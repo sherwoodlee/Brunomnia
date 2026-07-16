@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
-import { migrateWorkspace } from './storage';
+import { migrateWorkspace, parseWorkspaceImport } from './storage';
 
 describe('workspace migrations', () => {
   it('upgrades v1 requests with protocol defaults without changing request identity', () => {
@@ -19,7 +19,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(5);
+    expect(migrated.version).toBe(6);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
     expect(migrated.apiDesigns[0].name).toBe('Orders API');
@@ -48,5 +48,20 @@ describe('workspace migrations', () => {
 
   it('rejects unrelated JSON', () => {
     expect(() => migrateWorkspace({ hello: 'world' })).toThrow('not a Brunomnia');
+  });
+
+  it('disables imported plugin code and clears inherited authority', () => {
+    const exported = cloneSeedWorkspace();
+    exported.plugins = [{
+      id: 'plugin-one', name: 'Imported', version: '1.0.0', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true,
+      requestedPermissions: ['network'], grantedPermissions: ['network'], installedAt: new Date().toISOString(),
+    }];
+    exported.pluginData = { 'plugin-one': { token: 'secret' } };
+    exported.activePluginTheme = 'plugin-one::theme:0';
+
+    const imported = parseWorkspaceImport(JSON.stringify(exported));
+    expect(imported.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
+    expect(imported.pluginData).toEqual({});
+    expect(imported.activePluginTheme).toBe('');
   });
 });

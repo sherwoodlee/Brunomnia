@@ -14,6 +14,7 @@ import { parseRunnerData, runCollection } from '../lib/runner';
 import { runBrowserScript } from '../lib/scriptSandbox';
 import { storeResponseCookies } from '../lib/cookies';
 import { sendRequest } from '../lib/http';
+import { createPluginRuntime, type PluginHostCallbacks, type PluginRunState } from '../lib/plugins';
 import { startMockServer, stopMockServer, type RunningMock } from '../lib/mock';
 import { runStreamSample } from '../lib/protocol';
 import { Icon } from './Icon';
@@ -22,7 +23,7 @@ import { CodeEditor } from './ProtocolEditors';
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
 type AutomationWorkbenchProps = {
-  section: Exclude<WorkbenchSection, 'requests'>;
+  section: Exclude<WorkbenchSection, 'requests' | 'git' | 'plugins'>;
   workspace: Workspace;
   activeEnvironment: Environment;
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
@@ -132,6 +133,14 @@ function RunnerWorkbench({ workspace, activeEnvironment, onChangeWorkspace }: Au
     try {
       let runnerCookies = [...workspace.cookies];
       let runnerResponses = [...workspace.responses];
+      const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
+      const pluginCallbacks: PluginHostCallbacks = {
+        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses }),
+        prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
+        readClipboard: () => navigator.clipboard.readText(),
+        writeClipboard: (value) => navigator.clipboard.writeText(value),
+      };
+      const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
       const report = await runCollection(collection, environment, {
         iterations, retries, delayMs, dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current,
         onResult: (result) => setResults((current) => [...current, result]),
@@ -142,14 +151,14 @@ function RunnerWorkbench({ workspace, activeEnvironment, onChangeWorkspace }: Au
         };
         const result = request.protocol === 'websocket' || request.protocol === 'sse'
           ? await runStreamSample(request, requestEnvironment, streamWindowMs)
-          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses });
+          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, pluginRuntime });
         const requestUrl = result.requestUrl ?? request.url;
         if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
         const stored = { ...result, requestId: request.id, requestName: request.name, requestUrl, receivedAt: new Date().toISOString() };
         runnerResponses = [stored, ...runnerResponses.filter((candidate) => candidate.requestId !== request.id)].slice(0, 100);
         return result;
       }, runBrowserScript);
-      onChangeWorkspace((current) => ({ ...current, cookies: runnerCookies, responses: runnerResponses, runnerReports: [report, ...current.runnerReports].slice(0, 30) }));
+      onChangeWorkspace((current) => ({ ...current, cookies: runnerCookies, responses: runnerResponses, pluginData: pluginState.data, runnerReports: [report, ...current.runnerReports].slice(0, 30) }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {

@@ -1,6 +1,6 @@
 import { parseAllDocuments } from 'yaml';
 import type { ArtifactImport } from './types';
-import { migrateWorkspace } from '../storage';
+import { secureImportedWorkspace } from '../storage';
 import { asRecord, asString, type UnknownRecord } from './common';
 import { importCurl, isCurl } from './curl';
 import { importHar, isHar } from './har';
@@ -26,9 +26,10 @@ export const importArtifact = (contents: string, sourceName = 'Imported artifact
   const first = documents[0] ?? parseSpecDocument(contents);
   if (!first) throw new Error('The import is not valid JSON, YAML, WSDL, or cURL text.');
   if (first.format === 'brunomnia') {
-    const replacement = migrateWorkspace(first);
+    const replacement = secureImportedWorkspace(first);
+    const disabledPlugins = Array.isArray(first.plugins) && first.plugins.length > 0;
     return {
-      format: 'brunomnia', sourceName, warnings: [], replacement,
+      format: 'brunomnia', sourceName, warnings: disabledPlugins ? [{ code: 'plugins-disabled', message: 'Imported plugins were disabled, their stored data was removed, and all capability grants were cleared. Review the source before enabling them.' }] : [], replacement,
       metadata: { version: String(replacement.version), collections: String(replacement.collections.length) },
       collections: [], environments: [], apiDesigns: [], mockServers: [], cookies: [],
     };

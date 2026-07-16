@@ -9,6 +9,7 @@ export type TemplateContext = {
   now?: Date;
   uuid?: () => string;
   prompt?: (message: string, defaultValue?: string) => string | null;
+  customTag?: (name: string, args: string[]) => Promise<string | undefined>;
 };
 
 const environmentPattern = /{{\s*([^{}]+?)\s*}}/g;
@@ -124,6 +125,8 @@ const resolveRawTag = async (name: string, args: string[], context: TemplateCont
     if ((args[0] ?? '').toLowerCase() === 'platform') return typeof navigator === 'undefined' ? 'unknown' : navigator.platform || 'unknown';
     return 'unknown';
   }
+  const custom = await context.customTag?.(name, args);
+  if (custom !== undefined) return custom;
   throw new Error(`Template tag '${name}' is not supported.`);
 };
 

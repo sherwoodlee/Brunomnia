@@ -7501,7 +7501,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 5,
+  version: 6,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -7632,7 +7632,11 @@ paths:
   runnerReports: [],
   imports: [],
   cookies: [],
-  responses: []
+  responses: [],
+  project: { mode: "local", path: "", remoteUrl: "", remoteName: "origin", authorName: "", authorEmail: "", autoSave: true },
+  plugins: [],
+  pluginData: {},
+  activePluginTheme: ""
 };
 var createBlankRequest = (id) => createRequest(id, "Untitled Request", "GET", "https://");
 

@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
-import type { Workspace } from '../types';
+import type { PluginPermission, PluginRecord, Workspace } from '../types';
 
 const storageKey = 'brunomnia.workspace.v1';
 
@@ -11,6 +11,31 @@ const isWorkspaceEnvelope = (value: unknown): value is Record<string, unknown> =
 };
 
 const requestDefaults = () => cloneSeedWorkspace().collections[0].requests[0];
+
+const knownPluginPermissions: PluginPermission[] = ['request:read', 'request:write', 'response:read', 'response:write', 'store', 'network', 'app:prompt', 'app:clipboard', 'template', 'action', 'theme'];
+
+const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
+  if (!item || typeof item !== 'object') return [];
+  const plugin = item as Record<string, unknown>;
+  if (typeof plugin.source !== 'string' || !plugin.source.trim()) return [];
+  const permissions = (candidate: unknown) => Array.isArray(candidate)
+    ? knownPluginPermissions.filter((permission) => candidate.includes(permission))
+    : [];
+  return [{
+    id: typeof plugin.id === 'string' && plugin.id ? plugin.id : `migrated-plugin-${index}`,
+    name: typeof plugin.name === 'string' && plugin.name ? plugin.name : 'Local plugin',
+    version: typeof plugin.version === 'string' && plugin.version ? plugin.version : '0.0.0-local',
+    description: typeof plugin.description === 'string' ? plugin.description : '',
+    source: plugin.source,
+    sourcePath: typeof plugin.sourcePath === 'string' ? plugin.sourcePath : undefined,
+    sourceFormat: plugin.sourceFormat === 'brunomnia' ? 'brunomnia' : 'insomnia-commonjs',
+    enabled: plugin.enabled === true,
+    requestedPermissions: permissions(plugin.requestedPermissions),
+    grantedPermissions: permissions(plugin.grantedPermissions),
+    installedAt: typeof plugin.installedAt === 'string' ? plugin.installedAt : new Date(0).toISOString(),
+    error: typeof plugin.error === 'string' ? plugin.error : undefined,
+  } satisfies PluginRecord];
+});
 
 export const migrateWorkspace = (value: unknown): Workspace => {
   if (!isWorkspaceEnvelope(value)) throw new Error('This is not a Brunomnia workspace export.');
@@ -40,7 +65,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const environmentIds = new Set(environments.map((environment) => environment.id));
   return {
     ...workspace,
-    version: 5,
+    version: 6,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
@@ -52,8 +77,22 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     imports: workspace.imports ?? [],
     cookies: workspace.cookies ?? [],
     responses: workspace.responses ?? [],
+    project: { ...seed.project, ...workspace.project },
+    plugins: normalizePlugins(workspace.plugins),
+    pluginData: workspace.pluginData ?? {},
+    activePluginTheme: workspace.activePluginTheme ?? '',
     collections,
   } as Workspace;
+};
+
+export const secureImportedWorkspace = (value: unknown): Workspace => {
+  const workspace = migrateWorkspace(value);
+  return {
+    ...workspace,
+    plugins: workspace.plugins.map((plugin) => ({ ...plugin, enabled: false, grantedPermissions: [] })),
+    pluginData: {},
+    activePluginTheme: '',
+  };
 };
 
 export const loadWorkspace = async (): Promise<Workspace> => {
@@ -81,5 +120,5 @@ export const saveWorkspace = async (workspace: Workspace): Promise<void> => {
 
 export const parseWorkspaceImport = (text: string): Workspace => {
   const parsed: unknown = JSON.parse(text);
-  return migrateWorkspace(parsed);
+  return secureImportedWorkspace(parsed);
 };

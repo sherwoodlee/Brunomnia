@@ -82,12 +82,20 @@ Compatibility bounds remain explicit: nested source folders are represented in f
 
 Compatibility bounds remain explicit: OAuth 2 authorization uses a copied authorization URL and manual returned code/token rather than an embedded callback listener; Netrc contents are project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, arbitrary Spectral JavaScript/functions/remote `extends`, and script-originated network/module access remain deferred. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. WebSocket custom proxy/client identity and headless CLI streaming/auth parity remain later closure work.
 
-## Milestone 6 — Git Sync and extensibility
+## Milestone 6 — Git Sync and extensibility (complete)
 
-- Standard filesystem project representation with Git init/clone/status/diff/commit/branch/pull/push operations
-- Conflict-aware merges and a visual resolver that never discards local changes silently
-- Permissioned plugin runtime with request/response hooks, template tags, themes, actions, and an Insomnia compatibility adapter
-- Documented extension API, local plugin installation, and migration tooling
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Filesystem projects | Complete baseline | Stable split YAML for project metadata, collections, environments, designs, and mocks; a manifest limits cleanup to Brunomnia-owned paths and leaves unrelated repository files untouched |
+| Git workflow | Complete baseline | Standard `.git` repositories with init/clone/status, staged and working diffs, stage/unstage, commit author overrides, local branch create/switch, remotes, pull, push, and merge |
+| Conflict resolution | Complete baseline | Base/ours/theirs text views, editable resolutions, binary ours/theirs selection, deleted-side handling, staging, and explicit merge abort |
+| Plugin installation | Complete baseline | Pasted JavaScript or a local dependency-free CommonJS file/package; every install starts disabled and changing source clears grants |
+| Extension API | Complete baseline | Request/response hooks, custom template tags, request/workspace/document actions, themes, local storage, notifications, and mediated network/prompt/clipboard calls |
+| Extension isolation | Complete baseline | Two-second disposable Worker, one-megabyte source limit, blocked ambient network/DOM/module loading, explicit per-capability grants, sanitized theme colors, and import-time authority removal |
+| Workspace migration | Complete | Versions 1–5 migrate to workspace v6 project, plugin, plugin-data, and theme fields; imported plugins are disabled and stripped of grants/data |
+| Documentation and evidence | Complete | [Git project guide](GIT_PROJECTS.md), [plugin guide](PLUGINS.md), and [Milestone 6 verification](QA_MILESTONE_6.md) |
+
+Compatibility bounds remain explicit: Git credential setup uses the user's installed Git and credential helper; commit-history browsing, provider-specific onboarding, rebase/cherry-pick, and automatic project discovery remain later work. The plugin adapter intentionally does not install remote packages or arbitrary npm dependencies, and it implements a focused Insomnia-style CommonJS/context subset rather than the entire plugin ecosystem. Streaming request hooks, file watching/hot reload, plugin dependency resolution, and complete hook/context/template-argument compatibility remain in the parity ledger.
 
 ## Milestone 7 — collaboration, secrets, and governance
 

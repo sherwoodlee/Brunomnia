@@ -192,7 +192,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 5;
+  version: 6;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -205,6 +205,49 @@ export type Workspace = {
   imports: ImportRecord[];
   cookies: CookieRecord[];
   responses: StoredResponse[];
+  project: ProjectConfig;
+  plugins: PluginRecord[];
+  pluginData: Record<string, Record<string, string>>;
+  activePluginTheme: string;
+};
+
+export type ProjectConfig = {
+  mode: 'local' | 'folder' | 'git';
+  path: string;
+  remoteUrl: string;
+  remoteName: string;
+  authorName: string;
+  authorEmail: string;
+  autoSave: boolean;
+  lastSavedAt?: string;
+};
+
+export type PluginPermission =
+  | 'request:read'
+  | 'request:write'
+  | 'response:read'
+  | 'response:write'
+  | 'store'
+  | 'network'
+  | 'app:prompt'
+  | 'app:clipboard'
+  | 'template'
+  | 'action'
+  | 'theme';
+
+export type PluginRecord = {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  source: string;
+  sourcePath?: string;
+  sourceFormat: 'brunomnia' | 'insomnia-commonjs';
+  enabled: boolean;
+  requestedPermissions: PluginPermission[];
+  grantedPermissions: PluginPermission[];
+  installedAt: string;
+  error?: string;
 };
 
 export type HttpResponse = {
@@ -221,7 +264,7 @@ export type HttpResponse = {
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests';
 export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline' | 'tests';
 export type SidebarMode = 'collections' | 'history';
-export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks';
+export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins';
 
 export type ApiDesign = {
   id: string;

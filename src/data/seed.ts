@@ -96,7 +96,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 5,
+  version: 6,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -228,6 +228,10 @@ paths:
   imports: [],
   cookies: [],
   responses: [],
+  project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
+  plugins: [],
+  pluginData: {},
+  activePluginTheme: '',
 };
 
 export const cloneSeedWorkspace = (): Workspace => structuredClone(seedWorkspace);

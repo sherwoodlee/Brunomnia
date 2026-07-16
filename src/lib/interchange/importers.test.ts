@@ -4,6 +4,17 @@ import { cloneSeedWorkspace } from '../../data/seed';
 import { applyArtifactImport, importArtifact } from './index';
 
 describe('artifact import adapters', () => {
+  it('warns and removes inherited authority from Brunomnia plugins', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.plugins = [{
+      id: 'plugin-one', name: 'Imported', version: '1.0.0', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true,
+      requestedPermissions: ['network'], grantedPermissions: ['network'], installedAt: new Date().toISOString(),
+    }];
+    const result = importArtifact(JSON.stringify(workspace), 'workspace.brunomnia.json');
+    expect(result.warnings[0].message).toContain('capability grants were cleared');
+    expect(result.replacement?.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
+  });
+
   it.each([
     ['insomnia-v4.json', 'insomnia-v4'],
     ['insomnia-v5.yaml', 'insomnia-v5'],
@@ -178,7 +189,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(5);
+    expect(second.version).toBe(6);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

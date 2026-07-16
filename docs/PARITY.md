@@ -24,8 +24,8 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 | Mock servers | Baseline | Real native loopback mock server with routes, parameters, headers, delays, CORS, and three dynamic tokens. Liquid/Faker breadth, response-to-mock generation, hosted/self-host deployment workflows, and AI generation remain. | [Mock servers](https://developer.konghq.com/insomnia/mock-servers/) |
 | Headless CLI and CI | Baseline | Bundled CLI lints/generates/exports OpenAPI and runs HTTP/GraphQL collections/tests with shared runner logic. Inso command/flag/report breadth and signed containers remain. | [Inso CLI](https://developer.konghq.com/inso-cli/), [CLI reference](https://developer.konghq.com/inso-cli/reference/) |
 | Import and export formats | Baseline | Existing formats/scopes now also map advanced Insomnia/Postman auth and round-trip Insomnia v4/v5 cookie jars. Folder flattening, partial scripts, external files, WSDL placeholders, Socket.IO/MCP downgrades, and omitted binary bytes remain explicit bounds. | [Import/export reference](https://developer.konghq.com/insomnia/import-export/) |
-| Git Sync and version control | Not started | Standard repository storage, Git operations, branches, commits, pull/push, diff, history, and conflict resolution remain. | [Storage and Git Sync](https://developer.konghq.com/insomnia/storage/) |
-| Plugins and extension API | Not started | Permission model, installation, hooks/actions, template tags, themes, request/response contexts, and compatibility tooling remain. | [Plugins](https://developer.konghq.com/insomnia/plugins/), [plugin reference](https://developer.konghq.com/insomnia/plugins/plugin-reference/) |
+| Git Sync and version control | Baseline | Split-YAML projects in standard repositories now support init/clone/status, stage/unstage, working/staged diff, commits, local branches, remotes, pull/push, merge, three-way text resolution, binary side selection, and abort. Commit history UI, provider-specific authentication/onboarding, rebase/cherry-pick, automatic discovery, and broader edge-case fixtures remain. | [Storage and Git Sync](https://developer.konghq.com/insomnia/storage/), [Git Sync](https://developer.konghq.com/insomnia/git-sync/) |
+| Plugins and extension API | Baseline | Disabled-by-default local CommonJS plugins run in disposable Workers with explicit grants. Request/response hooks, custom tags, actions, themes, local store, notifications, and mediated network/prompt/clipboard APIs work for HTTP, GraphQL, gRPC, and collection runs. Remote/npm dependency installation, discovery/hot reload, streaming hooks, complete context/hook coverage, and ecosystem compatibility remain. | [Plugins](https://developer.konghq.com/insomnia/plugins/), [plugin reference](https://developer.konghq.com/insomnia/plugins/plugin-reference/), [hooks and actions](https://developer.konghq.com/insomnia/plugins/hooks-and-actions/) |
 | Secrets and external vaults | Not started | OS credential storage and AWS/GCP/Azure/HashiCorp secret adapters remain; current environment values are ordinary workspace data. | [External vault integration](https://developer.konghq.com/insomnia/external-vault/) |
 | Cloud sync and collaboration | Not started | Self-hostable E2EE sync, sharing, branches, cross-device versioning, presence/comments, and offline reconciliation remain. | [Storage options](https://developer.konghq.com/insomnia/storage/) |
 | MCP clients | Not started | HTTP/STDIO connections, discovery, cached tools/prompts/resources, execution, and project serialization remain. | [MCP clients](https://developer.konghq.com/insomnia/mcp-clients-in-insomnia/) |
@@ -62,6 +62,17 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Runner/script/custom-ruleset compatibility: [`src/lib/runner.ts`](../src/lib/runner.ts), [`src/lib/scriptSandbox.ts`](../src/lib/scriptSandbox.ts), and [`src/lib/openapi.ts`](../src/lib/openapi.ts)
 - Advanced interoperability and workspace v5 migration: [`src/lib/interchange/`](../src/lib/interchange/) and [`src/lib/storage.ts`](../src/lib/storage.ts)
 - Exact verification record: [`docs/QA_MILESTONE_5.md`](QA_MILESTONE_5.md)
+
+## Milestone 6 acceptance evidence
+
+- Split-YAML ownership, symlink confinement, standard Git operations, and conflicts: [`src-tauri/src/project.rs`](../src-tauri/src/project.rs)
+- Native local package reader and Tauri command boundary: [`src-tauri/src/plugin.rs`](../src-tauri/src/plugin.rs) and [`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs)
+- Git status/diff/branch/remote/conflict UI: [`src/components/ProjectWorkbench.tsx`](../src/components/ProjectWorkbench.tsx)
+- Permissioned plugin Worker, compatibility adapter, and tests: [`src/lib/plugins.ts`](../src/lib/plugins.ts) and [`src/lib/plugins.test.ts`](../src/lib/plugins.test.ts)
+- Disabled-by-default installation and per-capability grant UI: [`src/components/PluginWorkbench.tsx`](../src/components/PluginWorkbench.tsx)
+- Request/runner integration and workspace v6 migration: [`src/lib/http.ts`](../src/lib/http.ts), [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx), and [`src/lib/storage.ts`](../src/lib/storage.ts)
+- User guides: [`docs/GIT_PROJECTS.md`](GIT_PROJECTS.md) and [`docs/PLUGINS.md`](PLUGINS.md)
+- Exact verification record: [`docs/QA_MILESTONE_6.md`](QA_MILESTONE_6.md)
 
 ## Parity declaration rule
 

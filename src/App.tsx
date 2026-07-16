@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from './data/seed';
 import { sendRequest } from './lib/http';
 import { storeResponseCookies } from './lib/cookies';
@@ -10,9 +11,13 @@ import { runBrowserScript } from './lib/scriptSandbox';
 import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import { AutomationWorkbench } from './components/AutomationWorkbench';
+import { ProjectWorkbench } from './components/ProjectWorkbench';
+import { PluginWorkbench } from './components/PluginWorkbench';
 import { AuthEditor } from './components/AuthEditor';
 import { applyArtifactImport } from './lib/interchange/apply';
 import type { ArtifactImport } from './lib/interchange/types';
+import { writeProject } from './lib/project';
+import { applyPluginTheme, createPluginRuntime, describePlugin, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -553,7 +558,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 5, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [],
+    format: 'brunomnia', version: 6, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '',
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -576,6 +581,7 @@ export default function App() {
   const [scriptTests, setScriptTests] = useState<Array<{ name: string; passed: boolean; error?: string }>>([]);
   const [scriptLogs, setScriptLogs] = useState<string[]>([]);
   const [runningMocks, setRunningMocks] = useState<Record<string, RunningMock>>({});
+  const [projectSyncError, setProjectSyncError] = useState('');
   const streamSession = useRef<string | undefined>(undefined);
   const streamProtocol = useRef<Protocol | undefined>(undefined);
 
@@ -593,6 +599,26 @@ export default function App() {
   useEffect(() => {
     if (!hydrated) return;
     const timeout = window.setTimeout(() => void saveWorkspace(workspace), 350);
+    return () => window.clearTimeout(timeout);
+  }, [hydrated, workspace]);
+
+  useEffect(() => {
+    if (!workspace.activePluginTheme) { applyPluginTheme(); return; }
+    const [pluginId, themeId] = workspace.activePluginTheme.split('::');
+    const plugin = workspace.plugins.find((candidate) => candidate.id === pluginId && candidate.enabled && candidate.grantedPermissions.includes('theme'));
+    if (!plugin) { applyPluginTheme(); return; }
+    let cancelled = false;
+    void describePlugin(plugin).then((descriptor) => {
+      if (!cancelled) applyPluginTheme(descriptor.themes.find((theme) => theme.id === themeId));
+    }).catch(() => { if (!cancelled) applyPluginTheme(); });
+    return () => { cancelled = true; };
+  }, [workspace.activePluginTheme, workspace.plugins]);
+
+  useEffect(() => {
+    if (!hydrated || !isTauri() || workspace.project.mode === 'local' || !workspace.project.path || !workspace.project.autoSave) return;
+    const timeout = window.setTimeout(() => {
+      void writeProject(workspace.project.path, workspace).then(() => setProjectSyncError('')).catch((caught) => setProjectSyncError(caught instanceof Error ? caught.message : String(caught)));
+    }, 700);
     return () => window.clearTimeout(timeout);
   }, [hydrated, workspace]);
 
@@ -753,15 +779,24 @@ export default function App() {
     setResponseTab('preview');
     setScriptTests([]);
     setScriptLogs([]);
+    const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
+    const pluginCallbacks: PluginHostCallbacks = {
+      network: (pluginRequest) => sendRequest(pluginRequest, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses }),
+      prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
+      readClipboard: () => navigator.clipboard.readText(),
+      writeClipboard: (value) => navigator.clipboard.writeText(value),
+    };
+    const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
     try {
       let variables = environmentMap(activeEnvironment);
       const preRequest = await runBrowserScript(active.request.preRequestScript, active.request, variables);
-      const executableRequest = preRequest.request;
+      let executableRequest = preRequest.request;
       variables = preRequest.environment;
       const requestVariables = { ...variables, ...(preRequest.localVariables ?? {}) };
       setScriptLogs(preRequest.logs);
       let result: HttpResponse;
       if (executableRequest.protocol === 'grpc') {
+        executableRequest = await pluginRuntime.beforeRequest(executableRequest);
         const existingSchema = executableRequest.grpc.descriptorSetBase64 ? grpcSchemas[active.request.id] : undefined;
         const schema = existingSchema ?? await loadActiveGrpcSchema();
         if (!schema) return;
@@ -782,16 +817,16 @@ export default function App() {
           variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
         });
         const body = JSON.stringify({ status: output.status, callType: output.callType, messages: output.messages }, null, 2);
-        result = { status: 200, statusText: `gRPC ${output.status}`, headers: { 'grpc-call-type': output.callType }, body, durationMs: output.durationMs, sizeBytes: new Blob([body]).size };
+        result = await pluginRuntime.afterResponse(executableRequest, { status: 200, statusText: `gRPC ${output.status}`, headers: { 'grpc-call-type': output.callType }, body, durationMs: output.durationMs, sizeBytes: new Blob([body]).size });
       } else {
         result = await sendRequest(executableRequest, {
           ...activeEnvironment,
           variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
-        }, { cookies: workspace.cookies, responses: workspace.responses });
+        }, { cookies: workspace.cookies, responses: workspace.responses, pluginRuntime });
       }
       const afterResponse = await runBrowserScript(executableRequest.tests, executableRequest, variables, result, 2000, preRequest.localVariables);
       setScriptTests(afterResponse.tests);
-      setScriptLogs((current) => [...current, ...afterResponse.logs]);
+      setScriptLogs((current) => [...current, ...afterResponse.logs, ...pluginState.notifications.map((notification) => `[plugin] ${notification.title}: ${notification.message}`)]);
       persistScriptEnvironment(afterResponse.environment);
       setResponse(result);
       const historyEntry: HistoryEntry = {
@@ -812,10 +847,13 @@ export default function App() {
         cookies: executableRequest.transport.storeCookies
           ? storeResponseCookies(current.cookies, storedResponse.requestUrl, result.setCookies ?? [])
           : current.cookies,
+        pluginData: pluginState.data,
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setResponse({ status: 0, statusText: 'Request failed', headers: {}, body: message, durationMs: 0, sizeBytes: message.length });
+      setScriptLogs((current) => [...current, ...pluginState.notifications.map((notification) => `[plugin] ${notification.title}: ${notification.message}`)]);
+      setWorkspace((current) => ({ ...current, pluginData: pluginState.data }));
     } finally {
       setIsSending(false);
     }
@@ -893,6 +931,8 @@ export default function App() {
             <button aria-label="Scripts" onClick={() => { setWorkbenchSection('requests'); setRequestTab('scripts'); }} type="button"><Icon name="code" /></button>
             <button aria-label="Collection Runner" className={workbenchSection === 'runner' ? 'active' : ''} onClick={() => setWorkbenchSection('runner')} type="button"><Icon name="database" /></button>
             <button aria-label="Mock servers" className={workbenchSection === 'mocks' ? 'active' : ''} onClick={() => setWorkbenchSection('mocks')} type="button"><Icon name="spark" /></button>
+            <button aria-label="Git Sync" className={workbenchSection === 'git' ? 'active' : ''} onClick={() => setWorkbenchSection('git')} type="button"><Icon name="code" /></button>
+            <button aria-label="Plugins" className={workbenchSection === 'plugins' ? 'active' : ''} onClick={() => setWorkbenchSection('plugins')} type="button"><Icon name="braces" /></button>
           </div>
           <button aria-label="Environment settings" onClick={() => setShowEnvironment(true)} type="button"><Icon name="settings" /></button>
         </nav>
@@ -943,7 +983,7 @@ export default function App() {
             streamMessages={streamMessages}
             streamStatus={streamStatus}
           />
-        </div> : (
+        </div> : workbenchSection === 'git' ? <ProjectWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /> : workbenchSection === 'plugins' ? <PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /> : (
           <AutomationWorkbench
             activeEnvironment={activeEnvironment}
             onChangeWorkspace={(updater) => setWorkspace(updater)}
@@ -969,6 +1009,7 @@ export default function App() {
         <span><i /> Ready</span>
         <span className="status-spacer" />
         <span><i /> Environment: {activeEnvironment.name}</span>
+        {projectSyncError ? <span className="bad">Project save failed: {projectSyncError}</span> : null}
         <span>Local-only</span>
         <span>UTF-8</span>
         <span>{workbenchSection === 'requests' ? protocolLabel(active.request) : titleCase(workbenchSection)}</span>

@@ -1,0 +1,185 @@
+import { isTauri } from '@tauri-apps/api/core';
+import { useEffect, useMemo, useState } from 'react';
+import type { Workspace } from '../types';
+import {
+  abortGitMerge,
+  checkoutGitBranch,
+  cloneGitProject,
+  commitGitChanges,
+  getGitConflicts,
+  getGitDiff,
+  getGitStatus,
+  initGitProject,
+  mergeGitBranch,
+  pullGitProject,
+  pushGitProject,
+  readProject,
+  resolveGitConflict,
+  resolveGitConflictSide,
+  setGitRemote,
+  stageGitFiles,
+  unstageGitFiles,
+  writeProject,
+  type GitConflict,
+  type GitStatus,
+} from '../lib/project';
+import { Icon } from './Icon';
+
+type ProjectWorkbenchProps = {
+  workspace: Workspace;
+  onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
+};
+
+const emptyStatus: GitStatus = { branch: '', upstream: '', ahead: 0, behind: 0, files: [], branches: [], remotes: [], mergeInProgress: false, rebaseInProgress: false };
+
+export function ProjectWorkbench({ workspace, onChangeWorkspace }: ProjectWorkbenchProps) {
+  const [path, setPath] = useState(workspace.project.path);
+  const [remoteUrl, setRemoteUrl] = useState(workspace.project.remoteUrl);
+  const [status, setStatus] = useState<GitStatus>(emptyStatus);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [diff, setDiff] = useState('');
+  const [showStagedDiff, setShowStagedDiff] = useState(false);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [branchName, setBranchName] = useState('');
+  const [mergeBranch, setMergeBranch] = useState('');
+  const [conflicts, setConflicts] = useState<GitConflict[]>([]);
+  const [activeConflictPath, setActiveConflictPath] = useState('');
+  const [resolution, setResolution] = useState('');
+  const [busy, setBusy] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const native = isTauri();
+  const activeConflict = conflicts.find((conflict) => conflict.path === activeConflictPath) ?? conflicts[0];
+  const currentRemote = status.remotes.find((remote) => remote.name === workspace.project.remoteName) ?? status.remotes[0];
+  const unstaged = status.files.filter((file) => !file.staged || file.worktreeStatus !== ' ');
+  const staged = status.files.filter((file) => file.staged);
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  const updateProject = (patch: Partial<Workspace['project']>) => onChangeWorkspace((current) => ({ ...current, project: { ...current.project, ...patch } }));
+  const setNextStatus = async (next: GitStatus) => {
+    setStatus(next);
+    setSelected([]);
+    if (next.mergeInProgress || next.files.some((file) => file.conflicted)) {
+      const nextConflicts = await getGitConflicts(path);
+      setConflicts(nextConflicts);
+      setActiveConflictPath(nextConflicts[0]?.path ?? '');
+      setResolution(nextConflicts[0]?.working ?? '');
+    } else {
+      setConflicts([]); setActiveConflictPath(''); setResolution('');
+    }
+  };
+  const run = async (label: string, operation: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(label); setError(''); setMessage('');
+    try { await operation(); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    finally { setBusy(''); }
+  };
+
+  const refresh = () => run('Refreshing', async () => {
+    const next = await getGitStatus(path);
+    await setNextStatus(next);
+    setMessage(`Git status refreshed on ${next.branch || 'HEAD'}.`);
+  });
+
+  useEffect(() => {
+    if (!native || workspace.project.mode !== 'git' || !workspace.project.path) return;
+    let cancelled = false;
+    void getGitStatus(workspace.project.path).then(async (next) => {
+      if (!cancelled) await setNextStatus(next);
+    }).catch((caught) => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)); });
+    return () => { cancelled = true; };
+    // Opening the workbench should inspect the configured repository once; manual refresh owns later updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [native, workspace.project.mode, workspace.project.path]);
+
+  useEffect(() => {
+    if (!native || workspace.project.mode !== 'git' || !path) { setDiff(''); return; }
+    let cancelled = false;
+    void getGitDiff(path, showStagedDiff).then((value) => { if (!cancelled) setDiff(value); }).catch(() => { if (!cancelled) setDiff(''); });
+    return () => { cancelled = true; };
+  }, [native, path, showStagedDiff, status]);
+
+  const connectFolder = (mode: 'folder' | 'git') => run(mode === 'git' ? 'Initializing Git' : 'Creating project', async () => {
+    const result = await writeProject(path, workspace);
+    let nextStatus = emptyStatus;
+    if (mode === 'git') nextStatus = await initGitProject(path, 'main');
+    updateProject({ mode, path: result.path, remoteUrl, lastSavedAt: new Date().toISOString() });
+    setPath(result.path);
+    await setNextStatus(nextStatus);
+    setMessage(`${mode === 'git' ? 'Git' : 'Filesystem'} project ready · ${result.filesWritten} files written.`);
+  });
+
+  const openFolder = () => run('Opening project', async () => {
+    const loaded = await readProject(path, workspace);
+    onChangeWorkspace(() => ({ ...loaded, project: { ...loaded.project, mode: 'folder', path } }));
+    setMessage(`Opened ${loaded.name} from YAML resources.`);
+  });
+
+  const reloadGitWorkspace = async (next: GitStatus) => {
+    if (next.files.some((file) => file.conflicted)) return;
+    const loaded = await readProject(path, workspace);
+    onChangeWorkspace(() => ({ ...loaded, project: { ...workspace.project, mode: 'git', path } }));
+  };
+
+  const clone = () => run('Cloning', async () => {
+    const nextStatus = await cloneGitProject(remoteUrl, path);
+    let loaded: Workspace;
+    try { loaded = await readProject(path, workspace); }
+    catch {
+      const next = { ...workspace, project: { ...workspace.project, mode: 'git' as const, path, remoteUrl } };
+      await writeProject(path, next);
+      loaded = next;
+    }
+    onChangeWorkspace(() => ({ ...loaded, project: { ...loaded.project, mode: 'git', path, remoteUrl } }));
+    await setNextStatus(nextStatus);
+    setMessage(`Cloned ${remoteUrl}.`);
+  });
+
+  const toggleSelected = (file: string) => setSelected((current) => current.includes(file) ? current.filter((path) => path !== file) : [...current, file]);
+
+  if (!native) return (
+    <section className="project-workbench unavailable-workbench">
+      <Icon name="folder" size={34} /><h1>Filesystem projects require the desktop app</h1>
+      <p>The production browser build cannot read folders or invoke Git. Open this same workspace in Brunomnia’s Tauri app to create, clone, merge, and push standard repositories.</p>
+    </section>
+  );
+
+  if (workspace.project.mode !== 'git') return (
+    <section className="project-workbench project-onboarding">
+      <header><div><small>Project</small><h1>Filesystem and Git Sync</h1><p>Keep each collection in reviewable YAML files inside an ordinary local folder or `.git` repository.</p></div></header>
+      <div className="project-connect-grid">
+        <article><Icon name="folder" size={26} /><h2>Open YAML project</h2><p>Load an existing Brunomnia project without enabling Git.</p><label>Folder path<input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/Users/me/Projects/orders-api" /></label><button disabled={!path || Boolean(busy)} onClick={openFolder} type="button">Open project</button></article>
+        <article><Icon name="archive" size={26} /><h2>Create local project</h2><p>Write this workspace into stable, split YAML resources.</p><label>Folder path<input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/Users/me/Projects/orders-api" /></label><button disabled={!path || Boolean(busy)} onClick={() => connectFolder('folder')} type="button">Create project</button></article>
+        <article><Icon name="code" size={26} /><h2>Initialize Git Sync</h2><p>Create standard project YAML plus a normal `.git` directory.</p><label>Folder path<input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/Users/me/Projects/orders-api" /></label><button disabled={!path || Boolean(busy)} onClick={() => connectFolder('git')} type="button">Initialize Git</button></article>
+        <article><Icon name="download" size={26} /><h2>Clone repository</h2><label>Remote URL<input value={remoteUrl} onChange={(event) => setRemoteUrl(event.target.value)} placeholder="https://github.com/org/api-project.git" /></label><label>Destination<input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/Users/me/Projects/api-project" /></label><button disabled={!path || !remoteUrl || Boolean(busy)} onClick={clone} type="button">Clone and open</button></article>
+      </div>
+      {busy ? <div className="automation-message">{busy}…</div> : null}{error ? <div className="automation-message error">{error}</div> : null}{message ? <div className="automation-message">{message}</div> : null}
+    </section>
+  );
+
+  return (
+    <section className="project-workbench git-workbench">
+      <header className="project-header"><div><small>Git Sync</small><h1>{workspace.name}</h1><p>{path}</p></div><div className="git-branch-summary"><strong>{status.branch || 'HEAD'}</strong><span>{status.upstream || 'No upstream'}</span>{status.ahead || status.behind ? <small>↑ {status.ahead} · ↓ {status.behind}</small> : null}</div><div className="project-header-actions"><button disabled={Boolean(busy)} onClick={refresh} type="button">Refresh</button><button disabled={Boolean(busy)} onClick={() => run('Saving YAML', async () => { const result = await writeProject(path, workspace); updateProject({ lastSavedAt: new Date().toISOString() }); await setNextStatus(await getGitStatus(path)); setMessage(`${result.filesWritten} files updated · ${result.filesUnchanged} unchanged.`); })} type="button">Save YAML</button><button disabled={Boolean(busy)} onClick={() => run('Pulling', async () => { const result = await pullGitProject(path, workspace.project.remoteName, status.branch); await setNextStatus(result.status); await reloadGitWorkspace(result.status); setMessage(result.stderr || result.stdout || 'Pull complete.'); })} type="button">Pull</button><button disabled={Boolean(busy)} onClick={() => run('Pushing', async () => { const result = await pushGitProject(path, workspace.project.remoteName, status.branch); await setNextStatus(result.status); setMessage(result.stderr || result.stdout || 'Push complete.'); })} type="button">Push</button></div></header>
+
+      <div className="git-layout">
+        <aside className="git-sidebar">
+          <section><header><strong>Changes</strong><span>{status.files.length}</span></header><div className="git-file-list">{status.files.map((file) => <label className={file.conflicted ? 'conflicted' : ''} key={file.path}><input checked={selectedSet.has(file.path)} onChange={() => toggleSelected(file.path)} type="checkbox" /><code>{file.indexStatus}{file.worktreeStatus}</code><span>{file.path}</span></label>)}{!status.files.length ? <p>Working tree clean.</p> : null}</div><div className="git-row-actions"><button disabled={!selected.length || Boolean(busy)} onClick={() => run('Staging', async () => setNextStatus(await stageGitFiles(path, selected)))} type="button">Stage</button><button disabled={!selected.length || Boolean(busy)} onClick={() => run('Unstaging', async () => setNextStatus(await unstageGitFiles(path, selected)))} type="button">Unstage</button></div></section>
+          <section><header><strong>Commit</strong><span>{staged.length} staged</span></header><textarea value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Describe this change" /><div className="git-author-grid"><input value={workspace.project.authorName} onChange={(event) => updateProject({ authorName: event.target.value })} placeholder="Author name (optional)" /><input value={workspace.project.authorEmail} onChange={(event) => updateProject({ authorEmail: event.target.value })} placeholder="Author email (optional)" /></div><button disabled={!commitMessage.trim() || !staged.length || Boolean(busy)} onClick={() => run('Committing', async () => { const result = await commitGitChanges(path, commitMessage, workspace.project.authorName, workspace.project.authorEmail); setCommitMessage(''); await setNextStatus(result.status); setMessage(result.stdout || 'Commit created.'); })} type="button">Commit staged changes</button></section>
+          <section><header><strong>Branches</strong><span>{status.branches.length}</span></header><select value={status.branch} onChange={(event) => { const branch = event.target.value; void run('Switching branch', async () => { const result = await checkoutGitBranch(path, branch); await reloadGitWorkspace(result.status); await setNextStatus(result.status); }); }}>{status.branches.map((branch) => <option key={branch}>{branch}</option>)}</select><div className="git-inline"><input value={branchName} onChange={(event) => setBranchName(event.target.value)} placeholder="new-branch" /><button disabled={!branchName || Boolean(busy)} onClick={() => run('Creating branch', async () => { const result = await checkoutGitBranch(path, branchName, true); setBranchName(''); await setNextStatus(result.status); })} type="button">Create</button></div><div className="git-inline"><select value={mergeBranch} onChange={(event) => setMergeBranch(event.target.value)}><option value="">Merge branch…</option>{status.branches.filter((branch) => branch !== status.branch).map((branch) => <option key={branch}>{branch}</option>)}</select><button disabled={!mergeBranch || Boolean(busy)} onClick={() => run('Merging', async () => { const result = await mergeGitBranch(path, mergeBranch); await setNextStatus(result.status); await reloadGitWorkspace(result.status); setMessage(result.stderr || result.stdout || 'Merge ready to commit.'); })} type="button">Merge</button></div></section>
+          <section><header><strong>Remote</strong><span>{currentRemote?.name ?? 'none'}</span></header><input value={remoteUrl} onChange={(event) => setRemoteUrl(event.target.value)} placeholder={currentRemote?.fetchUrl || 'https://…'} /><button disabled={!remoteUrl || Boolean(busy)} onClick={() => run('Setting remote', async () => { const next = await setGitRemote(path, workspace.project.remoteName, remoteUrl); updateProject({ remoteUrl }); await setNextStatus(next); })} type="button">Set {workspace.project.remoteName}</button></section>
+        </aside>
+
+        <div className="git-main">
+          {conflicts.length ? <div className="conflict-workbench"><header><div><small>Merge conflict</small><h2>{activeConflict?.path}</h2></div><select value={activeConflict?.path ?? ''} onChange={(event) => { const conflict = conflicts.find((candidate) => candidate.path === event.target.value); setActiveConflictPath(event.target.value); setResolution(conflict?.working ?? ''); }}>{conflicts.map((conflict) => <option key={conflict.path}>{conflict.path}</option>)}</select><button onClick={() => run('Aborting merge', async () => setNextStatus(await abortGitMerge(path)))} type="button">Abort merge</button></header>{activeConflict?.binary ? <div className="empty-state"><strong>Binary conflict</strong><span>Choose and stage one complete binary version.</span><div className="git-row-actions"><button disabled={!activeConflict || Boolean(busy)} onClick={() => run('Choosing ours', async () => { const next = await resolveGitConflictSide(path, activeConflict!.path, 'ours'); await setNextStatus(next); await reloadGitWorkspace(next); })} type="button">Use ours</button><button disabled={!activeConflict || Boolean(busy)} onClick={() => run('Choosing theirs', async () => { const next = await resolveGitConflictSide(path, activeConflict!.path, 'theirs'); await setNextStatus(next); await reloadGitWorkspace(next); })} type="button">Use theirs</button></div></div> : <><div className="conflict-columns"><ConflictPane title="Base" value={activeConflict?.base ?? ''} /><ConflictPane title="Ours" value={activeConflict?.ours ?? ''} /><ConflictPane title="Theirs" value={activeConflict?.theirs ?? ''} /></div><div className="resolution-editor"><header><strong>Resolution</strong><div><button onClick={() => setResolution(activeConflict?.ours ?? '')} type="button">Use ours</button><button onClick={() => setResolution(activeConflict?.theirs ?? '')} type="button">Use theirs</button><button onClick={() => setResolution(`${activeConflict?.ours ?? ''}\n${activeConflict?.theirs ?? ''}`)} type="button">Keep both</button></div></header><textarea value={resolution} onChange={(event) => setResolution(event.target.value)} /></div><button className="resolve-button" disabled={!activeConflict || Boolean(busy)} onClick={() => run('Resolving conflict', async () => { const next = await resolveGitConflict(path, activeConflict!.path, resolution); await setNextStatus(next); await reloadGitWorkspace(next); })} type="button">Mark resolved and stage</button></>}</div>
+            : <div className="diff-workbench"><header><div><small>Review</small><h2>{showStagedDiff ? 'Staged diff' : 'Working tree diff'}</h2></div><div className="segmented-control"><button className={!showStagedDiff ? 'active' : ''} onClick={() => setShowStagedDiff(false)} type="button">Unstaged {unstaged.length}</button><button className={showStagedDiff ? 'active' : ''} onClick={() => setShowStagedDiff(true)} type="button">Staged {staged.length}</button></div></header><pre>{diff || (showStagedDiff ? 'No staged diff.' : 'No unstaged diff.')}</pre></div>}
+        </div>
+      </div>
+      {busy ? <div className="automation-message">{busy}…</div> : null}{error ? <div className="automation-message error">{error}</div> : null}{message ? <div className="automation-message">{message}</div> : null}
+    </section>
+  );
+}
+
+function ConflictPane({ title, value }: { title: string; value: string }) {
+  return <article><header>{title}</header><pre>{value || 'File absent in this revision.'}</pre></article>;
+}

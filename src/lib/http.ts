@@ -8,6 +8,11 @@ import { renderTemplate } from './templates';
 export type SendRequestContext = {
   cookies?: CookieRecord[];
   responses?: StoredResponse[];
+  pluginRuntime?: {
+    beforeRequest: (request: ApiRequest) => Promise<ApiRequest>;
+    afterResponse: (request: ApiRequest, response: HttpResponse) => Promise<HttpResponse>;
+    templateTag: (name: string, args: string[], request: ApiRequest) => Promise<string | undefined>;
+  };
 };
 
 const graphqlBody = (request: ApiRequest, variables: Record<string, string>) => {
@@ -54,7 +59,13 @@ const renderRows = async (rows: ApiRequest['headers'], render: (value: string) =
 })));
 
 const renderRequest = async (request: ApiRequest, variables: Record<string, string>, context: SendRequestContext) => {
-  const templateContext = { variables, cookies: context.cookies ?? [], responses: context.responses ?? [], request };
+  const templateContext = {
+    variables,
+    cookies: context.cookies ?? [],
+    responses: context.responses ?? [],
+    request,
+    customTag: context.pluginRuntime ? (name: string, args: string[]) => context.pluginRuntime!.templateTag(name, args, request) : undefined,
+  };
   const render = (value: string) => renderTemplate(value, templateContext);
   const authEntries = await Promise.all(Object.entries(request.auth).map(async ([key, value]) => [key, typeof value === 'string' ? await render(value) : value]));
   return {
@@ -87,7 +98,11 @@ const signingBody = (request: ApiRequest, variables: Record<string, string>) => 
 
 export const sendRequest = async (request: ApiRequest, environment: Environment | undefined, context: SendRequestContext = {}): Promise<HttpResponse> => {
   const variables = environmentMap(environment);
-  const prepared = await renderRequest(request, variables, context);
+  const hooked = context.pluginRuntime ? await context.pluginRuntime.beforeRequest(request) : request;
+  const prepared = await renderRequest(hooked, variables, context);
+  const finish = async (response: HttpResponse) => context.pluginRuntime
+    ? context.pluginRuntime.afterResponse(prepared, response)
+    : response;
   let url = buildRequestUrl(prepared, variables);
   let headers = buildHeaders(prepared, variables);
   const contentType = (value: string) => value.toLowerCase() === 'content-type';
@@ -145,12 +160,12 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         },
       },
     });
-    return { ...output, requestUrl: url };
+    return finish({ ...output, requestUrl: url });
   }
 
   if (new URL(url).hostname === 'api.acme.dev') {
     await new Promise((resolve) => window.setTimeout(resolve, 380));
-    return mockResponse();
+    return finish(mockResponse());
   }
 
   const startedAt = performance.now();
@@ -163,7 +178,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     credentials: prepared.transport.sendCookies ? 'include' : 'omit',
   });
   const body = await response.text();
-  return {
+  return finish({
     status: response.status,
     statusText: response.statusText,
     headers: Object.fromEntries(response.headers.entries()),
@@ -171,7 +186,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     durationMs: Math.round(performance.now() - startedAt),
     sizeBytes: new Blob([body]).size,
     requestUrl: url,
-  };
+  });
 };
 
 export type OAuth2TokenResult = {
