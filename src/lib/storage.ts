@@ -21,7 +21,10 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const defaults = requestDefaults();
   return {
     ...workspace,
-    version: 2,
+    version: 3,
+    apiDesigns: workspace.apiDesigns ?? cloneSeedWorkspace().apiDesigns,
+    mockServers: workspace.mockServers ?? cloneSeedWorkspace().mockServers,
+    runnerReports: workspace.runnerReports ?? [],
     collections: workspace.collections.map((collection) => ({
       ...collection,
       requests: collection.requests.map((request) => ({
