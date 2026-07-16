@@ -157,6 +157,36 @@ pub struct GrpcCallOutput {
     pub duration_ms: u128,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MockRouteInput {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub method: String,
+    pub path: String,
+    pub status: u16,
+    pub headers: Vec<KeyValue>,
+    pub body: String,
+    pub delay_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MockServerInput {
+    pub server_id: String,
+    pub host: String,
+    pub port: u16,
+    pub routes: Vec<MockRouteInput>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MockServerOutput {
+    pub base_url: String,
+    pub route_count: usize,
+}
+
 impl StreamEvent {
     pub fn system(session_id: &str, kind: &str, text: impl Into<String>) -> Self {
         Self {

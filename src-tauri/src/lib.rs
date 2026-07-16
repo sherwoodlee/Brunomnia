@@ -1,5 +1,6 @@
 mod grpc_client;
 mod http_client;
+mod mock_server;
 mod models;
 mod streaming;
 
@@ -100,10 +101,27 @@ async fn send_grpc_request(input: models::GrpcCallInput) -> Result<models::GrpcC
     grpc_client::call(input).await
 }
 
+#[tauri::command]
+async fn start_mock_server(
+    input: models::MockServerInput,
+    state: State<'_, mock_server::MockServerState>,
+) -> Result<models::MockServerOutput, String> {
+    mock_server::start(input, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn stop_mock_server(
+    server_id: String,
+    state: State<'_, mock_server::MockServerState>,
+) -> Result<(), String> {
+    mock_server::stop(server_id, state.inner().clone()).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(streaming::StreamingState::default())
+        .manage(mock_server::MockServerState::default())
         .invoke_handler(tauri::generate_handler![
             load_workspace,
             save_workspace,
@@ -114,7 +132,9 @@ pub fn run() {
             connect_sse,
             disconnect_sse,
             grpc_load_schema,
-            send_grpc_request
+            send_grpc_request,
+            start_mock_server,
+            stop_mock_server
         ])
         .run(tauri::generate_context!())
         .expect("error while running Brunomnia");

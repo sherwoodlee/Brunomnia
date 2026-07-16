@@ -1,0 +1,27 @@
+openapi: 3.1.0
+info:
+  title: Orders API
+  version: 1.0.0
+servers:
+  - url: https://api.acme.dev
+paths:
+  /v1/orders:
+    get:
+      operationId: listOrders
+      summary: List orders
+      responses:
+        '200':
+          description: Orders returned
+  /v1/orders/{orderId}:
+    get:
+      operationId: getOrder
+      summary: Get an order
+      parameters:
+        - in: path
+          name: orderId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Order returned

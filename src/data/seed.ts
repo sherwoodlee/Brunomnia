@@ -54,7 +54,10 @@ message Order { string id = 1; string status = 2; double total = 3; }`,
     clientKeyPem: '',
   },
   preRequestScript: '// Runs before the request\n',
-  tests: '// Example: expect(response.status).toBe(200)\n',
+  tests: `insomnia.test('Status is successful', () => {
+  expect(insomnia.response.status).toBeLessThan(400);
+});
+`,
 });
 
 const orders = createRequest('create-order', 'Create Order', 'POST', 'https://api.acme.dev/v1/orders');
@@ -80,7 +83,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 2,
+  version: 3,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -139,6 +142,75 @@ export const seedWorkspace: Workspace = {
     },
   ],
   history: [],
+  apiDesigns: [
+    {
+      id: 'orders-api-design',
+      name: 'Orders API',
+      contents: `openapi: 3.1.0
+info:
+  title: Orders API
+  version: 1.0.0
+  description: Local-first order operations
+servers:
+  - url: https://api.acme.dev
+paths:
+  /v1/orders:
+    get:
+      operationId: listOrders
+      summary: List orders
+      responses:
+        '200':
+          description: Orders returned
+    post:
+      operationId: createOrder
+      summary: Create an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Order created
+  /v1/orders/{orderId}:
+    get:
+      operationId: getOrder
+      summary: Get an order
+      parameters:
+        - in: path
+          name: orderId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Order returned
+`,
+    },
+  ],
+  mockServers: [
+    {
+      id: 'orders-mock',
+      name: 'Orders local mock',
+      host: '127.0.0.1',
+      port: 4010,
+      routes: [
+        {
+          id: 'mock-list-orders',
+          name: 'List orders',
+          enabled: true,
+          method: 'GET',
+          path: '/v1/orders',
+          status: 200,
+          headers: [{ id: 'mock-content-type', name: 'Content-Type', value: 'application/json', enabled: true }],
+          body: JSON.stringify({ data: [{ id: 'ord_mock_1', status: 'PROCESSING' }], generatedAt: '{{$timestamp}}' }, null, 2),
+          delayMs: 0,
+        },
+      ],
+    },
+  ],
+  runnerReports: [],
 };
 
 export const cloneSeedWorkspace = (): Workspace => structuredClone(seedWorkspace);

@@ -1,0 +1,79 @@
+{
+  "format": "brunomnia",
+  "version": 3,
+  "name": "CLI example",
+  "activeRequestId": "cli-health-request",
+  "activeEnvironmentId": "cli-local",
+  "collections": [
+    {
+      "id": "cli-health",
+      "name": "CLI Health",
+      "expanded": true,
+      "requests": [
+        {
+          "id": "cli-health-request",
+          "name": "Read local data response",
+          "protocol": "http",
+          "method": "GET",
+          "url": "data:application/json,%7B%22ok%22%3Atrue%7D",
+          "params": [],
+          "headers": [],
+          "bodyMode": "none",
+          "body": "",
+          "formBody": [],
+          "multipartBody": [],
+          "auth": {
+            "type": "none",
+            "token": "",
+            "username": "",
+            "password": "",
+            "apiKeyName": "X-API-Key",
+            "apiKeyValue": "",
+            "apiKeyLocation": "header"
+          },
+          "graphql": {
+            "query": "",
+            "variables": "{}",
+            "operationName": ""
+          },
+          "grpc": {
+            "service": "",
+            "method": "",
+            "descriptorSource": "reflection",
+            "protoText": "",
+            "descriptorSetBase64": "",
+            "input": "{}",
+            "metadata": []
+          },
+          "transport": {
+            "followRedirects": true,
+            "timeoutMs": 5000,
+            "validateCertificates": true,
+            "proxyUrl": "",
+            "clientCertificatePem": "",
+            "clientKeyPem": ""
+          },
+          "preRequestScript": "insomnia.environment.set('executedBy', 'cli');\ninsomnia.request.addHeader({ name: 'X-Brunomnia-CLI', value: 'true' });",
+          "tests": "insomnia.test('Status is 200', () => { expect(insomnia.response.status).toBe(200); });\ninsomnia.test('Body is JSON', () => { expect(insomnia.response.json()).toEqual({ ok: true }); });"
+        }
+      ]
+    }
+  ],
+  "environments": [
+    {
+      "id": "cli-local",
+      "name": "CLI Local",
+      "variables": []
+    }
+  ],
+  "history": [],
+  "apiDesigns": [
+    {
+      "id": "cli-api-design",
+      "name": "CLI API",
+      "contents": "openapi: 3.1.0\ninfo:\n  title: CLI API\n  version: 1.0.0\npaths:\n  /health:\n    get:\n      operationId: health\n      responses:\n        '200':\n          description: Healthy\n"
+    }
+  ],
+  "mockServers": [],
+  "runnerReports": []
+}

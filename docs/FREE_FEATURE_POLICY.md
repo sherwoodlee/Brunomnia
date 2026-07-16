@@ -12,4 +12,4 @@ Brunomnia's product capabilities are source-available under Apache-2.0 and must 
 6. Telemetry is absent by default. Any future diagnostics must be explicit, optional, documented, and removable.
 7. Pull requests that add feature gating must be rejected unless the gate protects an unsafe or unsupported platform condition rather than a commercial entitlement.
 
-This policy describes the project architecture and contribution standard; it does not claim that every parity item has already been implemented. Coverage is tracked in [MIGRATION.md](MIGRATION.md).
+This policy describes the project architecture and contribution standard; it does not claim that every parity item has already been implemented. Coverage is tracked in [PARITY.md](PARITY.md) and staged in [MIGRATION.md](MIGRATION.md).

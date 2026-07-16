@@ -1,4 +1,4 @@
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE';
 export type Protocol = 'http' | 'graphql' | 'websocket' | 'sse' | 'grpc';
 export type BodyMode = 'none' | 'json' | 'text' | 'form-urlencoded' | 'multipart' | 'binary';
 
@@ -102,13 +102,16 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 2;
+  version: 3;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
   collections: Collection[];
   environments: Environment[];
   history: HistoryEntry[];
+  apiDesigns: ApiDesign[];
+  mockServers: MockServer[];
+  runnerReports: RunnerReport[];
 };
 
 export type HttpResponse = {
@@ -121,8 +124,84 @@ export type HttpResponse = {
 };
 
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests';
-export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline';
+export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline' | 'tests';
 export type SidebarMode = 'collections' | 'history';
+export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks';
+
+export type ApiDesign = {
+  id: string;
+  name: string;
+  contents: string;
+  generatedCollectionId?: string;
+};
+
+export type OpenApiIssue = {
+  severity: 'error' | 'warning';
+  path: string;
+  message: string;
+};
+
+export type MockRoute = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  method: HttpMethod;
+  path: string;
+  status: number;
+  headers: KeyValue[];
+  body: string;
+  delayMs: number;
+};
+
+export type MockServer = {
+  id: string;
+  name: string;
+  host: '127.0.0.1';
+  port: number;
+  routes: MockRoute[];
+};
+
+export type ScriptTestResult = {
+  name: string;
+  passed: boolean;
+  error?: string;
+};
+
+export type ScriptRunResult = {
+  request: ApiRequest;
+  environment: Record<string, string>;
+  logs: string[];
+  tests: ScriptTestResult[];
+};
+
+export type RunnerItemResult = {
+  id: string;
+  requestId: string;
+  requestName: string;
+  iteration: number;
+  attempt: number;
+  status: number;
+  durationMs: number;
+  passed: boolean;
+  error?: string;
+  tests: ScriptTestResult[];
+};
+
+export type RunnerReport = {
+  id: string;
+  collectionId: string;
+  collectionName: string;
+  environmentId: string;
+  startedAt: string;
+  finishedAt: string;
+  iterations: number;
+  retries: number;
+  total: number;
+  passed: number;
+  failed: number;
+  cancelled: boolean;
+  results: RunnerItemResult[];
+};
 
 export type StreamDirection = 'incoming' | 'outgoing' | 'system';
 

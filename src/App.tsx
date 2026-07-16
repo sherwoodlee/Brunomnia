@@ -4,7 +4,11 @@ import { sendRequest } from './lib/http';
 import { connectStream, disconnectStream, invokeGrpc, loadGrpcSchema, sendWebSocketMessage } from './lib/protocol';
 import { formatBytes, mockResponse, prettyBody } from './lib/request';
 import { loadWorkspace, parseWorkspaceImport, saveWorkspace } from './lib/storage';
+import { environmentMap } from './lib/request';
+import { runBrowserScript } from './lib/scriptSandbox';
+import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
+import { AutomationWorkbench } from './components/AutomationWorkbench';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -28,11 +32,12 @@ import type {
   SidebarMode,
   StreamMessage,
   Workspace,
+  WorkbenchSection,
 } from './types';
 
 const requestTabs: RequestTab[] = ['params', 'headers', 'auth', 'body', 'transport', 'scripts', 'tests'];
-const responseTabs: ResponseTab[] = ['preview', 'headers', 'cookies', 'timeline'];
-const methods: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+const responseTabs: ResponseTab[] = ['preview', 'headers', 'cookies', 'timeline', 'tests'];
+const methods: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE'];
 const protocols: { value: Protocol; label: string }[] = [
   { value: 'http', label: 'HTTP' },
   { value: 'graphql', label: 'GraphQL' },
@@ -381,6 +386,8 @@ type ResponsePanelProps = {
   streamMessages: StreamMessage[];
   streamStatus: 'disconnected' | 'connecting' | 'connected';
   streamDraft: string;
+  scriptTests: Array<{ name: string; passed: boolean; error?: string }>;
+  scriptLogs: string[];
   onTabChange: (tab: ResponseTab) => void;
   onStreamDraftChange: (value: string) => void;
   onSendStreamMessage: () => void;
@@ -394,6 +401,8 @@ function ResponsePanel({
   streamMessages,
   streamStatus,
   streamDraft,
+  scriptTests,
+  scriptLogs,
   onTabChange,
   onStreamDraftChange,
   onSendStreamMessage,
@@ -417,7 +426,7 @@ function ResponsePanel({
         <button aria-label="Response source" className="icon-button subtle" type="button"><Icon name="globe" size={18} /></button>
       </div>
       <nav className="tab-strip response-tabs" aria-label="Response details">
-        {responseTabs.map((tab) => <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">{titleCase(tab)}</button>)}
+        {responseTabs.map((tab) => <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">{titleCase(tab)}{tab === 'tests' && scriptTests.length ? <small>{scriptTests.filter((test) => test.passed).length}/{scriptTests.length}</small> : null}</button>)}
       </nav>
       <div className="response-content">
         {activeTab === 'preview' && streaming ? (
@@ -439,6 +448,14 @@ function ResponsePanel({
             <div><span className="timeline-dot" /><strong>Request started</strong><time>0 ms</time></div>
             <div><span className="timeline-dot" /><strong>Response received</strong><time>{response.durationMs} ms</time></div>
             <div><span className="timeline-dot ok" /><strong>Body decoded</strong><time>{response.durationMs} ms</time></div>
+          </div>
+        ) : null}
+        {activeTab === 'tests' ? (
+          <div className="test-results">
+            <header><strong>{scriptTests.filter((test) => test.passed).length}/{scriptTests.length || 0} passing</strong><span>{scriptLogs.length} console messages</span></header>
+            {scriptTests.map((test, index) => <article className={test.passed ? 'passing' : 'failing'} key={`${test.name}-${index}`}><i>{test.passed ? '✓' : '×'}</i><span><strong>{test.name}</strong>{test.error ? <small>{test.error}</small> : null}</span></article>)}
+            {scriptLogs.map((log, index) => <pre key={`${log}-${index}`}>{log}</pre>)}
+            {!scriptTests.length && !scriptLogs.length ? <div className="empty-state compact"><Icon name="code" size={26} /><strong>No script results</strong><span>Send a request with an after-response script to see assertions here.</span></div> : null}
           </div>
         ) : null}
       </div>
@@ -478,15 +495,21 @@ type CommandPaletteProps = {
   onEnvironment: () => void;
   onImport: () => void;
   onExport: () => void;
+  onDesign: () => void;
+  onRunner: () => void;
+  onMocks: () => void;
 };
 
-function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment, onImport, onExport }: CommandPaletteProps) {
+function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment, onImport, onExport, onDesign, onRunner, onMocks }: CommandPaletteProps) {
   const actions = [
     { icon: 'plus' as const, label: 'Create request', shortcut: 'N', action: onAddRequest },
     { icon: 'folder' as const, label: 'Create collection', shortcut: '⇧ N', action: onAddCollection },
     { icon: 'braces' as const, label: 'Edit active environment', shortcut: 'E', action: onEnvironment },
     { icon: 'import' as const, label: 'Import workspace', shortcut: 'I', action: onImport },
     { icon: 'download' as const, label: 'Export workspace', shortcut: 'X', action: onExport },
+    { icon: 'grid' as const, label: 'Open API design', shortcut: 'D', action: onDesign },
+    { icon: 'database' as const, label: 'Open collection runner', shortcut: 'R', action: onRunner },
+    { icon: 'spark' as const, label: 'Open local mocks', shortcut: 'M', action: onMocks },
   ];
   return (
     <div className="modal-backdrop palette-backdrop" role="presentation" onMouseDown={onClose}>
@@ -500,7 +523,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 2, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [],
+    format: 'brunomnia', version: 3, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [],
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -517,6 +540,10 @@ export default function App() {
   const [streamDraft, setStreamDraft] = useState('');
   const [grpcSchemas, setGrpcSchemas] = useState<Record<string, GrpcSchema>>({});
   const [schemaLoading, setSchemaLoading] = useState(false);
+  const [workbenchSection, setWorkbenchSection] = useState<WorkbenchSection>('requests');
+  const [scriptTests, setScriptTests] = useState<Array<{ name: string; passed: boolean; error?: string }>>([]);
+  const [scriptLogs, setScriptLogs] = useState<string[]>([]);
+  const [runningMocks, setRunningMocks] = useState<Record<string, RunningMock>>({});
   const streamSession = useRef<string | undefined>(undefined);
   const streamProtocol = useRef<Protocol | undefined>(undefined);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -567,6 +594,8 @@ export default function App() {
     setStreamStatus('disconnected');
     setStreamMessages([]);
     setStreamDraft('');
+    setScriptTests([]);
+    setScriptLogs([]);
   }, [workspace.activeRequestId, active?.request.protocol]);
 
   const updateActiveRequest = useCallback((patch: Partial<ApiRequest>) => {
@@ -594,6 +623,7 @@ export default function App() {
           : collection),
       };
     });
+    setWorkbenchSection('requests');
     setRequestTab('params');
   }, []);
 
@@ -637,8 +667,22 @@ export default function App() {
     if (message.kind === 'closed' || message.kind === 'close' || message.kind === 'error') setStreamStatus('disconnected');
   };
 
+  const persistScriptEnvironment = (variables: Record<string, string>) => {
+    if (!activeEnvironment) return;
+    setWorkspace((current) => ({
+      ...current,
+      environments: current.environments.map((environment) => environment.id === activeEnvironment.id ? {
+        ...environment,
+        variables: Object.entries(variables).map(([name, value]) => ({
+          id: environment.variables.find((candidate) => candidate.name === name)?.id ?? uid('variable'),
+          name, value, enabled: true,
+        })),
+      } : environment),
+    }));
+  };
+
   const executeRequest = async () => {
-    if (!active || isSending) return;
+    if (!active || !activeEnvironment || isSending) return;
     if (active.request.protocol === 'websocket' || active.request.protocol === 'sse') {
       if (streamStatus === 'connected') {
         const sessionId = streamSession.current;
@@ -676,30 +720,47 @@ export default function App() {
 
     setIsSending(true);
     setResponseTab('preview');
+    setScriptTests([]);
+    setScriptLogs([]);
     try {
+      let variables = environmentMap(activeEnvironment);
+      const preRequest = await runBrowserScript(active.request.preRequestScript, active.request, variables);
+      const executableRequest = preRequest.request;
+      variables = preRequest.environment;
+      setScriptLogs(preRequest.logs);
       let result: HttpResponse;
-      if (active.request.protocol === 'grpc') {
-        const existingSchema = active.request.grpc.descriptorSetBase64 ? grpcSchemas[active.request.id] : undefined;
+      if (executableRequest.protocol === 'grpc') {
+        const existingSchema = executableRequest.grpc.descriptorSetBase64 ? grpcSchemas[active.request.id] : undefined;
         const schema = existingSchema ?? await loadActiveGrpcSchema();
         if (!schema) return;
-        const service = schema.services.find((candidate) => candidate.fullName === active.request.grpc.service) ?? schema.services[0];
-        const method = service?.methods.find((candidate) => candidate.name === active.request.grpc.method) ?? service?.methods[0];
+        const service = schema.services.find((candidate) => candidate.fullName === executableRequest.grpc.service) ?? schema.services[0];
+        const method = service?.methods.find((candidate) => candidate.name === executableRequest.grpc.method) ?? service?.methods[0];
         if (!service || !method) throw new Error('Load a gRPC service and method before invoking.');
         const callRequest: ApiRequest = {
-          ...active.request,
+          ...executableRequest,
           grpc: {
-            ...active.request.grpc,
+            ...executableRequest.grpc,
             descriptorSetBase64: schema.descriptorSetBase64,
             service: service.fullName,
             method: method.name,
           },
         };
-        const output = await invokeGrpc(callRequest, activeEnvironment);
+        const output = await invokeGrpc(callRequest, {
+          ...activeEnvironment,
+          variables: Object.entries(variables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
+        });
         const body = JSON.stringify({ status: output.status, callType: output.callType, messages: output.messages }, null, 2);
         result = { status: 200, statusText: `gRPC ${output.status}`, headers: { 'grpc-call-type': output.callType }, body, durationMs: output.durationMs, sizeBytes: new Blob([body]).size };
       } else {
-        result = await sendRequest(active.request, activeEnvironment);
+        result = await sendRequest(executableRequest, {
+          ...activeEnvironment,
+          variables: Object.entries(variables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
+        });
       }
+      const afterResponse = await runBrowserScript(executableRequest.tests, executableRequest, variables, result);
+      setScriptTests(afterResponse.tests);
+      setScriptLogs((current) => [...current, ...afterResponse.logs]);
+      persistScriptEnvironment(afterResponse.environment);
       setResponse(result);
       const historyEntry: HistoryEntry = {
         id: uid('history'), requestId: active.request.id, name: active.request.name, method: active.request.method,
@@ -778,16 +839,17 @@ export default function App() {
       <div className="app-body">
         <nav className="activity-rail" aria-label="Workspace sections">
           <div>
-            <button aria-label="Collections" className={sidebarMode === 'collections' ? 'active' : ''} onClick={() => setSidebarMode('collections')} type="button"><Icon name="archive" /></button>
-            <button aria-label="Overview" type="button"><Icon name="grid" /></button>
-            <button aria-label="History" className={sidebarMode === 'history' ? 'active' : ''} onClick={() => setSidebarMode('history')} type="button"><Icon name="history" /></button>
-            <button aria-label="Scripts" onClick={() => setRequestTab('scripts')} type="button"><Icon name="code" /></button>
-            <button aria-label="Data" type="button"><Icon name="database" /></button>
+            <button aria-label="Collections" className={workbenchSection === 'requests' && sidebarMode === 'collections' ? 'active' : ''} onClick={() => { setWorkbenchSection('requests'); setSidebarMode('collections'); }} type="button"><Icon name="archive" /></button>
+            <button aria-label="API Design" className={workbenchSection === 'design' ? 'active' : ''} onClick={() => setWorkbenchSection('design')} type="button"><Icon name="grid" /></button>
+            <button aria-label="History" className={workbenchSection === 'requests' && sidebarMode === 'history' ? 'active' : ''} onClick={() => { setWorkbenchSection('requests'); setSidebarMode('history'); }} type="button"><Icon name="history" /></button>
+            <button aria-label="Scripts" onClick={() => { setWorkbenchSection('requests'); setRequestTab('scripts'); }} type="button"><Icon name="code" /></button>
+            <button aria-label="Collection Runner" className={workbenchSection === 'runner' ? 'active' : ''} onClick={() => setWorkbenchSection('runner')} type="button"><Icon name="database" /></button>
+            <button aria-label="Mock servers" className={workbenchSection === 'mocks' ? 'active' : ''} onClick={() => setWorkbenchSection('mocks')} type="button"><Icon name="spark" /></button>
           </div>
           <button aria-label="Environment settings" onClick={() => setShowEnvironment(true)} type="button"><Icon name="settings" /></button>
         </nav>
 
-        <CollectionSidebar
+        {workbenchSection === 'requests' ? <CollectionSidebar
           mode={sidebarMode}
           onAddCollection={addCollection}
           onAddRequest={addRequest}
@@ -796,9 +858,9 @@ export default function App() {
           onToggleCollection={(id) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === id ? { ...collection, expanded: !collection.expanded } : collection) }))}
           search={search}
           workspace={workspace}
-        />
+        /> : null}
 
-        <div className="workbench">
+        {workbenchSection === 'requests' ? <div className="workbench">
           <RequestPanel
             activeTab={requestTab}
             grpcSchema={grpcSchemas[active.request.id]}
@@ -819,11 +881,32 @@ export default function App() {
             onTabChange={setResponseTab}
             protocol={active.request.protocol}
             response={response}
+            scriptLogs={scriptLogs}
+            scriptTests={scriptTests}
             streamDraft={streamDraft}
             streamMessages={streamMessages}
             streamStatus={streamStatus}
           />
-        </div>
+        </div> : (
+          <AutomationWorkbench
+            activeEnvironment={activeEnvironment}
+            onChangeWorkspace={(updater) => setWorkspace(updater)}
+            onOpenCollection={(collection) => {
+              setWorkbenchSection('requests');
+              setSidebarMode('collections');
+              if (collection.requests[0]) setWorkspace((current) => ({ ...current, activeRequestId: collection.requests[0].id }));
+            }}
+            onStartMock={(serverId, runningMock) => setRunningMocks((current) => ({ ...current, [serverId]: runningMock }))}
+            onStopMock={(serverId) => setRunningMocks((current) => {
+              const next = { ...current };
+              delete next[serverId];
+              return next;
+            })}
+            runningMocks={runningMocks}
+            section={workbenchSection}
+            workspace={workspace}
+          />
+        )}
       </div>
 
       <footer className="statusbar">
@@ -832,11 +915,11 @@ export default function App() {
         <span><i /> Environment: {activeEnvironment.name}</span>
         <span>Local-only</span>
         <span>UTF-8</span>
-        <span>{protocolLabel(active.request)}</span>
+        <span>{workbenchSection === 'requests' ? protocolLabel(active.request) : titleCase(workbenchSection)}</span>
       </footer>
 
       {showEnvironment ? <EnvironmentDialog environment={activeEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} /> : null}
-      {showPalette ? <CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onEnvironment={() => setShowEnvironment(true)} onExport={exportWorkspace} onImport={() => fileInput.current?.click()} /> : null}
+      {showPalette ? <CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => setWorkbenchSection('design')} onEnvironment={() => setShowEnvironment(true)} onExport={exportWorkspace} onImport={() => fileInput.current?.click()} onMocks={() => setWorkbenchSection('mocks')} onRunner={() => setWorkbenchSection('runner')} /> : null}
       {importError ? <div className="toast" role="alert"><span>{importError}</span><button aria-label="Dismiss" onClick={() => setImportError('')} type="button"><Icon name="x" size={15} /></button></div> : null}
     </main>
   );

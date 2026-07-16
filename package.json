@@ -3,9 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "bin": {
+    "brunomnia": "bin/brunomnia.cjs"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && npm run build:cli",
+    "build:cli": "esbuild cli/brunomnia.ts --bundle --platform=node --format=cjs --banner:js=\"#!/usr/bin/env node\" --outfile=bin/brunomnia.cjs",
+    "cli": "npm run build:cli && node bin/brunomnia.cjs",
     "preview": "vite preview",
     "test": "vitest run",
     "tauri": "tauri"
@@ -13,7 +18,8 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
@@ -21,6 +27,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "esbuild": "^0.28.1",
     "typescript": "~5.9.0",
     "vite": "^7.0.0",
     "vitest": "^3.2.0"
