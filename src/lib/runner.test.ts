@@ -37,4 +37,26 @@ describe('collection runner', () => {
     expect(report.retries).toBe(0);
     expect(report.total).toBe(1);
   });
+
+  it('passes iteration data and request-local variables through scripts and request rendering', async () => {
+    const request = createBlankRequest('one');
+    const scriptCalls: Array<{ local: Record<string, string>; iteration: Record<string, string> }> = [];
+    await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+      { id: 'env', name: 'Env', variables: [{ id: 'env-host', name: 'host', value: 'environment', enabled: true }] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [{ row: '42', host: 'iteration' }] },
+      async (_activeRequest, variables) => {
+        expect(variables).toMatchObject({ row: '42', host: 'iteration', local: 'yes' });
+        return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 };
+      },
+      async (_script, activeRequest, environment, response, _timeout, local = {}, iteration = {}) => {
+        scriptCalls.push({ local, iteration });
+        return { request: activeRequest, environment, localVariables: response ? local : { local: 'yes' }, logs: [], tests: [] };
+      },
+    );
+    expect(scriptCalls).toEqual([
+      { local: {}, iteration: { row: '42', host: 'iteration' } },
+      { local: { local: 'yes' }, iteration: { row: '42', host: 'iteration' } },
+    ]);
+  });
 });

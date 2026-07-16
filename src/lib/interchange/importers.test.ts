@@ -42,6 +42,33 @@ describe('artifact import adapters', () => {
     expect(result.environments[0].variables[0]).toMatchObject({ name: 'baseUrl', value: 'https://shop.example.com' });
   });
 
+  it('maps advanced Postman and Insomnia auth families into executable fields', () => {
+    const postman = importArtifact(JSON.stringify({
+      info: { name: 'AWS', schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json' },
+      item: [{ name: 'Signed', request: { method: 'GET', url: 'https://execute-api.us-west-2.amazonaws.com', auth: { type: 'awsv4', awsv4: [
+        { key: 'accessKey', value: '{{access}}' }, { key: 'secretKey', value: '{{secret}}' }, { key: 'region', value: 'us-west-2' }, { key: 'service', value: 'execute-api' },
+      ] } } }],
+    }), 'aws.postman_collection.json');
+    expect(postman.collections[0].requests[0].auth).toMatchObject({ type: 'iam', awsAccessKeyId: '{{access}}', awsSecretAccessKey: '{{secret}}', awsRegion: 'us-west-2' });
+
+    const insomnia = importArtifact(`type: collection.insomnia.rest/5.0
+schema_version: "5.1"
+name: Secured
+meta: { id: wrk_secured }
+collection:
+  - name: Hawk request
+    method: POST
+    url: https://api.example.com/items
+    authentication: { type: hawk, id: client, key: secret, algorithm: sha256, validatePayload: true }
+cookieJar:
+  name: Default
+  cookies:
+    - { key: session, value: abc, domain: api.example.com, path: /, secure: true, httpOnly: true }
+`, 'secured.yaml');
+    expect(insomnia.collections[0].requests[0].auth).toMatchObject({ type: 'hawk', hawkId: 'client', hawkKey: 'secret', hawkValidatePayload: true });
+    expect(insomnia.cookies[0]).toMatchObject({ name: 'session', domain: 'api.example.com', secure: true, httpOnly: true });
+  });
+
   it('imports HAR requests and detects bearer authentication', () => {
     const result = importArtifact(JSON.stringify({ log: { version: '1.2', creator: { name: 'Browser' }, entries: [{ request: {
       method: 'POST', url: 'https://api.example.com/items', httpVersion: 'HTTP/1.1',
@@ -151,7 +178,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(4);
+    expect(second.version).toBe(5);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

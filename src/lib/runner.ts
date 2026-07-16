@@ -15,6 +15,9 @@ export type ScriptExecutor = (
   request: ApiRequest,
   variables: Record<string, string>,
   response?: HttpResponse,
+  timeoutMs?: number,
+  localVariables?: Record<string, string>,
+  iterationData?: Record<string, string>,
 ) => Promise<ScriptRunResult>;
 
 export type RunnerOptions = {
@@ -48,7 +51,8 @@ export const runCollection = async (
   const retries = boundedInteger(options.retries, 0, 10);
 
   outer: for (let iteration = 0; iteration < iterations; iteration += 1) {
-    let variables = { ...environmentMap(environment), ...(options.dataRows[iteration % Math.max(1, options.dataRows.length)] ?? {}) };
+    const iterationData = options.dataRows[iteration % Math.max(1, options.dataRows.length)] ?? {};
+    let variables = { ...environmentMap(environment), ...iterationData };
     for (const originalRequest of collection.requests) {
       if (options.shouldCancel?.()) { cancelled = true; break outer; }
       for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
@@ -58,11 +62,12 @@ export const runCollection = async (
         let error: string | undefined;
         const started = Date.now();
         try {
-          const preRequest = await executeScript(request.preRequestScript, request, variables);
+          const preRequest = await executeScript(request.preRequestScript, request, variables, undefined, 2000, {}, iterationData);
           request = preRequest.request;
           variables = preRequest.environment;
-          response = await executeRequest(request, variables);
-          const afterResponse = await executeScript(request.tests, request, variables, response);
+          const localVariables = preRequest.localVariables ?? {};
+          response = await executeRequest(request, { ...variables, ...iterationData, ...localVariables });
+          const afterResponse = await executeScript(request.tests, request, variables, response, 2000, localVariables, iterationData);
           variables = afterResponse.environment;
           tests = afterResponse.tests;
         } catch (caught) {

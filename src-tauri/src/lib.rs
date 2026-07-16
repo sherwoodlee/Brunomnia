@@ -59,9 +59,10 @@ async fn connect_websocket(
 async fn send_websocket_message(
     session_id: String,
     message: String,
+    kind: String,
     state: State<'_, streaming::StreamingState>,
 ) -> Result<(), String> {
-    streaming::send_websocket_message(session_id, message, state.inner().clone()).await
+    streaming::send_websocket_message(session_id, message, kind, state.inner().clone()).await
 }
 
 #[tauri::command]

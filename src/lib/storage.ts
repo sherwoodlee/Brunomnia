@@ -31,7 +31,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
       grpc: { ...defaults.grpc, ...request.grpc },
       transport: { ...defaults.transport, ...request.transport },
       formBody: request.formBody ?? [],
-      multipartBody: request.multipartBody ?? [],
+      multipartBody: (request.multipartBody ?? []).map((part) => ({ ...part, contentType: part.contentType ?? part.file?.mimeType ?? '', fileName: part.fileName ?? part.file?.fileName ?? '' })),
     })),
   }));
   const collections = importedCollections.length ? importedCollections : seed.collections;
@@ -40,16 +40,18 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const environmentIds = new Set(environments.map((environment) => environment.id));
   return {
     ...workspace,
-    version: 4,
+    version: 5,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
     environments,
     history: Array.isArray(workspace.history) ? workspace.history : [],
-    apiDesigns: workspace.apiDesigns ?? seed.apiDesigns,
+    apiDesigns: (workspace.apiDesigns ?? seed.apiDesigns).map((design) => ({ ...design, ruleset: design.ruleset ?? '' })),
     mockServers: workspace.mockServers ?? seed.mockServers,
     runnerReports: workspace.runnerReports ?? [],
     imports: workspace.imports ?? [],
+    cookies: workspace.cookies ?? [],
+    responses: workspace.responses ?? [],
     collections,
   } as Workspace;
 };

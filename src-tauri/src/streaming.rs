@@ -2,6 +2,7 @@ use crate::{
     http_client::build_client,
     models::{StreamConnectInput, StreamEvent},
 };
+use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::{SinkExt, StreamExt};
 use std::{collections::HashMap, sync::Arc};
 use tauri::ipc::Channel;
@@ -13,7 +14,18 @@ use tokio_tungstenite::{
 
 enum WebSocketCommand {
     Text(String),
+    Binary(Vec<u8>),
     Close,
+}
+
+fn websocket_command(kind: &str, message: String) -> Result<WebSocketCommand, String> {
+    if kind == "binary" {
+        return STANDARD
+            .decode(message.trim())
+            .map(WebSocketCommand::Binary)
+            .map_err(|error| format!("Binary WebSocket frames must be base64: {error}"));
+    }
+    Ok(WebSocketCommand::Text(message))
 }
 
 #[derive(Clone, Default)]
@@ -86,6 +98,16 @@ pub async fn connect_websocket(
                                 }
                             }
                         }
+                        Some(WebSocketCommand::Binary(bytes)) => {
+                            let encoded = STANDARD.encode(&bytes);
+                            match socket.send(Message::Binary(bytes.clone().into())).await {
+                                Ok(()) => { let _ = on_event.send(StreamEvent::outgoing(&session_id, "binary", encoded)); }
+                                Err(error) => {
+                                    let _ = on_event.send(StreamEvent::system(&session_id, "error", error.to_string()));
+                                    break;
+                                }
+                            }
+                        }
                         Some(WebSocketCommand::Close) | None => {
                             let _ = socket.close(None).await;
                             break;
@@ -101,7 +123,7 @@ pub async fn connect_websocket(
                             let _ = on_event.send(StreamEvent::incoming(
                                 &session_id,
                                 "binary",
-                                format!("{} binary bytes", bytes.len()),
+                                STANDARD.encode(&bytes),
                             ));
                         }
                         Some(Ok(Message::Ping(_))) => {
@@ -134,6 +156,7 @@ pub async fn connect_websocket(
 pub async fn send_websocket_message(
     session_id: String,
     message: String,
+    kind: String,
     state: StreamingState,
 ) -> Result<(), String> {
     let sender = state
@@ -143,8 +166,9 @@ pub async fn send_websocket_message(
         .get(&session_id)
         .cloned()
         .ok_or_else(|| "Connect the WebSocket before sending a message.".to_string())?;
+    let command = websocket_command(&kind, message)?;
     sender
-        .send(WebSocketCommand::Text(message))
+        .send(command)
         .map_err(|_| "The WebSocket session has ended.".to_string())
 }
 
@@ -174,7 +198,7 @@ pub async fn connect_sse(
         return Err("This SSE stream is already connected.".into());
     }
 
-    let client = build_client(&input.transport)?;
+    let client = build_client(&input.transport, Some(&input.url))?;
     let mut request = client.get(&input.url).header("Accept", "text/event-stream");
     for header in input.headers.into_iter().filter(|header| header.enabled) {
         request = request.header(&header.name, &header.value);
@@ -309,6 +333,15 @@ fn parse_sse_event(block: &str) -> Option<ParsedSseEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decodes_binary_websocket_composition() {
+        match websocket_command("binary", "AAEC/w==".into()).unwrap() {
+            WebSocketCommand::Binary(bytes) => assert_eq!(bytes, vec![0, 1, 2, 255]),
+            _ => panic!("expected a binary command"),
+        }
+        assert!(websocket_command("binary", "not base64".into()).is_err());
+    }
 
     #[test]
     fn parses_chunked_multiline_events_and_comments() {

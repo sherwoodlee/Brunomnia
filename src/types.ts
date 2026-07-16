@@ -17,13 +17,66 @@ export type KeyValue = {
 };
 
 export type AuthConfig = {
-  type: 'none' | 'bearer' | 'basic' | 'api-key';
+  type: 'none' | 'bearer' | 'basic' | 'api-key' | 'digest' | 'oauth1' | 'oauth2' | 'ntlm' | 'iam' | 'hawk' | 'asap' | 'netrc';
+  disabled: boolean;
   token: string;
+  prefix: string;
   username: string;
   password: string;
   apiKeyName: string;
   apiKeyValue: string;
   apiKeyLocation: 'header' | 'query';
+  oauth1SignatureMethod: 'HMAC-SHA1' | 'HMAC-SHA256' | 'RSA-SHA1' | 'PLAINTEXT';
+  consumerKey: string;
+  consumerSecret: string;
+  tokenKey: string;
+  tokenSecret: string;
+  privateKey: string;
+  version: string;
+  nonce: string;
+  timestamp: string;
+  callback: string;
+  realm: string;
+  verifier: string;
+  includeBodyHash: boolean;
+  oauth2GrantType: 'authorization_code' | 'client_credentials' | 'implicit' | 'password' | 'refresh_token';
+  accessTokenUrl: string;
+  authorizationUrl: string;
+  clientId: string;
+  clientSecret: string;
+  audience: string;
+  scope: string;
+  resource: string;
+  redirectUrl: string;
+  credentialsInBody: boolean;
+  state: string;
+  code: string;
+  accessToken: string;
+  refreshToken: string;
+  tokenPrefix: string;
+  usePkce: boolean;
+  pkceMethod: 'S256' | 'plain';
+  codeVerifier: string;
+  responseType: 'code' | 'token' | 'id_token';
+  ntlmDomain: string;
+  ntlmWorkstation: string;
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
+  awsSessionToken: string;
+  awsRegion: string;
+  awsService: string;
+  hawkId: string;
+  hawkKey: string;
+  hawkExt: string;
+  hawkAlgorithm: 'sha1' | 'sha256';
+  hawkValidatePayload: boolean;
+  asapIssuer: string;
+  asapSubject: string;
+  asapAudience: string;
+  asapAdditionalClaims: string;
+  asapPrivateKey: string;
+  asapKeyId: string;
+  netrc: string;
 };
 
 export type FilePayload = {
@@ -35,6 +88,8 @@ export type FilePayload = {
 export type MultipartPart = KeyValue & {
   kind: 'text' | 'file';
   file?: FilePayload;
+  contentType?: string;
+  fileName?: string;
 };
 
 export type GraphqlConfig = {
@@ -58,8 +113,33 @@ export type TransportConfig = {
   timeoutMs: number;
   validateCertificates: boolean;
   proxyUrl: string;
+  proxyExclusions: string;
   clientCertificatePem: string;
   clientKeyPem: string;
+  clientCertificateDomains: string;
+  sendCookies: boolean;
+  storeCookies: boolean;
+};
+
+export type CookieRecord = {
+  id: string;
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires?: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite: 'strict' | 'lax' | 'none' | '';
+  hostOnly: boolean;
+  createdAt: string;
+};
+
+export type StoredResponse = HttpResponse & {
+  requestId: string;
+  requestName: string;
+  requestUrl: string;
+  receivedAt: string;
 };
 
 export type ApiRequest = {
@@ -112,7 +192,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 4;
+  version: 5;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -123,6 +203,8 @@ export type Workspace = {
   mockServers: MockServer[];
   runnerReports: RunnerReport[];
   imports: ImportRecord[];
+  cookies: CookieRecord[];
+  responses: StoredResponse[];
 };
 
 export type HttpResponse = {
@@ -132,6 +214,8 @@ export type HttpResponse = {
   body: string;
   durationMs: number;
   sizeBytes: number;
+  setCookies?: string[];
+  requestUrl?: string;
 };
 
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests';
@@ -143,6 +227,7 @@ export type ApiDesign = {
   id: string;
   name: string;
   contents: string;
+  ruleset?: string;
   generatedCollectionId?: string;
   source?: SourceMetadata;
 };
@@ -202,6 +287,7 @@ export type ScriptRunResult = {
   environment: Record<string, string>;
   logs: string[];
   tests: ScriptTestResult[];
+  localVariables?: Record<string, string>;
 };
 
 export type RunnerItemResult = {

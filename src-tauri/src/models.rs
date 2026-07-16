@@ -25,6 +25,10 @@ pub struct MultipartPart {
     pub enabled: bool,
     pub kind: String,
     pub file: Option<FilePayload>,
+    #[serde(default)]
+    pub content_type: String,
+    #[serde(default)]
+    pub file_name: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -39,9 +43,13 @@ pub struct TransportConfig {
     #[serde(default)]
     pub proxy_url: String,
     #[serde(default)]
+    pub proxy_exclusions: String,
+    #[serde(default)]
     pub client_certificate_pem: String,
     #[serde(default)]
     pub client_key_pem: String,
+    #[serde(default)]
+    pub client_certificate_domains: String,
 }
 
 fn default_true() -> bool {
@@ -50,6 +58,25 @@ fn default_true() -> bool {
 
 fn default_timeout() -> u64 {
     60_000
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeAuthConfig {
+    #[serde(default)]
+    pub auth_type: String,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub ntlm_domain: String,
+    #[serde(default)]
+    pub ntlm_workstation: String,
+    #[serde(default)]
+    pub netrc: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -64,6 +91,8 @@ pub struct HttpRequestInput {
     pub multipart_body: Vec<MultipartPart>,
     pub binary_body: Option<FilePayload>,
     #[serde(default)]
+    pub auth: NativeAuthConfig,
+    #[serde(default)]
     pub transport: TransportConfig,
 }
 
@@ -76,6 +105,7 @@ pub struct HttpResponseOutput {
     pub body: String,
     pub duration_ms: u128,
     pub size_bytes: usize,
+    pub set_cookies: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
