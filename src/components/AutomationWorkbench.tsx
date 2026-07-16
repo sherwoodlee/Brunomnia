@@ -17,15 +17,17 @@ import { sendRequest } from '../lib/http';
 import { createPluginRuntime, type PluginHostCallbacks, type PluginRunState } from '../lib/plugins';
 import { startMockServer, stopMockServer, type RunningMock } from '../lib/mock';
 import { runStreamSample } from '../lib/protocol';
+import { resolveAuthorizedExternalSecret } from '../lib/security';
 import { Icon } from './Icon';
 import { CodeEditor } from './ProtocolEditors';
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
 type AutomationWorkbenchProps = {
-  section: Exclude<WorkbenchSection, 'requests' | 'git' | 'plugins'>;
+  section: Exclude<WorkbenchSection, 'requests' | 'git' | 'plugins' | 'security'>;
   workspace: Workspace;
   activeEnvironment: Environment;
+  vault: Record<string, string>;
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
   onOpenCollection: (collection: Collection) => void;
   runningMocks: Record<string, RunningMock>;
@@ -111,7 +113,7 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection }: Aut
   );
 }
 
-function RunnerWorkbench({ workspace, activeEnvironment, onChangeWorkspace }: AutomationWorkbenchProps) {
+function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace }: AutomationWorkbenchProps) {
   const [collectionId, setCollectionId] = useState(workspace.collections[0]?.id ?? '');
   const [environmentId, setEnvironmentId] = useState(activeEnvironment.id);
   const [iterations, setIterations] = useState(1);
@@ -151,7 +153,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, onChangeWorkspace }: Au
         };
         const result = request.protocol === 'websocket' || request.protocol === 'sse'
           ? await runStreamSample(request, requestEnvironment, streamWindowMs)
-          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, pluginRuntime });
+          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
         const requestUrl = result.requestUrl ?? request.url;
         if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
         const stored = { ...result, requestId: request.id, requestName: request.name, requestUrl, receivedAt: new Date().toISOString() };

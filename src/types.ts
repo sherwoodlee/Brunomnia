@@ -192,7 +192,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 6;
+  version: 7;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -209,6 +209,50 @@ export type Workspace = {
   plugins: PluginRecord[];
   pluginData: Record<string, Record<string, string>>;
   activePluginTheme: string;
+  collaboration: CollaborationConfig;
+  governance: GovernanceConfig;
+};
+
+export type CollaborationConfig = {
+  mode: 'off' | 'encrypted-file';
+  path: string;
+  actor: string;
+  revision: number;
+  lastPulledAt?: string;
+  lastPushedAt?: string;
+};
+
+export type GovernanceRole = 'owner' | 'admin' | 'editor' | 'viewer';
+
+export type GovernanceMember = {
+  id: string;
+  name: string;
+  email: string;
+  role: GovernanceRole;
+  active: boolean;
+};
+
+export type GovernancePolicy = {
+  allowedStorage: Array<'local' | 'folder' | 'git' | 'encrypted-file'>;
+  requireEncryptedSync: boolean;
+  requireVaultForSecrets: boolean;
+  externalVaultAllowlist: string[];
+  auditRetention: number;
+};
+
+export type AuditEvent = {
+  id: string;
+  timestamp: string;
+  actorId: string;
+  action: string;
+  detail: string;
+};
+
+export type GovernanceConfig = {
+  currentMemberId: string;
+  members: GovernanceMember[];
+  policy: GovernancePolicy;
+  audit: AuditEvent[];
 };
 
 export type ProjectConfig = {
@@ -264,7 +308,7 @@ export type HttpResponse = {
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests';
 export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline' | 'tests';
 export type SidebarMode = 'collections' | 'history';
-export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins';
+export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins' | 'security';
 
 export type ApiDesign = {
   id: string;

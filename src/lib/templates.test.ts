@@ -36,4 +36,11 @@ describe('template engine', () => {
     const cookies = [{ id: 'session', name: 'session', value: 'abc', domain: 'api.example.com', path: '/api', secure: true, httpOnly: true, sameSite: 'lax' as const, hostOnly: true, createdAt: '2026-07-16T12:00:00Z' }];
     await expect(renderTemplate("{% cookie 'session' %}", { variables: { baseUrl: 'https://api.example.com' }, cookies, responses: [], request: templatedRequest })).resolves.toBe('abc');
   });
+
+  it('delegates four-family external vault tags without exposing provider credentials', async () => {
+    const calls: unknown[] = [];
+    const externalSecret = async (input: unknown) => { calls.push(input); return 'resolved-secret'; };
+    await expect(renderTemplate("{% external 'hashicorp', 'secret/orders', '', 'token', 'latest' %}", { variables: {}, cookies: [], responses: [], request, externalSecret })).resolves.toBe('resolved-secret');
+    expect(calls[0]).toMatchObject({ provider: 'hashicorp', reference: 'secret/orders', field: 'token', version: 'latest' });
+  });
 });

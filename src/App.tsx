@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from './data/seed';
-import { sendRequest } from './lib/http';
+import { sendRequest, type SendRequestContext } from './lib/http';
 import { storeResponseCookies } from './lib/cookies';
 import { connectStream, disconnectStream, invokeGrpc, loadGrpcSchema, sendWebSocketMessage } from './lib/protocol';
 import { formatBytes, mockResponse, prettyBody } from './lib/request';
@@ -13,11 +13,13 @@ import { Icon } from './components/Icon';
 import { AutomationWorkbench } from './components/AutomationWorkbench';
 import { ProjectWorkbench } from './components/ProjectWorkbench';
 import { PluginWorkbench } from './components/PluginWorkbench';
+import { SecurityWorkbench } from './components/SecurityWorkbench';
 import { AuthEditor } from './components/AuthEditor';
 import { applyArtifactImport } from './lib/interchange/apply';
 import type { ArtifactImport } from './lib/interchange/types';
 import { writeProject } from './lib/project';
 import { applyPluginTheme, createPluginRuntime, describePlugin, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
+import { plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -243,6 +245,7 @@ type RequestPanelProps = {
   environment: Environment;
   workspaceCookies: CookieRecord[];
   storedResponses: StoredResponse[];
+  requestContext: SendRequestContext;
   activeTab: RequestTab;
   isSending: boolean;
   streamStatus: 'disconnected' | 'connecting' | 'connected';
@@ -268,6 +271,7 @@ function RequestPanel({
   environment,
   workspaceCookies,
   storedResponses,
+  requestContext,
 }: RequestPanelProps) {
   const streamProtocol = request.protocol === 'websocket' || request.protocol === 'sse';
   const actionLabel = streamProtocol
@@ -352,7 +356,7 @@ function RequestPanel({
         {activeTab === 'headers' && request.protocol === 'grpc' ? (
           <KeyValueEditor rows={request.grpc.metadata} onChange={(metadata) => onChange({ grpc: { ...request.grpc, metadata } })} namePlaceholder="Metadata" />
         ) : null}
-        {activeTab === 'auth' ? <AuthEditor cookies={workspaceCookies} environment={environment} request={request} responses={storedResponses} onChange={onChange} /> : null}
+        {activeTab === 'auth' ? <AuthEditor cookies={workspaceCookies} environment={environment} request={request} requestContext={requestContext} responses={storedResponses} onChange={onChange} /> : null}
         {activeTab === 'body' && request.protocol === 'http' ? <HttpBodyEditor onChange={onChange} request={request} /> : null}
         {activeTab === 'body' && request.protocol === 'graphql' ? <GraphqlEditor onChange={onChange} request={request} /> : null}
         {activeTab === 'body' && (request.protocol === 'websocket' || request.protocol === 'sse') ? <StreamSetup onChange={onChange} request={request} /> : null}
@@ -558,7 +562,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 6, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '',
+    format: 'brunomnia', version: 7, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] },
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -582,6 +586,7 @@ export default function App() {
   const [scriptLogs, setScriptLogs] = useState<string[]>([]);
   const [runningMocks, setRunningMocks] = useState<Record<string, RunningMock>>({});
   const [projectSyncError, setProjectSyncError] = useState('');
+  const [vaultSession, setVaultSession] = useState<VaultSession>({ unlocked: false, passphrase: '', entries: [] });
   const streamSession = useRef<string | undefined>(undefined);
   const streamProtocol = useRef<Protocol | undefined>(undefined);
 
@@ -616,6 +621,8 @@ export default function App() {
 
   useEffect(() => {
     if (!hydrated || !isTauri() || workspace.project.mode === 'local' || !workspace.project.path || !workspace.project.autoSave) return;
+    const plaintext = workspace.governance.policy.requireVaultForSecrets ? plaintextSecretCandidates(workspace) : [];
+    if (plaintext.length) { setProjectSyncError(`Vault policy blocked ${plaintext.length} plaintext secret candidate${plaintext.length === 1 ? '' : 's'}.`); return; }
     const timeout = window.setTimeout(() => {
       void writeProject(workspace.project.path, workspace).then(() => setProjectSyncError('')).catch((caught) => setProjectSyncError(caught instanceof Error ? caught.message : String(caught)));
     }, 700);
@@ -639,6 +646,8 @@ export default function App() {
 
   const active = useMemo(() => findRequest(workspace), [workspace]);
   const activeEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
+  const unlockedVault = useMemo(() => vaultVariables(vaultSession), [vaultSession]);
+  const externalSecretResolver = useCallback((input: ExternalSecretInput) => resolveAuthorizedExternalSecret(workspace, input), [workspace]);
 
   useEffect(() => {
     const sessionId = streamSession.current;
@@ -766,7 +775,7 @@ export default function App() {
       streamSession.current = sessionId;
       streamProtocol.current = active.request.protocol;
       try {
-        await connectStream(active.request, activeEnvironment, sessionId, onStreamEvent);
+        await connectStream(active.request, { ...activeEnvironment, variables: [...activeEnvironment.variables, ...Object.entries(unlockedVault).map(([name, value]) => ({ id: `vault-${name}`, name, value, enabled: true }))] }, sessionId, onStreamEvent);
         setStreamStatus('connected');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -814,7 +823,7 @@ export default function App() {
         };
         const output = await invokeGrpc(callRequest, {
           ...activeEnvironment,
-          variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
+          variables: Object.entries({ ...requestVariables, ...unlockedVault }).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
         });
         const body = JSON.stringify({ status: output.status, callType: output.callType, messages: output.messages }, null, 2);
         result = await pluginRuntime.afterResponse(executableRequest, { status: 200, statusText: `gRPC ${output.status}`, headers: { 'grpc-call-type': output.callType }, body, durationMs: output.durationMs, sizeBytes: new Blob([body]).size });
@@ -822,7 +831,7 @@ export default function App() {
         result = await sendRequest(executableRequest, {
           ...activeEnvironment,
           variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
-        }, { cookies: workspace.cookies, responses: workspace.responses, pluginRuntime });
+        }, { cookies: workspace.cookies, responses: workspace.responses, pluginRuntime, vault: unlockedVault, externalSecret: externalSecretResolver });
       }
       const afterResponse = await runBrowserScript(executableRequest.tests, executableRequest, variables, result, 2000, preRequest.localVariables);
       setScriptTests(afterResponse.tests);
@@ -933,6 +942,7 @@ export default function App() {
             <button aria-label="Mock servers" className={workbenchSection === 'mocks' ? 'active' : ''} onClick={() => setWorkbenchSection('mocks')} type="button"><Icon name="spark" /></button>
             <button aria-label="Git Sync" className={workbenchSection === 'git' ? 'active' : ''} onClick={() => setWorkbenchSection('git')} type="button"><Icon name="code" /></button>
             <button aria-label="Plugins" className={workbenchSection === 'plugins' ? 'active' : ''} onClick={() => setWorkbenchSection('plugins')} type="button"><Icon name="braces" /></button>
+            <button aria-label="Security & Sync" className={workbenchSection === 'security' ? 'active' : ''} onClick={() => setWorkbenchSection('security')} type="button"><Icon name="lock" /></button>
           </div>
           <button aria-label="Environment settings" onClick={() => setShowEnvironment(true)} type="button"><Icon name="settings" /></button>
         </nav>
@@ -959,6 +969,7 @@ export default function App() {
             onSend={() => void executeRequest()}
             onTabChange={setRequestTab}
             request={active.request}
+            requestContext={{ vault: unlockedVault, externalSecret: externalSecretResolver }}
             storedResponses={workspace.responses}
             schemaLoading={schemaLoading}
             streamStatus={streamStatus}
@@ -983,7 +994,7 @@ export default function App() {
             streamMessages={streamMessages}
             streamStatus={streamStatus}
           />
-        </div> : workbenchSection === 'git' ? <ProjectWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /> : workbenchSection === 'plugins' ? <PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /> : (
+        </div> : workbenchSection === 'git' ? <ProjectWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /> : workbenchSection === 'plugins' ? <PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /> : workbenchSection === 'security' ? <SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} /> : (
           <AutomationWorkbench
             activeEnvironment={activeEnvironment}
             onChangeWorkspace={(updater) => setWorkspace(updater)}
@@ -1000,6 +1011,7 @@ export default function App() {
             })}
             runningMocks={runningMocks}
             section={workbenchSection}
+            vault={unlockedVault}
             workspace={workspace}
           />
         )}
@@ -1010,6 +1022,7 @@ export default function App() {
         <span className="status-spacer" />
         <span><i /> Environment: {activeEnvironment.name}</span>
         {projectSyncError ? <span className="bad">Project save failed: {projectSyncError}</span> : null}
+        <span>{vaultSession.unlocked ? `Vault: ${vaultSession.entries.length} unlocked` : 'Vault: locked'}</span>
         <span>Local-only</span>
         <span>UTF-8</span>
         <span>{workbenchSection === 'requests' ? protocolLabel(active.request) : titleCase(workbenchSection)}</span>

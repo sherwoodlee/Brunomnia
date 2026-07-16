@@ -7501,7 +7501,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 6,
+  version: 7,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -7636,7 +7636,14 @@ paths:
   project: { mode: "local", path: "", remoteUrl: "", remoteName: "origin", authorName: "", authorEmail: "", autoSave: true },
   plugins: [],
   pluginData: {},
-  activePluginTheme: ""
+  activePluginTheme: "",
+  collaboration: { mode: "off", path: "", actor: "Local owner", revision: 0 },
+  governance: {
+    currentMemberId: "local-owner",
+    members: [{ id: "local-owner", name: "Local owner", email: "", role: "owner", active: true }],
+    policy: { allowedStorage: ["local", "folder", "git", "encrypted-file"], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 },
+    audit: []
+  }
 };
 var createBlankRequest = (id) => createRequest(id, "Untitled Request", "GET", "https://");
 

@@ -97,12 +97,19 @@ Compatibility bounds remain explicit: OAuth 2 authorization uses a copied author
 
 Compatibility bounds remain explicit: Git credential setup uses the user's installed Git and credential helper; commit-history browsing, provider-specific onboarding, rebase/cherry-pick, and automatic project discovery remain later work. The plugin adapter intentionally does not install remote packages or arbitrary npm dependencies, and it implements a focused Insomnia-style CommonJS/context subset rather than the entire plugin ecosystem. Streaming request hooks, file watching/hot reload, plugin dependency resolution, and complete hook/context/template-argument compatibility remain in the parity ledger.
 
-## Milestone 7 — collaboration, secrets, and governance
+## Milestone 7 — collaboration, secrets, and governance (complete baseline)
 
-- Self-hostable end-to-end encrypted sync and real-time collaboration
-- Project sharing, branches, history, presence, comments, and offline reconciliation
-- Local credential storage plus AWS, GCP, Azure, and HashiCorp external-vault adapters
-- Free self-hosted SSO, RBAC, SCIM, audit, organization, and policy controls
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Local secret vault | Complete baseline | AES-256-GCM envelope, PBKDF2-HMAC-SHA256 with 210,000 iterations, random salt/nonce, 0600 temporary files on Unix, atomic replacement, passphrase never persisted, explicit lock/reset, and `vault.*` request variables |
+| Plaintext-secret policy | Complete baseline | Detects likely environment values (including disabled ones), credential headers/query fields, URL credentials, authentication, Netrc, and client-private-key values; blocks managed-project writes/stage/commit/push and encrypted-sync push until values use local-vault or external-vault references |
+| External vaults | Complete baseline | AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and HashiCorp Vault via installed official CLIs and their existing credential chains; 30-minute memory cache with a 20 MB/256-entry bound, 30-second process limit, 10 MB output limit, no shell, and a per-provider/reference/scope/field/version workspace allowlist |
+| Encrypted collaboration | Complete baseline | Passphrase-derived AES-GCM shared file, filtered shareable scope, monotonic revisions, optimistic base-revision conflict rejection, pull, explicit force push, and compatibility with a user-controlled mounted share/WebDAV/sync folder |
+| Local governance | Complete baseline | Owner/admin/editor/viewer actors, last-owner protection, storage policy controls, encrypted-sync and vault policy metadata, external-reference approval, bounded audit retention, and edit checks on sync/governance actions |
+| Workspace migration | Complete | Versions 1–6 migrate to v7 collaboration/governance fields; malformed roles, policies, actors, audit events, revisions, and allowed storage modes are normalized safely |
+| Documentation and evidence | Complete | [Security and encrypted sync guide](SECURITY_AND_SYNC.md) and [Milestone 7 verification](QA_MILESTONE_7.md) |
+
+Compatibility bounds remain explicit: shared-file encryption uses one team passphrase rather than per-user public-key wrapping; synchronization is pull/push rather than real-time presence; server-mediated comments, per-resource Cloud Sync branches/history, offline merge UI, and automatic device discovery remain. Local roles are policy metadata and action checks, not strong identity authentication. Self-hosted SAML/OIDC login, SCIM provisioning, tamper-evident remote audit storage, provider SDK login flows, private-environment hierarchy, script vault access, and headless external-vault parity remain later closure work.
 
 ## Milestone 8 — MCP, AI, and service integrations
 

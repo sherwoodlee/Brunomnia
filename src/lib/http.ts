@@ -8,6 +8,8 @@ import { renderTemplate } from './templates';
 export type SendRequestContext = {
   cookies?: CookieRecord[];
   responses?: StoredResponse[];
+  vault?: Record<string, string>;
+  externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
   pluginRuntime?: {
     beforeRequest: (request: ApiRequest) => Promise<ApiRequest>;
     afterResponse: (request: ApiRequest, response: HttpResponse) => Promise<HttpResponse>;
@@ -65,6 +67,7 @@ const renderRequest = async (request: ApiRequest, variables: Record<string, stri
     responses: context.responses ?? [],
     request,
     customTag: context.pluginRuntime ? (name: string, args: string[]) => context.pluginRuntime!.templateTag(name, args, request) : undefined,
+    externalSecret: context.externalSecret,
   };
   const render = (value: string) => renderTemplate(value, templateContext);
   const authEntries = await Promise.all(Object.entries(request.auth).map(async ([key, value]) => [key, typeof value === 'string' ? await render(value) : value]));
@@ -97,7 +100,7 @@ const signingBody = (request: ApiRequest, variables: Record<string, string>) => 
 };
 
 export const sendRequest = async (request: ApiRequest, environment: Environment | undefined, context: SendRequestContext = {}): Promise<HttpResponse> => {
-  const variables = environmentMap(environment);
+  const variables = { ...environmentMap(environment), ...(context.vault ?? {}) };
   const hooked = context.pluginRuntime ? await context.pluginRuntime.beforeRequest(request) : request;
   const prepared = await renderRequest(hooked, variables, context);
   const finish = async (response: HttpResponse) => context.pluginRuntime

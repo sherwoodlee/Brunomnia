@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the sixth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the seventh runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -31,6 +31,10 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Three-way text conflict editing, binary ours/theirs resolution, and explicit merge abort without silently discarding local changes
 - Local dependency-free CommonJS plugins with disabled-by-default installation, explicit capability grants, request/response hooks, template tags, actions, themes, and plugin-local storage
 - A time-limited Worker boundary for plugin code, mediated network/prompt/clipboard access, and automatic grant removal when source changes or a workspace is imported
+- A passphrase-derived AES-256-GCM local vault whose decrypted values exist only in memory and resolve through `{{ vault.name }}`
+- AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and HashiCorp Vault template adapters through user-authenticated official CLIs, an in-memory cache, and an explicit per-reference-tuple allowlist
+- End-to-end encrypted shared-file revisions with optimistic conflict checks, explicit force, device-local data filtering, and self-hosted filesystem/WebDAV compatibility
+- Local owner/admin/editor/viewer metadata, storage and plaintext-secret policies, bounded audit records, and workspace v7 migration hardening
 - Atomic persistence in the OS application-data directory
 - Responsive desktop UI with no login, upgrade, or cloud dependency
 
@@ -88,7 +92,7 @@ npm run tauri build -- --debug --bundles app
 - `src-tauri/` — native shell, atomic workspace/project persistence, Git process boundary, local plugin reader, protocol transports, and loopback mocks
 - `cli/` — headless automation entry point sharing the OpenAPI and runner modules
 - `design/` — accepted full-screen concept and verified implementation captures
-- `docs/` — migration, project/plugin guides, verification records, and feature-access policy
+- `docs/` — migration, project/plugin/security guides, verification records, and feature-access policy
 
 Brunomnia is independent software and is not affiliated with or endorsed by Kong Inc. “Insomnia” is referenced only to describe import/migration goals.
 

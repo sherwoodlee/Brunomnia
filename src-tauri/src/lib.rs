@@ -1,9 +1,11 @@
+mod external_vault;
 mod grpc_client;
 mod http_client;
 mod mock_server;
 mod models;
 mod plugin;
 mod project;
+mod secure_store;
 mod streaming;
 
 use models::{HttpRequestInput, HttpResponseOutput};
@@ -18,6 +20,10 @@ fn workspace_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .map_err(|error| error.to_string())?;
     fs::create_dir_all(&app_data).map_err(|error| error.to_string())?;
     Ok(app_data.join("workspace.json"))
+}
+
+fn vault_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(workspace_path(app)?.with_file_name("local-vault.enc.json"))
 }
 
 #[tauri::command]
@@ -193,6 +199,72 @@ async fn plugin_read_source(path: String) -> Result<plugin::PluginSourceOutput, 
 }
 
 #[tauri::command]
+async fn secure_vault_status(app: AppHandle) -> Result<secure_store::SecureFileStatus, String> {
+    let path = vault_path(&app)?;
+    blocking(move || secure_store::vault_status(&path)).await
+}
+
+#[tauri::command]
+async fn secure_vault_unlock(
+    app: AppHandle,
+    passphrase: String,
+) -> Result<Vec<secure_store::VaultEntry>, String> {
+    let path = vault_path(&app)?;
+    blocking(move || secure_store::vault_unlock(&path, passphrase)).await
+}
+
+#[tauri::command]
+async fn secure_vault_save(
+    app: AppHandle,
+    input: secure_store::VaultSaveInput,
+) -> Result<secure_store::SecureFileStatus, String> {
+    let path = vault_path(&app)?;
+    blocking(move || secure_store::vault_save(&path, input)).await
+}
+
+#[tauri::command]
+async fn secure_vault_reset(app: AppHandle) -> Result<(), String> {
+    let path = vault_path(&app)?;
+    blocking(move || secure_store::vault_reset(&path)).await
+}
+
+#[tauri::command]
+async fn secure_sync_status(path: String) -> Result<secure_store::SecureFileStatus, String> {
+    blocking(move || secure_store::sync_status(path)).await
+}
+
+#[tauri::command]
+async fn secure_sync_pull(
+    path: String,
+    passphrase: String,
+) -> Result<secure_store::SyncPayload, String> {
+    blocking(move || secure_store::sync_pull(path, passphrase)).await
+}
+
+#[tauri::command]
+async fn secure_sync_push(
+    input: secure_store::SyncPushInput,
+) -> Result<secure_store::SyncPayload, String> {
+    blocking(move || secure_store::sync_push(input)).await
+}
+
+#[tauri::command]
+async fn secure_external_secret(
+    input: external_vault::ExternalSecretInput,
+    state: State<'_, external_vault::ExternalSecretCache>,
+) -> Result<String, String> {
+    let cache = state.inner().clone();
+    blocking(move || cache.resolve(input)).await
+}
+
+#[tauri::command]
+fn secure_external_cache_clear(
+    state: State<'_, external_vault::ExternalSecretCache>,
+) -> Result<(), String> {
+    state.clear()
+}
+
+#[tauri::command]
 async fn connect_websocket(
     input: models::StreamConnectInput,
     on_event: Channel<models::StreamEvent>,
@@ -269,6 +341,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(streaming::StreamingState::default())
         .manage(mock_server::MockServerState::default())
+        .manage(external_vault::ExternalSecretCache::default())
         .invoke_handler(tauri::generate_handler![
             load_workspace,
             save_workspace,
@@ -292,6 +365,15 @@ pub fn run() {
             project_git_resolve_conflict,
             project_git_resolve_conflict_side,
             plugin_read_source,
+            secure_vault_status,
+            secure_vault_unlock,
+            secure_vault_save,
+            secure_vault_reset,
+            secure_sync_status,
+            secure_sync_pull,
+            secure_sync_push,
+            secure_external_secret,
+            secure_external_cache_clear,
             connect_websocket,
             send_websocket_message,
             disconnect_websocket,

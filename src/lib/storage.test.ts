@@ -19,7 +19,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(6);
+    expect(migrated.version).toBe(7);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
     expect(migrated.apiDesigns[0].name).toBe('Orders API');
@@ -44,6 +44,24 @@ describe('workspace migrations', () => {
     expect(migrated.environments[0].id).toBe(migrated.activeEnvironmentId);
     expect(migrated.history).toEqual([]);
     expect(migrated.imports).toEqual([]);
+  });
+
+  it('normalizes malformed collaboration and governance data without removing the last owner', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.collaboration = { mode: 'unknown', revision: -4, path: 42 };
+    workspace.governance = {
+      currentMemberId: 'missing',
+      members: [{ id: 'viewer', name: 'Viewer', role: 'invalid', active: true }, null],
+      policy: { allowedStorage: ['invalid'], auditRetention: 1_000_000 },
+      audit: [{ id: 'event', timestamp: '2026-07-16T00:00:00Z', action: 'test' }, 'invalid'],
+    };
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.collaboration).toMatchObject({ mode: 'off', revision: 0, path: '' });
+    expect(migrated.governance.members[0]).toMatchObject({ id: 'viewer', role: 'owner', active: true });
+    expect(migrated.governance.currentMemberId).toBe('viewer');
+    expect(migrated.governance.policy.auditRetention).toBe(10_000);
+    expect(migrated.governance.policy.allowedStorage).toContain('encrypted-file');
+    expect(migrated.governance.audit).toHaveLength(1);
   });
 
   it('rejects unrelated JSON', () => {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ApiRequest, CookieRecord, Environment, StoredResponse } from '../types';
 import { createOAuth2AuthorizationUrl, generateCodeVerifier } from '../lib/auth';
-import { fetchOAuth2Token } from '../lib/http';
+import { fetchOAuth2Token, type SendRequestContext } from '../lib/http';
 import { environmentMap } from '../lib/request';
 
 type AuthEditorProps = {
@@ -9,6 +9,7 @@ type AuthEditorProps = {
   environment: Environment;
   cookies: CookieRecord[];
   responses: StoredResponse[];
+  requestContext: SendRequestContext;
   onChange: (patch: Partial<ApiRequest>) => void;
 };
 
@@ -24,7 +25,7 @@ function AuthField({ label, value, onChange, placeholder, secret = false }: Auth
   return <label>{label}<input autoComplete="off" onChange={(event) => onChange(event.target.value)} placeholder={placeholder} spellCheck={false} type={secret ? 'password' : 'text'} value={value} /></label>;
 }
 
-export function AuthEditor({ request, environment, cookies, responses, onChange }: AuthEditorProps) {
+export function AuthEditor({ request, environment, cookies, responses, requestContext, onChange }: AuthEditorProps) {
   const auth = request.auth;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -47,7 +48,7 @@ export function AuthEditor({ request, environment, cookies, responses, onChange 
   const acquireToken = async () => {
     setBusy(true); setMessage('');
     try {
-      const result = await fetchOAuth2Token(request, environment, { cookies, responses });
+      const result = await fetchOAuth2Token(request, environment, { ...requestContext, cookies, responses });
       update({ accessToken: result.accessToken, refreshToken: result.refreshToken, tokenPrefix: result.tokenType });
       setMessage(`Token acquired${result.expiresIn ? ` · expires in ${result.expiresIn}s` : ''}.`);
     } catch (caught) {
