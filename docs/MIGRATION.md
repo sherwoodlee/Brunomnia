@@ -50,12 +50,22 @@ Streaming gRPC currently returns up to 100 messages within the configured deadli
 
 Current compatibility bounds are explicit: linting is not yet Spectral ruleset parity; the script API is a safe compatibility subset; mock templating is not yet Liquid/Faker parity; browser-only mock start/stop is a UI simulation because a browser cannot bind a server; CLI collection execution currently supports HTTP and GraphQL; and streaming runner semantics for WebSocket/SSE are deferred.
 
-## Milestone 4 — import and export interoperability
+## Milestone 4 — import and export interoperability (complete)
 
-- Import Insomnia JSON v4/v5, Postman Collection 2.0/2.1, HAR, OpenAPI 3.0/3.1, Swagger 2, WSDL, and cURL
-- Export stable Brunomnia JSON/YAML plus portable OpenAPI and request snippets
-- Preserve folders, environments, auth, scripts, and unsupported-source metadata with actionable conversion warnings
-- Add round-trip fixtures and compatibility tests for every adapter
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Import sources | Complete baseline | Local file, pasted text, and HTTP(S) URL with a 20 MB local conversion limit and pre-apply analysis |
+| Insomnia import | Complete baseline | JSON v4 and multi-document YAML v5 collections, requests, environments, API designs, mocks, HTTP, GraphQL, WebSocket, and gRPC |
+| Postman import | Complete baseline | Collection 2.0/2.1, nested items, variables, environments, supported auth/body modes, and best-effort script translation |
+| Portable request import | Complete baseline | HAR 1.2 and one or more cURL commands, parsed locally without shell execution |
+| API definition import | Complete baseline | OpenAPI 3.x, Swagger 2, and WSDL-to-SOAP request templates |
+| Export scopes | Complete baseline | All data, selected collection, or selected API design |
+| Export formats | Complete baseline | Brunomnia JSON, Insomnia v4 JSON, Insomnia v5 YAML, HAR 1.2, and raw OpenAPI |
+| Conversion safety | Complete | Warning preview, collision-safe IDs, import records, source IDs, and unsupported-source metadata |
+| Workspace migration | Complete | Versions 1–3 migrate in place to version 4 import records and source metadata |
+| Compatibility fixtures | Complete | Project-owned fixtures for every import adapter plus Insomnia v4/v5 and HAR round-trip tests |
+
+Compatibility bounds remain explicit: nested source folders are represented in flattened request names; Postman scripts are translated only for the supported permission-bounded API; local file references must be selected again; WSDL message schemas become editable SOAP placeholders; Socket.IO becomes a WebSocket baseline and MCP becomes an HTTP baseline with source metadata; and binary payload bytes are not embedded in compatibility exports.
 
 ## Milestone 5 — request and authentication fidelity
 

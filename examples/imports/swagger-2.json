@@ -1,0 +1,15 @@
+{
+  "swagger": "2.0",
+  "info": { "title": "Legacy fixture", "version": "1.0.0" },
+  "schemes": ["https"],
+  "host": "api.example.com",
+  "basePath": "/v1",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "responses": { "200": { "description": "Healthy" } }
+      }
+    }
+  }
+}

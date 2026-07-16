@@ -23,7 +23,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 | Collection runner and automated tests | Baseline | Ordered iterations, JSON/CSV data, retries, delay, cancellation, environment propagation, assertions, and reports. Stream-aware runs, additional reporting/export, and compatibility details remain. | [Collections and runner](https://developer.konghq.com/insomnia/collections/) |
 | Mock servers | Baseline | Real native loopback mock server with routes, parameters, headers, delays, CORS, and three dynamic tokens. Liquid/Faker breadth, response-to-mock generation, hosted/self-host deployment workflows, and AI generation remain. | [Mock servers](https://developer.konghq.com/insomnia/mock-servers/) |
 | Headless CLI and CI | Baseline | Bundled CLI lints/generates/exports OpenAPI and runs HTTP/GraphQL collections/tests with shared runner logic. Inso command/flag/report breadth and signed containers remain. | [Inso CLI](https://developer.konghq.com/inso-cli/), [CLI reference](https://developer.konghq.com/inso-cli/reference/) |
-| Import and export formats | Early baseline | Brunomnia workspace JSON plus OpenAPI request generation/export exist. Insomnia JSON v4/v5, Postman 2.0/2.1, HAR, Swagger 2, WSDL, cURL, and complete portable export adapters remain. | [Import/export reference](https://developer.konghq.com/insomnia/import-export/) |
+| Import and export formats | Baseline | File, pasted-text, and HTTP(S) URL imports cover Insomnia v4/v5, Postman 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL. Scoped exports cover Brunomnia JSON, Insomnia v4/v5, HAR, and raw OpenAPI. Folder flattening, script translation, external files, WSDL placeholders, Socket.IO/MCP downgrade warnings, and omitted binary bytes are explicit compatibility bounds. | [Import/export reference](https://developer.konghq.com/insomnia/import-export/) |
 | Git Sync and version control | Not started | Standard repository storage, Git operations, branches, commits, pull/push, diff, history, and conflict resolution remain. | [Storage and Git Sync](https://developer.konghq.com/insomnia/storage/) |
 | Plugins and extension API | Not started | Permission model, installation, hooks/actions, template tags, themes, request/response contexts, and compatibility tooling remain. | [Plugins](https://developer.konghq.com/insomnia/plugins/), [plugin reference](https://developer.konghq.com/insomnia/plugins/plugin-reference/) |
 | Secrets and external vaults | Not started | OS credential storage and AWS/GCP/Azure/HashiCorp secret adapters remain; current environment values are ordinary workspace data. | [External vault integration](https://developer.konghq.com/insomnia/external-vault/) |
@@ -43,6 +43,16 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Headless entry point and offline fixture: [`cli/brunomnia.ts`](../cli/brunomnia.ts) and [`examples/cli-workspace.json`](../examples/cli-workspace.json)
 - UI surfaces: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx)
 - Exact verification record: [`docs/QA.md`](QA.md)
+
+## Milestone 4 acceptance evidence
+
+- Format detection and adapter routing: [`src/lib/interchange/index.ts`](../src/lib/interchange/index.ts)
+- Insomnia, Postman, HAR, cURL, API definition, and WSDL converters: [`src/lib/interchange/`](../src/lib/interchange/)
+- Scoped compatibility exports and round-trip tests: [`src/lib/interchange/exporters.ts`](../src/lib/interchange/exporters.ts) and [`src/lib/interchange/exporters.test.ts`](../src/lib/interchange/exporters.test.ts)
+- Import fixtures for every adapter: [`examples/imports/`](../examples/imports/)
+- Pre-apply warning and export-preview UI: [`src/components/InterchangeDialogs.tsx`](../src/components/InterchangeDialogs.tsx)
+- Collision-safe application and workspace v4 migration: [`src/lib/interchange/apply.ts`](../src/lib/interchange/apply.ts) and [`src/lib/storage.ts`](../src/lib/storage.ts)
+- Exact verification record: [`docs/QA_MILESTONE_4.md`](QA_MILESTONE_4.md)
 
 ## Parity declaration rule
 
