@@ -1,0 +1,277 @@
+import { useRef } from 'react';
+import type {
+  ApiRequest,
+  BodyMode,
+  FilePayload,
+  GrpcSchema,
+  MultipartPart,
+  StreamMessage,
+} from '../types';
+import { Icon } from './Icon';
+
+type ChangeRequest = (patch: Partial<ApiRequest>) => void;
+
+type CodeEditorProps = {
+  ariaLabel: string;
+  value: string;
+  onChange: (value: string) => void;
+};
+
+export function CodeEditor({ ariaLabel, value, onChange }: CodeEditorProps) {
+  const gutter = useRef<HTMLDivElement>(null);
+  const lines = value.split('\n');
+  return (
+    <div className="editable-code-surface">
+      <div aria-hidden="true" className="code-gutter" ref={gutter}>
+        {lines.map((_, index) => <span key={index}>{index + 1}</span>)}
+      </div>
+      <textarea
+        aria-label={ariaLabel}
+        className="code-editor"
+        onChange={(event) => onChange(event.target.value)}
+        onScroll={(event) => {
+          if (gutter.current) gutter.current.scrollTop = event.currentTarget.scrollTop;
+        }}
+        spellCheck={false}
+        value={value}
+      />
+    </div>
+  );
+}
+
+const filePayload = async (file: File): Promise<FilePayload> => ({
+  fileName: file.name,
+  mimeType: file.type || 'application/octet-stream',
+  dataBase64: await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+    reader.readAsDataURL(file);
+  }),
+});
+
+const modes: { value: BodyMode; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'json', label: 'JSON' },
+  { value: 'text', label: 'Text' },
+  { value: 'form-urlencoded', label: 'Form URL encoded' },
+  { value: 'multipart', label: 'Multipart' },
+  { value: 'binary', label: 'Binary' },
+];
+
+const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onChange: ChangeRequest }) {
+  const updateMultipart = (id: string, patch: Partial<MultipartPart>) => onChange({
+    multipartBody: request.multipartBody.map((part) => part.id === id ? { ...part, ...patch } : part),
+  });
+
+  return (
+    <div className="editor-stack body-editor">
+      <div className="editor-toolbar body-mode-toolbar">
+        <div role="tablist" aria-label="HTTP body type">
+          {modes.map((mode) => (
+            <button
+              aria-selected={request.bodyMode === mode.value}
+              className={request.bodyMode === mode.value ? 'active' : ''}
+              key={mode.value}
+              onClick={() => onChange({ bodyMode: mode.value })}
+              role="tab"
+              type="button"
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+        <small>{request.bodyMode === 'none' ? 'No payload' : 'Native request body'}</small>
+      </div>
+      {request.bodyMode === 'none' ? (
+        <div className="empty-state compact"><Icon name="archive" size={26} /><strong>This request has no body</strong></div>
+      ) : null}
+      {request.bodyMode === 'json' || request.bodyMode === 'text' ? (
+        <CodeEditor ariaLabel="Request body" onChange={(body) => onChange({ body })} value={request.body} />
+      ) : null}
+      {request.bodyMode === 'form-urlencoded' ? (
+        <SimpleRows
+          name="Field"
+          rows={request.formBody}
+          onChange={(formBody) => onChange({ formBody })}
+        />
+      ) : null}
+      {request.bodyMode === 'multipart' ? (
+        <div className="multipart-editor">
+          <div className="multipart-header"><span>Type</span><span>Name</span><span>Value / file</span><span /></div>
+          {request.multipartBody.map((part) => (
+            <div className="multipart-row" key={part.id}>
+              <select value={part.kind} onChange={(event) => updateMultipart(part.id, { kind: event.target.value as MultipartPart['kind'], file: undefined })}>
+                <option value="text">Text</option><option value="file">File</option>
+              </select>
+              <input aria-label="Multipart field name" value={part.name} onChange={(event) => updateMultipart(part.id, { name: event.target.value })} placeholder="field" />
+              {part.kind === 'file' ? (
+                <label className="file-picker"><Icon name="import" size={14} /><span>{part.file?.fileName ?? 'Choose file'}</span><input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void filePayload(file).then((payload) => updateMultipart(part.id, { file: payload })); }} /></label>
+              ) : <input aria-label="Multipart field value" value={part.value} onChange={(event) => updateMultipart(part.id, { value: event.target.value })} placeholder="value" />}
+              <button aria-label="Remove multipart field" className="icon-button subtle" onClick={() => onChange({ multipartBody: request.multipartBody.filter((candidate) => candidate.id !== part.id) })} type="button"><Icon name="trash" size={14} /></button>
+            </div>
+          ))}
+          <button className="add-row" onClick={() => onChange({ multipartBody: [...request.multipartBody, { id: uid('part'), name: '', value: '', enabled: true, kind: 'text' }] })} type="button"><Icon name="plus" size={14} /> Add part</button>
+        </div>
+      ) : null}
+      {request.bodyMode === 'binary' ? (
+        <div className="binary-dropzone">
+          <Icon name="import" size={25} />
+          <strong>{request.binaryBody?.fileName ?? 'Choose a binary payload'}</strong>
+          <span>{request.binaryBody ? `${request.binaryBody.mimeType} · ${Math.round(request.binaryBody.dataBase64.length * .75)} bytes` : 'The selected file remains in this local workspace.'}</span>
+          <label>Choose file<input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void filePayload(file).then((binaryBody) => onChange({ binaryBody })); }} /></label>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type Row = ApiRequest['formBody'][number];
+
+function SimpleRows({ rows, onChange, name }: { rows: Row[]; onChange: (rows: Row[]) => void; name: string }) {
+  const update = (id: string, patch: Partial<Row>) => onChange(rows.map((row) => row.id === id ? { ...row, ...patch } : row));
+  return (
+    <div className="simple-rows">
+      {rows.map((row) => (
+        <div key={row.id}>
+          <input aria-label={`Enable ${name}`} type="checkbox" checked={row.enabled} onChange={(event) => update(row.id, { enabled: event.target.checked })} />
+          <input aria-label={`${name} name`} placeholder={name} value={row.name} onChange={(event) => update(row.id, { name: event.target.value })} />
+          <input aria-label={`${name} value`} placeholder="Value" value={row.value} onChange={(event) => update(row.id, { value: event.target.value })} />
+          <button aria-label={`Remove ${name}`} className="icon-button subtle" onClick={() => onChange(rows.filter((candidate) => candidate.id !== row.id))} type="button"><Icon name="trash" size={14} /></button>
+        </div>
+      ))}
+      <button className="add-row" onClick={() => onChange([...rows, { id: uid('row'), name: '', value: '', enabled: true }])} type="button"><Icon name="plus" size={14} /> Add field</button>
+    </div>
+  );
+}
+
+export function GraphqlEditor({ request, onChange }: { request: ApiRequest; onChange: ChangeRequest }) {
+  const graphql = request.graphql;
+  return (
+    <div className="graphql-editor">
+      <section>
+        <header><strong>Operation</strong><input aria-label="GraphQL operation name" value={graphql.operationName} onChange={(event) => onChange({ graphql: { ...graphql, operationName: event.target.value } })} placeholder="Operation name" /></header>
+        <CodeEditor ariaLabel="GraphQL query" value={graphql.query} onChange={(query) => onChange({ graphql: { ...graphql, query } })} />
+      </section>
+      <section>
+        <header><strong>Variables</strong><small>JSON</small></header>
+        <CodeEditor ariaLabel="GraphQL variables" value={graphql.variables} onChange={(variables) => onChange({ graphql: { ...graphql, variables } })} />
+      </section>
+    </div>
+  );
+}
+
+export function GrpcEditor({
+  request,
+  schema,
+  schemaLoading,
+  onChange,
+  onLoadSchema,
+}: {
+  request: ApiRequest;
+  schema?: GrpcSchema;
+  schemaLoading: boolean;
+  onChange: ChangeRequest;
+  onLoadSchema: () => void;
+}) {
+  const grpc = request.grpc;
+  const service = schema?.services.find((candidate) => candidate.fullName === grpc.service) ?? schema?.services[0];
+  const method = service?.methods.find((candidate) => candidate.name === grpc.method) ?? service?.methods[0];
+  const update = (patch: Partial<ApiRequest['grpc']>) => onChange({ grpc: { ...grpc, ...patch } });
+  return (
+    <div className="grpc-editor">
+      <div className="grpc-schema-bar">
+        <div className="segmented-control">
+          <button className={grpc.descriptorSource === 'reflection' ? 'active' : ''} onClick={() => update({ descriptorSource: 'reflection', descriptorSetBase64: '' })} type="button">Reflection</button>
+          <button className={grpc.descriptorSource === 'proto' ? 'active' : ''} onClick={() => update({ descriptorSource: 'proto', descriptorSetBase64: '' })} type="button">Proto source</button>
+        </div>
+        <button className="secondary-button compact-button" disabled={schemaLoading} onClick={onLoadSchema} type="button">{schemaLoading ? 'Loading…' : 'Load schema'}</button>
+      </div>
+      <div className={`grpc-workspace${grpc.descriptorSource === 'proto' ? ' with-proto' : ''}`}>
+        {grpc.descriptorSource === 'proto' ? (
+          <div className="proto-source-pane">
+            <div className="pane-label"><strong>schema.proto</strong><small>Editable source</small></div>
+            <CodeEditor ariaLabel="Protocol Buffer definition" value={grpc.protoText} onChange={(protoText) => update({ protoText, descriptorSetBase64: '' })} />
+          </div>
+        ) : null}
+        <div className="grpc-call-editor">
+          <div className="grpc-method-picker">
+            <label>Service<select aria-label="gRPC service" value={service?.fullName ?? ''} onChange={(event) => { const next = schema?.services.find((candidate) => candidate.fullName === event.target.value); update({ service: event.target.value, method: next?.methods[0]?.name ?? '' }); }}><option value="">Select service</option>{schema?.services.map((item) => <option key={item.fullName} value={item.fullName}>{item.fullName}</option>)}</select></label>
+            <label>Method<select aria-label="gRPC method" value={method?.name ?? ''} onChange={(event) => update({ service: service?.fullName ?? '', method: event.target.value })}><option value="">Select method</option>{service?.methods.map((item) => <option key={item.fullName} value={item.name}>{item.name}</option>)}</select></label>
+            {method ? <span className="rpc-kind">{method.clientStreaming ? 'client stream' : 'single request'} → {method.serverStreaming ? 'server stream' : 'single response'}</span> : null}
+          </div>
+          {schema ? <CodeEditor ariaLabel="gRPC JSON message" value={grpc.input} onChange={(input) => update({ input })} /> : <div className="empty-state compact"><Icon name="database" size={26} /><strong>Load reflection or this proto definition</strong><span>Brunomnia builds dynamic request and response messages locally.</span></div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function StreamSetup({ protocol }: { protocol: ApiRequest['protocol'] }) {
+  return (
+    <div className="empty-state stream-setup">
+      <span className={`protocol-glyph ${protocol}`}>{protocol === 'websocket' ? 'WS' : 'SSE'}</span>
+      <strong>{protocol === 'websocket' ? 'Bidirectional WebSocket session' : 'Server-sent event stream'}</strong>
+      <span>{protocol === 'websocket' ? 'Connect, then send text frames from the response console.' : 'Connect to watch named events arrive in order.'}</span>
+    </div>
+  );
+}
+
+export function TransportEditor({ request, onChange }: { request: ApiRequest; onChange: ChangeRequest }) {
+  const transport = request.transport;
+  const update = (patch: Partial<ApiRequest['transport']>) => onChange({ transport: { ...transport, ...patch } });
+  return (
+    <div className="transport-editor">
+      <div className="transport-grid">
+        <label>Request timeout (ms)<input min="100" max="600000" type="number" value={transport.timeoutMs} onChange={(event) => update({ timeoutMs: Number(event.target.value) })} /></label>
+        <label>Proxy URL<input placeholder="http://127.0.0.1:8080" spellCheck={false} value={transport.proxyUrl} onChange={(event) => update({ proxyUrl: event.target.value })} /></label>
+      </div>
+      <div className="transport-switches">
+        <label><input checked={transport.followRedirects} type="checkbox" onChange={(event) => update({ followRedirects: event.target.checked })} /><span>Follow HTTP redirects</span></label>
+        <label><input checked={transport.validateCertificates} type="checkbox" onChange={(event) => update({ validateCertificates: event.target.checked })} /><span>Validate server certificates</span></label>
+      </div>
+      <div className="certificate-grid">
+        <label>Client certificate (PEM)<textarea aria-label="Client certificate PEM" placeholder="-----BEGIN CERTIFICATE-----" value={transport.clientCertificatePem} onChange={(event) => update({ clientCertificatePem: event.target.value })} /></label>
+        <label>Client private key (PEM)<textarea aria-label="Client private key PEM" placeholder="-----BEGIN PRIVATE KEY-----" value={transport.clientKeyPem} onChange={(event) => update({ clientKeyPem: event.target.value })} /></label>
+      </div>
+      <p className="transport-note">Transport secrets remain on this device and export only when you explicitly export this workspace.</p>
+    </div>
+  );
+}
+
+export function StreamConsole({
+  protocol,
+  messages,
+  connected,
+  draft,
+  onDraftChange,
+  onSend,
+}: {
+  protocol: ApiRequest['protocol'];
+  messages: StreamMessage[];
+  connected: boolean;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onSend: () => void;
+}) {
+  return (
+    <div className={`stream-console${protocol === 'websocket' ? ' with-composer' : ''}`}>
+      <div className="stream-log" aria-live="polite">
+        {messages.length ? messages.map((message) => (
+          <article className={`stream-message ${message.direction}`} key={message.id}>
+            <header><span>{message.direction}</span><strong>{message.kind}</strong><time>{new Date(message.timestamp).toLocaleTimeString()}</time></header>
+            <pre>{message.text}</pre>
+          </article>
+        )) : <div className="empty-state compact"><Icon name="history" size={26} /><strong>No stream activity yet</strong><span>Connect to start the ordered event log.</span></div>}
+      </div>
+      {protocol === 'websocket' ? (
+        <div className="stream-composer">
+          <textarea aria-label="WebSocket message" disabled={!connected} placeholder={connected ? 'Type a text frame…' : 'Connect before sending a frame'} value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) onSend(); }} />
+          <button disabled={!connected || !draft.trim()} onClick={onSend} type="button">Send frame</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}

@@ -1,0 +1,190 @@
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyValue {
+    pub name: String,
+    pub value: String,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePayload {
+    pub file_name: String,
+    pub mime_type: String,
+    pub data_base64: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultipartPart {
+    pub name: String,
+    pub value: String,
+    pub enabled: bool,
+    pub kind: String,
+    pub file: Option<FilePayload>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransportConfig {
+    #[serde(default = "default_true")]
+    pub follow_redirects: bool,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
+    #[serde(default = "default_true")]
+    pub validate_certificates: bool,
+    #[serde(default)]
+    pub proxy_url: String,
+    #[serde(default)]
+    pub client_certificate_pem: String,
+    #[serde(default)]
+    pub client_key_pem: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_timeout() -> u64 {
+    60_000
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpRequestInput {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<KeyValue>,
+    pub body_mode: String,
+    pub body: String,
+    pub form_body: Vec<KeyValue>,
+    pub multipart_body: Vec<MultipartPart>,
+    pub binary_body: Option<FilePayload>,
+    #[serde(default)]
+    pub transport: TransportConfig,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpResponseOutput {
+    pub status: u16,
+    pub status_text: String,
+    pub headers: BTreeMap<String, String>,
+    pub body: String,
+    pub duration_ms: u128,
+    pub size_bytes: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamConnectInput {
+    pub session_id: String,
+    pub url: String,
+    pub headers: Vec<KeyValue>,
+    #[serde(default)]
+    pub transport: TransportConfig,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamEvent {
+    pub session_id: String,
+    pub direction: String,
+    pub kind: String,
+    pub text: String,
+    pub timestamp: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcSchemaInput {
+    pub endpoint: String,
+    pub source: String,
+    pub proto_text: String,
+    pub metadata: Vec<KeyValue>,
+    #[serde(default)]
+    pub transport: TransportConfig,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcMethodInfo {
+    pub name: String,
+    pub full_name: String,
+    pub client_streaming: bool,
+    pub server_streaming: bool,
+    pub input_type: String,
+    pub output_type: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcServiceInfo {
+    pub name: String,
+    pub full_name: String,
+    pub methods: Vec<GrpcMethodInfo>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcSchemaOutput {
+    pub services: Vec<GrpcServiceInfo>,
+    pub descriptor_set_base64: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcCallInput {
+    pub endpoint: String,
+    pub service: String,
+    pub method: String,
+    pub descriptor_set_base64: String,
+    pub messages_json: String,
+    pub metadata: Vec<KeyValue>,
+    #[serde(default)]
+    pub transport: TransportConfig,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcCallOutput {
+    pub status: String,
+    pub call_type: String,
+    pub messages: Vec<serde_json::Value>,
+    pub duration_ms: u128,
+}
+
+impl StreamEvent {
+    pub fn system(session_id: &str, kind: &str, text: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            direction: "system".to_string(),
+            kind: kind.to_string(),
+            text: text.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    pub fn incoming(session_id: &str, kind: &str, text: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            direction: "incoming".to_string(),
+            kind: kind.to_string(),
+            text: text.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    pub fn outgoing(session_id: &str, kind: &str, text: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            direction: "outgoing".to_string(),
+            kind: kind.to_string(),
+            text: text.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+}
