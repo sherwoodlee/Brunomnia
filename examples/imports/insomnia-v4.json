@@ -1,0 +1,8 @@
+{
+  "__export_format": 4,
+  "__export_source": "insomnia.desktop.app:fixture",
+  "resources": [
+    { "_id": "wrk_fixture", "parentId": null, "name": "Fixture workspace", "_type": "workspace" },
+    { "_id": "req_fixture", "parentId": "wrk_fixture", "name": "Health", "method": "GET", "url": "https://api.example.com/health", "headers": [], "parameters": [], "_type": "request" }
+  ]
+}

@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createBlankRequest } from './data/seed';
 import { sendRequest } from './lib/http';
 import { connectStream, disconnectStream, invokeGrpc, loadGrpcSchema, sendWebSocketMessage } from './lib/protocol';
 import { formatBytes, mockResponse, prettyBody } from './lib/request';
-import { loadWorkspace, parseWorkspaceImport, saveWorkspace } from './lib/storage';
+import { loadWorkspace, saveWorkspace } from './lib/storage';
 import { environmentMap } from './lib/request';
 import { runBrowserScript } from './lib/scriptSandbox';
 import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import { AutomationWorkbench } from './components/AutomationWorkbench';
+import { applyArtifactImport } from './lib/interchange/apply';
+import type { ArtifactImport } from './lib/interchange/types';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -34,6 +36,9 @@ import type {
   Workspace,
   WorkbenchSection,
 } from './types';
+
+const ImportDialog = lazy(() => import('./components/InterchangeDialogs').then((module) => ({ default: module.ImportDialog })));
+const ExportDialog = lazy(() => import('./components/InterchangeDialogs').then((module) => ({ default: module.ExportDialog })));
 
 const requestTabs: RequestTab[] = ['params', 'headers', 'auth', 'body', 'transport', 'scripts', 'tests'];
 const responseTabs: ResponseTab[] = ['preview', 'headers', 'cookies', 'timeline', 'tests'];
@@ -505,8 +510,8 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
     { icon: 'plus' as const, label: 'Create request', shortcut: 'N', action: onAddRequest },
     { icon: 'folder' as const, label: 'Create collection', shortcut: '⇧ N', action: onAddCollection },
     { icon: 'braces' as const, label: 'Edit active environment', shortcut: 'E', action: onEnvironment },
-    { icon: 'import' as const, label: 'Import workspace', shortcut: 'I', action: onImport },
-    { icon: 'download' as const, label: 'Export workspace', shortcut: 'X', action: onExport },
+    { icon: 'import' as const, label: 'Import artifact', shortcut: 'I', action: onImport },
+    { icon: 'download' as const, label: 'Export artifact', shortcut: 'X', action: onExport },
     { icon: 'grid' as const, label: 'Open API design', shortcut: 'D', action: onDesign },
     { icon: 'database' as const, label: 'Open collection runner', shortcut: 'R', action: onRunner },
     { icon: 'spark' as const, label: 'Open local mocks', shortcut: 'M', action: onMocks },
@@ -523,7 +528,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 3, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [],
+    format: 'brunomnia', version: 4, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [],
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -534,7 +539,8 @@ export default function App() {
   const [isSending, setIsSending] = useState(false);
   const [showEnvironment, setShowEnvironment] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
-  const [importError, setImportError] = useState('');
+  const [showImport, setShowImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [streamStatus, setStreamStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [streamMessages, setStreamMessages] = useState<StreamMessage[]>([]);
   const [streamDraft, setStreamDraft] = useState('');
@@ -546,7 +552,6 @@ export default function App() {
   const [runningMocks, setRunningMocks] = useState<Record<string, RunningMock>>({});
   const streamSession = useRef<string | undefined>(undefined);
   const streamProtocol = useRef<Protocol | undefined>(undefined);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -787,25 +792,28 @@ export default function App() {
     }
   };
 
-  const exportWorkspace = useCallback(() => {
-    const blob = new Blob([JSON.stringify(workspace, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `${workspace.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'brunomnia'}-workspace.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }, [workspace]);
+  const applyImport = (result: ArtifactImport) => {
+    setWorkspace((current) => applyArtifactImport(current, result));
+    setWorkbenchSection('requests');
+    setSidebarMode('collections');
+  };
 
-  const importWorkspace = async (file: File | undefined) => {
-    if (!file) return;
-    try {
-      const imported = parseWorkspaceImport(await file.text());
-      setWorkspace(imported);
-      setImportError('');
-    } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'Unable to import workspace.');
-    }
+  const fetchImportUrl = async (url: string) => {
+    if (!url.trim()) throw new Error('Enter an artifact URL.');
+    let parsedUrl: URL;
+    try { parsedUrl = new URL(url.trim()); } catch { throw new Error('Enter a valid artifact URL.'); }
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') throw new Error('Artifact URLs must use HTTP or HTTPS.');
+    const request = createBlankRequest(uid('import-url'));
+    request.name = 'Import artifact';
+    request.url = url.trim();
+    request.method = 'GET';
+    request.bodyMode = 'none';
+    request.preRequestScript = '';
+    request.tests = '';
+    const result = await sendRequest(request, activeEnvironment);
+    if (result.status < 200 || result.status >= 300) throw new Error(`Import URL returned ${result.status} ${result.statusText}.`);
+    if (result.sizeBytes > 20_000_000) throw new Error('The import exceeds the 20 MB local conversion limit.');
+    return result.body;
   };
 
   const updateEnvironment = (environment: Environment) => {
@@ -830,10 +838,9 @@ export default function App() {
         </select>
         <div className="topbar-actions">
           <button aria-label="Edit environment" className="icon-button subtle" onClick={() => setShowEnvironment(true)} type="button"><Icon name="braces" size={18} /></button>
-          <button aria-label="Import workspace" className="icon-button subtle" onClick={() => fileInput.current?.click()} type="button"><Icon name="import" size={18} /></button>
-          <button aria-label="Export workspace" className="icon-button subtle" onClick={exportWorkspace} type="button"><Icon name="download" size={18} /></button>
+          <button aria-label="Import artifacts" className="icon-button subtle" onClick={() => setShowImport(true)} type="button"><Icon name="import" size={18} /></button>
+          <button aria-label="Export artifacts" className="icon-button subtle" onClick={() => setShowExport(true)} type="button"><Icon name="download" size={18} /></button>
         </div>
-        <input accept="application/json,.json" className="visually-hidden" onChange={(event) => void importWorkspace(event.target.files?.[0])} ref={fileInput} type="file" />
       </header>
 
       <div className="app-body">
@@ -919,8 +926,9 @@ export default function App() {
       </footer>
 
       {showEnvironment ? <EnvironmentDialog environment={activeEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} /> : null}
-      {showPalette ? <CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => setWorkbenchSection('design')} onEnvironment={() => setShowEnvironment(true)} onExport={exportWorkspace} onImport={() => fileInput.current?.click()} onMocks={() => setWorkbenchSection('mocks')} onRunner={() => setWorkbenchSection('runner')} /> : null}
-      {importError ? <div className="toast" role="alert"><span>{importError}</span><button aria-label="Dismiss" onClick={() => setImportError('')} type="button"><Icon name="x" size={15} /></button></div> : null}
+      {showImport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading import tools…</div></div>}><ImportDialog onApply={applyImport} onClose={() => setShowImport(false)} onFetchUrl={fetchImportUrl} /></Suspense> : null}
+      {showExport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading export tools…</div></div>}><ExportDialog onClose={() => setShowExport(false)} workspace={workspace} /></Suspense> : null}
+      {showPalette ? <CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => setWorkbenchSection('design')} onEnvironment={() => setShowEnvironment(true)} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => setWorkbenchSection('mocks')} onRunner={() => setWorkbenchSection('runner')} /> : null}
     </main>
   );
 }

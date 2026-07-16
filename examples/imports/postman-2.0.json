@@ -1,0 +1,17 @@
+{
+  "info": {
+    "name": "Postman 2.0 fixture",
+    "_postman_id": "postman-v20-fixture",
+    "schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": "Accept: application/json",
+        "url": "https://api.example.com/health"
+      }
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the third runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the fourth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -22,7 +22,10 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - OpenAPI 3.x YAML/JSON editing, structural linting, operation preview, formatting, and request generation
 - Native loopback mock servers with route parameters, delays, headers, CORS, and dynamic response tokens
 - A headless CLI for OpenAPI lint/generation/export and collection/test execution
-- Versioned JSON workspace import/export
+- File, pasted-text, and HTTP(S) URL imports with format detection and a warning preview
+- Insomnia JSON v4/v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports
+- Scoped Brunomnia JSON, Insomnia v4/v5, HAR, and raw OpenAPI exports
+- Versioned workspace migrations with collision-safe import history and preserved source metadata
 - Atomic persistence in the OS application-data directory
 - Responsive desktop UI with no login, upgrade, or cloud dependency
 
@@ -76,7 +79,7 @@ npm run tauri build -- --debug --bundles app
 
 ## Architecture
 
-- `src/` — React workbench, design/runner/script engines, local state, templating, and browser fallback
+- `src/` — React workbench, design/runner/script/interchange engines, local state, templating, and browser fallback
 - `src-tauri/` — native shell, atomic workspace persistence, protocol transports, and loopback mocks
 - `cli/` — headless automation entry point sharing the OpenAPI and runner modules
 - `design/` — accepted full-screen concept and verified implementation captures

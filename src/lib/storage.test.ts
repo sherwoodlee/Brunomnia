@@ -16,13 +16,32 @@ describe('workspace migrations', () => {
     delete legacy.apiDesigns;
     delete legacy.mockServers;
     delete legacy.runnerReports;
+    delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(3);
+    expect(migrated.version).toBe(4);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
     expect(migrated.apiDesigns[0].name).toBe('Orders API');
     expect(migrated.mockServers[0].host).toBe('127.0.0.1');
+    expect(migrated.imports).toEqual([]);
+  });
+
+  it('repairs minimal exports with usable collections, environments, and active IDs', () => {
+    const migrated = migrateWorkspace({
+      format: 'brunomnia',
+      version: 1,
+      name: '',
+      activeRequestId: 'missing-request',
+      activeEnvironmentId: 'missing-environment',
+      collections: [],
+    });
+
+    expect(migrated.name).toBe('Imported Workspace');
+    expect(migrated.collections[0].requests[0].id).toBe(migrated.activeRequestId);
+    expect(migrated.environments[0].id).toBe(migrated.activeEnvironmentId);
+    expect(migrated.history).toEqual([]);
+    expect(migrated.imports).toEqual([]);
   });
 
   it('rejects unrelated JSON', () => {

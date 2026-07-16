@@ -14,31 +14,43 @@ const requestDefaults = () => cloneSeedWorkspace().collections[0].requests[0];
 
 export const migrateWorkspace = (value: unknown): Workspace => {
   if (!isWorkspaceEnvelope(value)) throw new Error('This is not a Brunomnia workspace export.');
+  const seed = cloneSeedWorkspace();
   const workspace = value as unknown as Omit<Workspace, 'version' | 'collections'> & {
     version?: number;
     collections: Array<{ requests: Array<Partial<Workspace['collections'][number]['requests'][number]>> } & Omit<Workspace['collections'][number], 'requests'>>;
   };
   const defaults = requestDefaults();
+  const importedCollections = workspace.collections.map((collection) => ({
+    ...collection,
+    requests: collection.requests.map((request) => ({
+      ...defaults,
+      ...request,
+      bodyMode: request.bodyMode ?? (request.method === 'GET' || request.method === 'HEAD' ? 'none' : 'json'),
+      auth: { ...defaults.auth, ...request.auth },
+      graphql: { ...defaults.graphql, ...request.graphql },
+      grpc: { ...defaults.grpc, ...request.grpc },
+      transport: { ...defaults.transport, ...request.transport },
+      formBody: request.formBody ?? [],
+      multipartBody: request.multipartBody ?? [],
+    })),
+  }));
+  const collections = importedCollections.length ? importedCollections : seed.collections;
+  const environments = Array.isArray(workspace.environments) && workspace.environments.length ? workspace.environments : seed.environments;
+  const requestIds = new Set(collections.flatMap((collection) => collection.requests.map((request) => request.id)));
+  const environmentIds = new Set(environments.map((environment) => environment.id));
   return {
     ...workspace,
-    version: 3,
-    apiDesigns: workspace.apiDesigns ?? cloneSeedWorkspace().apiDesigns,
-    mockServers: workspace.mockServers ?? cloneSeedWorkspace().mockServers,
+    version: 4,
+    name: workspace.name || 'Imported Workspace',
+    activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
+    activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
+    environments,
+    history: Array.isArray(workspace.history) ? workspace.history : [],
+    apiDesigns: workspace.apiDesigns ?? seed.apiDesigns,
+    mockServers: workspace.mockServers ?? seed.mockServers,
     runnerReports: workspace.runnerReports ?? [],
-    collections: workspace.collections.map((collection) => ({
-      ...collection,
-      requests: collection.requests.map((request) => ({
-        ...defaults,
-        ...request,
-        bodyMode: request.bodyMode ?? (request.method === 'GET' || request.method === 'HEAD' ? 'none' : 'json'),
-        auth: { ...defaults.auth, ...request.auth },
-        graphql: { ...defaults.graphql, ...request.graphql },
-        grpc: { ...defaults.grpc, ...request.grpc },
-        transport: { ...defaults.transport, ...request.transport },
-        formBody: request.formBody ?? [],
-        multipartBody: request.multipartBody ?? [],
-      })),
-    })),
+    imports: workspace.imports ?? [],
+    collections,
   } as Workspace;
 };
 

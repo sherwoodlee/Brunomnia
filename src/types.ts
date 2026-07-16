@@ -1,6 +1,13 @@
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE';
 export type Protocol = 'http' | 'graphql' | 'websocket' | 'sse' | 'grpc';
 export type BodyMode = 'none' | 'json' | 'text' | 'form-urlencoded' | 'multipart' | 'binary';
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+export type SourceMetadata = {
+  format: string;
+  sourceId?: string;
+  unsupported?: Record<string, JsonValue>;
+};
 
 export type KeyValue = {
   id: string;
@@ -74,6 +81,7 @@ export type ApiRequest = {
   transport: TransportConfig;
   preRequestScript: string;
   tests: string;
+  source?: SourceMetadata;
 };
 
 export type Collection = {
@@ -81,12 +89,14 @@ export type Collection = {
   name: string;
   expanded: boolean;
   requests: ApiRequest[];
+  source?: SourceMetadata;
 };
 
 export type Environment = {
   id: string;
   name: string;
   variables: KeyValue[];
+  source?: SourceMetadata;
 };
 
 export type HistoryEntry = {
@@ -102,7 +112,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 3;
+  version: 4;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -112,6 +122,7 @@ export type Workspace = {
   apiDesigns: ApiDesign[];
   mockServers: MockServer[];
   runnerReports: RunnerReport[];
+  imports: ImportRecord[];
 };
 
 export type HttpResponse = {
@@ -133,6 +144,7 @@ export type ApiDesign = {
   name: string;
   contents: string;
   generatedCollectionId?: string;
+  source?: SourceMetadata;
 };
 
 export type OpenApiIssue = {
@@ -159,6 +171,24 @@ export type MockServer = {
   host: '127.0.0.1';
   port: number;
   routes: MockRoute[];
+  source?: SourceMetadata;
+};
+
+export type ImportFormat = 'brunomnia' | 'insomnia-v4' | 'insomnia-v5' | 'postman-2' | 'postman-environment' | 'har' | 'openapi-3' | 'swagger-2' | 'wsdl' | 'curl';
+
+export type ImportWarning = {
+  code: string;
+  message: string;
+  resource?: string;
+};
+
+export type ImportRecord = {
+  id: string;
+  format: ImportFormat;
+  sourceName: string;
+  importedAt: string;
+  warnings: ImportWarning[];
+  metadata: Record<string, string>;
 };
 
 export type ScriptTestResult = {
