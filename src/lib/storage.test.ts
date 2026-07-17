@@ -19,7 +19,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(8);
+    expect(migrated.version).toBe(9);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
     expect(migrated.apiDesigns[0].name).toBe('Orders API');
@@ -30,6 +30,8 @@ describe('workspace migrations', () => {
     expect(migrated.mcpClients).toEqual([]);
     expect(migrated.ai.enabled).toBe(false);
     expect(migrated.konnect.baseUrl).toBe('https://us.api.konghq.com');
+    expect(migrated.preferences).toMatchObject({ theme: 'system', requestTimeoutMs: 30_000, autoFetchGraphqlSchema: true });
+    expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaEndpoint: '', schemaFetchedAt: '' });
   });
 
   it('repairs minimal exports with usable collections, environments, and active IDs', () => {
@@ -84,6 +86,7 @@ describe('workspace migrations', () => {
     }];
     exported.ai = { ...exported.ai, enabled: true, apiKey: 'raw-ai-key', mockGeneration: true, commitSuggestions: true };
     exported.konnect = { ...exported.konnect, enabled: true, token: 'raw-konnect-token' };
+    exported.preferences = { ...exported.preferences, theme: 'light', requestTimeoutMs: 123_000 };
 
     const imported = parseWorkspaceImport(JSON.stringify(exported));
     expect(imported.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
@@ -92,5 +95,15 @@ describe('workspace migrations', () => {
     expect(imported.mcpClients[0]).toMatchObject({ enabled: false, token: '', password: '' });
     expect(imported.ai).toMatchObject({ enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false });
     expect(imported.konnect).toMatchObject({ enabled: false, token: '' });
+    expect(imported.preferences).toMatchObject({ theme: 'system', requestTimeoutMs: 30_000 });
+  });
+
+  it('normalizes preference bounds and shortcut values', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.preferences = { theme: 'unknown', density: 'compact', fontSize: 99, requestTimeoutMs: 1, shortcuts: { palette: ' mod + shift + p ', send: 42 } };
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 20, requestTimeoutMs: 1_000 });
+    expect(migrated.preferences.shortcuts.palette).toBe('Mod+Shift+P');
+    expect(migrated.preferences.shortcuts.send).toBe('Mod+Enter');
   });
 });

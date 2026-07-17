@@ -1,6 +1,8 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
-import type { AiSettings, AuditEvent, CollaborationConfig, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, Workspace } from '../types';
+import type { AiSettings, AppPreferences, AuditEvent, CollaborationConfig, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, ShortcutAction, Workspace } from '../types';
+import { normalizeGraphqlSchema } from './graphql';
+import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 
 const storageKey = 'brunomnia.workspace.v1';
 
@@ -182,6 +184,24 @@ const normalizeKonnect = (value: unknown, defaults: KonnectConfig): KonnectConfi
   };
 };
 
+const normalizePreferences = (value: unknown): AppPreferences => {
+  const source = record(value);
+  const rawShortcuts = record(source?.shortcuts);
+  const shortcuts = Object.fromEntries((Object.keys(defaultShortcuts) as ShortcutAction[]).map((action) => {
+    const candidate = typeof rawShortcuts?.[action] === 'string' ? normalizeShortcut(rawShortcuts[action].slice(0, 64)) : '';
+    return [action, candidate || defaultShortcuts[action]];
+  })) as AppPreferences['shortcuts'];
+  return {
+    theme: source?.theme === 'dark' || source?.theme === 'light' ? source.theme : 'system',
+    density: source?.density === 'compact' ? 'compact' : 'comfortable',
+    fontSize: Math.min(20, Math.max(11, Number(source?.fontSize) || defaultPreferences.fontSize)),
+    requestTimeoutMs: Math.min(600_000, Math.max(1_000, Number(source?.requestTimeoutMs) || defaultPreferences.requestTimeoutMs)),
+    autoFetchGraphqlSchema: source?.autoFetchGraphqlSchema !== false,
+    confirmDestructive: source?.confirmDestructive !== false,
+    shortcuts,
+  };
+};
+
 export const migrateWorkspace = (value: unknown): Workspace => {
   if (!isWorkspaceEnvelope(value)) throw new Error('This is not a Brunomnia workspace export.');
   const seed = cloneSeedWorkspace();
@@ -192,17 +212,26 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const defaults = requestDefaults();
   const importedCollections = workspace.collections.map((collection) => ({
     ...collection,
-    requests: collection.requests.map((request) => ({
-      ...defaults,
-      ...request,
-      bodyMode: request.bodyMode ?? (request.method === 'GET' || request.method === 'HEAD' ? 'none' : 'json'),
-      auth: { ...defaults.auth, ...request.auth },
-      graphql: { ...defaults.graphql, ...request.graphql },
-      grpc: { ...defaults.grpc, ...request.grpc },
-      transport: { ...defaults.transport, ...request.transport },
-      formBody: request.formBody ?? [],
-      multipartBody: (request.multipartBody ?? []).map((part) => ({ ...part, contentType: part.contentType ?? part.file?.mimeType ?? '', fileName: part.fileName ?? part.file?.fileName ?? '' })),
-    })),
+    requests: collection.requests.map((request) => {
+      const graphql = record(request.graphql);
+      return {
+        ...defaults,
+        ...request,
+        bodyMode: request.bodyMode ?? (request.method === 'GET' || request.method === 'HEAD' ? 'none' : 'json'),
+        auth: { ...defaults.auth, ...request.auth },
+        graphql: {
+          ...defaults.graphql,
+          ...request.graphql,
+          schema: normalizeGraphqlSchema(graphql?.schema),
+          schemaEndpoint: stringValue(graphql?.schemaEndpoint),
+          schemaFetchedAt: stringValue(graphql?.schemaFetchedAt),
+        },
+        grpc: { ...defaults.grpc, ...request.grpc },
+        transport: { ...defaults.transport, ...request.transport },
+        formBody: request.formBody ?? [],
+        multipartBody: (request.multipartBody ?? []).map((part) => ({ ...part, contentType: part.contentType ?? part.file?.mimeType ?? '', fileName: part.fileName ?? part.file?.fileName ?? '' })),
+      };
+    }),
   }));
   const collections = importedCollections.length ? importedCollections : seed.collections;
   const environments = Array.isArray(workspace.environments) && workspace.environments.length ? workspace.environments : seed.environments;
@@ -211,7 +240,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 8,
+    version: 9,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
@@ -232,6 +261,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     mcpClients: normalizeMcpClients(workspace.mcpClients),
     ai: normalizeAi(workspace.ai, seed.ai),
     konnect: normalizeKonnect(workspace.konnect, seed.konnect),
+    preferences: normalizePreferences(workspace.preferences),
     collections,
   } as Workspace;
 };
@@ -246,6 +276,7 @@ export const secureImportedWorkspace = (value: unknown): Workspace => {
     mcpClients: workspace.mcpClients.map((client) => ({ ...client, enabled: false, token: '', password: '' })),
     ai: { ...workspace.ai, enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false },
     konnect: { ...workspace.konnect, enabled: false, token: '' },
+    preferences: structuredClone(defaultPreferences),
   };
 };
 

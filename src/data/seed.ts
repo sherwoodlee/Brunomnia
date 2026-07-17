@@ -1,4 +1,5 @@
 import type { ApiRequest, Collection, HttpMethod, Workspace } from '../types';
+import { defaultPreferences } from '../lib/preferences';
 
 const createRequest = (id: string, name: string, method: HttpMethod, url: string): ApiRequest => ({
   id,
@@ -34,6 +35,8 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
     query: 'query GetViewer {\n  viewer {\n    id\n    name\n  }\n}',
     variables: '{}',
     operationName: 'GetViewer',
+    schemaEndpoint: '',
+    schemaFetchedAt: '',
   },
   grpc: {
     service: '',
@@ -96,7 +99,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 8,
+  version: 9,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -242,6 +245,7 @@ paths:
   mcpClients: [],
   ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false },
   konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] },
+  preferences: structuredClone(defaultPreferences),
 };
 
 export const cloneSeedWorkspace = (): Workspace => structuredClone(seedWorkspace);

@@ -96,6 +96,48 @@ export type GraphqlConfig = {
   query: string;
   variables: string;
   operationName: string;
+  schema?: GraphqlSchema;
+  schemaEndpoint: string;
+  schemaFetchedAt: string;
+};
+
+export type GraphqlTypeRef = {
+  kind: string;
+  name: string;
+  ofType?: GraphqlTypeRef;
+};
+
+export type GraphqlInputValue = {
+  name: string;
+  description: string;
+  defaultValue: string;
+  type: GraphqlTypeRef;
+};
+
+export type GraphqlField = {
+  name: string;
+  description: string;
+  isDeprecated: boolean;
+  deprecationReason: string;
+  args: GraphqlInputValue[];
+  type: GraphqlTypeRef;
+};
+
+export type GraphqlSchemaType = {
+  kind: string;
+  name: string;
+  description: string;
+  fields: GraphqlField[];
+  inputFields: GraphqlInputValue[];
+  enumValues: Array<{ name: string; description: string; isDeprecated: boolean; deprecationReason: string }>;
+  possibleTypes: GraphqlTypeRef[];
+};
+
+export type GraphqlSchema = {
+  queryType: string;
+  mutationType: string;
+  subscriptionType: string;
+  types: GraphqlSchemaType[];
 };
 
 export type GrpcConfig = {
@@ -192,7 +234,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 8;
+  version: 9;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -214,6 +256,19 @@ export type Workspace = {
   mcpClients: McpClient[];
   ai: AiSettings;
   konnect: KonnectConfig;
+  preferences: AppPreferences;
+};
+
+export type ShortcutAction = 'palette' | 'preferences' | 'send' | 'environment' | 'history' | 'toggle-sidebar' | 'new-request' | 'duplicate-request' | 'delete-request' | 'focus-url';
+
+export type AppPreferences = {
+  theme: 'system' | 'dark' | 'light';
+  density: 'comfortable' | 'compact';
+  fontSize: number;
+  requestTimeoutMs: number;
+  autoFetchGraphqlSchema: boolean;
+  confirmDestructive: boolean;
+  shortcuts: Record<ShortcutAction, string>;
 };
 
 export type McpTool = {
@@ -376,7 +431,7 @@ export type HttpResponse = {
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests';
 export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline' | 'tests';
 export type SidebarMode = 'collections' | 'history';
-export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins' | 'security' | 'integrations';
+export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins' | 'security' | 'integrations' | 'preferences';
 
 export type ApiDesign = {
   id: string;

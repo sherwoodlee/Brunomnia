@@ -17,12 +17,12 @@ export type SendRequestContext = {
   };
 };
 
-const graphqlBody = (request: ApiRequest, variables: Record<string, string>) => {
+export const graphqlBody = (request: ApiRequest, variables: Record<string, string>) => {
   let parsedVariables: unknown = {};
   const resolvedVariables = resolveTemplate(request.graphql.variables, variables).trim();
   if (resolvedVariables) parsedVariables = JSON.parse(resolvedVariables);
   return JSON.stringify({
-    query: resolveTemplate(request.graphql.query, variables),
+    query: request.graphql.query,
     variables: parsedVariables,
     operationName: request.graphql.operationName || undefined,
   });
@@ -81,7 +81,7 @@ const renderRequest = async (request: ApiRequest, variables: Record<string, stri
     formBody: await renderRows(request.formBody, render),
     multipartBody: await Promise.all(request.multipartBody.map(async (part) => ({ ...part, name: await render(part.name), value: await render(part.value) }))),
     auth: Object.fromEntries(authEntries) as ApiRequest['auth'],
-    graphql: { query: await render(request.graphql.query), variables: await render(request.graphql.variables), operationName: await render(request.graphql.operationName) },
+    graphql: { ...request.graphql, query: request.graphql.query, variables: await render(request.graphql.variables), operationName: request.graphql.operationName },
     grpc: { ...request.grpc, service: await render(request.grpc.service), method: await render(request.grpc.method), protoText: await render(request.grpc.protoText), input: await render(request.grpc.input), metadata: await renderRows(request.grpc.metadata, render) },
     transport: {
       ...request.transport,

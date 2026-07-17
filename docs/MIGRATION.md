@@ -126,10 +126,25 @@ Compatibility bounds remain explicit: shared-file encryption uses one team passp
 
 Compatibility bounds remain explicit: HTTP MCP OAuth discovery/redirect handling, long-lived streaming sessions, cancellation, interactive elicitation, reviewed sampling, notification response UI, persistent STDIO processes, and a guided resource-template argument editor remain. Custom/local AI means an OpenAI-compatible loopback endpoint; Brunomnia does not yet load `.gguf` files itself. AI response-to-mock/URL fetching is not automatic, and MCP sampling is never silently forwarded. Konnect has a pull-only mapper and no live credential fixture in the repository; SNI/TCP/UDP routes are recorded as unsupported rather than misrepresented.
 
-## Milestone 9 — parity closure and release hardening
+## Milestone 9 — GraphQL productivity and desktop preferences (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| GraphQL introspection | Complete baseline | Explicit and automatic URL/request-selection introspection through the existing native transport, with redirects/cookie storage disabled and bounded normalized schema caches |
+| GraphQL authoring | Complete baseline | Query/variables composition, operation name, structural checks, cached root-field validation, root-field search/insertion, deprecation display, and type documentation browsing |
+| GraphQL template boundary | Complete | Query template syntax remains literal to match Insomnia; variables retain local/vault/external template support |
+| Request scheduling | Complete baseline | Initial delay, sequential repeat interval, stop-future-runs control, and a 1,000-send local safety bound |
+| Desktop preferences | Complete baseline | System/dark/light appearance, comfortable/compact density, editor font size, new-request timeout, apply-to-existing timeout, GraphQL auto-fetch, and delete confirmation |
+| Keyboard shortcuts | Complete baseline | Ten device-local editable bindings, platform `Mod` abstraction, collision warnings, clearing/reset, URL focus, request create/duplicate/delete, history, sidebar, environment, send, Preferences, and palette actions |
+| Workspace migration | Complete | Versions 1–8 migrate to v9 bounded GraphQL schema cache fields and normalized device-local preferences; imports receive safe defaults and project/encrypted-sync reads preserve local preferences |
+| Documentation and evidence | Complete | [GraphQL and preferences guide](GRAPHQL_AND_PREFERENCES.md) and [Milestone 9 verification](QA_MILESTONE_9.md) |
+
+Compatibility bounds remain explicit: validation is structural plus cached root-field checking rather than a complete GraphQL language server; persisted queries, subscriptions, full nested selection/argument/type validation, and introspection-disabled manual schema import remain open. Scheduled stop cancels future runs but does not abort a request already in flight. Preferences do not yet cover every upstream action, accessibility has not received a full assistive-technology audit, and release packaging remains macOS debug-app evidence rather than signed cross-platform distribution.
+
+## Milestone 10 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
-- Close remaining settings, shortcut, UX, packaging, migration, and compatibility gaps
+- Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
 - Cross-platform installers, signing/notarization guidance, accessibility audit, load/performance testing, and recovery tests
 - Declare parity only after every ledger row has reproducible evidence
 

@@ -3,6 +3,7 @@ import type { ReactNode, SVGProps } from 'react';
 export type IconName =
   | 'archive'
   | 'braces'
+  | 'check'
   | 'chevron-down'
   | 'chevron-right'
   | 'clock'
@@ -41,6 +42,7 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
   const content: Record<IconName, ReactNode> = {
     archive: <><path d="M4 7h16v12H4z" /><path d="M3 4h18v3H3zM9 11h6" /></>,
     braces: <><path d="M8 3H6.8A1.8 1.8 0 0 0 5 4.8v4.1c0 1.6-.7 2.6-2 3.1 1.3.5 2 1.5 2 3.1v4.1A1.8 1.8 0 0 0 6.8 21H8" /><path d="M16 3h1.2A1.8 1.8 0 0 1 19 4.8v4.1c0 1.6.7 2.6 2 3.1-1.3.5-2 1.5-2 3.1v4.1a1.8 1.8 0 0 1-1.8 1.8H16" /></>,
+    check: <path d="m5 12 4.5 4.5L19 7" />,
     'chevron-down': <path d="m7 9 5 5 5-5" />,
     'chevron-right': <path d="m9 7 5 5-5 5" />,
     clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3.5 2" /></>,

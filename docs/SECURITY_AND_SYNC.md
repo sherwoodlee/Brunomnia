@@ -53,6 +53,6 @@ The encrypted file can live on a self-hosted filesystem share, mounted WebDAV vo
 
 ## Governance and audit boundary
 
-Workspace v8 retains the v7 owner, admin, editor, and viewer actor model. At least one active owner is required. Owner/admin actors can manage members, allowed storage modes, secret policy, external reference approvals, and audit retention. Editors can publish encrypted revisions and operate integrations; viewers cannot. Audit events record governance and sync operations without secret values and are retained up to the configured bound.
+Workspace v9 retains the v7 owner, admin, editor, and viewer actor model. At least one active owner is required. Owner/admin actors can manage members, allowed storage modes, secret policy, external reference approvals, and audit retention. Editors can publish encrypted revisions and operate integrations; viewers cannot. Audit events record governance and sync operations without secret values and are retained up to the configured bound.
 
 These controls are meaningful local policy checks but are not authentication or a tamper-proof log. Anyone who can directly edit the workspace file controls its metadata. Self-hosted SAML/OIDC authentication, SCIM provisioning, organization service, comprehensive RBAC enforcement, signed audit export, real-time presence, and comments are still tracked in [the parity ledger](PARITY.md).

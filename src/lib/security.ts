@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { AuditEvent, Workspace } from '../types';
 import { migrateWorkspace } from './storage';
+import { defaultPreferences } from './preferences';
 
 export type VaultEntry = { id: string; name: string; value: string; updatedAt: string };
 export type VaultSession = { unlocked: boolean; passphrase: string; entries: VaultEntry[] };
@@ -120,6 +121,7 @@ export const shareableWorkspace = (workspace: Workspace): Workspace => ({
   activePluginTheme: '',
   ai: { ...workspace.ai, enabled: false, apiKey: '' },
   konnect: { ...workspace.konnect, enabled: false, token: '', controlPlanes: [], controlPlaneId: '' },
+  preferences: structuredClone(defaultPreferences),
   collaboration: { ...workspace.collaboration, path: '' },
 });
 
@@ -141,6 +143,7 @@ export const mergeSyncedWorkspace = (current: Workspace, payload: SyncPayload): 
     activePluginTheme: current.activePluginTheme,
     ai: current.ai,
     konnect: current.konnect,
+    preferences: current.preferences,
     collaboration: { ...current.collaboration, mode: 'encrypted-file', revision: payload.revision, lastPulledAt: new Date().toISOString() },
     governance: { ...shared.governance, currentMemberId },
   };
