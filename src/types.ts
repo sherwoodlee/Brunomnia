@@ -187,9 +187,11 @@ export type CookieRecord = {
 };
 
 export type StoredResponse = HttpResponse & {
+  id: string;
   requestId: string;
   requestName: string;
   requestUrl: string;
+  environmentId: string;
   receivedAt: string;
 };
 
@@ -311,6 +313,8 @@ export type AppPreferences = {
   fontSize: number;
   preferredHttpVersion: PreferredHttpVersion;
   maxRedirects: number;
+  maxHistoryResponses: number;
+  filterResponsesByEnv: boolean;
   requestTimeoutMs: number;
   scriptTimeoutMs: number;
   allowScriptRequests: boolean;

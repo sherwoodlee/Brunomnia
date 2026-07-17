@@ -551,6 +551,8 @@ kbd {
 .response-metrics strong { font: 500 27px var(--font-mono); }
 .response-metrics span { color: var(--muted); font: 10px var(--font-mono); white-space: nowrap; }
 .response-metrics span:nth-child(2) { font-size: 12px; }
+.response-history-picker { align-items: center; background: var(--panel-soft); border: 1px solid var(--border); border-radius: 5px; color: var(--muted); display: flex; gap: 6px; max-width: 290px; padding: 5px 8px; }
+.response-history-picker select { background: transparent; border: 0; color: var(--text); font: 10px var(--font-mono); max-width: 250px; outline: 0; }
 .ok { color: var(--mint) !important; }
 .bad { color: var(--red) !important; }
 .response-tabs { padding-left: 9px; }

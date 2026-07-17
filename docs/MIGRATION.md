@@ -432,7 +432,23 @@ Compatibility bounds remain explicit: the sandbox cannot bind deterministic comp
 
 Compatibility bounds remain explicit: browser development mode uses Fetch and cannot enforce a redirect-count ceiling. The sandbox cannot bind a deterministic redirect fixture, so hop behavior is source/unit/build-verified rather than live integration-tested. Redirect-chain timeline entries, per-request numeric overrides, WebSocket handshake redirects, and broader network diagnostics remain open.
 
-## Milestone 30 — remaining parity closure and release hardening
+## Milestone 30 — response history retention and environment filtering (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local response history defaults to 20 per request, accepts zero and positive integer limits, uses `-1` for retain-all, and offers active-environment filtering like the current upstream settings |
+| Persistent identity | Complete | New entries retain a local response ID plus request/environment identity; existing device data receives deterministic legacy IDs and an empty environment boundary |
+| Retention policy | Complete baseline | Positive limits keep the newest scoped results, zero removes saved results for the scope while preserving the live response, and `-1` retains all; other requests remain untouched |
+| Environment semantics | Complete | With filtering enabled, visibility, response template tags, and future pruning use the active environment; limits apply per request/environment pair |
+| Response selection | Complete baseline | Switching requests restores the newest eligible saved response, and a response-summary selector reopens older body/header/timeline evidence |
+| Execution breadth | Complete baseline | Primary requests, collection runs, and script secondary calls retain history consistently; OAuth/plugin/integration calls remain execution dependencies rather than user-request history entries |
+| Device-local safety | Complete | Imports reset preferences, malformed limits normalize, managed project/sync reads preserve local entries/preferences, and shareable payloads omit response history |
+| Executable coverage | Complete baseline | Frontend tests cover finite/zero/unlimited retention, environment scoping, migration, template filtering, and secondary-response storage; rendered QA remains intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 30 verification](QA_MILESTONE_30.md) |
+
+Compatibility bounds remain explicit: limit changes prune only when the relevant request next stores a response. The selector does not yet delete, pin, compare, export, or search individual saved responses. The legacy global 100-send activity log remains separate. Large/unlimited response retention can grow the device-local workspace file, and body pre-allocation limits remain open.
+
+## Milestone 31 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

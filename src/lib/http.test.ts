@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBlankRequest } from '../data/seed';
+import type { StoredResponse } from '../types';
 import { graphqlBody, sendRequest } from './http';
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -44,5 +45,24 @@ describe('native HTTP transport preferences', () => {
     }));
     expect(request.transport).not.toHaveProperty('preferredHttpVersion');
     expect(request.transport).not.toHaveProperty('maxRedirects');
+  });
+
+  it('filters response template history to the active environment when enabled', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
+    const request = createBlankRequest('filtered-response-history');
+    request.url = 'https://example.test/status';
+    request.headers = [{ id: 'history-header', name: 'X-History', value: "{% response 'body', 'source-request' %}", enabled: true }];
+    const stored = (id: string, environmentId: string, body: string): StoredResponse => ({
+      id, environmentId, body, requestId: 'source-request', requestName: 'Source', requestUrl: 'https://example.test/source', receivedAt: `2026-07-17T00:00:0${id}.000Z`, status: 200, statusText: 'OK', headers: {}, durationMs: 1, sizeBytes: body.length,
+    });
+
+    await sendRequest(request, { id: 'development', name: 'Development', variables: [] }, {
+      responses: [stored('2', 'production', 'production-value'), stored('1', 'development', 'development-value')],
+      filterResponsesByEnv: true,
+    });
+
+    expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({
+      input: expect.objectContaining({ headers: [expect.objectContaining({ value: 'development-value' })] }),
+    }));
   });
 });

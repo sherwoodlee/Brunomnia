@@ -22,6 +22,7 @@ import { startMockServer, stopMockServer, type RunningMock } from '../lib/mock';
 import { runStreamSample } from '../lib/protocol';
 import { resolveAuthorizedExternalSecret } from '../lib/security';
 import { generateMockWithAi } from '../lib/ai';
+import { retainResponseHistory } from '../lib/responseHistory';
 import { Icon } from './Icon';
 import { CodeEditor } from './ProtocolEditors';
 
@@ -190,7 +191,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       let runnerResponses = [...workspace.responses];
       const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
       const pluginCallbacks: PluginHostCallbacks = {
-        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects }),
+        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv }),
         prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
         readClipboard: () => navigator.clipboard.readText(),
         writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -206,11 +207,11 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
         };
         const result = request.protocol === 'websocket' || request.protocol === 'sse'
           ? await runStreamSample(request, requestEnvironment, streamWindowMs, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects)
-          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
+          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
         const requestUrl = result.requestUrl ?? request.url;
         if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
-        const stored = { ...result, requestId: request.id, requestName: request.name, requestUrl, receivedAt: new Date().toISOString() };
-        runnerResponses = [stored, ...runnerResponses.filter((candidate) => candidate.requestId !== request.id)].slice(0, 100);
+        const stored = { ...result, id: uid('response'), requestId: request.id, requestName: request.name, requestUrl, environmentId: environment.id, receivedAt: new Date().toISOString() };
+        runnerResponses = retainResponseHistory(runnerResponses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
         return result;
       }, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => runBrowserScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
         ...scriptOptions,
@@ -225,9 +226,10 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
             responses: runnerResponses,
             preferredHttpVersion: workspace.preferences.preferredHttpVersion,
             maxRedirects: workspace.preferences.maxRedirects,
+            filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
             vault: workspace.preferences.enableVaultInScripts ? vault : {},
           });
-          const state = applyScriptSubresponse(runnerCookies, runnerResponses, subrequest, subresponse);
+          const state = applyScriptSubresponse(runnerCookies, runnerResponses, subrequest, subresponse, undefined, environment.id, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
           runnerCookies = state.cookies;
           runnerResponses = state.responses;
           return subresponse;
@@ -315,7 +317,7 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     if (generating) return;
     setGenerating(true); setError('');
     try {
-      const generated = await generateMockWithAi(workspace.ai, aiPrompt, aiPort, activeEnvironment, { preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
+      const generated = await generateMockWithAi(workspace.ai, aiPrompt, aiPort, activeEnvironment, { preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
       onChangeWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, generated] }));
       setActiveId(generated.id); setActiveRouteId(generated.routes[0]?.id ?? ''); setShowAi(false); setAiPrompt('');
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }

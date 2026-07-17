@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
-import type { AiSettings, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ShortcutAction, Workspace } from '../types';
+import type { AiSettings, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ShortcutAction, StoredResponse, Workspace } from '../types';
 import { normalizeGraphqlSchema } from './graphql';
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 import { normalizeHttpMethod } from './request';
@@ -205,6 +205,10 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     maxRedirects: typeof source?.maxRedirects === 'number' && Number.isFinite(source.maxRedirects)
       ? Math.max(-1, Math.trunc(source.maxRedirects))
       : defaultPreferences.maxRedirects,
+    maxHistoryResponses: typeof source?.maxHistoryResponses === 'number' && Number.isFinite(source.maxHistoryResponses)
+      ? Math.max(-1, Math.trunc(source.maxHistoryResponses))
+      : defaultPreferences.maxHistoryResponses,
+    filterResponsesByEnv: source?.filterResponsesByEnv === true,
     requestTimeoutMs: Math.min(600_000, Math.max(1_000, Number(source?.requestTimeoutMs) || defaultPreferences.requestTimeoutMs)),
     scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
     allowScriptRequests: source?.allowScriptRequests === true,
@@ -215,6 +219,20 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     shortcuts,
   };
 };
+
+const normalizeStoredResponses = (value: unknown): StoredResponse[] => Array.isArray(value) ? value.flatMap((entry, index) => {
+  const source = record(entry);
+  if (!source) return [];
+  return [{
+    ...source,
+    id: stringValue(source.id, `legacy-response-${index}`),
+    requestId: stringValue(source.requestId),
+    requestName: stringValue(source.requestName),
+    requestUrl: stringValue(source.requestUrl),
+    environmentId: stringValue(source.environmentId),
+    receivedAt: stringValue(source.receivedAt, new Date(0).toISOString()),
+  } as StoredResponse];
+}) : [];
 
 const normalizeFolders = (value: unknown, defaultAuth: AuthConfig): RequestFolder[] => {
   const source = !Array.isArray(value) ? [] : value.slice(0, 1_000);
@@ -397,7 +415,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     runnerReports: workspace.runnerReports ?? [],
     imports: workspace.imports ?? [],
     cookies: workspace.cookies ?? [],
-    responses: workspace.responses ?? [],
+    responses: normalizeStoredResponses(workspace.responses),
     project: { ...seed.project, ...workspace.project },
     plugins: normalizePlugins(workspace.plugins),
     pluginData: workspace.pluginData ?? {},

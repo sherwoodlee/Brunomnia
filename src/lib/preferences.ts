@@ -34,6 +34,8 @@ export const defaultPreferences: AppPreferences = {
   fontSize: 13,
   preferredHttpVersion: 'default',
   maxRedirects: 10,
+  maxHistoryResponses: 20,
+  filterResponsesByEnv: false,
   requestTimeoutMs: 30_000,
   scriptTimeoutMs: 10_000,
   allowScriptRequests: false,
