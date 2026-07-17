@@ -1,6 +1,7 @@
 import { createBlankRequest } from '../data/seed';
 import type { ApiRequest, CookieRecord, FilePayload, HttpResponse, KeyValue, MultipartPart, ScriptRunResult, StoredResponse } from '../types';
 import { storeResponseCookies } from './cookies';
+import { retainResponseHistory } from './responseHistory';
 import { createScriptExpect } from './scriptExpect';
 import { createScriptModules } from './scriptModules';
 
@@ -68,11 +69,14 @@ export const applyScriptSubresponse = (
   request: ApiRequest,
   response: HttpResponse,
   receivedAt = new Date().toISOString(),
+  environmentId = '',
+  maxHistoryResponses = 20,
+  filterResponsesByEnv = false,
 ): { cookies: CookieRecord[]; responses: StoredResponse[] } => {
   const requestUrl = response.requestUrl ?? request.url;
   const nextCookies = request.transport.storeCookies ? storeResponseCookies(cookies, requestUrl, response.setCookies ?? []) : cookies;
-  const stored: StoredResponse = { ...response, requestId: request.id, requestName: request.name, requestUrl, receivedAt };
-  return { cookies: nextCookies, responses: [stored, ...responses].slice(0, 100) };
+  const stored: StoredResponse = { ...response, id: crypto.randomUUID(), requestId: request.id, requestName: request.name, requestUrl, environmentId, receivedAt };
+  return { cookies: nextCookies, responses: retainResponseHistory(responses, stored, maxHistoryResponses, filterResponsesByEnv) };
 };
 
 const payloadBytes = (payload: FilePayload) => Math.floor(payload.dataBase64.length * 3 / 4) - (payload.dataBase64.endsWith('==') ? 2 : payload.dataBase64.endsWith('=') ? 1 : 0);

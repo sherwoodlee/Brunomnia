@@ -5,7 +5,7 @@ import { renderTemplate } from './templates';
 
 const request = cloneSeedWorkspace().collections[0].requests[0];
 const response: StoredResponse = {
-  requestId: 'create-order', requestName: 'Create Order', requestUrl: 'https://api.example.com/orders', receivedAt: '2026-07-16T12:00:00Z',
+  id: 'response-one', requestId: 'create-order', requestName: 'Create Order', requestUrl: 'https://api.example.com/orders', environmentId: 'development', receivedAt: '2026-07-16T12:00:00Z',
   status: 201, statusText: 'Created', headers: { location: '/orders/ord_1' }, body: '{"id":"ord_1","items":[{"sku":"one"}]}', durationMs: 20, sizeBytes: 44,
 };
 

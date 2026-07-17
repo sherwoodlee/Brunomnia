@@ -10,6 +10,7 @@ export type SendRequestContext = {
   responses?: StoredResponse[];
   preferredHttpVersion?: PreferredHttpVersion;
   maxRedirects?: number;
+  filterResponsesByEnv?: boolean;
   vault?: Record<string, string>;
   externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
   pluginRuntime?: {
@@ -105,7 +106,10 @@ const signingBody = (request: ApiRequest, variables: Record<string, string>) => 
 export const sendRequest = async (request: ApiRequest, environment: Environment | undefined, context: SendRequestContext = {}): Promise<HttpResponse> => {
   const variables = { ...environmentMap(environment), ...(context.vault ?? {}) };
   const hooked = context.pluginRuntime ? await context.pluginRuntime.beforeRequest(request) : request;
-  const prepared = await renderRequest(hooked, variables, context);
+  const renderContext = context.filterResponsesByEnv
+    ? { ...context, responses: (context.responses ?? []).filter((response) => response.environmentId === environment?.id) }
+    : context;
+  const prepared = await renderRequest(hooked, variables, renderContext);
   const finish = async (response: HttpResponse) => context.pluginRuntime
     ? context.pluginRuntime.afterResponse(prepared, response)
     : response;
