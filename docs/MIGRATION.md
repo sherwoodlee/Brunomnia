@@ -257,7 +257,20 @@ Compatibility bounds remain explicit: PFX/PKCS#12 certificate sources and file-b
 
 Compatibility bounds remain explicit: this is a broad clean-room `assert` baseline, not byte-for-byte Chai package equivalence. The finite chainable `expect` adapter, plugins, `should`, custom assertion extension hooks, exotic/cyclic deep identity, and every overload/error-detail nuance remain open alongside other package behavior and non-scripting ledger gaps.
 
-## Milestone 18 — remaining parity closure and release hardening
+## Milestone 18 — shared chainable Chai expect compatibility (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Shared runtime | Complete baseline | One self-contained chain factory supplies `insomnia.expect`, global `expect`, and `require('chai').expect` in desktop Workers and the trusted CLI |
+| BDD surface | Complete baseline | Every currently documented Chai language chain, modifier, assertion name, and alias resolves, plus the existing Postman/Jest-style aliases |
+| Assertion families | Complete baseline | Value/type/state, inclusion, equality, numeric/date, property/descriptor, length, matching, keys, throws, responses, predicates, approximation, members, mutations, and object state |
+| Executable coverage | Complete | Direct inventory/behavior tests and serialized-Worker tests cover flags, aliases, nested/deep/ordered behavior, mutations, chaining, and custom failures |
+| CLI verification | Complete | The checked-in offline fixture exercises shared deep nested inclusion and ordered member chains under the existing explicit trust flags |
+| Documentation and evidence | Complete | Updated [permission-bounded scripting guide](SCRIPTING.md) and [Milestone 18 verification](QA_MILESTONE_18.md) |
+
+Compatibility bounds remain explicit: this is a broad clean-room BDD surface, not Chai package-internal equivalence. Plugins, `should`, extension/overwrite hooks, exact error metadata, exotic/cyclic deep identity, and every overload nuance remain open alongside other bounded package behavior and non-scripting ledger gaps.
+
+## Milestone 19 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

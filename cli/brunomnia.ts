@@ -7,6 +7,7 @@ import { parseRunnerData, runCollection } from '../src/lib/runner';
 import type { ApiDesign, ApiRequest, AuthConfig, Environment, HttpResponse, ScriptRunResult, Workspace } from '../src/types';
 import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resources';
 import { hydrateScriptFileReferences, normalizeScriptSubrequest, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
+import { createScriptExpect } from '../src/lib/scriptExpect';
 import { createScriptModules } from '../src/lib/scriptModules';
 
 const args = process.argv.slice(2);
@@ -34,33 +35,7 @@ const loadWorkspace = async (path: string): Promise<Workspace> => {
   return parsed as Workspace;
 };
 
-const expectApi = (actual: unknown, negated = false) => {
-  let keyMode: 'all' | 'any' = 'all';
-  const verify = (condition: boolean, message: string) => { if (negated ? condition : !condition) throw new Error(message); };
-  const api = {
-    toBe(expected: unknown) { verify(actual === expected, `Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`); },
-    toEqual(expected: unknown) { verify(JSON.stringify(actual) === JSON.stringify(expected), `Expected ${JSON.stringify(actual)} to equal ${JSON.stringify(expected)}`); },
-    toContain(expected: unknown) { verify(Boolean((actual as { includes?: (value: unknown) => boolean })?.includes?.(expected)), `Expected value to contain ${JSON.stringify(expected)}`); },
-    toBeTruthy() { verify(Boolean(actual), 'Expected value to be truthy'); },
-    toBeLessThan(expected: number) { verify(Number(actual) < expected, `Expected ${actual} to be less than ${expected}`); },
-    toBeGreaterThan(expected: number) { verify(Number(actual) > expected, `Expected ${actual} to be greater than ${expected}`); },
-    equal(expected: unknown) { verify(actual === expected, 'Expected values to equal'); },
-    eql(expected: unknown) { verify(JSON.stringify(actual) === JSON.stringify(expected), 'Expected values to deeply equal'); },
-    include(expected: unknown) { verify(Boolean((actual as { includes?: (value: unknown) => boolean })?.includes?.(expected)), 'Expected value to include'); },
-    above(expected: number) { verify(Number(actual) > expected, `Expected ${actual} to be above ${expected}`); },
-    below(expected: number) { verify(Number(actual) < expected, `Expected ${actual} to be below ${expected}`); },
-    a(expected: string) { verify(expected === 'array' ? Array.isArray(actual) : typeof actual === expected, `Expected value to be a ${expected}`); return api; },
-    an(expected: string) { verify(expected === 'array' ? Array.isArray(actual) : typeof actual === expected, `Expected value to be an ${expected}`); return api; },
-    lengthOf(expected: number) { verify((actual as { length?: number })?.length === expected, `Expected length ${expected}`); },
-    oneOf(expected: unknown[]) { verify(expected.includes(actual), `Expected value to be one of ${JSON.stringify(expected)}`); },
-    keys(...expected: unknown[]) { const values = expected.length === 1 && Array.isArray(expected[0]) ? expected[0] : expected; const keys = actual && typeof actual === 'object' ? Object.keys(actual) : []; verify(keyMode === 'any' ? values.some((key) => keys.includes(String(key))) : values.every((key) => keys.includes(String(key))), `Expected value to have ${keyMode} keys`); },
-  };
-  ['to', 'be', 'been', 'is', 'that', 'which', 'and', 'has', 'have', 'with', 'at', 'of', 'same'].forEach((name) => Object.defineProperty(api, name, { get: () => api }));
-  Object.defineProperty(api, 'not', { get: () => expectApi(actual, !negated) });
-  Object.defineProperty(api, 'all', { get: () => { keyMode = 'all'; return api; } });
-  Object.defineProperty(api, 'any', { get: () => { keyMode = 'any'; return api; } });
-  return api;
-};
+const expectApi = createScriptExpect();
 
 const runNodeScript = async (
   source: string,
