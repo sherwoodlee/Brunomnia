@@ -19,6 +19,12 @@ OpenAPI 3 generation now retains `{path}` syntax and creates explicit path rows 
 
 For JSON or text bodies, choose **Beautify** in the body toolbar. Valid JSON receives two-space indentation. XML-looking text, or text with an XML content type, receives conservative structural indentation. Invalid JSON and unrecognized plain text are left unchanged; the formatter does not send content anywhere.
 
+## Response compression
+
+The native desktop transport automatically advertises and decodes gzip, Brotli, deflate, and zstd responses. If a request already supplies `Accept-Encoding` or `Range`, the native client does not add its own compression negotiation. Response body size and saved content describe the decoded body shown in Brunomnia, not compressed wire bytes.
+
+If an ordinary response body fails specifically during content decoding, Brunomnia repeats that request once with automatic decoding disabled so the raw response remains inspectable. It does not retry unrelated read or transport errors. Because the fallback repeats the request after a response was received, avoid invalid `Content-Encoding` responses for non-idempotent operations. Event Stream transport keeps its existing reconnect policy instead of this one-shot raw fallback.
+
 ## Generate client code
 
 Choose **Code** beside the request URL or use `Mod+Shift+G`. The preview uses the effective request after collection/folder inheritance plus the resolved active environment. Available targets are:

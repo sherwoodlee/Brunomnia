@@ -403,7 +403,21 @@ Compatibility bounds remain explicit: the native transport behavior is source- a
 
 Compatibility bounds remain explicit: browser development mode cannot select its network stack's HTTP version. The sandbox cannot bind local HTTP/1 and HTTP/2 peers, so negotiated wire versions are not claimed as live integration-tested here. HTTP/3 is not offered by the current upstream settings UI and is not claimed.
 
-## Milestone 28 — remaining parity closure and release hardening
+## Milestone 28 — transparent response compression (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Codec breadth | Complete baseline | Native HTTP-family clients advertise and decode gzip, Brotli, deflate, and zstd through explicitly locked reqwest features |
+| Header semantics | Complete | Automatic negotiation is skipped when a request already supplies `Accept-Encoding` or `Range`; decoded responses omit stale encoding/length headers through the native client contract |
+| Decode fallback | Complete baseline | An ordinary request whose body fails specifically during decoding is repeated once with every automatic decoder disabled; unrelated body/transport failures are not retried |
+| Execution breadth | Complete baseline | Shared native clients cover HTTP, GraphQL, OAuth, integrations, secondary requests, and SSE; invalidly encoded SSE reconnect behavior remains distinct |
+| Size evidence | Complete | Response size continues to describe the UTF-8 decoded body exposed to the renderer and stored history, not compressed wire bytes |
+| Executable coverage | Complete baseline | Both decoder-enabled and decoder-disabled client configurations compile/build under every preferred HTTP mode; live codec fixtures remain sandbox-limited |
+| Documentation and evidence | Complete | Updated [request authoring guide](REQUEST_AUTHORING.md) and [Milestone 28 verification](QA_MILESTONE_28.md) |
+
+Compatibility bounds remain explicit: the sandbox cannot bind deterministic compressed-response peers, so codec wire fixtures are not claimed here. The fallback necessarily repeats a request after a server returns an undecodable body, matching upstream behavior; users should avoid invalid content encodings on non-idempotent endpoints. Compressed wire-byte accounting, raw/decoded toggles, and invalidly encoded SSE fallback remain open.
+
+## Milestone 29 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -68,20 +68,28 @@ pub fn build_client(
     transport: &TransportConfig,
     request_url: Option<&str>,
 ) -> Result<Client, String> {
-    build_client_with_timeout(transport, request_url, true)
+    build_client_with_options(transport, request_url, true, true)
 }
 
 pub fn build_streaming_client(
     transport: &TransportConfig,
     request_url: Option<&str>,
 ) -> Result<Client, String> {
-    build_client_with_timeout(transport, request_url, false)
+    build_client_with_options(transport, request_url, false, true)
 }
 
-fn build_client_with_timeout(
+fn build_client_without_decompression(
+    transport: &TransportConfig,
+    request_url: Option<&str>,
+) -> Result<Client, String> {
+    build_client_with_options(transport, request_url, true, false)
+}
+
+fn build_client_with_options(
     transport: &TransportConfig,
     request_url: Option<&str>,
     total_timeout: bool,
+    automatic_decompression: bool,
 ) -> Result<Client, String> {
     let redirect = if transport.follow_redirects {
         reqwest::redirect::Policy::limited(10)
@@ -105,6 +113,9 @@ fn build_client_with_timeout(
         // The all-protocol client advertises h2 through TLS ALPN and retains HTTP/1 fallback.
         HttpVersionMode::Automatic | HttpVersionMode::Http2 => builder,
     };
+    if !automatic_decompression {
+        builder = builder.no_gzip().no_brotli().no_deflate().no_zstd();
+    }
 
     if !transport.proxy_url.trim().is_empty() {
         let proxy = reqwest::Proxy::all(transport.proxy_url.trim())
@@ -428,12 +439,10 @@ async fn send_with_auth(
     }
 }
 
-pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
-    let url = url::Url::parse(&input.url).map_err(|error| format!("Invalid URL: {error}"))?;
-    let client = build_client(&input.transport, Some(&input.url))?;
-
-    let started = Instant::now();
-    let response = send_with_auth(&client, &input, url).await?;
+async fn read_response(
+    response: Response,
+    started: Instant,
+) -> Result<HttpResponseOutput, reqwest::Error> {
     let status = response.status();
     let http_version = format!("{:?}", response.version());
     let set_cookies = response
@@ -444,7 +453,7 @@ pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String>
         .map(str::to_string)
         .collect();
     let headers = flatten_headers(response.headers());
-    let body = response.text().await.map_err(|error| error.to_string())?;
+    let body = response.text().await?;
 
     Ok(HttpResponseOutput {
         status: status.as_u16(),
@@ -456,6 +465,25 @@ pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String>
         set_cookies,
         http_version,
     })
+}
+
+pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
+    let url = url::Url::parse(&input.url).map_err(|error| format!("Invalid URL: {error}"))?;
+    let client = build_client(&input.transport, Some(&input.url))?;
+
+    let started = Instant::now();
+    let response = send_with_auth(&client, &input, url.clone()).await?;
+    match read_response(response, started).await {
+        Ok(output) => Ok(output),
+        Err(error) if error.is_decode() => {
+            let client = build_client_without_decompression(&input.transport, Some(&input.url))?;
+            let response = send_with_auth(&client, &input, url).await?;
+            read_response(response, started)
+                .await
+                .map_err(|fallback_error| fallback_error.to_string())
+        }
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 fn flatten_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
@@ -539,5 +567,11 @@ mod tests {
             };
             assert_eq!(request.version(), expected);
         }
+
+        assert!(build_client_without_decompression(
+            &TransportConfig::default(),
+            Some("https://example.test")
+        )
+        .is_ok());
     }
 }
