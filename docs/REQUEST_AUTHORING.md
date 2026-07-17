@@ -25,6 +25,12 @@ The native desktop transport automatically advertises and decodes gzip, Brotli, 
 
 If an ordinary response body fails specifically during content decoding, Brunomnia repeats that request once with automatic decoding disabled so the raw response remains inspectable. It does not retry unrelated read or transport errors. Because the fallback repeats the request after a response was received, avoid invalid `Content-Encoding` responses for non-idempotent operations. Event Stream transport keeps its existing reconnect policy instead of this one-shot raw fallback.
 
+## Redirect policy
+
+Each request keeps a **Follow HTTP redirects** switch in its Transport tab. Preferences adds a device-local **Maximum redirects** ceiling shared by native HTTP, GraphQL, Event Stream, collection-run, script/plugin, artifact-import, OAuth, AI, MCP, Konnect, and Git-AI traffic. `0` rejects the first redirect, positive integers allow that many hops, and `-1` follows without a hop ceiling. Turning the per-request switch off always disables redirects.
+
+Finite and unlimited chains remain subject to an ordinary request's deadline. Event Streams use the request timeout while waiting for response headers—including redirects—then remove the total deadline from the active stream. Browser development mode uses Fetch's own redirect behavior because Fetch does not expose a maximum-hop control.
+
 ## Generate client code
 
 Choose **Code** beside the request URL or use `Mod+Shift+G`. The preview uses the effective request after collection/folder inheritance plus the resolved active environment. Available targets are:

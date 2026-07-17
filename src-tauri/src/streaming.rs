@@ -199,10 +199,13 @@ async fn open_sse(
             request = request.header("Last-Event-ID", last_event_id);
         }
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| format!("SSE connection failed: {error}"))?;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(input.transport.timeout_ms.clamp(100, 600_000)),
+        request.send(),
+    )
+    .await
+    .map_err(|_| "SSE connection timed out before response headers arrived.".to_string())?
+    .map_err(|error| format!("SSE connection failed: {error}"))?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("SSE server returned HTTP {status}."));

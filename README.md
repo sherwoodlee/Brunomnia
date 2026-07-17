@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the twenty-eighth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the twenty-ninth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -14,7 +14,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - JSON, text, URL-encoded, multipart file/part-metadata, and binary request bodies
 - Standard or custom HTTP methods, explicit encoded path parameters, repeated query keys, row descriptions, multiline values, and local JSON/XML body beautification
 - Local client-code generation for cURL, JavaScript Fetch, Python Requests, Go `net/http`, Java `HttpClient`, and C# `HttpClient`
-- Redirect, timeout, certificate validation, proxy exclusions, and domain-scoped client-certificate controls for native HTTP/SSE
+- Per-request redirect enablement plus a device-local finite or unlimited redirect ceiling, timeout, certificate validation, proxy exclusions, and domain-scoped client-certificate controls for native HTTP/SSE
 - Device-local Default, HTTP 1.0, HTTP 1.1, HTTP/2, and HTTP/2 Prior Knowledge preferences with the negotiated native version in response evidence
 - Transparent native gzip, Brotli, deflate, and zstd response decoding with one decode-error-only raw fallback
 - Local collections with persistent mixed folder/request drag ordering, cross-collection moves, nested request folders, request/collection/folder documentation, and inherited folder headers, authentication, variables, and scripts

@@ -417,7 +417,22 @@ Compatibility bounds remain explicit: browser development mode cannot select its
 
 Compatibility bounds remain explicit: the sandbox cannot bind deterministic compressed-response peers, so codec wire fixtures are not claimed here. The fallback necessarily repeats a request after a server returns an undecodable body, matching upstream behavior; users should avoid invalid content encodings on non-idempotent endpoints. Compressed wire-byte accounting, raw/decoded toggles, and invalidly encoded SSE fallback remain open.
 
-## Milestone 29 — remaining parity closure and release hardening
+## Milestone 29 — native maximum redirect policy (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local maximum redirects defaults to 10, accepts zero and positive integer ceilings, and uses `-1` for unlimited redirects as documented by the current upstream setting |
+| Request precedence | Complete | A request with Follow HTTP redirects disabled always uses a no-follow native policy regardless of the device maximum |
+| Finite execution | Complete | Zero rejects the first redirect; positive values configure reqwest's explicit hop limit and return a transport error when reached |
+| Unlimited execution | Complete baseline | `-1` uses a custom follow policy without a hop ceiling; ordinary requests retain their total deadline and SSE header establishment is explicitly bounded by the request timeout |
+| Execution breadth | Complete baseline | HTTP, GraphQL, SSE/reconnect, introspection, collection runs, scripts/plugins, imports, OAuth, AI, MCP, Konnect, and Git AI inherit the device preference |
+| Device-local safety | Complete | Existing data defaults to 10, malformed values normalize safely, project/sync reads preserve the device value, and workspace imports reset it |
+| Executable coverage | Complete baseline | Frontend tests cover migration, invocation/stream input, and request immutability; native tests cover disabled, zero, finite, and unlimited policy selection; live redirect chains remain sandbox-limited |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 29 verification](QA_MILESTONE_29.md) |
+
+Compatibility bounds remain explicit: browser development mode uses Fetch and cannot enforce a redirect-count ceiling. The sandbox cannot bind a deterministic redirect fixture, so hop behavior is source/unit/build-verified rather than live integration-tested. Redirect-chain timeline entries, per-request numeric overrides, WebSocket handshake redirects, and broader network diagnostics remain open.
+
+## Milestone 30 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -33,6 +33,7 @@ export const defaultPreferences: AppPreferences = {
   density: 'comfortable',
   fontSize: 13,
   preferredHttpVersion: 'default',
+  maxRedirects: 10,
   requestTimeoutMs: 30_000,
   scriptTimeoutMs: 10_000,
   allowScriptRequests: false,
