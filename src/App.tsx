@@ -1177,6 +1177,7 @@ export default function App() {
   const onStreamEvent = (message: StreamMessage) => {
     setStreamMessages((current) => [...current, { ...message, id: message.id || uid('event') }].slice(-500));
     if (message.kind === 'open') setStreamStatus('connected');
+    if (message.kind === 'reconnecting') setStreamStatus('connecting');
     if (message.kind === 'closed' || message.kind === 'close' || message.kind === 'error') setStreamStatus('disconnected');
   };
 

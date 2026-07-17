@@ -70,6 +70,13 @@ message Order { string id = 1; string status = 2; double total = 3; }`,
     sendCookies: true,
     storeCookies: true,
   },
+  sse: {
+    autoReconnect: true,
+    reconnectDelayMs: 1000,
+    maxReconnects: 0,
+    respectServerRetry: true,
+    sendLastEventId: true,
+  },
   preRequestScript: '// Runs before the request\n',
   tests: `insomnia.test('Status is successful', () => {
   expect(insomnia.response.status).toBeLessThan(400);

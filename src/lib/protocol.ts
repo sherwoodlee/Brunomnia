@@ -36,6 +36,14 @@ const event = (sessionId: string, direction: StreamMessage['direction'], kind: s
   timestamp: new Date().toISOString(),
 });
 
+export const sseConnectConfig = (request: ApiRequest) => ({
+  autoReconnect: request.sse?.autoReconnect !== false,
+  reconnectDelayMs: Math.min(60_000, Math.max(100, Number(request.sse?.reconnectDelayMs) || 1000)),
+  maxReconnects: Math.min(1_000, Math.max(0, Number(request.sse?.maxReconnects) || 0)),
+  respectServerRetry: request.sse?.respectServerRetry !== false,
+  sendLastEventId: request.sse?.sendLastEventId !== false,
+});
+
 export const connectStream = async (
   request: ApiRequest,
   environment: Environment | undefined,
@@ -48,6 +56,7 @@ export const connectStream = async (
     url: resolveTemplate(request.url, variables),
     headers: resolvedHeaders(request, environment),
     transport: request.transport,
+    sse: sseConnectConfig(request),
   };
   if (isTauri()) {
     const channel = new Channel<StreamMessage>();

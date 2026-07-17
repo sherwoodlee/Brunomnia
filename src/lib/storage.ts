@@ -339,6 +339,15 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         },
         grpc: { ...defaults.grpc, ...request.grpc, metadata: normalizeRows(record(request.grpc)?.metadata, `${requestId}-metadata`) },
         transport: { ...defaults.transport, ...request.transport },
+        sse: {
+          ...defaults.sse,
+          ...request.sse,
+          autoReconnect: request.sse?.autoReconnect !== false,
+          reconnectDelayMs: Math.min(60_000, Math.max(100, Number(request.sse?.reconnectDelayMs) || defaults.sse.reconnectDelayMs)),
+          maxReconnects: Math.min(1_000, Math.max(0, Number(request.sse?.maxReconnects) || 0)),
+          respectServerRetry: request.sse?.respectServerRetry !== false,
+          sendLastEventId: request.sse?.sendLastEventId !== false,
+        },
         formBody: normalizeRows(request.formBody, `${requestId}-form`),
         multipartBody: (request.multipartBody ?? []).map((part) => ({ ...part, contentType: part.contentType ?? part.file?.mimeType ?? '', fileName: part.fileName ?? part.file?.fileName ?? '' })),
       };

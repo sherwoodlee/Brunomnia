@@ -38,6 +38,21 @@ pub fn build_client(
     transport: &TransportConfig,
     request_url: Option<&str>,
 ) -> Result<Client, String> {
+    build_client_with_timeout(transport, request_url, true)
+}
+
+pub fn build_streaming_client(
+    transport: &TransportConfig,
+    request_url: Option<&str>,
+) -> Result<Client, String> {
+    build_client_with_timeout(transport, request_url, false)
+}
+
+fn build_client_with_timeout(
+    transport: &TransportConfig,
+    request_url: Option<&str>,
+    total_timeout: bool,
+) -> Result<Client, String> {
     let redirect = if transport.follow_redirects {
         reqwest::redirect::Policy::limited(10)
     } else {
@@ -45,10 +60,15 @@ pub fn build_client(
     };
     let mut builder = Client::builder()
         .redirect(redirect)
-        .timeout(std::time::Duration::from_millis(
+        .danger_accept_invalid_certs(!transport.validate_certificates)
+        .connect_timeout(std::time::Duration::from_millis(
             transport.timeout_ms.clamp(100, 600_000),
-        ))
-        .danger_accept_invalid_certs(!transport.validate_certificates);
+        ));
+    if total_timeout {
+        builder = builder.timeout(std::time::Duration::from_millis(
+            transport.timeout_ms.clamp(100, 600_000),
+        ));
+    }
 
     if !transport.proxy_url.trim().is_empty() {
         let proxy = reqwest::Proxy::all(transport.proxy_url.trim())

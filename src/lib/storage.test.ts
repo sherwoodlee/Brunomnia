@@ -24,6 +24,13 @@ describe('workspace migrations', () => {
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
+    expect(migrated.collections[0].requests[0].sse).toEqual({
+      autoReconnect: true,
+      reconnectDelayMs: 1_000,
+      maxReconnects: 0,
+      respectServerRetry: true,
+      sendLastEventId: true,
+    });
     expect(migrated.apiDesigns[0].name).toBe('Orders API');
     expect(migrated.mockServers[0].host).toBe('127.0.0.1');
     expect(migrated.imports).toEqual([]);
@@ -64,6 +71,27 @@ describe('workspace migrations', () => {
     const migrated = migrateWorkspace(workspace);
     expect(migrated.collections[0].requests[0].method).toBe('PROPFIND');
     expect(migrated.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'path', value: 'team docs', description: 'File path' });
+  });
+
+  it('normalizes imported SSE reconnect controls', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    const first = (workspace.collections as Array<{ requests: Array<Record<string, unknown>> }>)[0].requests[0];
+    first.sse = {
+      autoReconnect: false,
+      reconnectDelayMs: 90_000,
+      maxReconnects: -20,
+      respectServerRetry: false,
+      sendLastEventId: false,
+    };
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.collections[0].requests[0].sse).toEqual({
+      autoReconnect: false,
+      reconnectDelayMs: 60_000,
+      maxReconnects: 0,
+      respectServerRetry: false,
+      sendLastEventId: false,
+    });
   });
 
   it('normalizes collection sub-environments and repairs a stale selection', () => {

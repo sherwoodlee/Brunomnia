@@ -1,5 +1,5 @@
 use crate::{
-    http_client::build_client,
+    http_client::build_streaming_client,
     models::{StreamConnectInput, StreamEvent},
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -184,6 +184,35 @@ pub async fn disconnect_websocket(session_id: String, state: StreamingState) -> 
         .map_err(|_| "The WebSocket session has already ended.".to_string())
 }
 
+async fn open_sse(
+    input: &StreamConnectInput,
+    last_event_id: Option<&str>,
+) -> Result<reqwest::Response, String> {
+    let client = build_streaming_client(&input.transport, Some(&input.url))?;
+    let mut request = client.get(&input.url).header("Accept", "text/event-stream");
+    for header in input.headers.iter().filter(|header| header.enabled) {
+        request = request.header(&header.name, &header.value);
+    }
+    if input.sse.send_last_event_id {
+        if let Some(last_event_id) = last_event_id.filter(|value| !value.is_empty()) {
+            request = request.header("Last-Event-ID", last_event_id);
+        }
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("SSE connection failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("SSE server returned HTTP {status}."));
+    }
+    Ok(response)
+}
+
+fn should_reconnect(config: &crate::models::SseConfig, reconnects: u32) -> bool {
+    config.auto_reconnect && (config.max_reconnects == 0 || reconnects < config.max_reconnects)
+}
+
 pub async fn connect_sse(
     input: StreamConnectInput,
     on_event: Channel<StreamEvent>,
@@ -198,19 +227,8 @@ pub async fn connect_sse(
         return Err("This SSE stream is already connected.".into());
     }
 
-    let client = build_client(&input.transport, Some(&input.url))?;
-    let mut request = client.get(&input.url).header("Accept", "text/event-stream");
-    for header in input.headers.into_iter().filter(|header| header.enabled) {
-        request = request.header(&header.name, &header.value);
-    }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| format!("SSE connection failed: {error}"))?;
+    let response = open_sse(&input, None).await?;
     let status = response.status();
-    if !status.is_success() {
-        return Err(format!("SSE server returned HTTP {status}."));
-    }
 
     let (cancel, mut cancel_receiver) = mpsc::unbounded_channel();
     state
@@ -227,24 +245,82 @@ pub async fn connect_sse(
     ));
 
     tokio::spawn(async move {
-        let mut bytes = response.bytes_stream();
-        let mut parser = SseParser::default();
-        loop {
-            tokio::select! {
-                _ = cancel_receiver.recv() => break,
-                chunk = bytes.next() => {
-                    match chunk {
-                        Some(Ok(chunk)) => {
-                            for event in parser.push(&chunk) {
-                                let _ = on_event.send(StreamEvent::incoming(&session_id, &event.event, event.data));
+        let mut response = Some(response);
+        let mut reconnects = 0_u32;
+        let mut reconnect_delay_ms = input.sse.reconnect_delay_ms.clamp(100, 60_000);
+        let mut last_event_id = String::new();
+        let mut cancelled = false;
+        'session: loop {
+            if let Some(active_response) = response.take() {
+                let mut bytes = active_response.bytes_stream();
+                let mut parser = SseParser::default();
+                loop {
+                    tokio::select! {
+                        _ = cancel_receiver.recv() => {
+                            cancelled = true;
+                            break;
+                        },
+                        chunk = bytes.next() => {
+                            match chunk {
+                                Some(Ok(chunk)) => {
+                                    for event in parser.push(&chunk) {
+                                        if let Some(id) = event.id.filter(|id| id.len() <= 8_192) {
+                                            last_event_id = id;
+                                        }
+                                        if input.sse.respect_server_retry {
+                                            if let Some(delay) = event.retry_ms {
+                                                reconnect_delay_ms = delay.clamp(100, 60_000);
+                                            }
+                                        }
+                                        if !event.data.is_empty() {
+                                            let _ = on_event.send(StreamEvent::incoming(&session_id, &event.event, event.data));
+                                        }
+                                    }
+                                }
+                                Some(Err(error)) => {
+                                    let _ = on_event.send(StreamEvent::system(&session_id, "error", error.to_string()));
+                                    break;
+                                }
+                                None => break,
                             }
                         }
-                        Some(Err(error)) => {
-                            let _ = on_event.send(StreamEvent::system(&session_id, "error", error.to_string()));
-                            break;
-                        }
-                        None => break,
                     }
+                }
+            }
+            if cancelled || !should_reconnect(&input.sse, reconnects) {
+                break;
+            }
+            reconnects += 1;
+            let _ = on_event.send(StreamEvent::system(
+                &session_id,
+                "reconnecting",
+                format!("Reconnect attempt {reconnects} in {reconnect_delay_ms} ms"),
+            ));
+            tokio::select! {
+                _ = cancel_receiver.recv() => break 'session,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(reconnect_delay_ms)) => {}
+            }
+            let last_event_header = input
+                .sse
+                .send_last_event_id
+                .then_some(last_event_id.as_str());
+            let reconnect = open_sse(&input, last_event_header);
+            let reopened = tokio::select! {
+                _ = cancel_receiver.recv() => break 'session,
+                result = reconnect => result,
+            };
+            match reopened {
+                Ok(next_response) => {
+                    let status = next_response.status();
+                    let _ = on_event.send(StreamEvent::system(
+                        &session_id,
+                        "open",
+                        format!("Reconnected · HTTP {status} · attempt {reconnects}"),
+                    ));
+                    response = Some(next_response);
+                }
+                Err(error) => {
+                    let _ = on_event.send(StreamEvent::system(&session_id, "error", error));
                 }
             }
         }
@@ -274,6 +350,8 @@ pub async fn disconnect_sse(session_id: String, state: StreamingState) -> Result
 struct ParsedSseEvent {
     event: String,
     data: String,
+    id: Option<String>,
+    retry_ms: Option<u64>,
 }
 
 #[derive(Default)]
@@ -312,6 +390,8 @@ fn find_event_boundary(buffer: &[u8]) -> Option<(usize, usize)> {
 fn parse_sse_event(block: &str) -> Option<ParsedSseEvent> {
     let mut event = "message".to_string();
     let mut data = Vec::new();
+    let mut id = None;
+    let mut retry_ms = None;
     for line in block.lines() {
         if line.starts_with(':') {
             continue;
@@ -321,12 +401,16 @@ fn parse_sse_event(block: &str) -> Option<ParsedSseEvent> {
         match name {
             "event" => event = value.to_string(),
             "data" => data.push(value.to_string()),
+            "id" if !value.contains('\0') => id = Some(value.to_string()),
+            "retry" => retry_ms = value.parse().ok(),
             _ => {}
         }
     }
-    (!data.is_empty()).then(|| ParsedSseEvent {
+    (!data.is_empty() || id.is_some() || retry_ms.is_some()).then(|| ParsedSseEvent {
         event,
         data: data.join("\n"),
+        id,
+        retry_ms,
     })
 }
 
@@ -353,6 +437,8 @@ mod tests {
             vec![ParsedSseEvent {
                 event: "update".into(),
                 data: "first\nsecond".into(),
+                id: None,
+                retry_ms: None,
             }]
         );
     }
@@ -365,7 +451,47 @@ mod tests {
             vec![ParsedSseEvent {
                 event: "message".into(),
                 data: "hello".into(),
+                id: None,
+                retry_ms: None,
             }]
         );
+    }
+
+    #[test]
+    fn preserves_last_event_id_and_server_retry_metadata() {
+        let mut parser = SseParser::default();
+        assert_eq!(
+            parser.push(b"id: order-42\nretry: 2500\ndata: ready\n\n"),
+            vec![ParsedSseEvent {
+                event: "message".into(),
+                data: "ready".into(),
+                id: Some("order-42".into()),
+                retry_ms: Some(2500),
+            }]
+        );
+        assert_eq!(
+            parser.push(b"retry: 1200\n\n"),
+            vec![ParsedSseEvent {
+                event: "message".into(),
+                data: String::new(),
+                id: None,
+                retry_ms: Some(1200),
+            }]
+        );
+        assert!(parser.push(b"id: bad\0id\n\n").is_empty());
+    }
+
+    #[test]
+    fn applies_unlimited_and_bounded_reconnect_policies() {
+        let mut config = crate::models::SseConfig::default();
+        assert!(should_reconnect(&config, 50_000));
+
+        config.max_reconnects = 2;
+        assert!(should_reconnect(&config, 0));
+        assert!(should_reconnect(&config, 1));
+        assert!(!should_reconnect(&config, 2));
+
+        config.auto_reconnect = false;
+        assert!(!should_reconnect(&config, 0));
     }
 }

@@ -13,7 +13,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 | REST/HTTP execution | Baseline | Native execution, custom token-valid methods, encoded `{path}` substitution, repeated query keys, response inspection, redirects, timeouts, TLS validation, proxy exclusions, domain-scoped PEM identity, and per-request cookie policy work. Local code generation covers six client targets with named payload/signing bounds. HTTP version controls, compression/client-network details, and browser forbidden-header limits remain. | [Requests](https://developer.konghq.com/insomnia/requests/) |
 | GraphQL | Baseline | Query, templated variables, operation name, native execution, bounded/cached introspection, automatic selection/URL refresh, structural and cached-root validation, documentation browsing, and safe root-field insertion work. Persisted queries, full language-service validation/autocomplete, subscriptions, and richer schema workflows remain. | [GraphQL](https://developer.konghq.com/insomnia/graphql/) |
 | WebSocket | Baseline | Native text and base64/file binary composition, headers, ordered events, and bounded runner samples work. Custom proxy/client identity and richer message collections remain. | [Insomnia documentation](https://developer.konghq.com/index/insomnia/) |
-| Server-Sent Events | Baseline | Native incremental parsing covers chunking, CRLF, comments, event names, multiline data, and bounded runner samples. Reconnect/long-run controls remain. | [Insomnia documentation](https://developer.konghq.com/index/insomnia/) |
+| Server-Sent Events | Baseline | Native long-running sessions cover chunking, CRLF, comments, event names, multiline data, persistent bounded/unlimited reconnect policy, server `retry:` hints, `Last-Event-ID` resume, reconnect cancellation, and bounded runner samples. A live reconnect integration fixture, richer event search/export, and streaming plugin hooks remain. | [Requests](https://developer.konghq.com/insomnia/requests/) |
 | gRPC | Baseline | Reflection, pasted proto compilation, dynamic JSON/protobuf mapping, and all four call shapes. Importable proto trees and additional metadata/schema workflows remain. | [Insomnia documentation](https://developer.konghq.com/index/insomnia/) |
 | Request bodies | Baseline | JSON, text, URL-encoded, multipart text/files with duplicate fields and editable part filename/content type, binary payloads, and local JSON/conservative-XML beautification work; CLI supports the same finite modes. Arbitrary per-part headers and some encoding compatibility remain. | [Requests](https://developer.konghq.com/insomnia/requests/) |
 | Request authentication | Baseline | All documented families have editable execution paths: Basic, Digest, OAuth 1/2, NTLM, AWS IAM v4, Bearer, API key, Hawk, Atlassian ASAP, and Netrc. Automated OAuth callback capture, credential-vault storage, uncommon challenge variants, and cross-platform integration fixtures remain. | [Request authentication](https://developer.konghq.com/insomnia/request-authentication/) |
@@ -251,6 +251,15 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Filter metadata in JSON and text evidence: [`src/types.ts`](../src/types.ts), [`src/lib/runnerReport.ts`](../src/lib/runnerReport.ts), and [`src/lib/runnerReport.test.ts`](../src/lib/runnerReport.test.ts)
 - Updated guide: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
 - Exact verification record: [`docs/QA_MILESTONE_25.md`](QA_MILESTONE_25.md)
+
+## Milestone 26 acceptance evidence
+
+- Persistent request-level reconnect contract and migration defaults: [`src/types.ts`](../src/types.ts), [`src/data/seed.ts`](../src/data/seed.ts), and [`src/lib/storage.ts`](../src/lib/storage.ts)
+- Native lifetime, reconnect, retry-hint, resume, and cancellation behavior: [`src-tauri/src/http_client.rs`](../src-tauri/src/http_client.rs), [`src-tauri/src/models.rs`](../src-tauri/src/models.rs), and [`src-tauri/src/streaming.rs`](../src-tauri/src/streaming.rs)
+- Reconnect editor and stream-state feedback: [`src/components/ProtocolEditors.tsx`](../src/components/ProtocolEditors.tsx), [`src/App.tsx`](../src/App.tsx), and [`src/styles.css`](../src/styles.css)
+- Focused frontend and native policy/parser coverage: [`src/lib/protocol.test.ts`](../src/lib/protocol.test.ts), [`src/lib/storage.test.ts`](../src/lib/storage.test.ts), and [`src-tauri/src/streaming.rs`](../src-tauri/src/streaming.rs)
+- User guide: [`docs/SSE_STREAMS.md`](SSE_STREAMS.md)
+- Exact verification record: [`docs/QA_MILESTONE_26.md`](QA_MILESTONE_26.md)
 
 ## Parity declaration rule
 

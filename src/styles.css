@@ -484,8 +484,19 @@ kbd {
 .protocol-glyph { align-items: center; border: 1px solid currentColor; border-radius: 5px; display: flex; font: 700 11px var(--font-mono); height: 38px; justify-content: center; width: 48px; }
 .protocol-glyph.websocket { color: var(--blue); }
 .protocol-glyph.sse { color: var(--mint); }
-.stream-setup { min-height: 100%; padding: 30px; }
+.stream-setup { display: grid; gap: 24px; min-height: 100%; padding: 30px; }
 .stream-setup > span:last-child { max-width: 420px; text-align: center; }
+.sse-reconnect-settings { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 5px; display: grid; gap: 14px; margin: 0 auto; max-width: 560px; padding: 18px; width: 100%; }
+.sse-reconnect-settings header { display: flex; flex-direction: column; gap: 4px; }
+.sse-reconnect-settings header strong { color: var(--text-soft); font-size: 12px; }
+.sse-reconnect-settings header small, .sse-reconnect-settings label small { color: var(--faint); font-size: 9px; }
+.sse-reconnect-settings > div { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sse-reconnect-settings > div label { color: var(--muted); display: flex; flex-direction: column; font-size: 9px; gap: 6px; text-transform: uppercase; }
+.sse-reconnect-settings input[type="number"] { background: var(--bg); border: 1px solid var(--border); color: var(--text-soft); font: 10px var(--font-mono); height: 34px; padding: 0 9px; }
+.sse-reconnect-settings input:disabled { opacity: .45; }
+.sse-switch { align-items: center; color: var(--text-soft); display: flex; font-size: 10px; gap: 8px; }
+.sse-switch input { accent-color: var(--accent); }
+.sse-switch code { color: var(--amber); font: 9px var(--font-mono); }
 
 .grpc-editor { display: grid; grid-template-rows: 50px minmax(0, 1fr); height: 100%; min-width: 560px; }
 .grpc-schema-bar { align-items: center; border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; padding: 0 14px; }
