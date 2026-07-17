@@ -2,14 +2,14 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the twenty-fifth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the twenty-sixth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
 - Native Rust transports for HTTP, GraphQL, WebSocket, SSE, and dynamic gRPC calls
 - GraphQL operation/variables editor, bounded schema introspection cache, root-field validation, documentation explorer, and safe field insertion
 - WebSocket text/binary-frame sessions with an ordered bidirectional event log
-- Incremental Server-Sent Events parsing with named-event history
+- Long-running Server-Sent Events sessions with incremental parsing, bounded or unlimited automatic reconnects, server retry hints, and `Last-Event-ID` resume
 - gRPC reflection, pasted `.proto` compilation, dynamic JSON messages, and unary/client/server/bidirectional streaming calls
 - JSON, text, URL-encoded, multipart file/part-metadata, and binary request bodies
 - Standard or custom HTTP methods, explicit encoded path parameters, repeated query keys, row descriptions, multiline values, and local JSON/XML body beautification

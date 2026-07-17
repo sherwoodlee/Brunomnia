@@ -23,11 +23,11 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | --- | --- | --- |
 | GraphQL | Complete | Operation name, query and variables editor; native HTTP execution and response inspection |
 | WebSocket | Complete | Native text-frame sessions, custom headers, connect/disconnect, ordered incoming/outgoing/system log |
-| Server-Sent Events | Complete | Native incremental parser handles chunk boundaries, CRLF, comments, named events and multiline data |
+| Server-Sent Events | Complete baseline | Native long-running sessions handle chunk boundaries, CRLF, comments, named events, multiline data, reconnect policy, server retry hints, and event-ID resume |
 | gRPC schema discovery | Complete | Server Reflection v1 and pasted `.proto` compilation into a local descriptor pool |
 | gRPC execution | Complete | Dynamic protobuf JSON mapping; unary, client-streaming, server-streaming and bidirectional calls |
 | Rich HTTP bodies | Complete | None, JSON, text, URL-encoded, multipart text/files and binary files |
-| Transport configuration | Complete for HTTP/SSE | Redirect policy, timeout, certificate validation, HTTP proxy and PEM client identity |
+| Transport configuration | Complete for HTTP/SSE | Redirect policy, bounded connect/HTTP timeout, unlimited active SSE duration, certificate validation, HTTP proxy and PEM client identity |
 | gRPC TLS | Complete | System trust roots, timeout and PEM client identity |
 | WebSocket TLS | Baseline | System trust roots and arbitrary handshake headers; custom proxy/client identity is deferred |
 | Workspace migration | Complete | Version 1 workspaces migrate in place to the version 2 protocol schema |
@@ -373,7 +373,22 @@ Compatibility bounds remain explicit: the sidebar currently depends on native po
 
 Compatibility bounds remain explicit: Brunomnia discovers named tests inside request after-response scripts, so the request and top-level script execute before dynamic registrations can be filtered. This is not the same persistence model as Insomnia's standalone unit-test-suite resources. Suite identity/selection, configuration-file discovery, `--keepFile`, proxy/data-folder flags, and the remaining command surface remain open.
 
-## Milestone 26 — remaining parity closure and release hardening
+## Milestone 26 — persistent SSE reconnect controls (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Long-running native sessions | Complete baseline | SSE uses the configured timeout for connection establishment without applying a total deadline to an active response stream |
+| Reconnect policy | Complete baseline | Per-request automatic reconnect toggle, 100–60,000 ms delay, and 0–1,000 retry limit; zero means retry until explicit disconnect |
+| Protocol resume | Complete baseline | Valid `id:` values are retained and sent as `Last-Event-ID`; numeric `retry:` values can replace the local delay within the same bounds |
+| Cancellation | Complete | Explicit disconnect cancels an active read, reconnect delay, or reconnect attempt and removes the session |
+| Persistent authoring | Complete | Reconnect settings are stored per request and malformed/imported values receive bounded safe defaults |
+| Event feedback | Complete baseline | The ordered stream log records reconnect attempts, reopened connections, transport errors, and final closure; the request status reflects reconnecting state |
+| Executable coverage | Complete baseline | Frontend tests cover defaults/import bounds; native tests cover chunk parsing, metadata, and bounded/unlimited policy; the sandbox prevents a live listener fixture |
+| Documentation and evidence | Complete | [SSE streams guide](SSE_STREAMS.md) and [Milestone 26 verification](QA_MILESTONE_26.md) |
+
+Compatibility bounds remain explicit: the native transport behavior is source- and unit-tested, but this environment cannot bind the loopback listener needed for a deterministic disconnect/reconnect integration fixture. Browser development mode remains a deterministic stream demo. Event searching/export, streaming plugin hooks, and collection-run reconnect semantics remain open.
+
+## Milestone 27 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

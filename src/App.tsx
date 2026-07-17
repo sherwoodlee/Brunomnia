@@ -483,7 +483,7 @@ type RequestPanelProps = {
   requestContext: SendRequestContext;
   activeTab: RequestTab;
   isSending: boolean;
-  streamStatus: 'disconnected' | 'connecting' | 'connected';
+  streamStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
   grpcSchema?: GrpcSchema;
   grpcSchemaLoading: boolean;
   graphqlSchemaLoading: boolean;
@@ -527,7 +527,7 @@ function RequestPanel({
 }: RequestPanelProps) {
   const streamProtocol = request.protocol === 'websocket' || request.protocol === 'sse';
   const actionLabel = streamProtocol
-    ? streamStatus === 'connected' ? 'Disconnect' : streamStatus === 'connecting' ? 'Connecting' : 'Connect'
+    ? streamStatus === 'connected' ? 'Disconnect' : streamStatus === 'reconnecting' ? 'Stop reconnecting' : streamStatus === 'connecting' ? 'Connecting' : 'Connect'
     : request.protocol === 'grpc' ? 'Invoke' : 'Send';
   return (
     <section className="request-panel">
@@ -648,7 +648,7 @@ type ResponsePanelProps = {
   activeTab: ResponseTab;
   isSending: boolean;
   streamMessages: StreamMessage[];
-  streamStatus: 'disconnected' | 'connecting' | 'connected';
+  streamStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
   streamDraft: string;
   streamFrameKind: 'text' | 'binary';
   scriptTests: Array<{ name: string; passed: boolean; error?: string }>;
@@ -718,7 +718,7 @@ function ResponsePanel({
       <div className="response-summary">
         <div className="response-metrics">
           <strong className={streaming ? streamStatus === 'connected' ? 'ok' : '' : response.status > 0 && response.status < 400 ? 'ok' : 'bad'}>
-            {streaming ? streamStatus === 'connected' ? 'LIVE' : streamStatus === 'connecting' ? '···' : 'OFF' : isSending ? '···' : response.status || 'Error'}
+            {streaming ? streamStatus === 'connected' ? 'LIVE' : streamStatus === 'connecting' || streamStatus === 'reconnecting' ? '···' : 'OFF' : isSending ? '···' : response.status || 'Error'}
           </strong>
           <span className={!streaming && response.status > 0 && response.status < 400 ? 'ok' : !streaming ? 'bad' : ''}>{streaming ? protocol === 'websocket' ? 'WebSocket' : 'Event stream' : response.statusText}</span>
           <span>{streaming ? `${streamMessages.length} events` : `${response.durationMs} ms`}</span>
@@ -938,7 +938,7 @@ export default function App() {
   const [repeatIntervalMs, setRepeatIntervalMs] = useState(1_000);
   const [scheduledSendLabel, setScheduledSendLabel] = useState('');
   const [sidebarHidden, setSidebarHidden] = useState(false);
-  const [streamStatus, setStreamStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+  const [streamStatus, setStreamStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'reconnecting'>('disconnected');
   const [streamMessages, setStreamMessages] = useState<StreamMessage[]>([]);
   const [streamDraft, setStreamDraft] = useState('');
   const [streamFrameKind, setStreamFrameKind] = useState<'text' | 'binary'>('text');
@@ -1177,6 +1177,7 @@ export default function App() {
   const onStreamEvent = (message: StreamMessage) => {
     setStreamMessages((current) => [...current, { ...message, id: message.id || uid('event') }].slice(-500));
     if (message.kind === 'open') setStreamStatus('connected');
+    if (message.kind === 'reconnecting') setStreamStatus('reconnecting');
     if (message.kind === 'closed' || message.kind === 'close' || message.kind === 'error') setStreamStatus('disconnected');
   };
 
@@ -1230,7 +1231,7 @@ export default function App() {
     const request = configured.request;
     const executionEnvironment = configured.environment;
     if (request.protocol === 'websocket' || request.protocol === 'sse') {
-      if (streamStatus === 'connected') {
+      if (streamStatus === 'connected' || streamStatus === 'reconnecting') {
         const sessionId = streamSession.current;
         if (!sessionId) return;
         setIsSending(true);
@@ -1251,6 +1252,7 @@ export default function App() {
       }
       setStreamStatus('connecting');
       setStreamMessages([]);
+      setIsSending(true);
       const sessionId = uid('stream');
       streamSession.current = sessionId;
       streamProtocol.current = request.protocol;
@@ -1260,6 +1262,8 @@ export default function App() {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         onStreamEvent({ id: uid('event'), direction: 'system', kind: 'error', text: message, timestamp: new Date().toISOString() });
+      } finally {
+        setIsSending(false);
       }
       return;
     }

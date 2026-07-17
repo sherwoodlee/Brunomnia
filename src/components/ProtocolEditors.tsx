@@ -238,10 +238,22 @@ export function GrpcEditor({
 
 export function StreamSetup({ request, onChange }: { request: ApiRequest; onChange: ChangeRequest }) {
   const protocol = request.protocol;
+  const sse = request.sse ?? { autoReconnect: true, reconnectDelayMs: 1000, maxReconnects: 0, respectServerRetry: true, sendLastEventId: true };
+  const updateSse = (patch: Partial<ApiRequest['sse']>) => onChange({ sse: { ...sse, ...patch } });
   return (
     <div className="stream-setup">
       <div className="empty-state compact"><span className={`protocol-glyph ${protocol}`}>{protocol === 'websocket' ? 'WS' : 'SSE'}</span><strong>{protocol === 'websocket' ? 'Bidirectional WebSocket session' : 'Server-sent event stream'}</strong><span>{protocol === 'websocket' ? 'Connect, then send text or binary frames from the response console.' : 'Connect to watch named events arrive in order.'}</span></div>
       {protocol === 'websocket' ? <div className="editor-stack"><div className="editor-toolbar"><span>Runner startup text frame</span><small>Optional</small></div><CodeEditor ariaLabel="WebSocket runner startup frame" value={request.body} onChange={(body) => onChange({ body })} /></div> : null}
+      {protocol === 'sse' ? <div className="sse-reconnect-settings">
+        <header><strong>Long-running connection</strong><small>Reconnect after remote close or transport failure</small></header>
+        <label className="sse-switch"><input checked={sse.autoReconnect} onChange={(event) => updateSse({ autoReconnect: event.target.checked })} type="checkbox" /><span>Reconnect automatically</span></label>
+        <div>
+          <label>Reconnect delay (ms)<input disabled={!sse.autoReconnect} max="60000" min="100" onChange={(event) => updateSse({ reconnectDelayMs: Number(event.target.value) })} type="number" value={sse.reconnectDelayMs} /></label>
+          <label>Reconnect limit<input disabled={!sse.autoReconnect} max="1000" min="0" onChange={(event) => updateSse({ maxReconnects: Number(event.target.value) })} type="number" value={sse.maxReconnects} /><small>0 keeps retrying until Disconnect</small></label>
+        </div>
+        <label className="sse-switch"><input checked={sse.respectServerRetry} disabled={!sse.autoReconnect} onChange={(event) => updateSse({ respectServerRetry: event.target.checked })} type="checkbox" /><span>Respect server <code>retry:</code> delay</span></label>
+        <label className="sse-switch"><input checked={sse.sendLastEventId} disabled={!sse.autoReconnect} onChange={(event) => updateSse({ sendLastEventId: event.target.checked })} type="checkbox" /><span>Resume with <code>Last-Event-ID</code></span></label>
+      </div> : null}
     </div>
   );
 }

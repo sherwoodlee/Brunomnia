@@ -164,6 +164,14 @@ export type TransportConfig = {
   storeCookies: boolean;
 };
 
+export type SseConfig = {
+  autoReconnect: boolean;
+  reconnectDelayMs: number;
+  maxReconnects: number;
+  respectServerRetry: boolean;
+  sendLastEventId: boolean;
+};
+
 export type CookieRecord = {
   id: string;
   name: string;
@@ -203,6 +211,7 @@ export type ApiRequest = {
   graphql: GraphqlConfig;
   grpc: GrpcConfig;
   transport: TransportConfig;
+  sse: SseConfig;
   preRequestScript: string;
   tests: string;
   folderId?: string;

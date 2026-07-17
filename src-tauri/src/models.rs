@@ -52,12 +52,43 @@ pub struct TransportConfig {
     pub client_certificate_domains: String,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SseConfig {
+    #[serde(default = "default_true")]
+    pub auto_reconnect: bool,
+    #[serde(default = "default_sse_reconnect_delay")]
+    pub reconnect_delay_ms: u64,
+    #[serde(default)]
+    pub max_reconnects: u32,
+    #[serde(default = "default_true")]
+    pub respect_server_retry: bool,
+    #[serde(default = "default_true")]
+    pub send_last_event_id: bool,
+}
+
+impl Default for SseConfig {
+    fn default() -> Self {
+        Self {
+            auto_reconnect: true,
+            reconnect_delay_ms: default_sse_reconnect_delay(),
+            max_reconnects: 0,
+            respect_server_retry: true,
+            send_last_event_id: true,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
 
 fn default_timeout() -> u64 {
     60_000
+}
+
+fn default_sse_reconnect_delay() -> u64 {
+    1_000
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -116,6 +147,8 @@ pub struct StreamConnectInput {
     pub headers: Vec<KeyValue>,
     #[serde(default)]
     pub transport: TransportConfig,
+    #[serde(default)]
+    pub sse: SseConfig,
 }
 
 #[derive(Clone, Debug, Serialize)]
