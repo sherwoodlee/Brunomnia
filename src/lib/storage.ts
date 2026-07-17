@@ -3,6 +3,7 @@ import { cloneSeedWorkspace } from '../data/seed';
 import type { AiSettings, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ShortcutAction, Workspace } from '../types';
 import { normalizeGraphqlSchema } from './graphql';
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
+import { normalizeHttpMethod } from './request';
 
 const storageKey = 'brunomnia.workspace.v1';
 
@@ -22,7 +23,7 @@ const stringValue = (value: unknown, fallback = '') => typeof value === 'string'
 const normalizeRows = (value: unknown, prefix: string): KeyValue[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
   const row = record(item);
   if (!row) return [];
-  return [{ id: stringValue(row.id, `${prefix}-${index}`), name: stringValue(row.name), value: stringValue(row.value), enabled: row.enabled !== false }];
+  return [{ id: stringValue(row.id, `${prefix}-${index}`), name: stringValue(row.name), value: stringValue(row.value), enabled: row.enabled !== false, description: stringValue(row.description).slice(0, 20_000) }];
 }).slice(0, 1_000);
 
 const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
@@ -297,13 +298,20 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     documentation: stringValue(collection.documentation),
     requests: collection.requests.map((request) => {
       const graphql = record(request.graphql);
+      const requestId = stringValue(request.id, `migrated-request-${crypto.randomUUID()}`);
+      const method = normalizeHttpMethod(stringValue(request.method, defaults.method), defaults.method);
       return {
         ...defaults,
         ...request,
+        id: requestId,
+        method,
         folderId: stringValue(request.folderId),
         inheritFolderAuth: request.inheritFolderAuth === true,
         documentation: stringValue(request.documentation),
-        bodyMode: request.bodyMode ?? (request.method === 'GET' || request.method === 'HEAD' ? 'none' : 'json'),
+        pathParams: normalizeRows(request.pathParams, `${requestId}-path`),
+        params: normalizeRows(request.params, `${requestId}-query`),
+        headers: normalizeRows(request.headers, `${requestId}-header`),
+        bodyMode: request.bodyMode ?? (method === 'GET' || method === 'HEAD' ? 'none' : 'json'),
         auth: { ...defaults.auth, ...request.auth },
         graphql: {
           ...defaults.graphql,
@@ -312,9 +320,9 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           schemaEndpoint: stringValue(graphql?.schemaEndpoint),
           schemaFetchedAt: stringValue(graphql?.schemaFetchedAt),
         },
-        grpc: { ...defaults.grpc, ...request.grpc },
+        grpc: { ...defaults.grpc, ...request.grpc, metadata: normalizeRows(record(request.grpc)?.metadata, `${requestId}-metadata`) },
         transport: { ...defaults.transport, ...request.transport },
-        formBody: request.formBody ?? [],
+        formBody: normalizeRows(request.formBody, `${requestId}-form`),
         multipartBody: (request.multipartBody ?? []).map((part) => ({ ...part, contentType: part.contentType ?? part.file?.mimeType ?? '', fileName: part.fileName ?? part.file?.fileName ?? '' })),
       };
     }),
@@ -329,7 +337,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 10,
+    version: 11,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

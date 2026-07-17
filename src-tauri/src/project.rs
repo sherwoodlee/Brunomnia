@@ -1063,7 +1063,7 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         fs::write(temporary.path().join("README.md"), "keep me").unwrap();
         let workspace = serde_json::json!({
-            "format": "brunomnia", "version": 10, "name": "Example", "activeRequestId": "request", "activeEnvironmentId": "env",
+            "format": "brunomnia", "version": 11, "name": "Example", "activeRequestId": "request", "activeEnvironmentId": "env",
             "collections": [{"id":"collection", "name":"Orders", "expanded":true, "requests":[]}],
             "environments": [{"id":"env", "name":"Development", "variables":[]}],
             "apiDesigns": [], "mockServers": [],
@@ -1093,7 +1093,7 @@ mod tests {
         let external = tempfile::tempdir().unwrap();
         symlink(external.path(), temporary.path().join("collections")).unwrap();
         let workspace = serde_json::json!({
-            "format": "brunomnia", "version": 10, "name": "Unsafe", "activeRequestId": "", "activeEnvironmentId": "",
+            "format": "brunomnia", "version": 11, "name": "Unsafe", "activeRequestId": "", "activeEnvironmentId": "",
             "collections": [{"id":"collection", "name":"Orders", "expanded":true, "requests":[]}],
             "environments": [], "apiDesigns": [], "mockServers": []
         });

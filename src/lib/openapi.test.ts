@@ -9,7 +9,7 @@ paths:
     get:
       operationId: getPet
       parameters:
-        - { in: path, name: petId, required: true, schema: { type: string } }
+        - { in: path, name: petId, required: true, description: Pet identifier, example: pet/one, schema: { type: string } }
       responses: { '200': { description: ok } }
 `;
 
@@ -20,7 +20,8 @@ describe('OpenAPI design tools', () => {
     expect(analysis.operations[0]).toMatchObject({ id: 'getPet', method: 'GET', path: '/pets/{petId}' });
 
     const collection = generateCollectionFromOpenApi({ id: 'pets', name: 'Pets', contents: source });
-    expect(collection.requests[0].url).toBe('https://api.example.com/pets/{{ petId }}');
+    expect(collection.requests[0].url).toBe('https://api.example.com/pets/{petId}');
+    expect(collection.requests[0].pathParams[0]).toMatchObject({ name: 'petId', value: 'pet/one', enabled: true, description: 'Pet identifier' });
   });
 
   it('reports structural and path parameter errors', () => {

@@ -1,4 +1,4 @@
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE';
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE' | (string & Record<never, never>);
 export type Protocol = 'http' | 'graphql' | 'websocket' | 'sse' | 'grpc';
 export type BodyMode = 'none' | 'json' | 'text' | 'form-urlencoded' | 'multipart' | 'binary';
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -14,6 +14,7 @@ export type KeyValue = {
   name: string;
   value: string;
   enabled: boolean;
+  description?: string;
 };
 
 export type AuthConfig = {
@@ -190,6 +191,7 @@ export type ApiRequest = {
   protocol: Protocol;
   method: HttpMethod;
   url: string;
+  pathParams: KeyValue[];
   params: KeyValue[];
   headers: KeyValue[];
   bodyMode: BodyMode;
@@ -256,7 +258,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 10;
+  version: 11;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -281,7 +283,7 @@ export type Workspace = {
   preferences: AppPreferences;
 };
 
-export type ShortcutAction = 'palette' | 'preferences' | 'send' | 'environment' | 'history' | 'toggle-sidebar' | 'new-request' | 'duplicate-request' | 'delete-request' | 'focus-url';
+export type ShortcutAction = 'palette' | 'preferences' | 'send' | 'environment' | 'history' | 'toggle-sidebar' | 'new-request' | 'duplicate-request' | 'delete-request' | 'focus-url' | 'generate-code';
 
 export type AppPreferences = {
   theme: 'system' | 'dark' | 'light';

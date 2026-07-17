@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the tenth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the eleventh runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -12,6 +12,8 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Incremental Server-Sent Events parsing with named-event history
 - gRPC reflection, pasted `.proto` compilation, dynamic JSON messages, and unary/client/server/bidirectional streaming calls
 - JSON, text, URL-encoded, multipart file/part-metadata, and binary request bodies
+- Standard or custom HTTP methods, explicit encoded path parameters, repeated query keys, row descriptions, multiline values, and local JSON/XML body beautification
+- Local client-code generation for cURL, JavaScript Fetch, Python Requests, Go `net/http`, Java `HttpClient`, and C# `HttpClient`
 - Redirect, timeout, certificate validation, proxy exclusions, and domain-scoped client-certificate controls for native HTTP/SSE
 - Local collections with nested request folders, request/collection/folder documentation, and inherited folder headers, authentication, variables, and scripts
 - Base/sub-environment inheritance, device-local private sub-environments, collection/folder/iteration/request-local variables, dynamic aliases, and template tags for UUIDs, time, Faker values, encoding, hashing, JSONPath, cookies, prompts, requests, and chained responses
@@ -39,7 +41,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Project-scoped MCP clients over Streamable HTTP/JSON-RPC and native STDIO, with cached tools, prompts, resources, resource templates, roots, invocation, and an event console
 - Optional OpenAI, Anthropic, Gemini, and custom/local OpenAI-compatible providers with vault-only credential execution, AI mock generation, and reviewable Git commit grouping suggestions
 - Pull-only Konnect control-plane discovery and Gateway Service/HTTP Route mapping that preserves local request work and isolates unsupported routes
-- Workspace v10 migrations, bounded resource hierarchy normalization, private-environment publication filtering, split-YAML serialization, import-time authority stripping, and device-local AI/Konnect/preferences settings
+- Workspace v11 migrations, bounded resource hierarchy and request-row normalization, private-environment publication filtering, split-YAML serialization, import-time authority stripping, and device-local AI/Konnect/preferences settings
 - Atomic persistence in the OS application-data directory
 - System/dark/light appearance, comfortable/compact density, configurable editor sizing, request defaults, and customizable keyboard shortcuts
 - Responsive desktop UI with no login, upgrade, or cloud dependency

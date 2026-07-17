@@ -7374,7 +7374,8 @@ var defaultShortcuts = {
   "new-request": "Mod+N",
   "duplicate-request": "Mod+D",
   "delete-request": "Mod+Shift+Backspace",
-  "focus-url": "Mod+L"
+  "focus-url": "Mod+L",
+  "generate-code": "Mod+Shift+G"
 };
 var defaultPreferences = {
   theme: "system",
@@ -7393,6 +7394,7 @@ var createRequest = (id, name, method, url) => ({
   protocol: "http",
   method,
   url,
+  pathParams: [],
   params: [],
   headers: [{ id: `${id}-content-type`, name: "Content-Type", value: "application/json", enabled: method !== "GET" }],
   bodyMode: method === "GET" ? "none" : "json",
@@ -7529,7 +7531,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 10,
+  version: 11,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -7849,7 +7851,10 @@ var analyzeOpenApi = (contents, ruleset = "") => {
       const parameters = rawParameters.flatMap((rawParameter) => {
         const parameter = record(rawParameter);
         if (!parameter || typeof parameter.name !== "string" || typeof parameter.in !== "string") return [];
-        return [{ name: parameter.name, location: parameter.in, required: Boolean(parameter.required) }];
+        const schema = record(parameter.schema);
+        const example = parameter.example ?? schema?.example ?? schema?.default;
+        const value = example === void 0 ? "" : typeof example === "string" ? example : JSON.stringify(example);
+        return [{ name: parameter.name, location: parameter.in, required: Boolean(parameter.required), description: asString(parameter.description), value }];
       });
       for (const match of path.matchAll(/{([^}]+)}/g)) {
         if (!parameters.some((parameter) => parameter.location === "path" && parameter.name === match[1] && parameter.required)) {
@@ -7896,18 +7901,27 @@ var generateCollectionFromOpenApi = (design) => {
     const jsonSchema = record(record(content?.["application/json"])?.schema);
     request.name = operation.summary;
     request.method = operation.method;
-    request.url = `${baseUrl}${operation.path.replace(/{([^}]+)}/g, "{{ $1 }}")}`;
+    request.url = `${baseUrl}${operation.path}`;
+    request.pathParams = operation.parameters.filter((parameter) => parameter.location === "path").map((parameter) => ({
+      id: `${request.id}-path-${parameter.name}`,
+      name: parameter.name,
+      value: parameter.value,
+      enabled: true,
+      description: parameter.description
+    }));
     request.params = operation.parameters.filter((parameter) => parameter.location === "query").map((parameter) => ({
       id: `${request.id}-query-${parameter.name}`,
       name: parameter.name,
-      value: "",
-      enabled: parameter.required
+      value: parameter.value,
+      enabled: parameter.required,
+      description: parameter.description
     }));
     request.headers = operation.parameters.filter((parameter) => parameter.location === "header").map((parameter) => ({
       id: `${request.id}-header-${parameter.name}`,
       name: parameter.name,
-      value: "",
-      enabled: parameter.required
+      value: parameter.value,
+      enabled: parameter.required,
+      description: parameter.description
     }));
     if (jsonSchema || content?.["application/json"]) {
       request.bodyMode = "json";
@@ -7928,12 +7942,17 @@ var environmentMap = (environment) => Object.fromEntries(
 );
 var resolveTemplate = (value, variables) => value.replace(templatePattern, (match, name) => variables[name] ?? match);
 var buildRequestUrl = (request, variables) => {
-  const rawUrl = resolveTemplate(request.url, variables);
+  let rawUrl = resolveTemplate(request.url, variables);
+  (request.pathParams ?? []).filter((parameter) => parameter.enabled && parameter.name.trim()).forEach((parameter) => {
+    const name = resolveTemplate(parameter.name, variables).trim();
+    const value = encodeURIComponent(resolveTemplate(parameter.value, variables));
+    rawUrl = rawUrl.split(`{${name}}`).join(value);
+  });
   const enabledParams = request.params.filter((param) => param.enabled && param.name.trim());
   if (enabledParams.length === 0) return rawUrl;
   const url = new URL(rawUrl);
   for (const param of enabledParams) {
-    url.searchParams.set(resolveTemplate(param.name, variables), resolveTemplate(param.value, variables));
+    url.searchParams.append(resolveTemplate(param.name, variables), resolveTemplate(param.value, variables));
   }
   return url.toString();
 };

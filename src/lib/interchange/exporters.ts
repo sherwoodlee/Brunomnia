@@ -73,8 +73,10 @@ const insomniaBody = (request: ApiRequest, warnings: ImportWarning[]) => {
 const v4Request = (request: ApiRequest, parentId: string, index: number, warnings: ImportWarning[], prefix: string) => {
   const base = {
     _id: `__REQUEST_${prefix}_${index + 1}__`, parentId, modified: Date.now(), created: Date.now(), name: request.name,
-    url: request.url, method: request.method, parameters: request.params.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled })),
-    headers: request.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })),
+    url: request.url, method: request.method,
+    pathParameters: request.pathParams.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
+    parameters: request.params.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
+    headers: request.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled, description: header.description })),
     authentication: insomniaAuth(request.auth), preRequestScript: request.preRequestScript, afterResponseScript: request.tests, description: request.documentation ?? '',
   };
   if (request.protocol === 'websocket') return { ...base, _type: 'websocket_request' };
@@ -126,8 +128,9 @@ const v5Environment = (environments: Environment[], prefix: string) => {
 const v5Request = (request: ApiRequest, index: number, warnings: ImportWarning[], prefix: string) => {
   const common = {
     url: request.url, name: request.name, meta: { id: `${prefix}-req_${index + 1}`, description: request.documentation || (request.source ? `Imported from ${request.source.format}` : '') },
-    headers: request.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })),
-    parameters: request.params.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled })),
+    headers: request.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled, description: header.description })),
+    pathParameters: request.pathParams.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
+    parameters: request.params.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
     authentication: insomniaAuth(request.auth),
   };
   if (request.protocol === 'websocket') return { ...common, meta: { ...common.meta, id: `${prefix}-ws-req_${index + 1}` }, settings: { encodeUrl: true, followRedirects: request.transport.followRedirects ? 'on' : 'off', cookies: { send: true, store: true } } };

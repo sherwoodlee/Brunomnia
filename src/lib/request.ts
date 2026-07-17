@@ -1,6 +1,12 @@
 import type { ApiRequest, Environment, HttpResponse, KeyValue } from '../types';
 
 const templatePattern = /{{\s*([^{}]+?)\s*}}/g;
+const methodPattern = /^[!#$%&'*+.^_`|~0-9A-Z-]+$/;
+
+export const normalizeHttpMethod = (value: string, fallback = 'GET'): string => {
+  const method = value.trim().toUpperCase();
+  return method && method.length <= 32 && methodPattern.test(method) ? method : fallback;
+};
 
 export const environmentMap = (environment: Environment | undefined): Record<string, string> =>
   Object.fromEntries(
@@ -13,13 +19,18 @@ export const resolveTemplate = (value: string, variables: Record<string, string>
   value.replace(templatePattern, (match, name: string) => variables[name] ?? match);
 
 export const buildRequestUrl = (request: ApiRequest, variables: Record<string, string>): string => {
-  const rawUrl = resolveTemplate(request.url, variables);
+  let rawUrl = resolveTemplate(request.url, variables);
+  (request.pathParams ?? []).filter((parameter) => parameter.enabled && parameter.name.trim()).forEach((parameter) => {
+    const name = resolveTemplate(parameter.name, variables).trim();
+    const value = encodeURIComponent(resolveTemplate(parameter.value, variables));
+    rawUrl = rawUrl.split(`{${name}}`).join(value);
+  });
   const enabledParams = request.params.filter((param) => param.enabled && param.name.trim());
   if (enabledParams.length === 0) return rawUrl;
 
   const url = new URL(rawUrl);
   for (const param of enabledParams) {
-    url.searchParams.set(resolveTemplate(param.name, variables), resolveTemplate(param.value, variables));
+    url.searchParams.append(resolveTemplate(param.name, variables), resolveTemplate(param.value, variables));
   }
   return url.toString();
 };
@@ -66,6 +77,27 @@ export const prettyBody = (body: string): string => {
   } catch {
     return body;
   }
+};
+
+const prettyXml = (body: string) => {
+  const source = body.trim().replace(/>\s*</g, '><').replace(/></g, '>\n<');
+  if (!source.startsWith('<') || !source.endsWith('>')) return body;
+  let depth = 0;
+  return source.split('\n').map((line) => {
+    const closing = /^<\//.test(line);
+    if (closing) depth = Math.max(0, depth - 1);
+    const output = `${'  '.repeat(depth)}${line}`;
+    const opens = /^<[^!?/][^>]*[^/]?>$/.test(line) && !/<\/[^>]+>$/.test(line);
+    if (opens) depth += 1;
+    return output;
+  }).join('\n');
+};
+
+export const prettyRequestBody = (request: ApiRequest): string => {
+  if (request.bodyMode === 'json') return prettyBody(request.body);
+  const contentType = request.headers.find((header) => header.enabled && header.name.toLowerCase() === 'content-type')?.value.toLowerCase() ?? '';
+  if (request.bodyMode === 'text' && (contentType.includes('xml') || /^\s*<[^>]+>/.test(request.body))) return prettyXml(request.body);
+  return request.body;
 };
 
 export const mockResponse = (): HttpResponse => {

@@ -130,6 +130,7 @@ const mapInsomniaRequest = (
   } else {
     request.method = normalizeMethod(raw.method, warnings, request.name);
   }
+  request.pathParams = keyValues(raw.pathParameters, `${request.id}-path`);
   request.params = keyValues(raw.parameters, `${request.id}-query`);
   request.headers = [...inherited.headers, ...keyValues(raw.headers, `${request.id}-header`)];
   if (!isGrpc && !isWebsocket && !isSocketIo && !isMcp) applyInsomniaBody(request, raw.body, format, warnings);
@@ -148,7 +149,7 @@ const mapInsomniaRequest = (
     unsupported.mcp = toJsonValue({ transportType: raw.transportType, env: raw.env, roots: raw.roots });
     warnings.push({ code: 'unsupported-protocol', message: 'MCP was imported as an HTTP baseline; transport settings were preserved as source metadata.', resource: request.name });
   }
-  if (raw.pathParameters) unsupported.pathParameters = toJsonValue(raw.pathParameters);
+  if (raw.pathParameters && request.pathParams.length === 0) unsupported.pathParameters = toJsonValue(raw.pathParameters);
   if (settings?.cookies) unsupported.cookieSettings = toJsonValue(settings.cookies);
   request.source = {
     ...(request.source ?? sourceMetadata(format, sourceIdentity)),

@@ -39,6 +39,6 @@ Private environments are an omission boundary, not encrypted storage. Use `{{ va
 
 ## Import and export
 
-Brunomnia v10 exports preserve the complete hierarchy. Insomnia v4 and v5 compatibility adapters preserve nested folders, request placement, environment ancestry, folder headers, authentication, variables, scripts, and documentation inside their supported schemas. Imported folder and environment IDs are remapped as one batch so parent and request references remain collision-safe.
+Brunomnia v11 exports preserve the complete hierarchy. Insomnia v4 and v5 compatibility adapters preserve nested folders, request placement, environment ancestry, folder headers, authentication, variables, scripts, and documentation inside their supported schemas. Imported folder and environment IDs are remapped as one batch so parent and request references remain collision-safe.
 
 External file bytes, unsupported protocol details, and format-specific fields that have no executable Brunomnia equivalent continue to produce explicit conversion warnings instead of silent parity claims.

@@ -75,6 +75,7 @@ const renderRequest = async (request: ApiRequest, variables: Record<string, stri
     ...request,
     name: await render(request.name),
     url: await render(request.url),
+    pathParams: await renderRows(request.pathParams, render),
     params: await renderRows(request.params, render),
     headers: await renderRows(request.headers, render),
     body: await render(request.body),

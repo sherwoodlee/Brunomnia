@@ -1,5 +1,6 @@
 import { createBlankRequest } from '../../data/seed';
 import type { ApiRequest, AuthConfig, HttpMethod, ImportWarning, JsonValue, KeyValue, SourceMetadata } from '../../types';
+import { normalizeHttpMethod } from '../request';
 
 export type UnknownRecord = Record<string, unknown>;
 
@@ -28,19 +29,18 @@ export const toJsonValue = (value: unknown): JsonValue => {
   return String(value ?? '');
 };
 
-const supportedMethods = new Set<HttpMethod>(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE']);
-
 export const normalizeMethod = (value: unknown, warnings: ImportWarning[], resource: string): HttpMethod => {
-  const method = asString(value, 'GET').toUpperCase();
-  if (supportedMethods.has(method as HttpMethod)) return method as HttpMethod;
-  warnings.push({ code: 'unsupported-method', message: `Method ${method || '(empty)'} was converted to GET.`, resource });
+  const rawMethod = asString(value, 'GET');
+  const method = normalizeHttpMethod(rawMethod, '');
+  if (method) return method as HttpMethod;
+  warnings.push({ code: 'invalid-method', message: `Invalid method ${rawMethod || '(empty)'} was converted to GET.`, resource });
   return 'GET';
 };
 
 export const keyValues = (
   input: unknown,
   prefix: string,
-  keys: { name?: string; value?: string; disabled?: string } = {},
+  keys: { name?: string; value?: string; disabled?: string; description?: string } = {},
 ): KeyValue[] => asArray(input).flatMap((entry, index) => {
   const item = asRecord(entry);
   if (!item) return [];
@@ -52,6 +52,7 @@ export const keyValues = (
     name: asString(item[nameKey] ?? item.key),
     value: asString(item[valueKey]),
     enabled: !asBoolean(item[disabledKey]),
+    description: asString(item[keys.description ?? 'description']),
   }];
 });
 

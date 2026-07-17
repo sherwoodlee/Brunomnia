@@ -18,7 +18,17 @@ const rekeyCollection = (collection: Collection, batch: string): Collection => {
       headers: folder.headers.map((header) => ({ ...header, id: `${batch}-${header.id}` })),
       environment: folder.environment.map((variable) => ({ ...variable, id: `${batch}-${variable.id}` })),
     })),
-    requests: collection.requests.map((request) => ({ ...request, id: `${batch}-${request.id}`, folderId: request.folderId ? folderIds.get(request.folderId) ?? '' : '' })),
+    requests: collection.requests.map((request) => ({
+      ...request,
+      id: `${batch}-${request.id}`,
+      folderId: request.folderId ? folderIds.get(request.folderId) ?? '' : '',
+      pathParams: request.pathParams.map((row) => ({ ...row, id: `${batch}-${row.id}` })),
+      params: request.params.map((row) => ({ ...row, id: `${batch}-${row.id}` })),
+      headers: request.headers.map((row) => ({ ...row, id: `${batch}-${row.id}` })),
+      formBody: request.formBody.map((row) => ({ ...row, id: `${batch}-${row.id}` })),
+      multipartBody: request.multipartBody.map((row) => ({ ...row, id: `${batch}-${row.id}` })),
+      grpc: { ...request.grpc, metadata: request.grpc.metadata.map((row) => ({ ...row, id: `${batch}-${row.id}` })) },
+    })),
   };
 };
 
@@ -54,7 +64,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
     warnings: result.warnings,
     metadata: result.metadata,
   };
-  if (result.replacement) return { ...result.replacement, version: 10, imports: [record, ...result.replacement.imports].slice(0, 100) };
+  if (result.replacement) return { ...result.replacement, version: 11, imports: [record, ...result.replacement.imports].slice(0, 100) };
 
   const collections = result.collections.map((collection) => rekeyCollection(collection, batch));
   const collectionIds = new Map(result.collections.map((collection, index) => [collection.id, collections[index].id]));
@@ -68,7 +78,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
   const firstRequest = collections.flatMap((collection) => collection.requests)[0];
   return {
     ...workspace,
-    version: 10,
+    version: 11,
     activeRequestId: firstRequest?.id ?? workspace.activeRequestId,
     activeEnvironmentId: environments[0]?.id ?? workspace.activeEnvironmentId,
     collections: [...workspace.collections, ...collections],

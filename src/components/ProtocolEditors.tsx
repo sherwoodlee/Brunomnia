@@ -8,6 +8,7 @@ import type {
   StreamMessage,
 } from '../types';
 import { graphqlTypeLabel, insertGraphqlRootField, validateGraphqlDocument } from '../lib/graphql';
+import { prettyRequestBody } from '../lib/request';
 import { Icon } from './Icon';
 
 type ChangeRequest = (patch: Partial<ApiRequest>) => void;
@@ -84,7 +85,10 @@ export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onC
             </button>
           ))}
         </div>
-        <small>{request.bodyMode === 'none' ? 'No payload' : 'Native request body'}</small>
+        <div className="body-toolbar-actions">
+          {request.bodyMode === 'json' || request.bodyMode === 'text' ? <button onClick={() => onChange({ body: prettyRequestBody(request) })} type="button">Beautify</button> : null}
+          <small>{request.bodyMode === 'none' ? 'No payload' : 'Native request body'}</small>
+        </div>
       </div>
       {request.bodyMode === 'none' ? (
         <div className="empty-state compact"><Icon name="archive" size={26} /><strong>This request has no body</strong></div>

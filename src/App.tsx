@@ -5,13 +5,13 @@ import { createBlankRequest } from './data/seed';
 import { sendRequest, type SendRequestContext } from './lib/http';
 import { storeResponseCookies } from './lib/cookies';
 import { connectStream, disconnectStream, invokeGrpc, loadGrpcSchema, sendWebSocketMessage } from './lib/protocol';
-import { formatBytes, mockResponse, prettyBody } from './lib/request';
+import { environmentMap, formatBytes, mockResponse, normalizeHttpMethod, prettyBody } from './lib/request';
 import { loadWorkspace, saveWorkspace } from './lib/storage';
-import { environmentMap } from './lib/request';
 import { runBrowserScript } from './lib/scriptSandbox';
 import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import { AuthEditor } from './components/AuthEditor';
+import { CodeGenerationDialog } from './components/CodeGenerationDialog';
 import { applyArtifactImport } from './lib/interchange/apply';
 import type { ArtifactImport } from './lib/interchange/types';
 import { writeProject } from './lib/project';
@@ -71,6 +71,7 @@ const protocols: { value: Protocol; label: string }[] = [
 
 const protocolLabel = (request: ApiRequest) => request.protocol === 'http' ? request.method
   : request.protocol === 'websocket' ? 'WS' : request.protocol.toUpperCase();
+const methodClass = (method: string) => methods.includes(method as HttpMethod) ? method.toLowerCase() : 'custom';
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
@@ -78,6 +79,7 @@ const duplicateRequest = (request: ApiRequest): ApiRequest => {
   const copy = structuredClone(request);
   copy.id = uid('request');
   copy.name = `${request.name} copy`;
+  copy.pathParams = copy.pathParams.map((row) => ({ ...row, id: uid('path') }));
   copy.params = copy.params.map((row) => ({ ...row, id: uid('parameter') }));
   copy.headers = copy.headers.map((row) => ({ ...row, id: uid('header') }));
   copy.formBody = copy.formBody.map((row) => ({ ...row, id: uid('form') }));
@@ -100,6 +102,7 @@ type KeyValueEditorProps = {
   onChange: (rows: KeyValue[]) => void;
   namePlaceholder?: string;
   valuePlaceholder?: string;
+  detailed?: boolean;
 };
 
 function KeyValueEditor({
@@ -107,16 +110,18 @@ function KeyValueEditor({
   onChange,
   namePlaceholder = 'Name',
   valuePlaceholder = 'Value',
+  detailed = false,
 }: KeyValueEditorProps) {
   const update = (id: string, patch: Partial<KeyValue>) =>
     onChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
 
   return (
-    <div className="kv-editor">
+    <div className={`kv-editor${detailed ? ' detailed' : ''}`}>
       <div className="kv-header">
         <span />
         <span>{namePlaceholder}</span>
         <span>{valuePlaceholder}</span>
+        {detailed ? <span>Description</span> : null}
         <span />
       </div>
       {rows.map((row) => (
@@ -135,13 +140,21 @@ function KeyValueEditor({
             spellCheck={false}
             value={row.name}
           />
-          <input
+          {detailed ? <textarea
+            aria-label={valuePlaceholder}
+            onChange={(event) => update(row.id, { value: event.target.value })}
+            placeholder={valuePlaceholder}
+            rows={row.value.includes('\n') ? Math.min(6, row.value.split('\n').length) : 1}
+            spellCheck={false}
+            value={row.value}
+          /> : <input
             aria-label={valuePlaceholder}
             onChange={(event) => update(row.id, { value: event.target.value })}
             placeholder={valuePlaceholder}
             spellCheck={false}
             value={row.value}
-          />
+          />}
+          {detailed ? <input aria-label="Description" onChange={(event) => update(row.id, { description: event.target.value })} placeholder="Description" value={row.description ?? ''} /> : null}
           <button
             aria-label="Remove row"
             className="icon-button subtle"
@@ -154,7 +167,7 @@ function KeyValueEditor({
       ))}
       <button
         className="add-row"
-        onClick={() => onChange([...rows, { id: uid('field'), name: '', value: '', enabled: true }])}
+        onClick={() => onChange([...rows, { id: uid('field'), name: '', value: '', enabled: true, description: detailed ? '' : undefined }])}
         type="button"
       >
         <Icon name="plus" size={14} /> Add row
@@ -239,7 +252,7 @@ function CollectionSidebar({
             onClick={() => onSelectRequest(request.id)}
             style={{ '--resource-depth': depth } as CSSProperties}
             type="button"
-          ><span className={`method method-${request.method.toLowerCase()} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span>{request.name}</span></button>;
+          ><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span>{request.name}</span></button>;
           const renderFolder = (folder: RequestFolder, depth: number): ReactNode => {
             if (normalizedSearch && !folderMatches(folder)) return null;
             const children = folders.filter((candidate) => candidate.parentId === folder.id);
@@ -264,7 +277,7 @@ function CollectionSidebar({
         }) : (
           history.length ? history.map((entry) => (
             <button className="history-row" key={entry.id} onClick={() => onSelectRequest(entry.requestId)} type="button">
-              <span className={`method method-${entry.method.toLowerCase()}`}>{entry.method}</span>
+              <span className={`method method-${methodClass(entry.method)}`}>{entry.method}</span>
               <span>
                 <strong>{entry.name}</strong>
                 <small>{new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {entry.durationMs} ms</small>
@@ -298,6 +311,8 @@ type RequestPanelProps = {
   onOpenSendOptions: () => void;
   onLoadGrpcSchema: () => void;
   onLoadGraphqlSchema: () => void;
+  onAddRequest: () => void;
+  onGenerateCode: () => void;
   scheduledSendLabel: string;
   urlInputRef: RefObject<HTMLInputElement | null>;
 };
@@ -318,6 +333,8 @@ function RequestPanel({
   onOpenSendOptions,
   onLoadGrpcSchema,
   onLoadGraphqlSchema,
+  onAddRequest,
+  onGenerateCode,
   scheduledSendLabel,
   urlInputRef,
   environment,
@@ -333,7 +350,7 @@ function RequestPanel({
     <section className="request-panel">
       <div className="document-tabs">
         <div className="document-tab active">
-          <span className={`method method-${request.method.toLowerCase()} protocol-${request.protocol}`}>{protocolLabel(request)}</span>
+          <span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span>
           <input
             aria-label="Request name"
             onChange={(event) => onChange({ name: event.target.value })}
@@ -343,7 +360,7 @@ function RequestPanel({
           <span className="dirty-dot" />
         </div>
         <select aria-label="Request folder" className="request-folder-select" onChange={(event) => onChange({ folderId: event.target.value })} value={request.folderId ?? ''}><option value="">Collection root</option>{(collection.folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folderPath(collection, folder.id)}</option>)}</select>
-        <button aria-label="New request" className="tab-plus" type="button"><Icon name="plus" size={16} /></button>
+        <button aria-label="New request" className="tab-plus" onClick={onAddRequest} type="button"><Icon name="plus" size={16} /></button>
       </div>
 
       <div className="request-command-row">
@@ -362,15 +379,21 @@ function RequestPanel({
         >
           {protocols.map((protocol) => <option key={protocol.value} value={protocol.value}>{protocol.label}</option>)}
         </select>
-        <select
+        <input
           aria-label="HTTP method"
-          className={`method-select method-${request.method.toLowerCase()}`}
+          className={`method-select method-${methodClass(request.method)}`}
           disabled={request.protocol !== 'http'}
-          onChange={(event) => onChange({ method: event.target.value as HttpMethod })}
+          list="http-methods"
+          maxLength={32}
+          onBlur={(event) => onChange({ method: normalizeHttpMethod(event.target.value, 'GET') as HttpMethod })}
+          onChange={(event) => {
+            const value = event.target.value.toUpperCase();
+            if (/^[!#$%&'*+.^_`|~0-9A-Z-]*$/.test(value)) onChange({ method: value as HttpMethod });
+          }}
+          spellCheck={false}
           value={request.method}
-        >
-          {methods.map((method) => <option key={method}>{method}</option>)}
-        </select>
+        />
+        <datalist id="http-methods">{methods.map((method) => <option key={method} value={method} />)}</datalist>
         <input
           aria-label="Request URL"
           className="url-input"
@@ -382,12 +405,13 @@ function RequestPanel({
           ref={urlInputRef}
           value={request.url}
         />
+        <button aria-label="Generate client code" className="codegen-trigger" disabled={request.protocol !== 'http' && request.protocol !== 'graphql'} onClick={onGenerateCode} type="button"><Icon name="code" size={15} /><span>Code</span></button>
         <div className="send-actions"><button className="send-button" disabled={isSending && !scheduledSendLabel} onClick={scheduledSendLabel ? onCancelScheduled : onSend} type="button">{isSending ? <span className="sending-spinner" /> : null}{scheduledSendLabel ? `Stop · ${scheduledSendLabel}` : isSending && !streamProtocol ? 'Working' : actionLabel}</button><button aria-label="Send options" disabled={streamProtocol || request.protocol === 'grpc'} onClick={onOpenSendOptions} type="button"><Icon name="chevron-down" size={13} /></button></div>
       </div>
 
       <nav className="tab-strip request-tabs" aria-label="Request configuration">
         {requestTabs.map((tab) => {
-          const count = tab === 'params' ? request.params.filter((row) => row.enabled && row.name).length
+          const count = tab === 'params' ? [...request.pathParams, ...request.params].filter((row) => row.enabled && row.name).length
             : tab === 'headers' ? (request.protocol === 'grpc' ? request.grpc.metadata : request.headers).filter((row) => row.enabled && row.name).length : 0;
           return (
             <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">
@@ -399,10 +423,13 @@ function RequestPanel({
 
       <div className="request-editor">
         {activeTab === 'params' ? (
-          <KeyValueEditor rows={request.params} onChange={(params) => onChange({ params })} namePlaceholder="Parameter" />
+          <div className="parameter-editors">
+            <section><header><strong>Path parameters</strong><small>Replace matching {'{name}'} segments in the URL.</small></header><KeyValueEditor detailed rows={request.pathParams} onChange={(pathParams) => onChange({ pathParams })} namePlaceholder="Path parameter" /></section>
+            <section><header><strong>Query parameters</strong><small>Enabled rows are appended in order; duplicate names are preserved.</small></header><KeyValueEditor detailed rows={request.params} onChange={(params) => onChange({ params })} namePlaceholder="Query parameter" /></section>
+          </div>
         ) : null}
         {activeTab === 'headers' && request.protocol !== 'grpc' ? (
-          <KeyValueEditor rows={request.headers} onChange={(headers) => onChange({ headers })} namePlaceholder="Header" />
+          <KeyValueEditor detailed rows={request.headers} onChange={(headers) => onChange({ headers })} namePlaceholder="Header" />
         ) : null}
         {activeTab === 'headers' && request.protocol === 'grpc' ? (
           <KeyValueEditor rows={request.grpc.metadata} onChange={(metadata) => onChange({ grpc: { ...request.grpc, metadata } })} namePlaceholder="Metadata" />
@@ -684,7 +711,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 10, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 13, requestTimeoutMs: 30000, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L' } },
+    format: 'brunomnia', version: 11, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 13, requestTimeoutMs: 30000, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L', 'generate-code': 'Mod+Shift+G' } },
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -698,6 +725,7 @@ export default function App() {
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showSendOptions, setShowSendOptions] = useState(false);
+  const [showCodeGeneration, setShowCodeGeneration] = useState(false);
   const [folderEditor, setFolderEditor] = useState<{ collectionId: string; folderId: string }>();
   const [collectionEditor, setCollectionEditor] = useState<string>();
   const [sendDelayMs, setSendDelayMs] = useState(0);
@@ -1151,6 +1179,7 @@ export default function App() {
         setShowPalette(false);
         setShowEnvironment(false);
         setShowSendOptions(false);
+        setShowCodeGeneration(false);
         return;
       }
       if (event.repeat) return;
@@ -1169,6 +1198,9 @@ export default function App() {
       else if (shortcutMatches(event, shortcuts['duplicate-request'])) action(duplicateActiveRequest);
       else if (shortcutMatches(event, shortcuts['delete-request'])) action(deleteActiveRequest);
       else if (shortcutMatches(event, shortcuts['focus-url'])) action(() => { setWorkbenchSection('requests'); urlInputRef.current?.focus(); urlInputRef.current?.select(); });
+      else if (shortcutMatches(event, shortcuts['generate-code'])) action(() => {
+        if (active && (active.request.protocol === 'http' || active.request.protocol === 'graphql')) setShowCodeGeneration(true);
+      });
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -1231,6 +1263,7 @@ export default function App() {
   if (!hydrated || !active || !activeCollection || !activeEnvironment || !selectedEnvironment) {
     return <main className="loading-screen"><div className="brand-mark"><span /></div><strong>Brunomnia</strong><span>Opening local workspace…</span></main>;
   }
+  const codegenConfiguration = applyCollectionConfiguration(activeCollection, active.request, activeEnvironment);
 
   return (
     <main className="app-shell" data-density={workspace.preferences.density} data-theme={workspace.activePluginTheme ? 'plugin' : workspace.preferences.theme} style={{ '--editor-font-size': `${workspace.preferences.fontSize}px` } as CSSProperties}>
@@ -1290,7 +1323,9 @@ export default function App() {
             grpcSchemaLoading={grpcSchemaLoading}
             isSending={isSending}
             onChange={updateActiveRequest}
+            onAddRequest={addRequest}
             onCancelScheduled={cancelScheduledSends}
+            onGenerateCode={() => setShowCodeGeneration(true)}
             onLoadGraphqlSchema={() => void loadActiveGraphqlSchema()}
             onLoadGrpcSchema={() => void loadActiveGrpcSchema()}
             onOpenSendOptions={() => setShowSendOptions(true)}
@@ -1373,6 +1408,7 @@ export default function App() {
       </div> : null}
       {showImport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading import tools…</div></div>}><ImportDialog onApply={applyImport} onClose={() => setShowImport(false)} onFetchUrl={fetchImportUrl} /></Suspense> : null}
       {showExport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading export tools…</div></div>}><ExportDialog onClose={() => setShowExport(false)} workspace={workspace} /></Suspense> : null}
+      {showCodeGeneration ? <CodeGenerationDialog onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /> : null}
       {showPalette ? <CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => setWorkbenchSection('design')} onEnvironment={() => setShowEnvironment(true)} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => setWorkbenchSection('mocks')} onPreferences={() => setWorkbenchSection('preferences')} onRunner={() => setWorkbenchSection('runner')} /> : null}
     </main>
   );

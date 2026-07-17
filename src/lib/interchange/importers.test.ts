@@ -58,6 +58,28 @@ describe('artifact import adapters', () => {
     expect(result.environments[0].variables[0]).toMatchObject({ name: 'baseUrl', value: 'https://shop.example.com' });
   });
 
+  it('imports custom methods, explicit path variables, descriptions, and multiline values', () => {
+    const postman = importArtifact(JSON.stringify({
+      info: { name: 'WebDAV', schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json' },
+      item: [{ name: 'Inspect', request: {
+        method: 'PROPFIND',
+        url: { raw: 'https://api.example.com/files/:path', variable: [{ key: 'path', value: 'team docs', description: 'File path' }] },
+        header: [{ key: 'X-Notes', value: 'first\nsecond', description: 'Audit notes' }],
+      } }],
+    }), 'webdav.postman_collection.json');
+    expect(postman.warnings.some((warning) => warning.code === 'unsupported-method')).toBe(false);
+    expect(postman.collections[0].requests[0]).toMatchObject({ method: 'PROPFIND', url: 'https://api.example.com/files/{path}' });
+    expect(postman.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'path', value: 'team docs', description: 'File path' });
+    expect(postman.collections[0].requests[0].headers[0]).toMatchObject({ value: 'first\nsecond', description: 'Audit notes' });
+
+    const insomnia = importArtifact(JSON.stringify({ __export_format: 4, resources: [
+      { _id: 'wrk', _type: 'workspace', name: 'WebDAV' },
+      { _id: 'req', parentId: 'wrk', _type: 'request', name: 'Inspect', method: 'PROPFIND', url: 'https://api.example.com/files/{path}', pathParameters: [{ name: 'path', value: 'team docs', description: 'File path' }] },
+    ] }), 'webdav-insomnia.json');
+    expect(insomnia.collections[0].requests[0].method).toBe('PROPFIND');
+    expect(insomnia.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'path', value: 'team docs', description: 'File path' });
+  });
+
   it('maps advanced Postman and Insomnia auth families into executable fields', () => {
     const postman = importArtifact(JSON.stringify({
       info: { name: 'AWS', schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json' },
@@ -202,7 +224,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(10);
+    expect(second.version).toBe(11);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

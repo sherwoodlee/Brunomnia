@@ -9,6 +9,10 @@ describe('artifact export adapters', () => {
     const workspace = cloneSeedWorkspace();
     workspace.collections[0].requests[0].auth = { ...workspace.collections[0].requests[0].auth, type: 'hawk', hawkId: 'client', hawkKey: 'secret', hawkAlgorithm: 'sha256' };
     workspace.collections[0].requests[0].documentation = 'Request docs';
+    workspace.collections[0].requests[0].method = 'PROPFIND';
+    workspace.collections[0].requests[0].url = 'https://api.acme.dev/v1/orders/{orderId}';
+    workspace.collections[0].requests[0].pathParams = [{ id: 'order-id', name: 'orderId', value: 'ord/one', enabled: true, description: 'Order identifier' }];
+    workspace.collections[0].requests[0].headers[0].description = 'Payload type';
     workspace.collections[0].folders = [{ id: 'orders-folder', name: 'Secured orders', parentId: '', expanded: true, headers: [{ id: 'folder-header', name: 'X-Team', value: 'orders', enabled: true }], environment: [{ id: 'folder-variable', name: 'scope', value: 'orders', enabled: true }], auth: { ...workspace.collections[0].requests[0].auth, type: 'bearer', token: '{{ vault.orders }}' }, preRequestScript: 'folderPre();', tests: 'folderAfter();', documentation: 'Folder docs' }];
     workspace.collections[0].requests[0].folderId = 'orders-folder';
     workspace.cookies = [{ id: 'cookie-session', name: 'session', value: 'abc', domain: 'api.acme.dev', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-16T12:00:00.000Z' }];
@@ -20,6 +24,9 @@ describe('artifact export adapters', () => {
     expect(new Set(v4Import.collections.flatMap((collection) => collection.requests.map((request) => request.id))).size).toBe(14);
     expect(v4Import.collections[0].requests[0].auth).toMatchObject({ type: 'hawk', hawkId: 'client' });
     expect(v4Import.collections[0].requests[0].documentation).toBe('Request docs');
+    expect(v4Import.collections[0].requests[0]).toMatchObject({ method: 'PROPFIND', url: 'https://api.acme.dev/v1/orders/{orderId}' });
+    expect(v4Import.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'orderId', value: 'ord/one', description: 'Order identifier' });
+    expect(v4Import.collections[0].requests[0].headers[0].description).toBe('Payload type');
     expect(v4Import.collections[0].folders?.[0]).toMatchObject({ name: 'Secured orders', documentation: 'Folder docs' });
     expect(v4Import.collections[0].requests[0].folderId).toBe(v4Import.collections[0].folders?.[0].id);
     expect(v4Import.cookies[0]).toMatchObject({ name: 'session', sameSite: 'lax' });
@@ -34,6 +41,7 @@ describe('artifact export adapters', () => {
     expect(v5Import.mockServers[0].routes[0].status).toBe(200);
     expect(v5Import.collections[0].requests[0].auth).toMatchObject({ type: 'hawk', hawkId: 'client' });
     expect(v5Import.collections[0].requests[0].documentation).toBe('Request docs');
+    expect(v5Import.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'orderId', value: 'ord/one', description: 'Order identifier' });
     expect(v5Import.collections[0].folders?.[0]).toMatchObject({ name: 'Secured orders', documentation: 'Folder docs' });
     expect(v5Import.collections[0].requests[0].folderId).toBe(v5Import.collections[0].folders?.[0].id);
     expect(v5Import.cookies[0]).toMatchObject({ name: 'session', sameSite: 'lax' });
@@ -55,7 +63,7 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(10);
+    expect(parsed.version).toBe(11);
 
     const design = workspace.apiDesigns[0];
     const spec = exportArtifact(workspace, { format: 'openapi', scope: 'design', designId: design.id });

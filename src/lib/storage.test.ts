@@ -10,6 +10,7 @@ describe('workspace migrations', () => {
     const first = collections[0].requests[0];
     delete first.protocol;
     delete first.bodyMode;
+    delete first.pathParams;
     delete first.graphql;
     delete first.grpc;
     delete first.transport;
@@ -19,8 +20,9 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(10);
+    expect(migrated.version).toBe(11);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
+    expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
     expect(migrated.apiDesigns[0].name).toBe('Orders API');
     expect(migrated.mockServers[0].host).toBe('127.0.0.1');
@@ -31,6 +33,7 @@ describe('workspace migrations', () => {
     expect(migrated.ai.enabled).toBe(false);
     expect(migrated.konnect.baseUrl).toBe('https://us.api.konghq.com');
     expect(migrated.preferences).toMatchObject({ theme: 'system', requestTimeoutMs: 30_000, autoFetchGraphqlSchema: true });
+    expect(migrated.preferences.shortcuts['generate-code']).toBe('Mod+Shift+G');
     expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaEndpoint: '', schemaFetchedAt: '' });
   });
 
@@ -49,6 +52,17 @@ describe('workspace migrations', () => {
     expect(migrated.environments[0].id).toBe(migrated.activeEnvironmentId);
     expect(migrated.history).toEqual([]);
     expect(migrated.imports).toEqual([]);
+  });
+
+  it('normalizes v11 custom methods and described path rows', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.version = 10;
+    const first = (workspace.collections as Array<{ requests: Array<Record<string, unknown>> }>)[0].requests[0];
+    first.method = ' propfind ';
+    first.pathParams = [{ id: 'path', name: 'path', value: 'team docs', enabled: true, description: 'File path' }];
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.collections[0].requests[0].method).toBe('PROPFIND');
+    expect(migrated.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'path', value: 'team docs', description: 'File path' });
   });
 
   it('normalizes malformed collaboration and governance data without removing the last owner', () => {
