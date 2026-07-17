@@ -654,7 +654,7 @@ kbd {
 .runner-config label.runner-toggle { align-items: center; flex-direction: row; font-size: 9px; letter-spacing: 0; text-transform: none; }
 .runner-number-grid { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
 .runner-config p { color: var(--faint); font-size: 9px; line-height: 1.45; }
-.runner-results { display: grid; grid-template-rows: 106px minmax(0, 1fr); min-height: 0; }
+.runner-results { display: grid; grid-template-rows: 106px minmax(0, 1fr) auto; min-height: 0; }
 .runner-results > header { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 18px 22px; }
 .runner-results > header small { color: var(--muted); font-size: 9px; }
 .runner-results > header h2 { font-size: 19px; font-weight: 550; margin: 3px 0 0; }
@@ -665,10 +665,27 @@ kbd {
 .runner-table-head, .runner-table article { align-items: center; display: grid; gap: 12px; grid-template-columns: minmax(190px, 1fr) 70px 60px 70px 80px 60px; padding: 0 18px; }
 .runner-table-head { border-bottom: 1px solid var(--border-soft); color: var(--faint); font-size: 8px; height: 36px; text-transform: uppercase; }
 .runner-table article { border-bottom: 1px solid var(--border-soft); min-height: 51px; }
+.runner-table article[role="button"] { cursor: pointer; outline: none; }
+.runner-table article[role="button"]:focus-visible, .runner-table article.selected { background: var(--panel-soft); box-shadow: inset 2px 0 var(--accent); }
 .runner-table article > span { font: 9px var(--font-mono); }
 .runner-table article > span:first-child { display: flex; flex-direction: column; gap: 3px; }
 .runner-table article strong { color: var(--text-soft); font-size: 10px; }
 .runner-table article small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runner-response-detail { background: var(--panel); border-top: 1px solid var(--border); max-height: 250px; min-height: 155px; overflow: auto; }
+.runner-response-detail > header { align-items: center; border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; padding: 10px 16px; }
+.runner-response-detail > header div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.runner-response-detail > header small, .runner-body-preview small { color: var(--muted); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
+.runner-response-detail > header strong { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runner-response-detail button { background: transparent; border: 1px solid var(--border); border-radius: 3px; color: var(--muted); font-size: 8px; padding: 5px 8px; }
+.runner-response-detail > p { color: var(--muted); font-size: 10px; margin: 18px; }
+.runner-response-content { display: grid; gap: 10px; grid-template-columns: 210px minmax(180px, .65fr) minmax(280px, 1fr); padding: 12px 16px; }
+.runner-response-meta { display: flex; flex-direction: column; gap: 6px; }
+.runner-response-meta span { color: var(--muted); font: 9px var(--font-mono); }
+.runner-response-meta strong { color: var(--text); font-size: 16px; }
+.runner-response-content details { min-width: 0; }
+.runner-response-content summary { color: var(--muted); cursor: pointer; font-size: 9px; }
+.runner-response-content pre { color: var(--text-soft); font: 9px/1.5 var(--font-mono); margin: 7px 0 0; max-height: 115px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.runner-body-preview { min-width: 0; }
 
 .mock-content { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
 .mock-grid { display: grid; flex: 1; grid-template-columns: 260px minmax(500px, 1fr) 250px; min-height: 0; min-width: 960px; overflow: auto; }
@@ -1287,6 +1304,7 @@ kbd {
   .runner-stats { text-align: left; }
   .runner-table { overflow-x: auto; }
   .runner-table-head, .runner-table article { min-width: 620px; }
+  .runner-response-content { grid-template-columns: 1fr; }
   .mock-routes { border-bottom: 1px solid var(--border); border-right: 0; min-height: 230px; }
   .ai-mock-generator { align-items: stretch; grid-template-columns: minmax(0, 1fr); }
   .mock-route-editor { border-bottom: 1px solid var(--border); border-right: 0; min-height: 480px; }

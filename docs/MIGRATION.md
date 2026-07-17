@@ -313,7 +313,22 @@ Compatibility bounds remain explicit: Brunomnia does not claim byte-identical Mo
 
 Compatibility bounds remain explicit: the request plan is device-session state rather than a named saved preset. Per-request iteration counts, response-body report export, test-name filtering, all protocol runner semantics, and the rest of the Inso flag/command surface remain open.
 
-## Milestone 22 — remaining parity closure and release hardening
+## Milestone 22 — bounded collection-run response evidence (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Response snapshots | Complete baseline | Successful attempts retain status text, bounded headers, a body preview, original response size, and explicit truncation state |
+| Per-attempt bounds | Complete | At most 32 KB of UTF-8 content, including 16 KB body and 64 bounded headers, is stored for one attempt |
+| Report bound | Complete | One mutable 1 MB content budget spans every attempt in a report; later snapshots remain metadata-only once it is exhausted |
+| UTF-8 safety | Complete | Byte truncation backs up to a valid code-point boundary, including for multi-byte body/header content |
+| Desktop inspection | Complete baseline | Pointer or keyboard selection opens status, timing, header, body-preview, size, and truncation details for live and saved results |
+| Portable evidence | Complete baseline | Versioned JSON includes response snapshots; text/TAP/JUnit reporters remain intentionally concise |
+| Executable coverage | Complete | Seventy response attempts prove per-item/header/body limits, UTF-8 boundaries, and the shared aggregate budget |
+| Documentation and evidence | Complete | Updated [runner reports and CI guide](RUNNER_REPORTS.md) and [Milestone 22 verification](QA_MILESTONE_22.md) |
+
+Compatibility bounds remain explicit: snapshots are previews, not full request/response console archives. Request headers/bodies, redirect traces, cookie deltas, syntax-highlighted viewers, arbitrary-size bodies, binary rendering, and full protocol-specific runner consoles remain open.
+
+## Milestone 23 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

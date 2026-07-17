@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { parseRunnerData, runCollection } from './runner';
+import { RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, parseRunnerData, runCollection } from './runner';
 
 describe('collection runner', () => {
   it('parses JSON and quoted CSV iteration data', () => {
@@ -90,6 +90,29 @@ describe('collection runner', () => {
     expect(report.results.map((result) => result.status)).toEqual([500, 200, 200]);
     expect(report.bailed).toBe(false);
     expect(report.total).toBe(3);
+  });
+
+  it('stores UTF-8-safe response previews within per-result and report budgets', async () => {
+    const requests = Array.from({ length: 70 }, (_, index) => createBlankRequest(`request-${index}`));
+    const headers = Object.fromEntries(Array.from({ length: 70 }, (_, index) => [`x-header-${index}`, `value-${index}`]));
+    const body = '🙂'.repeat(5_000);
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
+      async () => ({ status: 200, statusText: 'OK', headers, body, durationMs: 1, sizeBytes: new TextEncoder().encode(body).byteLength }),
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    );
+
+    const snapshots = report.results.flatMap((result) => result.response ?? []);
+    expect(snapshots).toHaveLength(70);
+    expect(snapshots[0].headersTruncated).toBe(true);
+    expect(snapshots[0].bodyTruncated).toBe(true);
+    expect(new TextEncoder().encode(snapshots[0].bodyPreview).byteLength).toBeLessThanOrEqual(16_000);
+    expect(snapshots.every((snapshot) => snapshot.storedBytes <= RUNNER_RESPONSE_PER_RESULT_BYTES)).toBe(true);
+    expect(snapshots.reduce((total, snapshot) => total + snapshot.storedBytes, 0)).toBeLessThanOrEqual(RUNNER_RESPONSE_REPORT_BYTES);
+    expect(snapshots.at(-1)?.bodyTruncated).toBe(true);
+    expect(snapshots.at(-1)?.storedBytes).toBe(0);
   });
 
   it('passes iteration data and request-local variables through scripts and request rendering', async () => {
