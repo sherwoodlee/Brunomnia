@@ -236,6 +236,7 @@ export type Collection = {
   expanded: boolean;
   requests: ApiRequest[];
   folders?: RequestFolder[];
+  resourceOrder?: string[];
   environment?: KeyValue[];
   subEnvironments?: CollectionEnvironment[];
   activeSubEnvironmentId?: string;

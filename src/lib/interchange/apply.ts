@@ -7,6 +7,7 @@ const nextBatch = (result: ArtifactImport) => `import-${Date.now().toString(36)}
 
 const rekeyCollection = (collection: Collection, batch: string): Collection => {
   const folderIds = new Map((collection.folders ?? []).map((folder) => [folder.id, `${batch}-${folder.id}`]));
+  const requestIds = new Map(collection.requests.map((request) => [request.id, `${batch}-${request.id}`]));
   return {
     ...collection,
     id: `${batch}-${collection.id}`,
@@ -17,6 +18,10 @@ const rekeyCollection = (collection: Collection, batch: string): Collection => {
       variables: environment.variables.map((variable) => ({ ...variable, id: `${batch}-${variable.id}` })),
     })),
     activeSubEnvironmentId: collection.activeSubEnvironmentId ? `${batch}-${collection.activeSubEnvironmentId}` : '',
+    resourceOrder: (collection.resourceOrder ?? []).flatMap((id) => {
+      const mapped = folderIds.get(id) ?? requestIds.get(id);
+      return mapped ? [mapped] : [];
+    }),
     folders: (collection.folders ?? []).map((folder) => ({
       ...folder,
       id: folderIds.get(folder.id)!,
@@ -26,7 +31,7 @@ const rekeyCollection = (collection: Collection, batch: string): Collection => {
     })),
     requests: collection.requests.map((request) => ({
       ...request,
-      id: `${batch}-${request.id}`,
+      id: requestIds.get(request.id)!,
       folderId: request.folderId ? folderIds.get(request.folderId) ?? '' : '',
       pathParams: request.pathParams.map((row) => ({ ...row, id: `${batch}-${row.id}` })),
       params: request.params.map((row) => ({ ...row, id: `${batch}-${row.id}` })),

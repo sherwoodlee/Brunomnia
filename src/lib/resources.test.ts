@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createBlankRequest } from '../data/seed';
+import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
 import type { Collection, Environment, RequestFolder } from '../types';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes } from './resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, moveWorkspaceResource, orderedCollectionChildren, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes } from './resources';
 
 const row = (id: string, name: string, value: string) => ({ id, name, value, enabled: true });
 
@@ -64,5 +64,85 @@ describe('resource hierarchy', () => {
       { id: 'private', name: 'Private', parentId: 'base', private: true, variables: [] },
       { id: 'descendant', name: 'Descendant', parentId: 'private', variables: [] },
     ]).map((environment) => environment.id)).toEqual(['base']);
+  });
+
+  it('renders mixed folder and request siblings from a persisted order', () => {
+    const rootRequest = createBlankRequest('root-request');
+    const nestedRequest = { ...createBlankRequest('nested-request'), folderId: 'folder-a' };
+    const collection: Collection = {
+      id: 'collection', name: 'Collection', expanded: true, requests: [rootRequest, nestedRequest],
+      folders: [
+        { id: 'folder-a', name: 'A', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+        { id: 'folder-b', name: 'B', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+      ],
+      resourceOrder: ['root-request', 'folder-a', 'nested-request', 'folder-b'],
+    };
+    expect(orderedCollectionChildren(collection).map((resource) => resource.id)).toEqual(['root-request', 'folder-a', 'folder-b']);
+    expect(orderedCollectionChildren(collection, 'folder-a').map((resource) => resource.id)).toEqual(['nested-request']);
+  });
+
+  it('reorders and reparents mixed resources without changing their identities', () => {
+    const workspace = cloneSeedWorkspace();
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    workspace.collections = [{
+      id: 'source', name: 'Source', expanded: true, requests: [first, second],
+      folders: [{ id: 'folder', name: 'Folder', parentId: '', expanded: false, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }],
+      resourceOrder: ['folder', 'first', 'second'],
+    }];
+
+    const reordered = moveWorkspaceResource(workspace, {
+      kind: 'request', collectionId: 'source', resourceId: 'second', targetCollectionId: 'source', targetParentId: '', targetResourceId: 'folder', placement: 'before',
+    });
+    expect(orderedCollectionChildren(reordered.collections[0]).map((resource) => resource.id)).toEqual(['second', 'folder', 'first']);
+
+    const reparented = moveWorkspaceResource(reordered, {
+      kind: 'request', collectionId: 'source', resourceId: 'first', targetCollectionId: 'source', targetParentId: 'folder',
+    });
+    expect(reparented.collections[0].requests.find((request) => request.id === 'first')?.folderId).toBe('folder');
+    expect(reparented.collections[0].folders?.[0].expanded).toBe(true);
+    expect(orderedCollectionChildren(reparented.collections[0], 'folder').map((resource) => resource.id)).toEqual(['first']);
+  });
+
+  it('moves a folder subtree across collections and rejects descendant cycles', () => {
+    const workspace = cloneSeedWorkspace();
+    const nestedRequest = { ...createBlankRequest('nested-request'), folderId: 'child' };
+    workspace.collections = [
+      {
+        id: 'source', name: 'Source', expanded: true, requests: [nestedRequest],
+        folders: [
+          { id: 'root', name: 'Root', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+          { id: 'child', name: 'Child', parentId: 'root', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+        ],
+        resourceOrder: ['root', 'child', 'nested-request'],
+      },
+      {
+        id: 'target', name: 'Target', expanded: false, requests: [],
+        folders: [{ id: 'destination', name: 'Destination', parentId: '', expanded: false, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }],
+        resourceOrder: ['destination'],
+      },
+    ];
+    const cycle = moveWorkspaceResource(workspace, {
+      kind: 'folder', collectionId: 'source', resourceId: 'root', targetCollectionId: 'source', targetParentId: 'child',
+    });
+    expect(cycle).toBe(workspace);
+
+    const moved = moveWorkspaceResource(workspace, {
+      kind: 'folder', collectionId: 'source', resourceId: 'root', targetCollectionId: 'target', targetParentId: 'destination',
+    });
+    expect(moved.collections[0].folders).toEqual([]);
+    expect(moved.collections[0].requests).toEqual([]);
+    expect(moved.collections[1].folders?.find((folder) => folder.id === 'root')?.parentId).toBe('destination');
+    expect(moved.collections[1].folders?.find((folder) => folder.id === 'child')?.parentId).toBe('root');
+    expect(moved.collections[1].requests[0]).toMatchObject({ id: 'nested-request', folderId: 'child' });
+    expect(moved.collections[1].folders?.find((folder) => folder.id === 'destination')?.expanded).toBe(true);
+  });
+
+  it('reorders collections around the requested target', () => {
+    const workspace = cloneSeedWorkspace();
+    const first = workspace.collections[0].id;
+    const second = workspace.collections[1].id;
+    const moved = moveWorkspaceResource(workspace, { kind: 'collection', collectionId: first, targetCollectionId: second, placement: 'after' });
+    expect(moved.collections.slice(0, 2).map((collection) => collection.id)).toEqual([second, first]);
   });
 });

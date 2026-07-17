@@ -77,6 +77,19 @@ describe('workspace migrations', () => {
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });
 
+  it('sanitizes resource ordering while retaining every valid resource once', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    const collection = (workspace.collections as Array<Record<string, unknown>>)[0];
+    const requests = collection.requests as Array<Record<string, unknown>>;
+    collection.folders = [{ id: 'folder', name: 'Folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }];
+    collection.resourceOrder = [requests[1].id, 'missing', 'folder', requests[1].id, 42];
+    const migrated = migrateWorkspace(workspace);
+    const order = migrated.collections[0].resourceOrder ?? [];
+    expect(order.slice(0, 2)).toEqual([requests[1].id, 'folder']);
+    expect(new Set(order).size).toBe(order.length);
+    expect(order).toHaveLength(requests.length + 1);
+  });
+
   it('normalizes malformed collaboration and governance data without removing the last owner', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
     workspace.collaboration = { mode: 'unknown', revision: -4, path: 42 };

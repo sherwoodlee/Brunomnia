@@ -346,9 +346,18 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   }));
   const collections = (importedCollections.length ? importedCollections : seed.collections).map((collection) => {
     const folderIds = new Set((collection.folders ?? []).map((folder) => folder.id));
+    const resourceIds = new Set([...folderIds, ...collection.requests.map((request) => request.id)]);
+    const orderedIds = Array.isArray(collection.resourceOrder) ? collection.resourceOrder : [];
+    const seenResourceIds = new Set<string>();
+    const resourceOrder = [
+      ...orderedIds,
+      ...(collection.folders ?? []).map((folder) => folder.id),
+      ...collection.requests.map((request) => request.id),
+    ].filter((id): id is string => typeof id === 'string' && resourceIds.has(id) && !seenResourceIds.has(id) && Boolean(seenResourceIds.add(id)));
     const subEnvironmentIds = new Set((collection.subEnvironments ?? []).map((environment) => environment.id));
     return {
       ...collection,
+      resourceOrder,
       activeSubEnvironmentId: subEnvironmentIds.has(collection.activeSubEnvironmentId ?? '') ? collection.activeSubEnvironmentId : '',
       requests: collection.requests.map((request) => ({ ...request, folderId: request.folderId && folderIds.has(request.folderId) ? request.folderId : '' })),
     };
