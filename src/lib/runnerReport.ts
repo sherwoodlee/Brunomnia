@@ -36,7 +36,7 @@ const failureDetails = (result: RunnerItemResult) => {
   return 'The runner marked this attempt as failed.';
 };
 
-const summary = (report: RunnerReport) => `${report.passed} passed, ${report.failed} failed, ${report.total} total${report.cancelled ? ', cancelled' : ''} (${runDuration(report)} ms)`;
+const summary = (report: RunnerReport) => `${report.passed} passed, ${report.failed} failed, ${report.total} total${report.cancelled ? ', cancelled' : ''}${report.bailed ? ', bailed' : ''} (${runDuration(report)} ms)`;
 
 const specReport = (report: RunnerReport) => {
   const lines = [report.collectionName];

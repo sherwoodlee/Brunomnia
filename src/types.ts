@@ -570,6 +570,7 @@ export type RunnerReport = {
   passed: number;
   failed: number;
   cancelled: boolean;
+  bailed?: boolean;
   results: RunnerItemResult[];
 };
 

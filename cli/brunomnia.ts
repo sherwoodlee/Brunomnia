@@ -394,7 +394,7 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files]
+  brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files]
   brunomnia run test <workspace> <collection-name-or-id> [same options]
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
@@ -443,7 +443,7 @@ const main = async () => {
     const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
     const dataPath = flag('--data');
     const report = await runCollection(collection, environment, {
-      iterations: Number(flag('--iterations') ?? 1), retries: Number(flag('--retries') ?? 0), delayMs: 0,
+      iterations: Number(flag('--iterations') ?? 1), retries: Number(flag('--retries') ?? 0), bail: hasFlag('--bail'), delayMs: 0,
       scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(flag('--script-timeout') ?? 10_000))),
       environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
       dataRows: dataPath ? parseRunnerData(await loadText(dataPath)) : [],
