@@ -1,6 +1,6 @@
 # Permission-bounded scripting
 
-Milestone 12 expands Brunomnia's clean-room compatibility with the current [Insomnia scripting contract](https://developer.konghq.com/insomnia/scripts/) while keeping host capabilities explicit. Every feature in this document is local and free; the controls are safety grants, not account or subscription gates.
+Milestones 12–14 expand Brunomnia's clean-room compatibility with the current [Insomnia scripting contract](https://developer.konghq.com/insomnia/scripts/) while keeping host capabilities explicit. Every feature in this document is local and free; the controls are safety grants, not account or subscription gates.
 
 ## Runtime model
 
@@ -9,7 +9,7 @@ Desktop pre-request and after-response JavaScript runs in a disposable browser W
 The runtime exposes:
 
 - `insomnia.baseGlobals`, `globals`, `environment`, `baseEnvironment`, `CollectionVariables`, `collectionVariables`, `variables`, `localVars`, and `iterationData` with `get`, `set`, `unset`, `has`, `clear`, `toObject`, and `replaceIn`;
-- generic `insomnia.variables` lookup in local → iteration → nearest folder → collection → global priority, with new values written to the request-local scope;
+- generic `insomnia.variables` lookup in local → iteration → nearest folder → selected collection → collection base → selected global → global base priority, with new values written to the request-local scope;
 - `insomnia.parentFolders.get(nameOrId)`, `getById()`, `getByName()`, and `getEnvironments()`, with duplicate names searched nearest-first and mutable folder environments;
 - request method, URL, header, body, authentication, proxy, and certificate mutation helpers;
 - `request.url.addQueryParams()` with query strings, repeated rows, or objects, plus `getQueryString()` for ordinary or templated URLs;
@@ -20,7 +20,7 @@ The runtime exposes:
 - top-level `await`; and
 - selected local `require()` adapters: `assert`, `atob`, `btoa`, `chai`, lightweight `lodash`, `querystring`, `timers`, `url`, `util`, and `uuid`.
 
-`insomnia.globals` changes are persisted to the selected global environment without flattening inherited values. `insomnia.environment` and collection-variable aliases mutate the collection environment; parent-folder script changes are also persisted. Runner iterations carry global/collection/folder mutations forward in memory. Brunomnia currently aliases `baseGlobals` to the selected global environment and `baseEnvironment` to the collection environment because its model does not yet expose separate global-base and collection-sub-environment editors; this remains explicit rather than pretending those stores are distinct.
+`insomnia.baseGlobals` changes persist to the root global environment, while `insomnia.globals` changes persist to the selected global sub-environment without flattening inherited enabled values. `insomnia.baseEnvironment`, `CollectionVariables`, lowercase `collectionVariables`, and `variables.collectionVars` mutate the collection base. `insomnia.environment` and `variables.environmentVars` mutate the selected collection sub-environment. When no sub-environment is selected, the selected API aliases the corresponding base store. Parent-folder changes also persist. Direct sends, runner iterations, and trusted CLI runs keep all stores separate and carry mutations forward in memory; disabled rows mask lower scopes until a script explicitly sets or unsets that name in the owning store.
 
 ## Secondary requests
 
@@ -48,4 +48,4 @@ Secondary script requests require both `--allow-scripts` and `--allow-script-req
 
 ## Remaining compatibility limits
 
-The runtime does not yet bundle AJV, Cheerio, CryptoJS, CSV Parse, Moment, Postman Collection, TV4, XML2JS, or the complete Node built-in surface. File-backed body/certificate helpers remain editor-only. Complete Chai/Lodash behavior, distinct global-base/selected-global and collection-base/selected-collection persistence, and broader deprecated Postman interfaces remain in the [parity ledger](PARITY.md).
+The runtime does not yet bundle AJV, Cheerio, CryptoJS, CSV Parse, Moment, Postman Collection, TV4, XML2JS, or the complete Node built-in surface. File-backed body/certificate helpers remain editor-only. Complete Chai/Lodash behavior and broader deprecated Postman interfaces remain in the [parity ledger](PARITY.md).

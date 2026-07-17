@@ -8,7 +8,7 @@ import type {
   ScriptRunResult,
 } from '../types';
 import { environmentMap } from './request';
-import { applyCollectionConfiguration } from './resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, type ScriptEnvironmentScopes } from './resources';
 import type { ScriptRunOptions } from './scriptSandbox';
 
 export type RequestExecutor = (request: ApiRequest, variables: Record<string, string>) => Promise<HttpResponse>;
@@ -29,6 +29,7 @@ export type RunnerOptions = {
   delayMs: number;
   dataRows: Record<string, string>[];
   scriptTimeoutMs?: number;
+  environmentScopes?: ScriptEnvironmentScopes;
   shouldCancel?: () => boolean;
   onResult?: (result: RunnerItemResult) => void;
 };
@@ -53,14 +54,23 @@ export const runCollection = async (
   let cancelled = false;
   const iterations = boundedInteger(options.iterations, 1, 1000);
   const retries = boundedInteger(options.retries, 0, 10);
-  let collectionVariables = Object.fromEntries((collection.environment ?? []).filter((row) => row.enabled && row.name).map((row) => [row.name, row.value]));
-  const collectionDisabled = new Set((collection.environment ?? []).filter((row) => !row.enabled && row.name).map((row) => row.name));
+  const configuredGlobalScopes = options.environmentScopes;
+  const globalsAreBase = configuredGlobalScopes?.globalsAreBase ?? true;
+  let baseGlobalVariables = { ...(configuredGlobalScopes?.baseGlobals.values ?? environmentMap(environment)) };
+  let globalVariables = globalsAreBase ? baseGlobalVariables : { ...(configuredGlobalScopes?.globals.values ?? {}) };
+  let baseGlobalDisabled = [...(configuredGlobalScopes?.baseGlobals.disabled ?? [])];
+  let globalDisabled = [...(configuredGlobalScopes?.globals.disabled ?? [])];
+  const configuredCollectionScopes = collectionEnvironmentScopes(collection);
+  const collectionVariablesAreBase = configuredCollectionScopes.environmentIsBase;
+  let baseEnvironment = { ...configuredCollectionScopes.baseEnvironment.values };
+  let collectionVariables = collectionVariablesAreBase ? baseEnvironment : { ...configuredCollectionScopes.environment.values };
+  let baseEnvironmentDisabled = [...configuredCollectionScopes.baseEnvironment.disabled];
+  let collectionDisabled = [...configuredCollectionScopes.environment.disabled];
   const folderVariables = new Map((collection.folders ?? []).map((folder) => [folder.id, Object.fromEntries(folder.environment.filter((row) => row.enabled && row.name).map((row) => [row.name, row.value]))]));
   const folderDisabled = new Map((collection.folders ?? []).map((folder) => [folder.id, new Set(folder.environment.filter((row) => !row.enabled && row.name).map((row) => row.name))]));
 
   outer: for (let iteration = 0; iteration < iterations; iteration += 1) {
     const iterationData = options.dataRows[iteration % Math.max(1, options.dataRows.length)] ?? {};
-    let globalVariables = environmentMap(environment);
     for (const originalRequest of collection.requests) {
       if (options.shouldCancel?.()) { cancelled = true; break outer; }
       for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
@@ -72,15 +82,36 @@ export const runCollection = async (
         const started = Date.now();
         try {
           const scriptFolders = configured.folders.map((folder) => ({ id: folder.id, name: folder.name, environment: { ...(folderVariables.get(folder.id) ?? {}) }, disabled: [...(folderDisabled.get(folder.id) ?? [])] }));
-          const preRequest = await executeScript(request.preRequestScript, request, globalVariables, undefined, options.scriptTimeoutMs ?? 10_000, {}, iterationData, { collectionVariables, collectionDisabled: [...collectionDisabled], folders: scriptFolders });
+          const scriptScopes: ScriptRunOptions = {
+            baseGlobals: baseGlobalVariables,
+            baseGlobalDisabled,
+            globalDisabled,
+            globalsAreBase,
+            baseEnvironment,
+            baseEnvironmentDisabled,
+            collectionVariables,
+            collectionDisabled,
+            collectionVariablesAreBase,
+            folders: scriptFolders,
+          };
+          const preRequest = await executeScript(request.preRequestScript, request, globalVariables, undefined, options.scriptTimeoutMs ?? 10_000, {}, iterationData, scriptScopes);
           request = preRequest.request;
+          baseGlobalVariables = preRequest.baseGlobals ?? (globalsAreBase ? preRequest.environment : baseGlobalVariables);
           globalVariables = preRequest.environment;
-          collectionVariables = preRequest.collectionVariables ?? collectionVariables;
-          preRequest.folders?.forEach((folder) => folderVariables.set(folder.id, folder.environment));
+          baseGlobalDisabled = preRequest.baseGlobalDisabled ?? baseGlobalDisabled;
+          globalDisabled = preRequest.globalDisabled ?? globalDisabled;
+          baseEnvironment = preRequest.baseEnvironment ?? (collectionVariablesAreBase ? preRequest.collectionVariables : undefined) ?? baseEnvironment;
+          collectionVariables = collectionVariablesAreBase ? baseEnvironment : preRequest.collectionVariables ?? collectionVariables;
+          baseEnvironmentDisabled = preRequest.baseEnvironmentDisabled ?? baseEnvironmentDisabled;
+          collectionDisabled = preRequest.collectionDisabled ?? collectionDisabled;
+          preRequest.folders?.forEach((folder) => { folderVariables.set(folder.id, folder.environment); folderDisabled.set(folder.id, new Set(folder.disabled ?? [])); });
           const localVariables = preRequest.localVariables ?? {};
-          const requestVariables = { ...globalVariables };
-          collectionDisabled.forEach((name) => delete requestVariables[name]);
-          Object.assign(requestVariables, collectionVariables);
+          const requestVariables: Record<string, string> = {};
+          const applyScope = (scope: Record<string, string>, disabled: string[]) => { disabled.forEach((name) => delete requestVariables[name]); Object.assign(requestVariables, scope); };
+          applyScope(baseGlobalVariables, baseGlobalDisabled);
+          if (!globalsAreBase) applyScope(globalVariables, globalDisabled);
+          applyScope(baseEnvironment, baseEnvironmentDisabled);
+          if (!collectionVariablesAreBase) applyScope(collectionVariables, collectionDisabled);
           scriptFolders.forEach((folder) => {
             folderDisabled.get(folder.id)?.forEach((name) => delete requestVariables[name]);
             Object.assign(requestVariables, folderVariables.get(folder.id) ?? {});
@@ -88,13 +119,26 @@ export const runCollection = async (
           Object.assign(requestVariables, iterationData, localVariables);
           response = await executeRequest(request, requestVariables);
           const afterResponse = await executeScript(request.tests, request, globalVariables, response, options.scriptTimeoutMs ?? 10_000, localVariables, iterationData, {
+            baseGlobals: baseGlobalVariables,
+            baseGlobalDisabled,
+            globalDisabled,
+            globalsAreBase,
+            baseEnvironment,
+            baseEnvironmentDisabled,
             collectionVariables,
-            collectionDisabled: [...collectionDisabled],
-            folders: scriptFolders.map((folder) => ({ ...folder, environment: { ...(folderVariables.get(folder.id) ?? {}) } })),
+            collectionDisabled,
+            collectionVariablesAreBase,
+            folders: scriptFolders.map((folder) => ({ ...folder, environment: { ...(folderVariables.get(folder.id) ?? {}) }, disabled: [...(folderDisabled.get(folder.id) ?? [])] })),
           });
+          baseGlobalVariables = afterResponse.baseGlobals ?? (globalsAreBase ? afterResponse.environment : baseGlobalVariables);
           globalVariables = afterResponse.environment;
-          collectionVariables = afterResponse.collectionVariables ?? collectionVariables;
-          afterResponse.folders?.forEach((folder) => folderVariables.set(folder.id, folder.environment));
+          baseGlobalDisabled = afterResponse.baseGlobalDisabled ?? baseGlobalDisabled;
+          globalDisabled = afterResponse.globalDisabled ?? globalDisabled;
+          baseEnvironment = afterResponse.baseEnvironment ?? (collectionVariablesAreBase ? afterResponse.collectionVariables : undefined) ?? baseEnvironment;
+          collectionVariables = collectionVariablesAreBase ? baseEnvironment : afterResponse.collectionVariables ?? collectionVariables;
+          baseEnvironmentDisabled = afterResponse.baseEnvironmentDisabled ?? baseEnvironmentDisabled;
+          collectionDisabled = afterResponse.collectionDisabled ?? collectionDisabled;
+          afterResponse.folders?.forEach((folder) => { folderVariables.set(folder.id, folder.environment); folderDisabled.set(folder.id, new Set(folder.disabled ?? [])); });
           tests = afterResponse.tests;
         } catch (caught) {
           error = caught instanceof Error ? caught.message : String(caught);

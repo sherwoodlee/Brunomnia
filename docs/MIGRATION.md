@@ -199,9 +199,24 @@ Compatibility bounds remain explicit: the full upstream library/Node module set,
 | Verification fixture | Complete | The checked-in CLI fixture exercises ordered async Chai assertions under explicit `--allow-scripts` consent |
 | Documentation and evidence | Complete | Updated [permission-bounded scripting guide](SCRIPTING.md) and [Milestone 13 verification](QA_MILESTONE_13.md) |
 
-Compatibility bounds remain explicit: `baseGlobals` currently aliases the selected global store and `baseEnvironment` aliases the collection store because separate global-base/selected-global and collection-base/selected-collection editors are not yet modeled. The full bundled module set, file-backed script bodies/certificates, complete Chai/Lodash APIs, external-vault script access, deprecated Postman interfaces, and stronger portable CLI isolation remain open.
+Compatibility bounds remain explicit: the full bundled module set, file-backed script bodies/certificates, complete Chai/Lodash APIs, external-vault script access, deprecated Postman interfaces, and stronger portable CLI isolation remain open. Distinct environment-store work follows in Milestone 14.
 
-## Milestone 14 — remaining parity closure and release hardening
+## Milestone 14 — distinct script environment stores (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Global stores | Complete baseline | Root global base and effective selected global stores are modeled independently, with base/selected aliasing only when no global sub-environment is active |
+| Collection stores | Complete baseline | Every collection has an editable base plus selectable, creatable, renameable, and deletable sub-environments |
+| Lookup and masking | Complete baseline | Base global → selected global → collection base → selected collection → root-to-leaf folders → iteration → local resolution, including disabled-row masking and set/unset mask repair |
+| Execution paths | Complete baseline | Direct sends, collection runner, mediated secondary requests, and trusted CLI scripts receive and carry the same distinct store contract |
+| Persistence | Complete baseline | Base/selected global, base/selected collection, and folder mutations persist to their owning rows without flattening inherited enabled global values |
+| Interchange | Complete baseline | Postman collection variables map to collection base; Insomnia v4/v5 collection base/sub-environments round-trip; v5 standalone global environments remain separate |
+| Workspace migration | Complete | Versions 1–12 migrate to v13 with normalized collection sub-environments and stale active selections cleared |
+| Documentation and evidence | Complete | Updated [permission-bounded scripting guide](SCRIPTING.md) and [Milestone 14 verification](QA_MILESTONE_14.md) |
+
+Compatibility bounds remain explicit: global sub-environment chains deeper than one level are exposed to scripts as one effective selected-global store, and disabled masks inherited through that effective store can be persisted on the selected environment after mutation. The remaining bundled libraries, file-backed script helpers, deprecated Postman surfaces, and portable CLI isolation remain open.
+
+## Milestone 15 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

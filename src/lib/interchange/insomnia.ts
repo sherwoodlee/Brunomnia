@@ -215,6 +215,15 @@ const v4Environments = (resources: UnknownRecord[], workspaceId: string, format:
   }));
 };
 
+const collectionEnvironmentFields = (environments: Environment[]) => {
+  const base = environments.find((environment) => !environment.parentId) ?? environments[0];
+  return {
+    environment: base?.variables ?? [],
+    subEnvironments: environments.filter((environment) => environment.id !== base?.id).map((environment) => ({ id: environment.id, name: environment.name, variables: environment.variables })),
+    activeSubEnvironmentId: '',
+  };
+};
+
 const v4Mocks = (resources: UnknownRecord[], workspaceId: string): MockServer[] => {
   const servers = resources.filter((resource) => (resource._type === 'mock' || resource._type === 'mock_server') && (resource.parentId === workspaceId || !resource.parentId));
   return servers.map((server, index) => {
@@ -290,8 +299,8 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
         request.inheritFolderAuth = Boolean(request.folderId) && !resource.authentication;
         return request;
       });
-    collections.push({ id: sourceId('collection', 'insomnia-v4', workspaceId, workspaceIndex), name: asString(workspace.name, `Workspace ${workspaceIndex + 1}`), expanded: true, requests, folders: requestFolders, environment: [], documentation: asString(workspace.description), source: sourceMetadata('insomnia-v4', workspaceId, { description: workspace.description }) });
-    environments.push(...v4Environments(resources, workspaceId, 'insomnia-v4'));
+    const collectionEnvironments = v4Environments(resources, workspaceId, 'insomnia-v4');
+    collections.push({ id: sourceId('collection', 'insomnia-v4', workspaceId, workspaceIndex), name: asString(workspace.name, `Workspace ${workspaceIndex + 1}`), expanded: true, requests, folders: requestFolders, ...collectionEnvironmentFields(collectionEnvironments), documentation: asString(workspace.description), source: sourceMetadata('insomnia-v4', workspaceId, { description: workspace.description }) });
     mockServers.push(...v4Mocks(resources, workspaceId));
   }
 
@@ -370,8 +379,8 @@ export const importInsomniaV5 = (sourceName: string, documents: UnknownRecord[])
       const folders: RequestFolder[] = [];
       nestedV5Requests(document.collection, '', warnings, requests, folders, identity);
       const name = asString(document.name, `Collection ${documentIndex + 1}`);
-      collections.push({ id: sourceId('collection', 'insomnia-v5', identity), name, expanded: true, requests, folders, environment: [], documentation: asString(meta?.description), source: sourceMetadata('insomnia-v5', identity, { schemaVersion: document.schema_version }) });
-      environments.push(...v5Environments(document, identity));
+      const collectionEnvironments = v5Environments(document, identity);
+      collections.push({ id: sourceId('collection', 'insomnia-v5', identity), name, expanded: true, requests, folders, ...collectionEnvironmentFields(collectionEnvironments), documentation: asString(meta?.description), source: sourceMetadata('insomnia-v5', identity, { schemaVersion: document.schema_version }) });
       if (type.startsWith('spec.')) {
         const spec = asRecord(document.spec);
         const contents = spec?.contents;

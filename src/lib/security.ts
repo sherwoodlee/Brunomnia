@@ -95,6 +95,7 @@ export const plaintextSecretCandidates = (workspace: Workspace): string[] => {
     .forEach((row) => candidates.push(`${label}: ${kind} ${row.name}`));
   workspace.collections.forEach((collection) => {
     scanRows(collection.name, 'variable', collection.environment ?? []);
+    (collection.subEnvironments ?? []).forEach((environment) => scanRows(`${collection.name} / ${environment.name}`, 'variable', environment.variables));
     (collection.folders ?? []).forEach((folder) => {
       const label = `${collection.name} / ${folder.name}`;
       if (folder.auth) scanAuth(label, folder.auth);

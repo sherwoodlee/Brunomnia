@@ -20,7 +20,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(12);
+    expect(migrated.version).toBe(13);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
@@ -64,6 +64,17 @@ describe('workspace migrations', () => {
     const migrated = migrateWorkspace(workspace);
     expect(migrated.collections[0].requests[0].method).toBe('PROPFIND');
     expect(migrated.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'path', value: 'team docs', description: 'File path' });
+  });
+
+  it('normalizes collection sub-environments and repairs a stale selection', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    const collection = (workspace.collections as Array<Record<string, unknown>>)[0];
+    collection.subEnvironments = [{ id: 'staging', name: 'Staging', variables: [{ name: 'host', value: 'staging.example', enabled: true }] }, null];
+    collection.activeSubEnvironmentId = 'missing';
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.version).toBe(13);
+    expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
+    expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });
 
   it('normalizes malformed collaboration and governance data without removing the last owner', () => {

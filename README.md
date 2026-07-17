@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the thirteenth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the fourteenth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -16,12 +16,12 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Local client-code generation for cURL, JavaScript Fetch, Python Requests, Go `net/http`, Java `HttpClient`, and C# `HttpClient`
 - Redirect, timeout, certificate validation, proxy exclusions, and domain-scoped client-certificate controls for native HTTP/SSE
 - Local collections with nested request folders, request/collection/folder documentation, and inherited folder headers, authentication, variables, and scripts
-- Base/sub-environment inheritance, device-local private sub-environments, collection/folder/iteration/request-local variables, dynamic aliases, and template tags for UUIDs, time, Faker values, encoding, hashing, JSONPath, cookies, prompts, requests, and chained responses
+- Distinct global-base/selected-global and collection-base/selected-collection environments, device-local private global sub-environments, folder/iteration/request-local variables, dynamic aliases, and template tags for UUIDs, time, Faker values, encoding, hashing, JSONPath, cookies, prompts, requests, and chained responses
 - Basic, Digest, OAuth 1.0/2.0, NTLM, AWS IAM v4, Bearer, API key, Hawk, Atlassian ASAP, and Netrc authentication
 - Persistent editable cookie jar with per-request send/store controls
 - Request history and response body/header/timeline inspection
 - Delayed one-shot sends and sequential repeating sends with explicit cancellation and a 1,000-run safety bound
-- Permission-bounded pre-request scripts and async after-response tests with documented global/collection/folder/iteration/local lookup, exact folder/query/auth helpers, expanded Chai assertions, selected bundled modules, and opt-in mediated HTTP/vault capabilities
+- Permission-bounded pre-request scripts and async after-response tests with documented seven-level environment lookup, exact base/selected scope aliases, folder/query/auth helpers, expanded Chai assertions, selected bundled modules, and opt-in mediated HTTP/vault capabilities
 - Ordered collection runs with JSON/CSV iteration data, retries, cancellation, cookie/response chaining, bounded WebSocket/SSE samples, and saved reports
 - OpenAPI 3.x YAML/JSON editing, structural and safe Spectral-style custom linting, operation preview, formatting, and request generation
 - Native loopback mock servers with route parameters, delays, headers, CORS, and dynamic response tokens
@@ -29,7 +29,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - File, pasted-text, and HTTP(S) URL imports with format detection and a warning preview
 - Insomnia JSON v4/v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports
 - Scoped Brunomnia JSON, Insomnia v4/v5, HAR, and raw OpenAPI exports
-- Versioned workspace migrations with collision-safe import history, advanced-auth/cookie-jar interoperability, and preserved source metadata
+- Versioned workspace migrations with collision-safe import history, distinct environment-store interoperability, advanced-auth/cookie-jar mapping, and preserved source metadata
 - Reviewable split-YAML filesystem projects with ordinary Git init/clone/status/diff/stage/commit/branch/pull/push/merge workflows
 - Three-way text conflict editing, binary ours/theirs resolution, and explicit merge abort without silently discarding local changes
 - Local dependency-free CommonJS plugins with disabled-by-default installation, explicit capability grants, request/response hooks, template tags, actions, themes, and plugin-local storage
@@ -41,7 +41,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Project-scoped MCP clients over Streamable HTTP/JSON-RPC and native STDIO, with cached tools, prompts, resources, resource templates, roots, invocation, and an event console
 - Optional OpenAI, Anthropic, Gemini, and custom/local OpenAI-compatible providers with vault-only credential execution, AI mock generation, and reviewable Git commit grouping suggestions
 - Pull-only Konnect control-plane discovery and Gateway Service/HTTP Route mapping that preserves local request work and isolates unsupported routes
-- Workspace v12 migrations, bounded resource hierarchy and request-row normalization, private-environment publication filtering, split-YAML serialization, import-time authority stripping, and device-local integration/script permissions
+- Workspace v13 migrations, bounded resource hierarchy and request-row normalization, collection sub-environment repair, private-global publication filtering, split-YAML serialization, import-time authority stripping, and device-local integration/script permissions
 - Atomic persistence in the OS application-data directory
 - System/dark/light appearance, comfortable/compact density, configurable editor sizing, request defaults, and customizable keyboard shortcuts
 - Responsive desktop UI with no login, upgrade, or cloud dependency

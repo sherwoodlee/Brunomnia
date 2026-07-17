@@ -7,7 +7,7 @@ import { storeResponseCookies } from './lib/cookies';
 import { connectStream, disconnectStream, invokeGrpc, loadGrpcSchema, sendWebSocketMessage } from './lib/protocol';
 import { environmentMap, formatBytes, mockResponse, normalizeHttpMethod, prettyBody } from './lib/request';
 import { loadWorkspace, saveWorkspace } from './lib/storage';
-import { applyScriptSubresponse, runBrowserScript } from './lib/scriptSandbox';
+import { applyScriptSubresponse, runBrowserScript, type ScriptRunOptions } from './lib/scriptSandbox';
 import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import { AuthEditor } from './components/AuthEditor';
@@ -19,7 +19,7 @@ import { applyPluginTheme, createPluginRuntime, describePlugin, type PluginHostC
 import { plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
 import { fetchGraphqlSchema } from './lib/graphql';
 import { shortcutMatches } from './lib/preferences';
-import { applyCollectionConfiguration, environmentAncestors, folderAncestors, folderPath, publicEnvironments, resolveEnvironment } from './lib/resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -76,14 +76,18 @@ const methodClass = (method: string) => methods.includes(method as HttpMethod) ?
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
-const scriptVariableRows = (values: Record<string, string>, existing: KeyValue[], prefix: string): KeyValue[] => {
+const scriptVariableRows = (values: Record<string, string>, existing: KeyValue[], prefix: string, disabled = existing.filter((row) => !row.enabled && row.name).map((row) => row.name)): KeyValue[] => {
   const names = new Set(Object.keys(values));
+  const disabledNames = new Set(disabled.filter((name) => !names.has(name)));
   return [
     ...Object.entries(values).map(([name, value]) => {
       const row = existing.find((candidate) => candidate.name === name);
       return row ? { ...row, value, enabled: true } : { id: uid(prefix), name, value, enabled: true };
     }),
-    ...existing.filter((row) => !row.enabled && !names.has(row.name)),
+    ...[...disabledNames].map((name) => {
+      const row = existing.find((candidate) => candidate.name === name);
+      return row ? { ...row, enabled: false } : { id: uid(prefix), name, value: '', enabled: false };
+    }),
   ];
 };
 
@@ -94,10 +98,16 @@ const scriptFolderVariables = (folders: RequestFolder[]) => folders.map((folder)
   disabled: folder.environment.filter((row) => !row.enabled && row.name).map((row) => row.name),
 }));
 
-const mergedScriptVariables = (baseline: Record<string, string>, result: ScriptRunResult, collectionDisabled: string[]): Record<string, string> => {
-  const values = { ...baseline, ...result.environment };
-  collectionDisabled.forEach((name) => delete values[name]);
-  Object.assign(values, result.collectionVariables ?? {});
+const mergedScriptVariables = (result: ScriptRunResult, scopes: ScriptRunOptions): Record<string, string> => {
+  const values: Record<string, string> = {};
+  const apply = (scope: Record<string, string>, disabled: string[] = []) => {
+    disabled.forEach((name) => delete values[name]);
+    Object.assign(values, scope);
+  };
+  apply(result.baseGlobals ?? result.environment, result.baseGlobalDisabled ?? scopes.baseGlobalDisabled);
+  if (!scopes.globalsAreBase) apply(result.environment, result.globalDisabled ?? scopes.globalDisabled);
+  apply(result.baseEnvironment ?? result.collectionVariables ?? {}, result.baseEnvironmentDisabled ?? scopes.baseEnvironmentDisabled);
+  if (!scopes.collectionVariablesAreBase) apply(result.collectionVariables ?? {}, result.collectionDisabled ?? scopes.collectionDisabled);
   (result.folders ?? []).forEach((folder) => {
     (folder.disabled ?? []).forEach((name) => delete values[name]);
     Object.assign(values, folder.environment);
@@ -660,12 +670,35 @@ type CollectionDialogProps = {
 
 function CollectionDialog({ collection, onChange, onClose }: CollectionDialogProps) {
   const [tab, setTab] = useState<'variables' | 'docs'>('variables');
+  const selectedEnvironment = (collection.subEnvironments ?? []).find((environment) => environment.id === collection.activeSubEnvironmentId);
+  const selectEnvironment = (activeSubEnvironmentId: string) => onChange({ ...collection, activeSubEnvironmentId });
+  const addEnvironment = () => {
+    const id = uid('collection-environment');
+    onChange({
+      ...collection,
+      activeSubEnvironmentId: id,
+      subEnvironments: [...(collection.subEnvironments ?? []), { id, name: `Environment ${(collection.subEnvironments?.length ?? 0) + 1}`, variables: [] }],
+    });
+  };
+  const updateSelectedEnvironment = (patch: Partial<NonNullable<typeof selectedEnvironment>>) => {
+    if (!selectedEnvironment) return;
+    onChange({ ...collection, subEnvironments: (collection.subEnvironments ?? []).map((environment) => environment.id === selectedEnvironment.id ? { ...environment, ...patch } : environment) });
+  };
+  const deleteSelectedEnvironment = () => {
+    if (!selectedEnvironment || !window.confirm(`Delete collection environment “${selectedEnvironment.name}”?`)) return;
+    onChange({ ...collection, activeSubEnvironmentId: '', subEnvironments: (collection.subEnvironments ?? []).filter((environment) => environment.id !== selectedEnvironment.id) });
+  };
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section aria-labelledby="collection-settings-title" aria-modal="true" className="modal folder-modal collection-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
     <header><div><small>Collection configuration</small><h2 id="collection-settings-title">{collection.name}</h2></div><button aria-label="Close" className="icon-button subtle" onClick={onClose} type="button"><Icon name="x" /></button></header>
     <div className="folder-identity"><label>Name<input autoFocus onChange={(event) => onChange({ ...collection, name: event.target.value })} value={collection.name} /></label></div>
     <nav aria-label="Collection settings" className="interchange-tabs"><button className={tab === 'variables' ? 'active' : ''} onClick={() => setTab('variables')} type="button">Variables</button><button className={tab === 'docs' ? 'active' : ''} onClick={() => setTab('docs')} type="button">Docs</button></nav>
     <div className="folder-modal-content">
-      {tab === 'variables' ? <><p>Collection values override the selected global environment and are inherited by every request in this collection.</p><KeyValueEditor namePlaceholder="Variable" onChange={(environment) => onChange({ ...collection, environment })} rows={collection.environment ?? []} /></> : null}
+      {tab === 'variables' ? <div className="environment-layout collection-environment-layout"><aside><div><button className={!selectedEnvironment ? 'active' : ''} onClick={() => selectEnvironment('')} type="button"><i /><span>Base environment</span><small>BASE</small></button>{(collection.subEnvironments ?? []).map((environment) => <button className={selectedEnvironment?.id === environment.id ? 'active' : ''} key={environment.id} onClick={() => selectEnvironment(environment.id)} type="button"><i /><span>{environment.name}</span></button>)}</div><button onClick={addEnvironment} type="button"><Icon name="plus" size={13} /> Sub-environment</button></aside><main>
+        {selectedEnvironment ? <div className="environment-identity collection-environment-identity"><label>Name<input onChange={(event) => updateSelectedEnvironment({ name: event.target.value })} value={selectedEnvironment.name} /></label></div> : <strong>Collection base environment</strong>}
+        <p>{selectedEnvironment ? 'The selected collection environment overrides the collection base and selected global values.' : 'Base collection values override selected and base global values for every request in this collection.'}</p>
+        <KeyValueEditor namePlaceholder="Variable" onChange={(variables) => selectedEnvironment ? updateSelectedEnvironment({ variables }) : onChange({ ...collection, environment: variables })} rows={selectedEnvironment?.variables ?? collection.environment ?? []} />
+        {selectedEnvironment ? <button className="danger-action collection-environment-delete" onClick={deleteSelectedEnvironment} type="button">Delete sub-environment</button> : null}
+      </main></div> : null}
       {tab === 'docs' ? <div className="request-docs-editor"><header><strong>Collection documentation</strong><small>Markdown source</small></header><textarea aria-label="Collection documentation" onChange={(event) => onChange({ ...collection, documentation: event.target.value })} value={collection.documentation ?? ''} /><section><small>Preview</small><pre>{collection.documentation || 'No documentation yet.'}</pre></section></div> : null}
     </div>
     <footer><span className="footer-spacer" /><button className="secondary-button" onClick={onClose} type="button">Done</button></footer>
@@ -741,7 +774,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 12, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 13, requestTimeoutMs: 30000, scriptTimeoutMs: 10000, allowScriptRequests: false, enableVaultInScripts: false, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L', 'generate-code': 'Mod+Shift+G' } },
+    format: 'brunomnia', version: 13, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 13, requestTimeoutMs: 30000, scriptTimeoutMs: 10000, allowScriptRequests: false, enableVaultInScripts: false, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L', 'generate-code': 'Mod+Shift+G' } },
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -878,7 +911,7 @@ export default function App() {
   const addCollection = useCallback(() => {
     setWorkspace((current) => ({
       ...current,
-      collections: [...current.collections, { id: uid('collection'), name: `Collection ${current.collections.length + 1}`, expanded: true, requests: [], folders: [], environment: [], documentation: '' }],
+      collections: [...current.collections, { id: uid('collection'), name: `Collection ${current.collections.length + 1}`, expanded: true, requests: [], folders: [], environment: [], subEnvironments: [], activeSubEnvironmentId: '', documentation: '' }],
     }));
   }, []);
 
@@ -1002,27 +1035,39 @@ export default function App() {
   const persistScriptState = (collectionId: string, result: ScriptRunResult) => {
     if (!selectedEnvironment) return;
     setWorkspace((current) => {
-      const selected = current.environments.find((environment) => environment.id === selectedEnvironment.id);
-      if (!selected) return current;
-      const inherited = selected.parentId ? resolveEnvironment(current.environments, selected.parentId) : undefined;
-      const inheritedValues = environmentMap(inherited);
-      const ownNames = new Set(selected.variables.map((variable) => variable.name));
-      const resultNames = new Set(Object.keys(result.environment));
-      const nextVariables = [
-        ...Object.entries(result.environment).filter(([name, value]) => ownNames.has(name) || inheritedValues[name] !== value).map(([name, value]) => ({
-          ...(selected.variables.find((candidate) => candidate.name === name) ?? { id: uid('variable'), name }), name, value, enabled: true,
-        })),
-        ...selected.variables.filter((row) => !row.enabled && !resultNames.has(row.name)),
-      ];
+      const scopes = scriptEnvironmentScopes(current.environments, selectedEnvironment.id);
+      if (!scopes) return current;
+      const selected = current.environments.find((environment) => environment.id === scopes.selectedId);
+      const base = current.environments.find((environment) => environment.id === scopes.baseId);
+      if (!selected || !base) return current;
+      const selectedAncestors = environmentAncestors(current.environments, selected.id);
+      const inheritedGlobals = scopes.globalsAreBase ? {} : variableScope(selectedAncestors.slice(1).map((environment) => environment.variables)).values;
+      const persistSelectedRows = (values: Record<string, string>, target: Environment, inheritedValues: Record<string, string>) => {
+        const ownNames = new Set(target.variables.map((variable) => variable.name));
+        const resultNames = new Set(Object.keys(values));
+        return [
+          ...Object.entries(values).filter(([name, value]) => ownNames.has(name) || inheritedValues[name] !== value).map(([name, value]) => ({
+            ...(target.variables.find((candidate) => candidate.name === name) ?? { id: uid('variable'), name }), name, value, enabled: true,
+          })),
+          ...target.variables.filter((row) => !row.enabled && !resultNames.has(row.name)),
+        ];
+      };
       return {
         ...current,
-        environments: current.environments.map((environment) => environment.id === selected.id ? { ...environment, variables: nextVariables } : environment),
+        environments: current.environments.map((environment) => {
+          if (environment.id === base.id) return { ...environment, variables: scriptVariableRows(result.baseGlobals ?? result.environment, base.variables, 'base-global-variable', result.baseGlobalDisabled) };
+          if (!scopes.globalsAreBase && environment.id === selected.id) return { ...environment, variables: scriptVariableRows(persistSelectedRows(result.environment, selected, inheritedGlobals).filter((row) => row.enabled).reduce<Record<string, string>>((values, row) => ({ ...values, [row.name]: row.value }), {}), selected.variables, 'global-variable', result.globalDisabled) };
+          return environment;
+        }),
         collections: current.collections.map((candidate) => candidate.id !== collectionId ? candidate : {
           ...candidate,
-          environment: result.collectionVariables ? scriptVariableRows(result.collectionVariables, candidate.environment ?? [], 'collection-variable') : candidate.environment,
+          environment: result.baseEnvironment ? scriptVariableRows(result.baseEnvironment, candidate.environment ?? [], 'collection-base-variable', result.baseEnvironmentDisabled) : candidate.environment,
+          subEnvironments: (candidate.subEnvironments ?? []).map((environment) => environment.id === candidate.activeSubEnvironmentId && result.collectionVariables
+            ? { ...environment, variables: scriptVariableRows(result.collectionVariables, environment.variables, 'collection-environment-variable', result.collectionDisabled) }
+            : environment),
           folders: (candidate.folders ?? []).map((folder) => {
             const output = result.folders?.find((item) => item.id === folder.id);
-            return output ? { ...folder, environment: scriptVariableRows(output.environment, folder.environment, 'folder-variable') } : folder;
+            return output ? { ...folder, environment: scriptVariableRows(output.environment, folder.environment, 'folder-variable', output.disabled) } : folder;
           }),
         }),
       };
@@ -1086,21 +1131,36 @@ export default function App() {
     };
     const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
     try {
-      let variables = environmentMap(activeEnvironment);
-      const initialCollectionVariables = Object.fromEntries((collection.environment ?? []).filter((row) => row.enabled && row.name).map((row) => [row.name, row.value]));
-      const initialCollectionDisabled = (collection.environment ?? []).filter((row) => !row.enabled && row.name).map((row) => row.name);
+      const globalScopes = scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id);
+      if (!globalScopes) throw new Error('The selected global environment could not be resolved.');
+      const collectionScopes = collectionEnvironmentScopes(collection);
+      const initialScriptScopes: ScriptRunOptions = {
+        baseGlobals: globalScopes.baseGlobals.values,
+        baseGlobalDisabled: globalScopes.baseGlobals.disabled,
+        globalDisabled: globalScopes.globals.disabled,
+        globalsAreBase: globalScopes.globalsAreBase,
+        baseEnvironment: collectionScopes.baseEnvironment.values,
+        baseEnvironmentDisabled: collectionScopes.baseEnvironment.disabled,
+        collectionVariables: collectionScopes.environment.values,
+        collectionDisabled: collectionScopes.environment.disabled,
+        collectionVariablesAreBase: collectionScopes.environmentIsBase,
+      };
       const runScript = (
         source: string,
         scriptRequest: ApiRequest,
-        scriptVariables: Record<string, string>,
         scriptResponse?: HttpResponse,
         localVariables: Record<string, string> = {},
-        collectionVariables = initialCollectionVariables,
-        folders: NonNullable<ScriptRunResult['folders']> = scriptFolderVariables(configured.folders),
-      ) => runBrowserScript(source, scriptRequest, scriptVariables, scriptResponse, workspace.preferences.scriptTimeoutMs, localVariables, {}, {
-        collectionVariables,
-        collectionDisabled: initialCollectionDisabled,
-        folders,
+        previous?: ScriptRunResult,
+      ) => runBrowserScript(source, scriptRequest, previous?.environment ?? globalScopes.globals.values, scriptResponse, workspace.preferences.scriptTimeoutMs, localVariables, {}, {
+        ...initialScriptScopes,
+        baseGlobals: previous?.baseGlobals ?? initialScriptScopes.baseGlobals,
+        baseGlobalDisabled: previous?.baseGlobalDisabled ?? initialScriptScopes.baseGlobalDisabled,
+        globalDisabled: previous?.globalDisabled ?? initialScriptScopes.globalDisabled,
+        baseEnvironment: previous?.baseEnvironment ?? initialScriptScopes.baseEnvironment,
+        baseEnvironmentDisabled: previous?.baseEnvironmentDisabled ?? initialScriptScopes.baseEnvironmentDisabled,
+        collectionVariables: previous?.collectionVariables ?? initialScriptScopes.collectionVariables,
+        collectionDisabled: previous?.collectionDisabled ?? initialScriptScopes.collectionDisabled,
+        folders: previous?.folders ?? scriptFolderVariables(configured.folders),
         vault: workspace.preferences.enableVaultInScripts ? unlockedVault : undefined,
         sendRequest: workspace.preferences.allowScriptRequests ? async (subrequest, subrequestVariables) => {
           const subresponse = await sendRequest(subrequest, {
@@ -1117,10 +1177,9 @@ export default function App() {
           return subresponse;
         } : undefined,
       });
-      const preRequest = await runScript(request.preRequestScript, request, variables);
+      const preRequest = await runScript(request.preRequestScript, request);
       let executableRequest = preRequest.request;
-      variables = preRequest.environment;
-      const requestVariables = mergedScriptVariables(environmentMap(executionEnvironment), preRequest, initialCollectionDisabled);
+      const requestVariables = mergedScriptVariables(preRequest, initialScriptScopes);
       setScriptLogs(preRequest.logs);
       persistScriptState(collection.id, preRequest);
       let result: HttpResponse;
@@ -1153,7 +1212,7 @@ export default function App() {
           variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
         }, { cookies: workspace.cookies, responses: workspace.responses, pluginRuntime, vault: unlockedVault, externalSecret: externalSecretResolver });
       }
-      const afterResponse = await runScript(executableRequest.tests, executableRequest, variables, result, preRequest.localVariables, preRequest.collectionVariables, preRequest.folders);
+      const afterResponse = await runScript(executableRequest.tests, executableRequest, result, preRequest.localVariables, preRequest);
       setScriptTests(afterResponse.tests);
       setScriptLogs((current) => [...current, ...afterResponse.logs, ...pluginState.notifications.map((notification) => `[plugin] ${notification.title}: ${notification.message}`)]);
       persistScriptState(collection.id, afterResponse);

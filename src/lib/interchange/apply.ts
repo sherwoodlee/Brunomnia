@@ -11,6 +11,12 @@ const rekeyCollection = (collection: Collection, batch: string): Collection => {
     ...collection,
     id: `${batch}-${collection.id}`,
     environment: (collection.environment ?? []).map((variable) => ({ ...variable, id: `${batch}-${variable.id}` })),
+    subEnvironments: (collection.subEnvironments ?? []).map((environment) => ({
+      ...environment,
+      id: `${batch}-${environment.id}`,
+      variables: environment.variables.map((variable) => ({ ...variable, id: `${batch}-${variable.id}` })),
+    })),
+    activeSubEnvironmentId: collection.activeSubEnvironmentId ? `${batch}-${collection.activeSubEnvironmentId}` : '',
     folders: (collection.folders ?? []).map((folder) => ({
       ...folder,
       id: folderIds.get(folder.id)!,
@@ -64,7 +70,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
     warnings: result.warnings,
     metadata: result.metadata,
   };
-  if (result.replacement) return { ...result.replacement, version: 12, imports: [record, ...result.replacement.imports].slice(0, 100) };
+  if (result.replacement) return { ...result.replacement, version: 13, imports: [record, ...result.replacement.imports].slice(0, 100) };
 
   const collections = result.collections.map((collection) => rekeyCollection(collection, batch));
   const collectionIds = new Map(result.collections.map((collection, index) => [collection.id, collections[index].id]));
@@ -78,7 +84,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
   const firstRequest = collections.flatMap((collection) => collection.requests)[0];
   return {
     ...workspace,
-    version: 12,
+    version: 13,
     activeRequestId: firstRequest?.id ?? workspace.activeRequestId,
     activeEnvironmentId: environments[0]?.id ?? workspace.activeEnvironmentId,
     collections: [...workspace.collections, ...collections],

@@ -224,6 +224,12 @@ export type RequestFolder = {
   documentation: string;
 };
 
+export type CollectionEnvironment = {
+  id: string;
+  name: string;
+  variables: KeyValue[];
+};
+
 export type Collection = {
   id: string;
   name: string;
@@ -231,6 +237,8 @@ export type Collection = {
   requests: ApiRequest[];
   folders?: RequestFolder[];
   environment?: KeyValue[];
+  subEnvironments?: CollectionEnvironment[];
+  activeSubEnvironmentId?: string;
   documentation?: string;
   source?: SourceMetadata;
 };
@@ -258,7 +266,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 12;
+  version: 13;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -522,7 +530,13 @@ export type ScriptTestResult = {
 export type ScriptRunResult = {
   request: ApiRequest;
   environment: Record<string, string>;
+  baseGlobals?: Record<string, string>;
+  baseGlobalDisabled?: string[];
+  globalDisabled?: string[];
   collectionVariables?: Record<string, string>;
+  baseEnvironment?: Record<string, string>;
+  baseEnvironmentDisabled?: string[];
+  collectionDisabled?: string[];
   folders?: Array<{ id: string; name: string; environment: Record<string, string>; disabled?: string[] }>;
   logs: string[];
   tests: ScriptTestResult[];

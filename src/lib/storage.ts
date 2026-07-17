@@ -245,6 +245,17 @@ const normalizeFolders = (value: unknown, defaultAuth: AuthConfig): RequestFolde
   return normalized;
 };
 
+const normalizeCollectionEnvironments = (value: unknown, collectionId: string) => !Array.isArray(value) ? [] : value.slice(0, 500).flatMap((item, index) => {
+  const environment = record(item);
+  if (!environment) return [];
+  const id = stringValue(environment.id, `${collectionId}-sub-environment-${index}`);
+  return [{
+    id,
+    name: stringValue(environment.name, `Environment ${index + 1}`),
+    variables: normalizeRows(environment.variables, `${id}-variable`),
+  }];
+});
+
 const normalizeEnvironments = (value: unknown, fallback: Environment[]): Environment[] => {
   if (!Array.isArray(value) || !value.length) return fallback;
   const environments = value.slice(0, 500).flatMap((item, index): Environment[] => {
@@ -298,6 +309,8 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     ...collection,
     folders: normalizeFolders(collection.folders, defaults.auth),
     environment: normalizeRows(collection.environment, `${collection.id}-environment`),
+    subEnvironments: normalizeCollectionEnvironments(collection.subEnvironments, collection.id),
+    activeSubEnvironmentId: stringValue(collection.activeSubEnvironmentId),
     documentation: stringValue(collection.documentation),
     requests: collection.requests.map((request) => {
       const graphql = record(request.graphql);
@@ -332,7 +345,12 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   }));
   const collections = (importedCollections.length ? importedCollections : seed.collections).map((collection) => {
     const folderIds = new Set((collection.folders ?? []).map((folder) => folder.id));
-    return { ...collection, requests: collection.requests.map((request) => ({ ...request, folderId: request.folderId && folderIds.has(request.folderId) ? request.folderId : '' })) };
+    const subEnvironmentIds = new Set((collection.subEnvironments ?? []).map((environment) => environment.id));
+    return {
+      ...collection,
+      activeSubEnvironmentId: subEnvironmentIds.has(collection.activeSubEnvironmentId ?? '') ? collection.activeSubEnvironmentId : '',
+      requests: collection.requests.map((request) => ({ ...request, folderId: request.folderId && folderIds.has(request.folderId) ? request.folderId : '' })),
+    };
   });
   const environments = normalizeEnvironments(workspace.environments, seed.environments);
   const requestIds = new Set(collections.flatMap((collection) => collection.requests.map((request) => request.id)));
@@ -340,7 +358,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 12,
+    version: 13,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

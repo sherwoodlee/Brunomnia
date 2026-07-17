@@ -4,7 +4,7 @@ import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openap
 import { buildHeaders, buildRequestUrl, resolveTemplate } from '../src/lib/request';
 import { parseRunnerData, runCollection } from '../src/lib/runner';
 import type { ApiDesign, ApiRequest, AuthConfig, Environment, HttpResponse, ScriptRunResult, Workspace } from '../src/types';
-import { resolveEnvironment } from '../src/lib/resources';
+import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resources';
 import { normalizeScriptSubrequest, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 
 const args = process.argv.slice(2);
@@ -63,27 +63,41 @@ const runNodeScript = async (
   options: ScriptRunOptions = {},
 ): Promise<ScriptRunResult> => {
   const request = structuredClone(originalRequest);
-  const environment = { ...originalEnvironment };
-  const collectionVariables = { ...(options.collectionVariables ?? {}) };
+  const globalsAreBase = options.globalsAreBase === true;
+  const collectionVariablesAreBase = options.collectionVariablesAreBase === true;
+  const baseGlobals = { ...(options.baseGlobals ?? (globalsAreBase ? originalEnvironment : {})) };
+  const environment = globalsAreBase ? baseGlobals : { ...originalEnvironment };
+  const baseEnvironment = { ...(options.baseEnvironment ?? (collectionVariablesAreBase ? options.collectionVariables : {})) };
+  const collectionVariables = collectionVariablesAreBase ? baseEnvironment : { ...(options.collectionVariables ?? {}) };
+  const baseGlobalDisabled = [...(options.baseGlobalDisabled ?? [])];
+  const globalDisabled = [...(options.globalDisabled ?? [])];
+  const baseEnvironmentDisabled = [...(options.baseEnvironmentDisabled ?? [])];
+  const collectionDisabled = [...(options.collectionDisabled ?? [])];
   const folders = structuredClone(options.folders ?? []);
   const localVariables = { ...originalLocalVariables };
   const logs: string[] = [];
   const tests: ScriptRunResult['tests'] = [];
   const pendingTests: Promise<unknown>[] = [];
-  if (!source.trim()) return { request, environment, collectionVariables, folders, localVariables, logs, tests };
+  if (!source.trim()) return { request, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
   const mergedVariables = () => {
-    const values = { ...environment };
-    (options.collectionDisabled ?? []).forEach((name) => delete values[name]);
-    Object.assign(values, collectionVariables);
+    const values: Record<string, string> = {};
+    const applyScope = (scope: Record<string, string>, disabled: string[] = []) => {
+      disabled.forEach((name) => delete values[name]);
+      Object.assign(values, scope);
+    };
+    applyScope(baseGlobals, baseGlobalDisabled);
+    if (!globalsAreBase) applyScope(environment, globalDisabled);
+    applyScope(baseEnvironment, baseEnvironmentDisabled);
+    if (!collectionVariablesAreBase) applyScope(collectionVariables, collectionDisabled);
     folders.forEach((folder) => { (folder.disabled ?? []).forEach((name) => delete values[name]); Object.assign(values, folder.environment); });
     return { ...values, ...iterationData, ...localVariables };
   };
-  const variableApi = (values: Record<string, string>) => ({
+  const variableApi = (values: Record<string, string>, disabled: string[] = []) => ({
     get: (name: string) => values[name],
-    set: (name: string, value: unknown) => { values[name] = String(value); },
-    unset: (name: string) => { delete values[name]; },
+    set: (name: string, value: unknown) => { values[name] = String(value); const index = disabled.indexOf(name); if (index >= 0) disabled.splice(index, 1); },
+    unset: (name: string) => { delete values[name]; const index = disabled.indexOf(name); if (index >= 0) disabled.splice(index, 1); },
     has: (name: string) => Object.hasOwn(values, name),
-    clear: () => Object.keys(values).forEach((name) => delete values[name]),
+    clear: () => { Object.keys(values).forEach((name) => delete values[name]); disabled.splice(0); },
     toObject: () => ({ ...values }),
     replaceIn: (value: unknown) => String(value).replace(/{{\s*([^{}]+?)\s*}}/g, (match, name: string) => mergedVariables()[name] ?? match),
   });
@@ -187,15 +201,17 @@ const runNodeScript = async (
     request.transport.clientKeyPem = String(key?.pem ?? input.key ?? '');
     request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(',') : String(input.domains ?? '');
   } };
-  const globalApi = variableApi(environment);
-  const collectionApi = variableApi(collectionVariables);
+  const baseGlobalApi = variableApi(baseGlobals, baseGlobalDisabled);
+  const globalApi = variableApi(environment, globalsAreBase ? baseGlobalDisabled : globalDisabled);
+  const baseEnvironmentApi = variableApi(baseEnvironment, baseEnvironmentDisabled);
+  const collectionApi = variableApi(collectionVariables, collectionVariablesAreBase ? baseEnvironmentDisabled : collectionDisabled);
   const localApi = variableApi(localVariables) as ReturnType<typeof variableApi> & Record<string, unknown>;
   const iterationApi = variableApi(iterationData);
   const variablesApi = {
     get: (name: string) => mergedVariables()[name], set: localApi.set, unset: localApi.unset,
     has: (name: string) => Object.hasOwn(mergedVariables(), name), clear: localApi.clear, toObject: mergedVariables,
-    replaceIn: localApi.replaceIn, baseGlobalVars: globalApi, globalVars: globalApi, collectionVars: collectionApi,
-    collectionVariables: collectionApi, environmentVars: collectionApi, localVars: localApi, iterationDataVars: iterationApi,
+    replaceIn: localApi.replaceIn, baseGlobalVars: baseGlobalApi, globalVars: globalApi, collectionVars: baseEnvironmentApi,
+    collectionVariables: baseEnvironmentApi, environmentVars: collectionApi, localVars: localApi, iterationDataVars: iterationApi,
   };
   const responseFacade = (candidate: HttpResponse | undefined) => {
     if (!candidate) return undefined;
@@ -221,20 +237,20 @@ const runNodeScript = async (
     };
   };
   const insomnia = {
-    baseGlobals: globalApi,
+    baseGlobals: baseGlobalApi,
     globals: globalApi,
     environment: collectionApi,
-    baseEnvironment: collectionApi,
-    CollectionVariables: collectionApi,
-    collectionVariables: collectionApi,
+    baseEnvironment: baseEnvironmentApi,
+    CollectionVariables: baseEnvironmentApi,
+    collectionVariables: baseEnvironmentApi,
     variables: variablesApi,
     localVars: localApi,
     iterationData: iterationApi,
     parentFolders: {
-      get: (selector: string) => { const folder = [...folders].reverse().find((item) => item.id === selector || item.name === selector); return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment) } : undefined; },
-      getById: (id: string) => { const folder = folders.find((item) => item.id === id); return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment) } : undefined; },
-      getByName: (name: string) => { const folder = [...folders].reverse().find((item) => item.name === name); return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment) } : undefined; },
-      getEnvironments: () => [...folders].reverse().map((folder) => variableApi(folder.environment)),
+      get: (selector: string) => { const folder = [...folders].reverse().find((item) => item.id === selector || item.name === selector); return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment, folder.disabled) } : undefined; },
+      getById: (id: string) => { const folder = folders.find((item) => item.id === id); return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment, folder.disabled) } : undefined; },
+      getByName: (name: string) => { const folder = [...folders].reverse().find((item) => item.name === name); return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment, folder.disabled) } : undefined; },
+      getEnvironments: () => [...folders].reverse().map((folder) => variableApi(folder.environment, folder.disabled)),
     },
     request,
     response: responseFacade(response),
@@ -322,7 +338,7 @@ const runNodeScript = async (
     delete request.body;
     request.body = requestBody;
   }
-  return { request, environment, collectionVariables, folders, localVariables, logs, tests };
+  return { request, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
 };
 
 const executeHttp = async (request: ApiRequest, variables: Record<string, string>): Promise<HttpResponse> => {
@@ -406,13 +422,14 @@ const main = async () => {
     const workspace = await loadWorkspace(args[2] ?? fail('Provide a workspace file.'));
     const identifier = args[3] ?? fail('Provide a collection name or ID.');
     const collection = workspace.collections.find((candidate) => candidate.id === identifier || candidate.name === identifier) ?? fail(`Collection '${identifier}' was not found.`);
-    const environmentIdentifier = flag('--env');
+    const environmentIdentifier = flag('--env') ?? workspace.activeEnvironmentId;
     const selectedEnvironment: Environment = workspace.environments.find((candidate) => candidate.id === environmentIdentifier || candidate.name === environmentIdentifier) ?? workspace.environments[0] ?? fail('The workspace has no environment.');
     const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
     const dataPath = flag('--data');
     const report = await runCollection(collection, environment, {
       iterations: Number(flag('--iterations') ?? 1), retries: Number(flag('--retries') ?? 0), delayMs: 0,
       scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(flag('--script-timeout') ?? 10_000))),
+      environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
       dataRows: dataPath ? parseRunnerData(await loadText(dataPath)) : [],
     }, executeHttp, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => {
       if (source.trim() && !hasFlag('--allow-scripts')) throw new Error('CLI script execution is disabled. Re-run trusted workspaces with --allow-scripts.');

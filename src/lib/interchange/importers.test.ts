@@ -63,7 +63,8 @@ describe('artifact import adapters', () => {
     expect(result.collections[0].requests[0].preRequestScript).toContain("insomnia.sendRequest('https://example.com'");
     expect(result.collections[0].requests[0].tests).toContain("insomnia.test('created'");
     expect(result.collections[0].requests[0].tests).toContain('insomnia.expect(insomnia.response.status).toBe(201)');
-    expect(result.environments[0].variables[0]).toMatchObject({ name: 'baseUrl', value: 'https://shop.example.com' });
+    expect(result.collections[0].environment?.[0]).toMatchObject({ name: 'baseUrl', value: 'https://shop.example.com' });
+    expect(result.environments).toEqual([]);
   });
 
   it('imports custom methods, explicit path variables, descriptions, and multiline values', () => {
@@ -176,7 +177,7 @@ paths:
     expect(v4.collections[0].requests[0].name).toBe('Get one');
     expect(v4.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
     expect(v4.collections[0].requests[0].folderId).toBe(v4.collections[0].folders?.[0].id);
-    expect(v4.environments[0].variables[0]).toMatchObject({ name: 'token', value: 'abc' });
+    expect(v4.collections[0].environment?.[0]).toMatchObject({ name: 'token', value: 'abc' });
 
     const v5 = importArtifact(`type: collection.insomnia.rest/5.0
 schema_version: "5.1"
@@ -199,6 +200,7 @@ environments:
     expect(v5.collections[0].requests[0]).toMatchObject({ name: 'Create', bodyMode: 'json' });
     expect(v5.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
     expect(v5.collections[0].requests[0].folderId).toBe(v5.collections[0].folders?.[0].id);
+    expect(v5.collections[0].environment?.[0]).toMatchObject({ name: 'baseUrl', value: 'https://api.example.com' });
     const applied = applyArtifactImport(cloneSeedWorkspace(), v5);
     const appliedCollection = applied.collections.at(-1)!;
     expect(appliedCollection.requests[0].folderId).toBe(appliedCollection.folders?.[0].id);
@@ -232,7 +234,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(12);
+    expect(second.version).toBe(13);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });
