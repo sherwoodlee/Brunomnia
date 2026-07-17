@@ -12,7 +12,7 @@ export type OpenApiOperation = {
   path: string;
   summary: string;
   description: string;
-  parameters: Array<{ name: string; location: string; required: boolean }>;
+  parameters: Array<{ name: string; location: string; required: boolean; description: string; value: string }>;
 };
 
 export type OpenApiAnalysis = {
@@ -193,7 +193,10 @@ export const analyzeOpenApi = (contents: string, ruleset = ''): OpenApiAnalysis 
       const parameters = rawParameters.flatMap((rawParameter) => {
         const parameter = record(rawParameter);
         if (!parameter || typeof parameter.name !== 'string' || typeof parameter.in !== 'string') return [];
-        return [{ name: parameter.name, location: parameter.in, required: Boolean(parameter.required) }];
+        const schema = record(parameter.schema);
+        const example = parameter.example ?? schema?.example ?? schema?.default;
+        const value = example === undefined ? '' : typeof example === 'string' ? example : JSON.stringify(example);
+        return [{ name: parameter.name, location: parameter.in, required: Boolean(parameter.required), description: asString(parameter.description), value }];
       });
       for (const match of path.matchAll(/{([^}]+)}/g)) {
         if (!parameters.some((parameter) => parameter.location === 'path' && parameter.name === match[1] && parameter.required)) {
@@ -245,12 +248,15 @@ export const generateCollectionFromOpenApi = (design: ApiDesign): Collection => 
     const jsonSchema = record(record(content?.['application/json'])?.schema);
     request.name = operation.summary;
     request.method = operation.method;
-    request.url = `${baseUrl}${operation.path.replace(/{([^}]+)}/g, '{{ $1 }}')}`;
+    request.url = `${baseUrl}${operation.path}`;
+    request.pathParams = operation.parameters.filter((parameter) => parameter.location === 'path').map<KeyValue>((parameter) => ({
+      id: `${request.id}-path-${parameter.name}`, name: parameter.name, value: parameter.value, enabled: true, description: parameter.description,
+    }));
     request.params = operation.parameters.filter((parameter) => parameter.location === 'query').map<KeyValue>((parameter) => ({
-      id: `${request.id}-query-${parameter.name}`, name: parameter.name, value: '', enabled: parameter.required,
+      id: `${request.id}-query-${parameter.name}`, name: parameter.name, value: parameter.value, enabled: parameter.required, description: parameter.description,
     }));
     request.headers = operation.parameters.filter((parameter) => parameter.location === 'header').map<KeyValue>((parameter) => ({
-      id: `${request.id}-header-${parameter.name}`, name: parameter.name, value: '', enabled: parameter.required,
+      id: `${request.id}-header-${parameter.name}`, name: parameter.name, value: parameter.value, enabled: parameter.required, description: parameter.description,
     }));
     if (jsonSchema || content?.['application/json']) {
       request.bodyMode = 'json';

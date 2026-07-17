@@ -58,6 +58,28 @@ describe('artifact import adapters', () => {
     expect(result.environments[0].variables[0]).toMatchObject({ name: 'baseUrl', value: 'https://shop.example.com' });
   });
 
+  it('imports custom methods, explicit path variables, descriptions, and multiline values', () => {
+    const postman = importArtifact(JSON.stringify({
+      info: { name: 'WebDAV', schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json' },
+      item: [{ name: 'Inspect', request: {
+        method: 'PROPFIND',
+        url: { raw: 'https://api.example.com/files/:path', variable: [{ key: 'path', value: 'team docs', description: 'File path' }] },
+        header: [{ key: 'X-Notes', value: 'first\nsecond', description: 'Audit notes' }],
+      } }],
+    }), 'webdav.postman_collection.json');
+    expect(postman.warnings.some((warning) => warning.code === 'unsupported-method')).toBe(false);
+    expect(postman.collections[0].requests[0]).toMatchObject({ method: 'PROPFIND', url: 'https://api.example.com/files/{path}' });
+    expect(postman.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'path', value: 'team docs', description: 'File path' });
+    expect(postman.collections[0].requests[0].headers[0]).toMatchObject({ value: 'first\nsecond', description: 'Audit notes' });
+
+    const insomnia = importArtifact(JSON.stringify({ __export_format: 4, resources: [
+      { _id: 'wrk', _type: 'workspace', name: 'WebDAV' },
+      { _id: 'req', parentId: 'wrk', _type: 'request', name: 'Inspect', method: 'PROPFIND', url: 'https://api.example.com/files/{path}', pathParameters: [{ name: 'path', value: 'team docs', description: 'File path' }] },
+    ] }), 'webdav-insomnia.json');
+    expect(insomnia.collections[0].requests[0].method).toBe('PROPFIND');
+    expect(insomnia.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'path', value: 'team docs', description: 'File path' });
+  });
+
   it('maps advanced Postman and Insomnia auth families into executable fields', () => {
     const postman = importArtifact(JSON.stringify({
       info: { name: 'AWS', schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json' },
@@ -143,7 +165,9 @@ paths:
       { _id: 'env_1', parentId: 'wrk_1', name: 'Base', data: { token: 'abc' }, _type: 'environment' },
     ] }), 'insomnia-v4.json');
     expect(v4.format).toBe('insomnia-v4');
-    expect(v4.collections[0].requests[0].name).toBe('Folder / Get one');
+    expect(v4.collections[0].requests[0].name).toBe('Get one');
+    expect(v4.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
+    expect(v4.collections[0].requests[0].folderId).toBe(v4.collections[0].folders?.[0].id);
     expect(v4.environments[0].variables[0]).toMatchObject({ name: 'token', value: 'abc' });
 
     const v5 = importArtifact(`type: collection.insomnia.rest/5.0
@@ -164,7 +188,13 @@ environments:
   data: { baseUrl: https://api.example.com }
 `, 'insomnia-v5.yaml');
     expect(v5.format).toBe('insomnia-v5');
-    expect(v5.collections[0].requests[0]).toMatchObject({ name: 'Folder / Create', bodyMode: 'json' });
+    expect(v5.collections[0].requests[0]).toMatchObject({ name: 'Create', bodyMode: 'json' });
+    expect(v5.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
+    expect(v5.collections[0].requests[0].folderId).toBe(v5.collections[0].folders?.[0].id);
+    const applied = applyArtifactImport(cloneSeedWorkspace(), v5);
+    const appliedCollection = applied.collections.at(-1)!;
+    expect(appliedCollection.requests[0].folderId).toBe(appliedCollection.folders?.[0].id);
+    expect(appliedCollection.folders?.[0].id).not.toBe(v5.collections[0].folders?.[0].id);
   });
 
   it('preserves unsupported Insomnia real-time request details with explicit warnings', () => {
@@ -194,7 +224,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(9);
+    expect(second.version).toBe(11);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

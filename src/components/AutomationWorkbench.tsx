@@ -11,6 +11,7 @@ import type {
 } from '../types';
 import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
 import { parseRunnerData, runCollection } from '../lib/runner';
+import { resolveEnvironment } from '../lib/resources';
 import { runBrowserScript } from '../lib/scriptSandbox';
 import { storeResponseCookies } from '../lib/cookies';
 import { sendRequest } from '../lib/http';
@@ -127,7 +128,8 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const [error, setError] = useState('');
   const cancelled = useRef(false);
   const collection = workspace.collections.find((candidate) => candidate.id === collectionId) ?? workspace.collections[0];
-  const environment = workspace.environments.find((candidate) => candidate.id === environmentId) ?? activeEnvironment;
+  const selectedEnvironment = workspace.environments.find((candidate) => candidate.id === environmentId) ?? activeEnvironment;
+  const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
   const latestReport = workspace.runnerReports.find((report) => report.collectionId === collection?.id);
 
   const start = async () => {

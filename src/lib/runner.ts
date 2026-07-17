@@ -8,6 +8,7 @@ import type {
   ScriptRunResult,
 } from '../types';
 import { environmentMap } from './request';
+import { applyCollectionConfiguration } from './resources';
 
 export type RequestExecutor = (request: ApiRequest, variables: Record<string, string>) => Promise<HttpResponse>;
 export type ScriptExecutor = (
@@ -56,7 +57,9 @@ export const runCollection = async (
     for (const originalRequest of collection.requests) {
       if (options.shouldCancel?.()) { cancelled = true; break outer; }
       for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
-        let request = structuredClone(originalRequest);
+        const configured = applyCollectionConfiguration(collection, originalRequest, environment);
+        variables = { ...variables, ...environmentMap(configured.environment), ...iterationData };
+        let request = structuredClone(configured.request);
         let response: HttpResponse | undefined;
         let tests: RunnerItemResult['tests'] = [];
         let error: string | undefined;

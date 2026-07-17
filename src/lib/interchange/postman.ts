@@ -1,5 +1,5 @@
 import type { ApiRequest, Collection, Environment, ImportWarning, JsonValue, KeyValue } from '../../types';
-import { asArray, asBoolean, asRecord, asString, fileStem, keyValues, normalizeMethod, requestFrom, sourceId, sourceMetadata, toJsonValue, type UnknownRecord } from './common';
+import { asArray, asBoolean, asRecord, asString, fileStem, keyValues, normalizeMethod, requestFrom, sourceId, sourceMetadata, stripQuery, toJsonValue, type UnknownRecord } from './common';
 import { emptyResources, type ArtifactImport } from './types';
 
 const postmanFormat = 'postman-2' as const;
@@ -129,6 +129,7 @@ const applyPostmanBody = (request: ApiRequest, rawBody: unknown, warnings: Impor
     request.protocol = 'graphql';
     request.method = 'POST';
     request.graphql = {
+      ...request.graphql,
       query: asString(graphql?.query),
       variables: typeof graphql?.variables === 'string' ? graphql.variables : JSON.stringify(graphql?.variables ?? {}, null, 2),
       operationName: '',
@@ -163,8 +164,10 @@ const postmanRequest = (
   const request = requestFrom(postmanFormat, identity, index);
   request.name = [...path, asString(item.name, `Request ${index + 1}`)].join(' / ');
   request.method = normalizeMethod(raw.method, warnings, request.name);
-  request.url = postmanUrl(raw.url).replace(/:([A-Za-z_][\w-]*)/g, '{{ $1 }}');
   const url = asRecord(raw.url);
+  const importedUrl = postmanUrl(raw.url);
+  request.url = (Array.isArray(url?.query) ? stripQuery(importedUrl) : importedUrl).replace(/:([A-Za-z_][\w-]*)/g, '{$1}');
+  request.pathParams = keyValues(url?.variable, `${request.id}-path`, { name: 'key' });
   request.params = keyValues(url?.query, `${request.id}-query`, { name: 'key' });
   request.headers = postmanHeaders(raw.header, `${request.id}-header`);
   applyPostmanBody(request, raw.body, warnings);

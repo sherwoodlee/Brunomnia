@@ -10,6 +10,7 @@ describe('workspace migrations', () => {
     const first = collections[0].requests[0];
     delete first.protocol;
     delete first.bodyMode;
+    delete first.pathParams;
     delete first.graphql;
     delete first.grpc;
     delete first.transport;
@@ -19,8 +20,9 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(9);
+    expect(migrated.version).toBe(11);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
+    expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
     expect(migrated.apiDesigns[0].name).toBe('Orders API');
     expect(migrated.mockServers[0].host).toBe('127.0.0.1');
@@ -31,6 +33,7 @@ describe('workspace migrations', () => {
     expect(migrated.ai.enabled).toBe(false);
     expect(migrated.konnect.baseUrl).toBe('https://us.api.konghq.com');
     expect(migrated.preferences).toMatchObject({ theme: 'system', requestTimeoutMs: 30_000, autoFetchGraphqlSchema: true });
+    expect(migrated.preferences.shortcuts['generate-code']).toBe('Mod+Shift+G');
     expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaEndpoint: '', schemaFetchedAt: '' });
   });
 
@@ -49,6 +52,17 @@ describe('workspace migrations', () => {
     expect(migrated.environments[0].id).toBe(migrated.activeEnvironmentId);
     expect(migrated.history).toEqual([]);
     expect(migrated.imports).toEqual([]);
+  });
+
+  it('normalizes v11 custom methods and described path rows', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.version = 10;
+    const first = (workspace.collections as Array<{ requests: Array<Record<string, unknown>> }>)[0].requests[0];
+    first.method = ' propfind ';
+    first.pathParams = [{ id: 'path', name: 'path', value: 'team docs', enabled: true, description: 'File path' }];
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.collections[0].requests[0].method).toBe('PROPFIND');
+    expect(migrated.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'path', value: 'team docs', description: 'File path' });
   });
 
   it('normalizes malformed collaboration and governance data without removing the last owner', () => {
@@ -105,5 +119,27 @@ describe('workspace migrations', () => {
     expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 20, requestTimeoutMs: 1_000 });
     expect(migrated.preferences.shortcuts.palette).toBe('Mod+Shift+P');
     expect(migrated.preferences.shortcuts.send).toBe('Mod+Enter');
+  });
+
+  it('breaks malformed resource cycles and keeps private descendants device-local', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.collections[0].folders = [
+      { id: 'folder-a', name: 'A', parentId: 'folder-b', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+      { id: 'folder-b', name: 'B', parentId: 'folder-a', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+    ];
+    workspace.environments.push(
+      { id: 'private', name: 'Private', parentId: 'base-environment', private: true, variables: [] },
+      { id: 'descendant', name: 'Descendant', parentId: 'private', variables: [] },
+      { id: 'cycle-a', name: 'Cycle A', parentId: 'cycle-b', variables: [] },
+      { id: 'cycle-b', name: 'Cycle B', parentId: 'cycle-a', variables: [] },
+    );
+    const migrated = migrateWorkspace(workspace);
+    const folderA = migrated.collections[0].folders?.find((folder) => folder.id === 'folder-a');
+    const folderB = migrated.collections[0].folders?.find((folder) => folder.id === 'folder-b');
+    expect(folderA?.parentId === 'folder-b' && folderB?.parentId === 'folder-a').toBe(false);
+    const cycleA = migrated.environments.find((environment) => environment.id === 'cycle-a');
+    const cycleB = migrated.environments.find((environment) => environment.id === 'cycle-b');
+    expect(cycleA?.parentId === 'cycle-b' && cycleB?.parentId === 'cycle-a').toBe(false);
+    expect(migrated.environments.find((environment) => environment.id === 'descendant')?.private).toBe(true);
   });
 });

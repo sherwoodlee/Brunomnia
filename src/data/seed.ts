@@ -7,6 +7,7 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
   protocol: 'http',
   method,
   url,
+  pathParams: [],
   params: [],
   headers: [{ id: `${id}-content-type`, name: 'Content-Type', value: 'application/json', enabled: method !== 'GET' }],
   bodyMode: method === 'GET' ? 'none' : 'json',
@@ -95,11 +96,14 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
   name,
   expanded: true,
   requests,
+  folders: [],
+  environment: [],
+  documentation: '',
 });
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 9,
+  version: 11,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -143,18 +147,25 @@ export const seedWorkspace: Workspace = {
   ],
   environments: [
     {
+      id: 'base-environment',
+      name: 'Base Environment',
+      variables: [
+        { id: 'base-order-id', name: 'orderId', value: 'ord_abc123', enabled: true },
+        { id: 'base-product-id', name: 'productId', value: 'prod_98765', enabled: true },
+      ],
+      parentId: '', private: false, color: '#7e8a91',
+    },
+    {
       id: 'development',
       name: 'Development',
-      variables: [
-        { id: 'dev-base-url', name: 'baseUrl', value: 'https://api.acme.dev', enabled: true },
-        { id: 'dev-order-id', name: 'orderId', value: 'ord_abc123', enabled: true },
-        { id: 'dev-product-id', name: 'productId', value: 'prod_98765', enabled: true },
-      ],
+      variables: [{ id: 'dev-base-url', name: 'baseUrl', value: 'https://api.acme.dev', enabled: true }],
+      parentId: 'base-environment', private: false, color: '#66c68d',
     },
     {
       id: 'production',
       name: 'Production',
       variables: [{ id: 'prod-base-url', name: 'baseUrl', value: 'https://api.acme.com', enabled: true }],
+      parentId: 'base-environment', private: false, color: '#ff9d4a',
     },
   ],
   history: [],

@@ -1,5 +1,5 @@
 import { stringify } from 'yaml';
-import type { ApiDesign, ApiRequest, Collection, CookieRecord, Environment, ImportWarning, JsonValue, KeyValue, MockRoute, MockServer } from '../../types';
+import type { ApiDesign, ApiRequest, Collection, CookieRecord, Environment, ImportWarning, JsonValue, KeyValue, MockRoute, MockServer, RequestFolder } from '../../types';
 import { asArray, asBoolean, asNumber, asRecord, asString, keyValues, normalizeMethod, objectVariables, requestFrom, sourceId, sourceMetadata, toJsonValue, type UnknownRecord } from './common';
 import { emptyResources, type ArtifactImport } from './types';
 
@@ -96,11 +96,14 @@ const mapInsomniaRequest = (
   path: string[],
   inherited: InheritedRequestValues,
   warnings: ImportWarning[],
+  identityScope = '',
 ): ApiRequest => {
   const meta = asRecord(raw.meta);
-  const identity = asString(raw._id ?? meta?.id, `${path.join('/')}:${index}`);
+  const sourceIdentity = asString(raw._id ?? meta?.id, `${path.join('/')}:${index}`);
+  const identity = identityScope ? `${identityScope}:${sourceIdentity}` : sourceIdentity;
   const request = requestFrom(format, identity, index);
   request.name = [...path, asString(raw.name, `Request ${index + 1}`)].join(' / ');
+  request.documentation = asString(raw.description ?? meta?.description);
   request.url = asString(raw.url ?? asRecord(raw.reflectionApi)?.url);
   const type = asString(raw._type);
   const metaId = asString(meta?.id);
@@ -127,6 +130,7 @@ const mapInsomniaRequest = (
   } else {
     request.method = normalizeMethod(raw.method, warnings, request.name);
   }
+  request.pathParams = keyValues(raw.pathParameters, `${request.id}-path`);
   request.params = keyValues(raw.parameters, `${request.id}-query`);
   request.headers = [...inherited.headers, ...keyValues(raw.headers, `${request.id}-header`)];
   if (!isGrpc && !isWebsocket && !isSocketIo && !isMcp) applyInsomniaBody(request, raw.body, format, warnings);
@@ -145,10 +149,10 @@ const mapInsomniaRequest = (
     unsupported.mcp = toJsonValue({ transportType: raw.transportType, env: raw.env, roots: raw.roots });
     warnings.push({ code: 'unsupported-protocol', message: 'MCP was imported as an HTTP baseline; transport settings were preserved as source metadata.', resource: request.name });
   }
-  if (raw.pathParameters) unsupported.pathParameters = toJsonValue(raw.pathParameters);
+  if (raw.pathParameters && request.pathParams.length === 0) unsupported.pathParameters = toJsonValue(raw.pathParameters);
   if (settings?.cookies) unsupported.cookieSettings = toJsonValue(settings.cookies);
   request.source = {
-    ...(request.source ?? sourceMetadata(format, identity)),
+    ...(request.source ?? sourceMetadata(format, sourceIdentity)),
     unsupported,
   };
   return request;
@@ -166,14 +170,50 @@ const folderPath = (id: string, folders: Map<string, UnknownRecord>) => {
   return output;
 };
 
-const v4Environments = (resources: UnknownRecord[], workspaceId: string, format: 'insomnia-v4'): Environment[] => resources
-  .filter((resource) => resource._type === 'environment' && (resource.parentId === workspaceId || resources.some((candidate) => candidate._type === 'environment' && candidate._id === resource.parentId && candidate.parentId === workspaceId)))
-  .map((resource, index) => ({
-    id: sourceId('environment', format, asString(resource._id), index),
-    name: asString(resource.name, `Environment ${index + 1}`),
-    variables: objectVariables(resource.data, `insomnia-v4-env-${index}`),
-    source: sourceMetadata(format, resource._id, { parentId: resource.parentId }),
+const folderConfig = (raw: UnknownRecord, format: 'insomnia-v4' | 'insomnia-v5', id: string, index: number, warnings: ImportWarning[]): RequestFolder => {
+  const authRequest = requestFrom(format, `${id}-auth`, index);
+  if (raw.authentication) applyInsomniaAuth(authRequest, raw.authentication, format, warnings);
+  const scripts = asRecord(raw.scripts);
+  const meta = asRecord(raw.meta);
+  const rawEnvironment = Array.isArray(raw.environment)
+    ? keyValues(raw.environment, `${id}-environment`)
+    : objectVariables(raw.environment, `${id}-environment`);
+  return {
+    id,
+    name: asString(raw.name, `Folder ${index + 1}`),
+    parentId: '',
+    expanded: true,
+    headers: keyValues(raw.headers, `${id}-header`),
+    environment: rawEnvironment,
+    auth: raw.authentication ? authRequest.auth : undefined,
+    preRequestScript: joinScripts(raw.preRequestScript, scripts?.preRequest),
+    tests: joinScripts(raw.afterResponseScript, scripts?.afterResponse),
+    documentation: asString(raw.description ?? meta?.description),
+  };
+};
+
+const v4Environments = (resources: UnknownRecord[], workspaceId: string, format: 'insomnia-v4'): Environment[] => {
+  const all = new Map(resources.filter((resource) => resource._type === 'environment').map((environment) => [asString(environment._id), environment]));
+  const belongsToWorkspace = (environment: UnknownRecord) => {
+    const visited = new Set<string>();
+    let parentId = asString(environment.parentId);
+    while (parentId && !visited.has(parentId)) {
+      if (parentId === workspaceId) return true;
+      visited.add(parentId);
+      parentId = asString(all.get(parentId)?.parentId);
+    }
+    return false;
+  };
+  const selected = [...all.values()].filter(belongsToWorkspace);
+  const ids = new Map(selected.map((environment, index) => [asString(environment._id), sourceId('environment', format, `${workspaceId}:${asString(environment._id)}`, index)]));
+  return selected.map((environment, index) => ({
+    id: ids.get(asString(environment._id))!,
+    name: asString(environment.name, `Environment ${index + 1}`),
+    variables: objectVariables(environment.data, `insomnia-v4-env-${index}`),
+    parentId: ids.get(asString(environment.parentId)) ?? '',
+    source: sourceMetadata(format, environment._id, { parentId: environment.parentId }),
   }));
+};
 
 const v4Mocks = (resources: UnknownRecord[], workspaceId: string): MockServer[] => {
   const servers = resources.filter((resource) => (resource._type === 'mock' || resource._type === 'mock_server') && (resource.parentId === workspaceId || !resource.parentId));
@@ -212,6 +252,22 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
 
   for (const [workspaceIndex, workspace] of collectionWorkspaces.entries()) {
     const workspaceId = asString(workspace._id, '__WORKSPACE_ID__');
+    const belongsToWorkspace = (folder: UnknownRecord) => {
+      const visited = new Set<string>();
+      let current: UnknownRecord | undefined = folder;
+      while (current && !visited.has(asString(current._id))) {
+        visited.add(asString(current._id));
+        if (current.parentId === workspaceId) return true;
+        current = folders.get(asString(current.parentId));
+      }
+      return false;
+    };
+    const rawFolders = [...folders.values()].filter(belongsToWorkspace);
+    const folderIds = new Map(rawFolders.map((folder, index) => [asString(folder._id), sourceId('folder', 'insomnia-v4', `${workspaceId}:${asString(folder._id)}`, index)]));
+    const requestFolders = rawFolders.map((folder, index) => ({
+      ...folderConfig(folder, 'insomnia-v4', folderIds.get(asString(folder._id))!, index, warnings),
+      parentId: folderIds.get(asString(folder.parentId)) ?? '',
+    }));
     const requests = resources.filter((resource) => ['request', 'websocket_request', 'grpc_request', 'socketio_request', 'mcp_request'].includes(asString(resource._type)))
       .filter((resource) => resource.parentId === workspaceId || folders.has(asString(resource.parentId)))
       .filter((resource) => {
@@ -219,11 +275,22 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
         const rootFolder = path.length ? folders.get(asString(resource.parentId)) : undefined;
         if (!rootFolder) return resource.parentId === workspaceId;
         let current: UnknownRecord | undefined = rootFolder;
-        while (current && folders.has(asString(current.parentId))) current = folders.get(asString(current.parentId));
+        const visited = new Set<string>();
+        while (current && folders.has(asString(current.parentId))) {
+          const id = asString(current._id);
+          if (visited.has(id)) return false;
+          visited.add(id);
+          current = folders.get(asString(current.parentId));
+        }
         return current?.parentId === workspaceId;
       })
-      .map((resource, requestIndex) => mapInsomniaRequest(resource, 'insomnia-v4', requestIndex, folderPath(asString(resource.parentId), folders), { headers: [], preRequestScript: '', tests: '' }, warnings));
-    collections.push({ id: sourceId('collection', 'insomnia-v4', workspaceId, workspaceIndex), name: asString(workspace.name, `Workspace ${workspaceIndex + 1}`), expanded: true, requests, source: sourceMetadata('insomnia-v4', workspaceId, { description: workspace.description }) });
+      .map((resource, requestIndex) => {
+        const request = mapInsomniaRequest(resource, 'insomnia-v4', requestIndex, [], { headers: [], preRequestScript: '', tests: '' }, warnings, workspaceId);
+        request.folderId = folderIds.get(asString(resource.parentId)) ?? '';
+        request.inheritFolderAuth = Boolean(request.folderId) && !resource.authentication;
+        return request;
+      });
+    collections.push({ id: sourceId('collection', 'insomnia-v4', workspaceId, workspaceIndex), name: asString(workspace.name, `Workspace ${workspaceIndex + 1}`), expanded: true, requests, folders: requestFolders, environment: [], documentation: asString(workspace.description), source: sourceMetadata('insomnia-v4', workspaceId, { description: workspace.description }) });
     environments.push(...v4Environments(resources, workspaceId, 'insomnia-v4'));
     mockServers.push(...v4Mocks(resources, workspaceId));
   }
@@ -244,24 +311,25 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
 
 const nestedV5Requests = (
   children: unknown,
-  path: string[],
-  inherited: InheritedRequestValues,
+  parentId: string,
   warnings: ImportWarning[],
   output: ApiRequest[],
+  folders: RequestFolder[],
+  identityPrefix: string,
 ) => {
   for (const rawChild of asArray(children)) {
     const child = asRecord(rawChild);
     if (!child) continue;
     if (Array.isArray(child.children)) {
-      const scripts = asRecord(child.scripts);
-      nestedV5Requests(child.children, [...path, asString(child.name, 'Folder')], {
-        headers: [...inherited.headers, ...keyValues(child.headers, `v5-folder-header-${output.length}`)],
-        authentication: child.authentication ?? inherited.authentication,
-        preRequestScript: joinScripts(inherited.preRequestScript, scripts?.preRequest),
-        tests: joinScripts(inherited.tests, scripts?.afterResponse),
-      }, warnings, output);
+      const meta = asRecord(child.meta);
+      const folderId = sourceId('folder', 'insomnia-v5', `${identityPrefix}:${asString(meta?.id, `${parentId}:${folders.length}`)}`, folders.length);
+      folders.push({ ...folderConfig(child, 'insomnia-v5', folderId, folders.length, warnings), parentId });
+      nestedV5Requests(child.children, folderId, warnings, output, folders, identityPrefix);
     } else {
-      output.push(mapInsomniaRequest(child, 'insomnia-v5', output.length, path, inherited, warnings));
+      const request = mapInsomniaRequest(child, 'insomnia-v5', output.length, [], { headers: [], preRequestScript: '', tests: '' }, warnings, identityPrefix);
+      request.folderId = parentId;
+      request.inheritFolderAuth = Boolean(parentId) && !child.authentication;
+      output.push(request);
     }
   }
 };
@@ -273,8 +341,9 @@ const v5Environments = (document: UnknownRecord, prefix: string): Environment[] 
     id: sourceId('environment', 'insomnia-v5', asString(asRecord(root.meta)?.id, `${prefix}-base`)),
     name: asString(root.name, 'Base Environment'), variables: objectVariables(root.data, `${prefix}-base`), source: sourceMetadata('insomnia-v5', asRecord(root.meta)?.id),
   }];
+  const baseId = environments[0].id;
   asArray(root.subEnvironments).map(asRecord).filter((environment): environment is UnknownRecord => Boolean(environment)).forEach((environment, index) => {
-    environments.push({ id: sourceId('environment', 'insomnia-v5', asString(asRecord(environment.meta)?.id, `${prefix}-${index}`)), name: asString(environment.name, `Environment ${index + 1}`), variables: objectVariables(environment.data, `${prefix}-${index}`), source: sourceMetadata('insomnia-v5', asRecord(environment.meta)?.id) });
+    environments.push({ id: sourceId('environment', 'insomnia-v5', asString(asRecord(environment.meta)?.id, `${prefix}-${index}`)), name: asString(environment.name, `Environment ${index + 1}`), variables: objectVariables(environment.data, `${prefix}-${index}`), parentId: baseId, source: sourceMetadata('insomnia-v5', asRecord(environment.meta)?.id) });
   });
   return environments;
 };
@@ -298,9 +367,10 @@ export const importInsomniaV5 = (sourceName: string, documents: UnknownRecord[])
         if (mapped && !cookies.some((current) => current.name === mapped.name && current.domain === mapped.domain && current.path === mapped.path)) cookies.push(mapped);
       });
       const requests: ApiRequest[] = [];
-      nestedV5Requests(document.collection, [], { headers: [], preRequestScript: '', tests: '' }, warnings, requests);
+      const folders: RequestFolder[] = [];
+      nestedV5Requests(document.collection, '', warnings, requests, folders, identity);
       const name = asString(document.name, `Collection ${documentIndex + 1}`);
-      collections.push({ id: sourceId('collection', 'insomnia-v5', identity), name, expanded: true, requests, source: sourceMetadata('insomnia-v5', identity, { schemaVersion: document.schema_version }) });
+      collections.push({ id: sourceId('collection', 'insomnia-v5', identity), name, expanded: true, requests, folders, environment: [], documentation: asString(meta?.description), source: sourceMetadata('insomnia-v5', identity, { schemaVersion: document.schema_version }) });
       environments.push(...v5Environments(document, identity));
       if (type.startsWith('spec.')) {
         const spec = asRecord(document.spec);

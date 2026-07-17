@@ -1,17 +1,17 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, RefObject } from 'react';
+import type { CSSProperties, ReactNode, RefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from './data/seed';
 import { sendRequest, type SendRequestContext } from './lib/http';
 import { storeResponseCookies } from './lib/cookies';
 import { connectStream, disconnectStream, invokeGrpc, loadGrpcSchema, sendWebSocketMessage } from './lib/protocol';
-import { formatBytes, mockResponse, prettyBody } from './lib/request';
+import { environmentMap, formatBytes, mockResponse, normalizeHttpMethod, prettyBody } from './lib/request';
 import { loadWorkspace, saveWorkspace } from './lib/storage';
-import { environmentMap } from './lib/request';
 import { runBrowserScript } from './lib/scriptSandbox';
 import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import { AuthEditor } from './components/AuthEditor';
+import { CodeGenerationDialog } from './components/CodeGenerationDialog';
 import { applyArtifactImport } from './lib/interchange/apply';
 import type { ArtifactImport } from './lib/interchange/types';
 import { writeProject } from './lib/project';
@@ -19,6 +19,7 @@ import { applyPluginTheme, createPluginRuntime, describePlugin, type PluginHostC
 import { plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
 import { fetchGraphqlSchema } from './lib/graphql';
 import { shortcutMatches } from './lib/preferences';
+import { applyCollectionConfiguration, environmentAncestors, folderAncestors, folderPath, publicEnvironments, resolveEnvironment } from './lib/resources';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -38,6 +39,7 @@ import type {
   HttpResponse,
   KeyValue,
   Protocol,
+  RequestFolder,
   RequestTab,
   ResponseTab,
   SidebarMode,
@@ -56,7 +58,7 @@ const SecurityWorkbench = lazy(() => import('./components/SecurityWorkbench').th
 const IntegrationWorkbench = lazy(() => import('./components/IntegrationWorkbench').then((module) => ({ default: module.IntegrationWorkbench })));
 const PreferencesWorkbench = lazy(() => import('./components/PreferencesWorkbench').then((module) => ({ default: module.PreferencesWorkbench })));
 
-const requestTabs: RequestTab[] = ['params', 'headers', 'auth', 'body', 'transport', 'scripts', 'tests'];
+const requestTabs: RequestTab[] = ['params', 'headers', 'auth', 'body', 'transport', 'scripts', 'tests', 'docs'];
 const responseTabs: ResponseTab[] = ['preview', 'headers', 'cookies', 'timeline', 'tests'];
 const methods: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE'];
 const protocols: { value: Protocol; label: string }[] = [
@@ -69,6 +71,7 @@ const protocols: { value: Protocol; label: string }[] = [
 
 const protocolLabel = (request: ApiRequest) => request.protocol === 'http' ? request.method
   : request.protocol === 'websocket' ? 'WS' : request.protocol.toUpperCase();
+const methodClass = (method: string) => methods.includes(method as HttpMethod) ? method.toLowerCase() : 'custom';
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
@@ -76,6 +79,7 @@ const duplicateRequest = (request: ApiRequest): ApiRequest => {
   const copy = structuredClone(request);
   copy.id = uid('request');
   copy.name = `${request.name} copy`;
+  copy.pathParams = copy.pathParams.map((row) => ({ ...row, id: uid('path') }));
   copy.params = copy.params.map((row) => ({ ...row, id: uid('parameter') }));
   copy.headers = copy.headers.map((row) => ({ ...row, id: uid('header') }));
   copy.formBody = copy.formBody.map((row) => ({ ...row, id: uid('form') }));
@@ -98,6 +102,7 @@ type KeyValueEditorProps = {
   onChange: (rows: KeyValue[]) => void;
   namePlaceholder?: string;
   valuePlaceholder?: string;
+  detailed?: boolean;
 };
 
 function KeyValueEditor({
@@ -105,16 +110,18 @@ function KeyValueEditor({
   onChange,
   namePlaceholder = 'Name',
   valuePlaceholder = 'Value',
+  detailed = false,
 }: KeyValueEditorProps) {
   const update = (id: string, patch: Partial<KeyValue>) =>
     onChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
 
   return (
-    <div className="kv-editor">
+    <div className={`kv-editor${detailed ? ' detailed' : ''}`}>
       <div className="kv-header">
         <span />
         <span>{namePlaceholder}</span>
         <span>{valuePlaceholder}</span>
+        {detailed ? <span>Description</span> : null}
         <span />
       </div>
       {rows.map((row) => (
@@ -133,13 +140,21 @@ function KeyValueEditor({
             spellCheck={false}
             value={row.name}
           />
-          <input
+          {detailed ? <textarea
+            aria-label={valuePlaceholder}
+            onChange={(event) => update(row.id, { value: event.target.value })}
+            placeholder={valuePlaceholder}
+            rows={row.value.includes('\n') ? Math.min(6, row.value.split('\n').length) : 1}
+            spellCheck={false}
+            value={row.value}
+          /> : <input
             aria-label={valuePlaceholder}
             onChange={(event) => update(row.id, { value: event.target.value })}
             placeholder={valuePlaceholder}
             spellCheck={false}
             value={row.value}
-          />
+          />}
+          {detailed ? <input aria-label="Description" onChange={(event) => update(row.id, { description: event.target.value })} placeholder="Description" value={row.description ?? ''} /> : null}
           <button
             aria-label="Remove row"
             className="icon-button subtle"
@@ -152,7 +167,7 @@ function KeyValueEditor({
       ))}
       <button
         className="add-row"
-        onClick={() => onChange([...rows, { id: uid('field'), name: '', value: '', enabled: true }])}
+        onClick={() => onChange([...rows, { id: uid('field'), name: '', value: '', enabled: true, description: detailed ? '' : undefined }])}
         type="button"
       >
         <Icon name="plus" size={14} /> Add row
@@ -170,6 +185,10 @@ type CollectionSidebarProps = {
   onToggleCollection: (id: string) => void;
   onAddRequest: () => void;
   onAddCollection: () => void;
+  onAddFolder: (collectionId: string, parentId: string) => void;
+  onEditCollection: (collectionId: string) => void;
+  onEditFolder: (collectionId: string, folderId: string) => void;
+  onToggleFolder: (collectionId: string, folderId: string) => void;
 };
 
 function CollectionSidebar({
@@ -181,6 +200,10 @@ function CollectionSidebar({
   onToggleCollection,
   onAddRequest,
   onAddCollection,
+  onAddFolder,
+  onEditCollection,
+  onEditFolder,
+  onToggleFolder,
 }: CollectionSidebarProps) {
   const normalizedSearch = search.trim().toLowerCase();
   const history = workspace.history.filter((entry) =>
@@ -207,7 +230,7 @@ function CollectionSidebar({
       <div className="sidebar-heading">
         <span>{mode === 'collections' ? 'Collections' : 'Recent activity'}</span>
         {mode === 'collections' ? (
-          <button onClick={onAddCollection} type="button">New folder</button>
+          <button onClick={onAddCollection} type="button">New collection</button>
         ) : null}
       </div>
 
@@ -216,34 +239,45 @@ function CollectionSidebar({
           const visibleRequests = collection.requests.filter((request) =>
             `${request.name} ${request.method} ${request.protocol} ${request.url}`.toLowerCase().includes(normalizedSearch),
           );
-          if (normalizedSearch && visibleRequests.length === 0 && !collection.name.toLowerCase().includes(normalizedSearch)) {
+          const folders = collection.folders ?? [];
+          const folderMatches = (folder: RequestFolder): boolean => folder.name.toLowerCase().includes(normalizedSearch)
+            || visibleRequests.some((request) => request.folderId === folder.id)
+            || folders.some((candidate) => candidate.parentId === folder.id && folderMatches(candidate));
+          if (normalizedSearch && visibleRequests.length === 0 && !collection.name.toLowerCase().includes(normalizedSearch) && !folders.some(folderMatches)) {
             return null;
           }
+          const renderRequest = (request: ApiRequest, depth: number) => <button
+            className={`request-row${workspace.activeRequestId === request.id ? ' selected' : ''}`}
+            key={request.id}
+            onClick={() => onSelectRequest(request.id)}
+            style={{ '--resource-depth': depth } as CSSProperties}
+            type="button"
+          ><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span>{request.name}</span></button>;
+          const renderFolder = (folder: RequestFolder, depth: number): ReactNode => {
+            if (normalizedSearch && !folderMatches(folder)) return null;
+            const children = folders.filter((candidate) => candidate.parentId === folder.id);
+            const requests = visibleRequests.filter((request) => request.folderId === folder.id);
+            return <div className="request-folder" key={folder.id}>
+              <div className="request-folder-title" style={{ '--resource-depth': depth } as CSSProperties}>
+                <button aria-label={`${folder.expanded ? 'Collapse' : 'Expand'} ${folder.name}`} onClick={() => onToggleFolder(collection.id, folder.id)} type="button"><Icon name={folder.expanded ? 'chevron-down' : 'chevron-right'} size={12} /></button>
+                <button onClick={() => onEditFolder(collection.id, folder.id)} type="button"><Icon name="folder" size={14} /><span>{folder.name}</span></button>
+                <small>{collection.requests.filter((request) => folderAncestors(collection, request.folderId).some((ancestor) => ancestor.id === folder.id)).length}</small>
+                <button aria-label={`Add subfolder to ${folder.name}`} onClick={() => onAddFolder(collection.id, folder.id)} type="button"><Icon name="plus" size={12} /></button>
+                <button aria-label={`Configure ${folder.name}`} onClick={() => onEditFolder(collection.id, folder.id)} type="button"><Icon name="settings" size={12} /></button>
+              </div>
+              {folder.expanded || normalizedSearch ? <div>{children.map((child) => renderFolder(child, depth + 1))}{requests.map((request) => renderRequest(request, depth + 1))}</div> : null}
+            </div>;
+          };
           return (
             <div className="collection-group" key={collection.id}>
-              <button className="collection-title" onClick={() => onToggleCollection(collection.id)} type="button">
-                <Icon name={collection.expanded ? 'chevron-down' : 'chevron-right'} size={14} />
-                <Icon name="folder" size={16} />
-                <span>{collection.name}</span>
-                <small>{collection.requests.length}</small>
-              </button>
-              {collection.expanded ? visibleRequests.map((request) => (
-                <button
-                  className={`request-row${workspace.activeRequestId === request.id ? ' selected' : ''}`}
-                  key={request.id}
-                  onClick={() => onSelectRequest(request.id)}
-                  type="button"
-                >
-                  <span className={`method method-${request.method.toLowerCase()} protocol-${request.protocol}`}>{protocolLabel(request)}</span>
-                  <span>{request.name}</span>
-                </button>
-              )) : null}
+              <div className="collection-title"><button onClick={() => onToggleCollection(collection.id)} type="button"><Icon name={collection.expanded ? 'chevron-down' : 'chevron-right'} size={14} /><Icon name="archive" size={16} /><span>{collection.name}</span><small>{collection.requests.length}</small></button><button aria-label={`Add folder to ${collection.name}`} onClick={() => onAddFolder(collection.id, '')} type="button"><Icon name="plus" size={13} /></button><button aria-label={`Configure ${collection.name}`} onClick={() => onEditCollection(collection.id)} type="button"><Icon name="settings" size={13} /></button></div>
+              {collection.expanded ? <div>{folders.filter((folder) => !folder.parentId).map((folder) => renderFolder(folder, 0))}{visibleRequests.filter((request) => !request.folderId).map((request) => renderRequest(request, 0))}</div> : null}
             </div>
           );
         }) : (
           history.length ? history.map((entry) => (
             <button className="history-row" key={entry.id} onClick={() => onSelectRequest(entry.requestId)} type="button">
-              <span className={`method method-${entry.method.toLowerCase()}`}>{entry.method}</span>
+              <span className={`method method-${methodClass(entry.method)}`}>{entry.method}</span>
               <span>
                 <strong>{entry.name}</strong>
                 <small>{new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {entry.durationMs} ms</small>
@@ -259,6 +293,7 @@ function CollectionSidebar({
 
 type RequestPanelProps = {
   request: ApiRequest;
+  collection: Workspace['collections'][number];
   environment: Environment;
   workspaceCookies: CookieRecord[];
   storedResponses: StoredResponse[];
@@ -276,12 +311,15 @@ type RequestPanelProps = {
   onOpenSendOptions: () => void;
   onLoadGrpcSchema: () => void;
   onLoadGraphqlSchema: () => void;
+  onAddRequest: () => void;
+  onGenerateCode: () => void;
   scheduledSendLabel: string;
   urlInputRef: RefObject<HTMLInputElement | null>;
 };
 
 function RequestPanel({
   request,
+  collection,
   activeTab,
   isSending,
   streamStatus,
@@ -295,6 +333,8 @@ function RequestPanel({
   onOpenSendOptions,
   onLoadGrpcSchema,
   onLoadGraphqlSchema,
+  onAddRequest,
+  onGenerateCode,
   scheduledSendLabel,
   urlInputRef,
   environment,
@@ -310,7 +350,7 @@ function RequestPanel({
     <section className="request-panel">
       <div className="document-tabs">
         <div className="document-tab active">
-          <span className={`method method-${request.method.toLowerCase()} protocol-${request.protocol}`}>{protocolLabel(request)}</span>
+          <span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span>
           <input
             aria-label="Request name"
             onChange={(event) => onChange({ name: event.target.value })}
@@ -319,7 +359,8 @@ function RequestPanel({
           />
           <span className="dirty-dot" />
         </div>
-        <button aria-label="New request" className="tab-plus" type="button"><Icon name="plus" size={16} /></button>
+        <select aria-label="Request folder" className="request-folder-select" onChange={(event) => onChange({ folderId: event.target.value })} value={request.folderId ?? ''}><option value="">Collection root</option>{(collection.folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folderPath(collection, folder.id)}</option>)}</select>
+        <button aria-label="New request" className="tab-plus" onClick={onAddRequest} type="button"><Icon name="plus" size={16} /></button>
       </div>
 
       <div className="request-command-row">
@@ -338,15 +379,21 @@ function RequestPanel({
         >
           {protocols.map((protocol) => <option key={protocol.value} value={protocol.value}>{protocol.label}</option>)}
         </select>
-        <select
+        <input
           aria-label="HTTP method"
-          className={`method-select method-${request.method.toLowerCase()}`}
+          className={`method-select method-${methodClass(request.method)}`}
           disabled={request.protocol !== 'http'}
-          onChange={(event) => onChange({ method: event.target.value as HttpMethod })}
+          list="http-methods"
+          maxLength={32}
+          onBlur={(event) => onChange({ method: normalizeHttpMethod(event.target.value, 'GET') as HttpMethod })}
+          onChange={(event) => {
+            const value = event.target.value.toUpperCase();
+            if (/^[!#$%&'*+.^_`|~0-9A-Z-]*$/.test(value)) onChange({ method: value as HttpMethod });
+          }}
+          spellCheck={false}
           value={request.method}
-        >
-          {methods.map((method) => <option key={method}>{method}</option>)}
-        </select>
+        />
+        <datalist id="http-methods">{methods.map((method) => <option key={method} value={method} />)}</datalist>
         <input
           aria-label="Request URL"
           className="url-input"
@@ -358,12 +405,13 @@ function RequestPanel({
           ref={urlInputRef}
           value={request.url}
         />
+        <button aria-label="Generate client code" className="codegen-trigger" disabled={request.protocol !== 'http' && request.protocol !== 'graphql'} onClick={onGenerateCode} type="button"><Icon name="code" size={15} /><span>Code</span></button>
         <div className="send-actions"><button className="send-button" disabled={isSending && !scheduledSendLabel} onClick={scheduledSendLabel ? onCancelScheduled : onSend} type="button">{isSending ? <span className="sending-spinner" /> : null}{scheduledSendLabel ? `Stop · ${scheduledSendLabel}` : isSending && !streamProtocol ? 'Working' : actionLabel}</button><button aria-label="Send options" disabled={streamProtocol || request.protocol === 'grpc'} onClick={onOpenSendOptions} type="button"><Icon name="chevron-down" size={13} /></button></div>
       </div>
 
       <nav className="tab-strip request-tabs" aria-label="Request configuration">
         {requestTabs.map((tab) => {
-          const count = tab === 'params' ? request.params.filter((row) => row.enabled && row.name).length
+          const count = tab === 'params' ? [...request.pathParams, ...request.params].filter((row) => row.enabled && row.name).length
             : tab === 'headers' ? (request.protocol === 'grpc' ? request.grpc.metadata : request.headers).filter((row) => row.enabled && row.name).length : 0;
           return (
             <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">
@@ -375,15 +423,18 @@ function RequestPanel({
 
       <div className="request-editor">
         {activeTab === 'params' ? (
-          <KeyValueEditor rows={request.params} onChange={(params) => onChange({ params })} namePlaceholder="Parameter" />
+          <div className="parameter-editors">
+            <section><header><strong>Path parameters</strong><small>Replace matching {'{name}'} segments in the URL.</small></header><KeyValueEditor detailed rows={request.pathParams} onChange={(pathParams) => onChange({ pathParams })} namePlaceholder="Path parameter" /></section>
+            <section><header><strong>Query parameters</strong><small>Enabled rows are appended in order; duplicate names are preserved.</small></header><KeyValueEditor detailed rows={request.params} onChange={(params) => onChange({ params })} namePlaceholder="Query parameter" /></section>
+          </div>
         ) : null}
         {activeTab === 'headers' && request.protocol !== 'grpc' ? (
-          <KeyValueEditor rows={request.headers} onChange={(headers) => onChange({ headers })} namePlaceholder="Header" />
+          <KeyValueEditor detailed rows={request.headers} onChange={(headers) => onChange({ headers })} namePlaceholder="Header" />
         ) : null}
         {activeTab === 'headers' && request.protocol === 'grpc' ? (
           <KeyValueEditor rows={request.grpc.metadata} onChange={(metadata) => onChange({ grpc: { ...request.grpc, metadata } })} namePlaceholder="Metadata" />
         ) : null}
-        {activeTab === 'auth' ? <AuthEditor cookies={workspaceCookies} environment={environment} request={request} requestContext={requestContext} responses={storedResponses} onChange={onChange} /> : null}
+        {activeTab === 'auth' ? <div className="folder-auth-editor"><label><input checked={request.inheritFolderAuth === true} disabled={!request.folderId || !folderAncestors(collection, request.folderId).some((folder) => folder.auth)} onChange={(event) => onChange({ inheritFolderAuth: event.target.checked })} type="checkbox" /> Inherit authentication from closest configured folder</label><AuthEditor cookies={workspaceCookies} environment={environment} request={request} requestContext={requestContext} responses={storedResponses} onChange={onChange} /></div> : null}
         {activeTab === 'body' && request.protocol === 'http' ? <HttpBodyEditor onChange={onChange} request={request} /> : null}
         {activeTab === 'body' && request.protocol === 'graphql' ? <GraphqlEditor onChange={onChange} onLoadSchema={onLoadGraphqlSchema} request={request} schemaLoading={graphqlSchemaLoading} /> : null}
         {activeTab === 'body' && (request.protocol === 'websocket' || request.protocol === 'sse') ? <StreamSetup onChange={onChange} request={request} /> : null}
@@ -401,6 +452,7 @@ function RequestPanel({
             <CodeEditor ariaLabel="Response tests" onChange={(tests) => onChange({ tests })} value={request.tests} />
           </div>
         ) : null}
+        {activeTab === 'docs' ? <div className="request-docs-editor"><header><strong>Request documentation</strong><small>Markdown source</small></header><textarea aria-label="Request documentation" onChange={(event) => onChange({ documentation: event.target.value })} placeholder="Describe this request, its inputs, and expected behavior…" value={request.documentation ?? ''} /><section><small>Preview</small><pre>{request.documentation || 'No documentation yet.'}</pre></section></div> : null}
       </div>
       <div className="panel-footer"><span>{activeTab === 'body' ? 'Body' : titleCase(activeTab)}</span><span>UTF-8 · LF</span></div>
     </section>
@@ -536,22 +588,90 @@ function ResponsePanel({
 }
 
 type EnvironmentDialogProps = {
-  environment: Environment;
+  environments: Environment[];
+  activeId: string;
   onClose: () => void;
   onChange: (environment: Environment) => void;
+  onSelect: (id: string) => void;
+  onAdd: (parentId: string) => void;
+  onDelete: (id: string) => void;
 };
 
-function EnvironmentDialog({ environment, onClose, onChange }: EnvironmentDialogProps) {
+function EnvironmentDialog({ environments, activeId, onClose, onChange, onSelect, onAdd, onDelete }: EnvironmentDialogProps) {
+  const environment = environments.find((candidate) => candidate.id === activeId) ?? environments[0];
+  if (!environment) return null;
+  const resolved = resolveEnvironment(environments, environment.id) ?? environment;
+  const ownNames = new Set(environment.variables.map((variable) => variable.name));
+  const inherited = resolved.variables.filter((variable) => !ownNames.has(variable.name));
+  const publicIds = new Set(publicEnvironments(environments).map((candidate) => candidate.id));
+  const roots = environments.filter((candidate) => !candidate.parentId);
+  const renderEnvironment = (candidate: Environment, depth: number): ReactNode => <div key={candidate.id}><button className={candidate.id === environment.id ? 'active' : ''} onClick={() => onSelect(candidate.id)} style={{ '--environment-depth': depth } as CSSProperties} type="button"><i style={{ background: candidate.color || 'var(--muted)' }} /><span>{candidate.name}</span>{candidate.private ? <small>PRIVATE</small> : null}</button>{environments.filter((child) => child.parentId === candidate.id).map((child) => renderEnvironment(child, depth + 1))}</div>;
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section aria-labelledby="environment-title" aria-modal="true" className="modal environment-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
         <header><div><small>Active environment</small><h2 id="environment-title">{environment.name}</h2></div><button aria-label="Close" className="icon-button subtle" onClick={onClose} type="button"><Icon name="x" /></button></header>
-        <p>Variables resolve locally inside URLs, headers, authentication, and request bodies.</p>
-        <KeyValueEditor rows={environment.variables} onChange={(variables) => onChange({ ...environment, variables })} namePlaceholder="Variable" />
-        <footer><button className="secondary-button" onClick={onClose} type="button">Done</button></footer>
+        <div className="environment-layout"><aside><div>{roots.map((candidate) => renderEnvironment(candidate, 0))}</div><button onClick={() => onAdd('')} type="button"><Icon name="plus" size={13} /> Base environment</button><button onClick={() => onAdd(environment.id)} type="button"><Icon name="plus" size={13} /> Sub-environment</button></aside><main>
+          <div className="environment-identity"><label>Name<input onChange={(event) => onChange({ ...environment, name: event.target.value })} value={environment.name} /></label><label>Parent<select onChange={(event) => { const parentId = event.target.value; onChange({ ...environment, parentId, private: parentId ? environment.private || !publicIds.has(parentId) : false }); }} value={environment.parentId ?? ''}><option value="">None (base)</option>{environments.filter((candidate) => candidate.id !== environment.id && !environmentAncestors(environments, candidate.id).some((ancestor) => ancestor.id === environment.id)).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label><label>Color<input onChange={(event) => onChange({ ...environment, color: event.target.value })} type="color" value={environment.color || '#7e8a91'} /></label><label className="private-environment"><input checked={environment.private === true} disabled={!environment.parentId || !publicIds.has(environment.parentId)} onChange={(event) => onChange({ ...environment, private: event.target.checked })} type="checkbox" /> Private on this device</label></div>
+          <p>Own values override inherited values immediately. Private sub-environments are omitted from project sync and exports; use vault references for encrypted secrets.</p>
+          {inherited.length ? <div className="inherited-variables"><strong>Inherited from parent</strong>{inherited.map((variable) => <span key={variable.name}><code>{variable.name}</code><em>{variable.value}</em></span>)}</div> : null}
+          <KeyValueEditor rows={environment.variables} onChange={(variables) => onChange({ ...environment, variables })} namePlaceholder="Variable" />
+        </main></div>
+        <footer><button className="danger-action" disabled={environments.length <= 1} onClick={() => onDelete(environment.id)} type="button">Delete</button><span className="footer-spacer" /><button className="secondary-button" onClick={onClose} type="button">Done</button></footer>
       </section>
     </div>
   );
+}
+
+type CollectionDialogProps = {
+  collection: Workspace['collections'][number];
+  onChange: (collection: Workspace['collections'][number]) => void;
+  onClose: () => void;
+};
+
+function CollectionDialog({ collection, onChange, onClose }: CollectionDialogProps) {
+  const [tab, setTab] = useState<'variables' | 'docs'>('variables');
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section aria-labelledby="collection-settings-title" aria-modal="true" className="modal folder-modal collection-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
+    <header><div><small>Collection configuration</small><h2 id="collection-settings-title">{collection.name}</h2></div><button aria-label="Close" className="icon-button subtle" onClick={onClose} type="button"><Icon name="x" /></button></header>
+    <div className="folder-identity"><label>Name<input autoFocus onChange={(event) => onChange({ ...collection, name: event.target.value })} value={collection.name} /></label></div>
+    <nav aria-label="Collection settings" className="interchange-tabs"><button className={tab === 'variables' ? 'active' : ''} onClick={() => setTab('variables')} type="button">Variables</button><button className={tab === 'docs' ? 'active' : ''} onClick={() => setTab('docs')} type="button">Docs</button></nav>
+    <div className="folder-modal-content">
+      {tab === 'variables' ? <><p>Collection values override the selected global environment and are inherited by every request in this collection.</p><KeyValueEditor namePlaceholder="Variable" onChange={(environment) => onChange({ ...collection, environment })} rows={collection.environment ?? []} /></> : null}
+      {tab === 'docs' ? <div className="request-docs-editor"><header><strong>Collection documentation</strong><small>Markdown source</small></header><textarea aria-label="Collection documentation" onChange={(event) => onChange({ ...collection, documentation: event.target.value })} value={collection.documentation ?? ''} /><section><small>Preview</small><pre>{collection.documentation || 'No documentation yet.'}</pre></section></div> : null}
+    </div>
+    <footer><span className="footer-spacer" /><button className="secondary-button" onClick={onClose} type="button">Done</button></footer>
+  </section></div>;
+}
+
+type FolderDialogProps = {
+  collection: Workspace['collections'][number];
+  folder: RequestFolder;
+  environment: Environment;
+  cookies: CookieRecord[];
+  responses: StoredResponse[];
+  requestContext: SendRequestContext;
+  onChange: (folder: RequestFolder) => void;
+  onClose: () => void;
+  onDelete: () => void;
+};
+
+function FolderDialog({ collection, folder, environment, cookies, responses, requestContext, onChange, onClose, onDelete }: FolderDialogProps) {
+  const [tab, setTab] = useState<'variables' | 'headers' | 'auth' | 'scripts' | 'docs'>('variables');
+  const authRequest = createBlankRequest(`folder-auth-${folder.id}`);
+  authRequest.auth = folder.auth ?? authRequest.auth;
+  const invalidParents = new Set([folder.id, ...(collection.folders ?? []).filter((candidate) => folderAncestors(collection, candidate.id).some((ancestor) => ancestor.id === folder.id)).map((candidate) => candidate.id)]);
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section aria-labelledby="folder-title" aria-modal="true" className="modal folder-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
+    <header><div><small>Inherited request configuration</small><h2 id="folder-title">{folder.name}</h2></div><button aria-label="Close" className="icon-button subtle" onClick={onClose} type="button"><Icon name="x" /></button></header>
+    <div className="folder-identity"><label>Name<input autoFocus onChange={(event) => onChange({ ...folder, name: event.target.value })} value={folder.name} /></label><label>Parent folder<select onChange={(event) => onChange({ ...folder, parentId: event.target.value })} value={folder.parentId}><option value="">Collection root</option>{(collection.folders ?? []).filter((candidate) => !invalidParents.has(candidate.id)).map((candidate) => <option key={candidate.id} value={candidate.id}>{folderPath(collection, candidate.id)}</option>)}</select></label></div>
+    <nav className="interchange-tabs" aria-label="Folder settings">{(['variables', 'headers', 'auth', 'scripts', 'docs'] as const).map((item) => <button className={tab === item ? 'active' : ''} key={item} onClick={() => setTab(item)} type="button">{titleCase(item)}</button>)}</nav>
+    <div className="folder-modal-content">
+      {tab === 'variables' ? <><p>Folder values override collection and selected environment values for every descendant request.</p><KeyValueEditor namePlaceholder="Variable" onChange={(variables) => onChange({ ...folder, environment: variables })} rows={folder.environment} /></> : null}
+      {tab === 'headers' ? <><p>Closer folders and request headers override inherited headers with the same name.</p><KeyValueEditor namePlaceholder="Header" onChange={(headers) => onChange({ ...folder, headers })} rows={folder.headers} /></> : null}
+      {tab === 'auth' ? <><label className="folder-auth-toggle"><input checked={Boolean(folder.auth)} onChange={(event) => onChange({ ...folder, auth: event.target.checked ? authRequest.auth : undefined })} type="checkbox" /> Configure inheritable authentication</label>{folder.auth ? <AuthEditor cookies={cookies} environment={environment} onChange={(patch) => { if (patch.auth) onChange({ ...folder, auth: patch.auth }); }} request={authRequest} requestContext={requestContext} responses={responses} /> : <div className="empty-state compact"><Icon name="lock" size={24} /><strong>No folder authentication</strong><span>Enable it here, then choose “Inherit” on descendant requests.</span></div>}</> : null}
+      {tab === 'scripts' ? <div className="folder-script-grid"><section><header>Pre-request · root to request</header><CodeEditor ariaLabel="Folder pre-request script" onChange={(preRequestScript) => onChange({ ...folder, preRequestScript })} value={folder.preRequestScript} /></section><section><header>After-response · request to root</header><CodeEditor ariaLabel="Folder after-response script" onChange={(tests) => onChange({ ...folder, tests })} value={folder.tests} /></section></div> : null}
+      {tab === 'docs' ? <div className="request-docs-editor"><header><strong>Folder documentation</strong><small>Markdown source</small></header><textarea aria-label="Folder documentation" onChange={(event) => onChange({ ...folder, documentation: event.target.value })} value={folder.documentation} /><section><small>Preview</small><pre>{folder.documentation || 'No documentation yet.'}</pre></section></div> : null}
+    </div>
+    <footer><button className="danger-action" onClick={onDelete} type="button">Delete folder</button><span className="footer-spacer" /><button className="secondary-button" onClick={onClose} type="button">Done</button></footer>
+  </section></div>;
 }
 
 type CommandPaletteProps = {
@@ -591,7 +711,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 9, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 13, requestTimeoutMs: 30000, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L' } },
+    format: 'brunomnia', version: 11, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 13, requestTimeoutMs: 30000, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L', 'generate-code': 'Mod+Shift+G' } },
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -605,6 +725,9 @@ export default function App() {
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showSendOptions, setShowSendOptions] = useState(false);
+  const [showCodeGeneration, setShowCodeGeneration] = useState(false);
+  const [folderEditor, setFolderEditor] = useState<{ collectionId: string; folderId: string }>();
+  const [collectionEditor, setCollectionEditor] = useState<string>();
   const [sendDelayMs, setSendDelayMs] = useState(0);
   const [repeatIntervalMs, setRepeatIntervalMs] = useState(1_000);
   const [scheduledSendLabel, setScheduledSendLabel] = useState('');
@@ -670,8 +793,10 @@ export default function App() {
   }, [hydrated, workspace]);
 
   const active = useMemo(() => findRequest(workspace), [workspace]);
+  const activeCollection = workspace.collections.find((collection) => collection.id === active?.collectionId);
   activeRequestIdRef.current = workspace.activeRequestId;
-  const activeEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
+  const selectedEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
+  const activeEnvironment = useMemo(() => resolveEnvironment(workspace.environments, workspace.activeEnvironmentId), [workspace.activeEnvironmentId, workspace.environments]);
   const unlockedVault = useMemo(() => vaultVariables(vaultSession), [vaultSession]);
   const externalSecretResolver = useCallback((input: ExternalSecretInput) => resolveAuthorizedExternalSecret(workspace, input), [workspace]);
 
@@ -723,9 +848,30 @@ export default function App() {
   const addCollection = useCallback(() => {
     setWorkspace((current) => ({
       ...current,
-      collections: [...current.collections, { id: uid('collection'), name: `Collection ${current.collections.length + 1}`, expanded: true, requests: [] }],
+      collections: [...current.collections, { id: uid('collection'), name: `Collection ${current.collections.length + 1}`, expanded: true, requests: [], folders: [], environment: [], documentation: '' }],
     }));
   }, []);
+
+  const addFolder = (collectionId: string, parentId: string) => {
+    const folderId = uid('folder');
+    setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === collectionId ? { ...collection, expanded: true, folders: [...(collection.folders ?? []), { id: folderId, name: 'Untitled Folder', parentId, expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }] } : collection) }));
+    setFolderEditor({ collectionId, folderId });
+  };
+
+  const updateFolder = (collectionId: string, folder: RequestFolder) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === collectionId ? { ...collection, folders: (collection.folders ?? []).map((candidate) => candidate.id === folder.id ? folder : candidate) } : collection) }));
+
+  const updateCollection = (updated: Workspace['collections'][number]) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === updated.id ? updated : collection) }));
+
+  const deleteFolder = (collectionId: string, folderId: string) => {
+    if (workspace.preferences.confirmDestructive && !window.confirm('Delete this folder? Descendant requests and folders will move to its parent.')) return;
+    setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => {
+      if (collection.id !== collectionId) return collection;
+      const folder = (collection.folders ?? []).find((candidate) => candidate.id === folderId);
+      if (!folder) return collection;
+      return { ...collection, folders: (collection.folders ?? []).filter((candidate) => candidate.id !== folderId).map((candidate) => candidate.parentId === folderId ? { ...candidate, parentId: folder.parentId } : candidate), requests: collection.requests.map((request) => request.folderId === folderId ? { ...request, folderId: folder.parentId } : request) };
+    }) }));
+    setFolderEditor(undefined);
+  };
 
   const duplicateActiveRequest = () => {
     if (!active) return;
@@ -792,7 +938,9 @@ export default function App() {
 
   const loadActiveGraphqlSchema = async () => {
     if (!active || !activeEnvironment || active.request.protocol !== 'graphql' || graphqlSchemaLoading) return;
-    const targetRequest = active.request;
+    const collection = workspace.collections.find((candidate) => candidate.id === active.collectionId);
+    if (!collection) return;
+    const targetRequest = applyCollectionConfiguration(collection, active.request, activeEnvironment).request;
     setGraphqlSchemaLoading(true);
     try {
       const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, vault: unlockedVault, externalSecret: externalSecretResolver });
@@ -822,28 +970,34 @@ export default function App() {
   };
 
   const persistScriptEnvironment = (variables: Record<string, string>) => {
-    if (!activeEnvironment) return;
-    setWorkspace((current) => ({
-      ...current,
-      environments: current.environments.map((environment) => environment.id === activeEnvironment.id ? {
-        ...environment,
-        variables: Object.entries(variables).map(([name, value]) => ({
-          id: environment.variables.find((candidate) => candidate.name === name)?.id ?? uid('variable'),
-          name, value, enabled: true,
-        })),
-      } : environment),
-    }));
+    if (!selectedEnvironment) return;
+    setWorkspace((current) => {
+      const selected = current.environments.find((environment) => environment.id === selectedEnvironment.id);
+      if (!selected) return current;
+      const inherited = selected.parentId ? resolveEnvironment(current.environments, selected.parentId) : undefined;
+      const inheritedValues = environmentMap(inherited);
+      const ownNames = new Set(selected.variables.map((variable) => variable.name));
+      const nextVariables = Object.entries(variables).filter(([name, value]) => ownNames.has(name) || inheritedValues[name] !== value).map(([name, value]) => ({
+        id: selected.variables.find((candidate) => candidate.name === name)?.id ?? uid('variable'), name, value, enabled: true,
+      }));
+      return { ...current, environments: current.environments.map((environment) => environment.id === selected.id ? { ...environment, variables: nextVariables } : environment) };
+    });
   };
 
   const executeRequest = async () => {
     if (!active || !activeEnvironment || isSending) return;
-    if (active.request.protocol === 'websocket' || active.request.protocol === 'sse') {
+    const collection = workspace.collections.find((candidate) => candidate.id === active.collectionId);
+    if (!collection) return;
+    const configured = applyCollectionConfiguration(collection, active.request, activeEnvironment);
+    const request = configured.request;
+    const executionEnvironment = configured.environment;
+    if (request.protocol === 'websocket' || request.protocol === 'sse') {
       if (streamStatus === 'connected') {
         const sessionId = streamSession.current;
         if (!sessionId) return;
         setIsSending(true);
         try {
-          await disconnectStream(active.request.protocol, sessionId);
+          await disconnectStream(request.protocol, sessionId);
           setStreamMessages((current) => [...current, {
             id: uid('event'), direction: 'system', kind: 'closed', text: 'Disconnected by client', timestamp: new Date().toISOString(),
           }]);
@@ -861,9 +1015,9 @@ export default function App() {
       setStreamMessages([]);
       const sessionId = uid('stream');
       streamSession.current = sessionId;
-      streamProtocol.current = active.request.protocol;
+      streamProtocol.current = request.protocol;
       try {
-        await connectStream(active.request, { ...activeEnvironment, variables: [...activeEnvironment.variables, ...Object.entries(unlockedVault).map(([name, value]) => ({ id: `vault-${name}`, name, value, enabled: true }))] }, sessionId, onStreamEvent);
+        await connectStream(request, { ...executionEnvironment, variables: [...executionEnvironment.variables, ...Object.entries(unlockedVault).map(([name, value]) => ({ id: `vault-${name}`, name, value, enabled: true }))] }, sessionId, onStreamEvent);
         setStreamStatus('connected');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -878,15 +1032,15 @@ export default function App() {
     setScriptLogs([]);
     const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const pluginCallbacks: PluginHostCallbacks = {
-      network: (pluginRequest) => sendRequest(pluginRequest, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses }),
+      network: (pluginRequest) => sendRequest(pluginRequest, executionEnvironment, { cookies: workspace.cookies, responses: workspace.responses }),
       prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
       readClipboard: () => navigator.clipboard.readText(),
       writeClipboard: (value) => navigator.clipboard.writeText(value),
     };
     const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
     try {
-      let variables = environmentMap(activeEnvironment);
-      const preRequest = await runBrowserScript(active.request.preRequestScript, active.request, variables);
+      let variables = environmentMap(executionEnvironment);
+      const preRequest = await runBrowserScript(request.preRequestScript, request, variables);
       let executableRequest = preRequest.request;
       variables = preRequest.environment;
       const requestVariables = { ...variables, ...(preRequest.localVariables ?? {}) };
@@ -894,7 +1048,7 @@ export default function App() {
       let result: HttpResponse;
       if (executableRequest.protocol === 'grpc') {
         executableRequest = await pluginRuntime.beforeRequest(executableRequest);
-        const existingSchema = executableRequest.grpc.descriptorSetBase64 ? grpcSchemas[active.request.id] : undefined;
+        const existingSchema = executableRequest.grpc.descriptorSetBase64 ? grpcSchemas[request.id] : undefined;
         const schema = existingSchema ?? await loadActiveGrpcSchema();
         if (!schema) return;
         const service = schema.services.find((candidate) => candidate.fullName === executableRequest.grpc.service) ?? schema.services[0];
@@ -910,14 +1064,14 @@ export default function App() {
           },
         };
         const output = await invokeGrpc(callRequest, {
-          ...activeEnvironment,
+          ...executionEnvironment,
           variables: Object.entries({ ...requestVariables, ...unlockedVault }).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
         });
         const body = JSON.stringify({ status: output.status, callType: output.callType, messages: output.messages }, null, 2);
         result = await pluginRuntime.afterResponse(executableRequest, { status: 200, statusText: `gRPC ${output.status}`, headers: { 'grpc-call-type': output.callType }, body, durationMs: output.durationMs, sizeBytes: new Blob([body]).size });
       } else {
         result = await sendRequest(executableRequest, {
-          ...activeEnvironment,
+          ...executionEnvironment,
           variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
         }, { cookies: workspace.cookies, responses: workspace.responses, pluginRuntime, vault: unlockedVault, externalSecret: externalSecretResolver });
       }
@@ -1025,6 +1179,7 @@ export default function App() {
         setShowPalette(false);
         setShowEnvironment(false);
         setShowSendOptions(false);
+        setShowCodeGeneration(false);
         return;
       }
       if (event.repeat) return;
@@ -1043,6 +1198,9 @@ export default function App() {
       else if (shortcutMatches(event, shortcuts['duplicate-request'])) action(duplicateActiveRequest);
       else if (shortcutMatches(event, shortcuts['delete-request'])) action(deleteActiveRequest);
       else if (shortcutMatches(event, shortcuts['focus-url'])) action(() => { setWorkbenchSection('requests'); urlInputRef.current?.focus(); urlInputRef.current?.select(); });
+      else if (shortcutMatches(event, shortcuts['generate-code'])) action(() => {
+        if (active && (active.request.protocol === 'http' || active.request.protocol === 'graphql')) setShowCodeGeneration(true);
+      });
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -1079,9 +1237,33 @@ export default function App() {
     }));
   };
 
-  if (!hydrated || !active || !activeEnvironment) {
+  const addEnvironment = (parentId: string) => {
+    const id = uid('environment');
+    setWorkspace((current) => {
+      const publicIds = new Set(publicEnvironments(current.environments).map((environment) => environment.id));
+      return { ...current, activeEnvironmentId: id, environments: [...current.environments, { id, name: parentId ? 'New Sub-environment' : 'New Base Environment', variables: [], parentId, private: Boolean(parentId) && !publicIds.has(parentId), color: '#69bddd' }] };
+    });
+  };
+
+  const deleteEnvironment = (id: string) => {
+    if (workspace.environments.length <= 1) return;
+    if (workspace.preferences.confirmDestructive && !window.confirm('Delete this environment? Child environments will move to its parent.')) return;
+    setWorkspace((current) => {
+      const deleted = current.environments.find((environment) => environment.id === id);
+      if (!deleted) return current;
+      const environments = current.environments.filter((environment) => environment.id !== id).map((environment) => environment.parentId === id ? { ...environment, parentId: deleted.parentId ?? '', private: environment.private || deleted.private === true } : environment);
+      return { ...current, environments, activeEnvironmentId: current.activeEnvironmentId === id ? environments.find((environment) => environment.id === deleted.parentId)?.id ?? environments[0].id : current.activeEnvironmentId };
+    });
+  };
+
+  const editingCollection = workspace.collections.find((collection) => collection.id === folderEditor?.collectionId);
+  const editingFolder = editingCollection?.folders?.find((folder) => folder.id === folderEditor?.folderId);
+  const configuredCollection = workspace.collections.find((collection) => collection.id === collectionEditor);
+
+  if (!hydrated || !active || !activeCollection || !activeEnvironment || !selectedEnvironment) {
     return <main className="loading-screen"><div className="brand-mark"><span /></div><strong>Brunomnia</strong><span>Opening local workspace…</span></main>;
   }
+  const codegenConfiguration = applyCollectionConfiguration(activeCollection, active.request, activeEnvironment);
 
   return (
     <main className="app-shell" data-density={workspace.preferences.density} data-theme={workspace.activePluginTheme ? 'plugin' : workspace.preferences.theme} style={{ '--editor-font-size': `${workspace.preferences.fontSize}px` } as CSSProperties}>
@@ -1090,7 +1272,7 @@ export default function App() {
         <button className="workspace-switcher" type="button"><Icon name="archive" size={17} /><span>{workspace.name}</span><Icon name="chevron-down" size={15} /></button>
         <button className="command-trigger" onClick={() => setShowPalette(true)} type="button"><Icon name="search" size={17} /><span>Search or run command…</span><kbd>{workspace.preferences.shortcuts.palette.replace('Mod', '⌘/Ctrl')}</kbd></button>
         <select aria-label="Environment" className="environment-switcher" onChange={(event) => setWorkspace((current) => ({ ...current, activeEnvironmentId: event.target.value }))} value={workspace.activeEnvironmentId}>
-          {workspace.environments.map((environment) => <option key={environment.id} value={environment.id}>{environment.name}</option>)}
+          {workspace.environments.map((environment) => <option key={environment.id} value={environment.id}>{`${'— '.repeat(environmentAncestors(workspace.environments, environment.id).length)}${environment.name}${environment.private ? ' · private' : ''}`}</option>)}
         </select>
         <div className="topbar-actions">
           <button aria-label="Edit environment" className="icon-button subtle" onClick={() => setShowEnvironment(true)} type="button"><Icon name="braces" size={18} /></button>
@@ -1119,10 +1301,14 @@ export default function App() {
         {workbenchSection === 'requests' && !sidebarHidden ? <CollectionSidebar
           mode={sidebarMode}
           onAddCollection={addCollection}
+          onAddFolder={addFolder}
+          onEditCollection={setCollectionEditor}
+          onEditFolder={(collectionId, folderId) => setFolderEditor({ collectionId, folderId })}
           onAddRequest={addRequest}
           onSearch={setSearch}
           onSelectRequest={(id) => setWorkspace((current) => ({ ...current, activeRequestId: id }))}
           onToggleCollection={(id) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === id ? { ...collection, expanded: !collection.expanded } : collection) }))}
+          onToggleFolder={(collectionId, folderId) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === collectionId ? { ...collection, folders: (collection.folders ?? []).map((folder) => folder.id === folderId ? { ...folder, expanded: !folder.expanded } : folder) } : collection) }))}
           search={search}
           workspace={workspace}
         /> : null}
@@ -1130,13 +1316,16 @@ export default function App() {
         {workbenchSection === 'requests' ? <div className="workbench">
           <RequestPanel
             activeTab={requestTab}
+            collection={activeCollection}
             environment={activeEnvironment}
             grpcSchema={grpcSchemas[active.request.id]}
             graphqlSchemaLoading={graphqlSchemaLoading}
             grpcSchemaLoading={grpcSchemaLoading}
             isSending={isSending}
             onChange={updateActiveRequest}
+            onAddRequest={addRequest}
             onCancelScheduled={cancelScheduledSends}
+            onGenerateCode={() => setShowCodeGeneration(true)}
             onLoadGraphqlSchema={() => void loadActiveGraphqlSchema()}
             onLoadGrpcSchema={() => void loadActiveGrpcSchema()}
             onOpenSendOptions={() => setShowSendOptions(true)}
@@ -1203,7 +1392,9 @@ export default function App() {
         <span>{workbenchSection === 'requests' ? protocolLabel(active.request) : titleCase(workbenchSection)}</span>
       </footer>
 
-      {showEnvironment ? <EnvironmentDialog environment={activeEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} /> : null}
+      {showEnvironment ? <EnvironmentDialog activeId={workspace.activeEnvironmentId} environments={workspace.environments} onAdd={addEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} onDelete={deleteEnvironment} onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))} /> : null}
+      {configuredCollection ? <CollectionDialog collection={configuredCollection} onChange={updateCollection} onClose={() => setCollectionEditor(undefined)} /> : null}
+      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={activeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} requestContext={{ vault: unlockedVault, externalSecret: externalSecretResolver }} responses={workspace.responses} /> : null}
       {showSendOptions ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSendOptions(false)}>
         <section aria-labelledby="send-options-title" aria-modal="true" className="modal send-options-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
           <header><div><small>Request scheduling</small><h2 id="send-options-title">Send options</h2></div><button aria-label="Close" className="icon-button subtle" onClick={() => setShowSendOptions(false)} type="button"><Icon name="x" /></button></header>
@@ -1217,6 +1408,7 @@ export default function App() {
       </div> : null}
       {showImport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading import tools…</div></div>}><ImportDialog onApply={applyImport} onClose={() => setShowImport(false)} onFetchUrl={fetchImportUrl} /></Suspense> : null}
       {showExport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading export tools…</div></div>}><ExportDialog onClose={() => setShowExport(false)} workspace={workspace} /></Suspense> : null}
+      {showCodeGeneration ? <CodeGenerationDialog onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /> : null}
       {showPalette ? <CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => setWorkbenchSection('design')} onEnvironment={() => setShowEnvironment(true)} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => setWorkbenchSection('mocks')} onPreferences={() => setWorkbenchSection('preferences')} onRunner={() => setWorkbenchSection('runner')} /> : null}
     </main>
   );

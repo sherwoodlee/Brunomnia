@@ -11,6 +11,7 @@ export const shortcutLabels: Record<ShortcutAction, string> = {
   'duplicate-request': 'Duplicate request',
   'delete-request': 'Delete request',
   'focus-url': 'Focus request URL',
+  'generate-code': 'Generate client code',
 };
 
 export const defaultShortcuts: AppPreferences['shortcuts'] = {
@@ -24,6 +25,7 @@ export const defaultShortcuts: AppPreferences['shortcuts'] = {
   'duplicate-request': 'Mod+D',
   'delete-request': 'Mod+Shift+Backspace',
   'focus-url': 'Mod+L',
+  'generate-code': 'Mod+Shift+G',
 };
 
 export const defaultPreferences: AppPreferences = {
