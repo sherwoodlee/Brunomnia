@@ -4,7 +4,7 @@ import { createBlankRequest } from '../data/seed';
 import { applyScriptSubresponse, buildScriptWorkerSource, normalizeScriptSubrequest, validateScriptSource } from './scriptSandbox';
 
 describe('script sandbox source validation', () => {
-  const runWorkerSource = async (script: string) => {
+  const runWorkerSource = async (script: string, stateOverrides: Record<string, unknown> = {}) => {
     const messages: unknown[] = [];
     const listeners: Array<(event: { data: unknown }) => void> = [];
     const self = {
@@ -17,13 +17,21 @@ describe('script sandbox source validation', () => {
     request.url = 'https://api.example.com/items';
     await self.onmessage?.({ data: { type: 'run', state: {
       request,
+      baseGlobals: { base: 'base' },
+      baseGlobalDisabled: [],
       environment: { global: 'global' },
+      globalDisabled: [],
+      globalsAreBase: false,
+      baseEnvironment: { collectionBase: 'base' },
+      baseEnvironmentDisabled: [],
       collectionVariables: { shared: 'collection' },
       collectionDisabled: [],
+      collectionVariablesAreBase: false,
       folders: [{ id: 'root', name: 'Root', environment: { folder: 'root' } }, { id: 'child', name: 'Orders', environment: { folder: 'child' } }],
       response: { status: 201, statusText: 'Created', headers: { 'content-type': 'application/json' }, body: '{"id":"one"}', durationMs: 5, sizeBytes: 12 },
       localVariables: {}, iterationData: { row: '42' }, vault: {},
       permissions: { network: false, vault: false, maxSubrequests: 5 },
+      ...stateOverrides,
     } } });
     return messages.find((message) => (message as { type?: string }).type === 'result') as Record<string, unknown>;
   };
@@ -93,6 +101,52 @@ describe('script sandbox source validation', () => {
     expect((output.folders as Array<{ environment: Record<string, string> }>)[1].environment).toMatchObject({ folder: 'child', folderWrite: 'yes' });
     expect(output.request).toMatchObject({ url: 'https://api.example.com/items?page=1&page=2', auth: { type: 'basic', username: 'Ada', password: 'secret' } });
     expect(output.tests).toEqual([{ name: 'async contract', passed: true }]);
+  });
+
+  it('resolves all seven variable layers and mutates distinct base and selected stores', async () => {
+    const output = await runWorkerSource(`
+      insomnia.test('seven-level priority', () => {
+        insomnia.expect(insomnia.variables.get('priority')).to.equal('local');
+        insomnia.expect(insomnia.baseGlobals.get('priority')).to.equal('base-global');
+        insomnia.expect(insomnia.globals.get('priority')).to.equal('selected-global');
+        insomnia.expect(insomnia.baseEnvironment.get('priority')).to.equal('base-collection');
+        insomnia.expect(insomnia.environment.get('priority')).to.equal('selected-collection');
+        insomnia.expect(insomnia.parentFolders.get('Orders').environment.get('priority')).to.equal('folder');
+        insomnia.expect(insomnia.iterationData.get('priority')).to.equal('iteration');
+        insomnia.expect(insomnia.localVars.get('priority')).to.equal('local');
+      });
+      insomnia.baseGlobals.set('baseWrite', 'yes');
+      insomnia.globals.set('masked', 'unmasked');
+      insomnia.baseEnvironment.set('baseCollectionWrite', 'yes');
+      insomnia.environment.set('selectedCollectionWrite', 'yes');
+    `, {
+      baseGlobals: { priority: 'base-global', masked: 'base' },
+      environment: { priority: 'selected-global' },
+      globalDisabled: ['masked'],
+      baseEnvironment: { priority: 'base-collection' },
+      collectionVariables: { priority: 'selected-collection' },
+      folders: [{ id: 'root', name: 'Root', environment: { priority: 'root-folder' }, disabled: [] }, { id: 'child', name: 'Orders', environment: { priority: 'folder' }, disabled: [] }],
+      iterationData: { priority: 'iteration' },
+      localVariables: { priority: 'local' },
+    });
+    expect(output.ok).toBe(true);
+    expect(output.tests).toEqual([{ name: 'seven-level priority', passed: true }]);
+    expect(output.baseGlobals).toMatchObject({ baseWrite: 'yes' });
+    expect(output.environment).toMatchObject({ masked: 'unmasked' });
+    expect(output.globalDisabled).toEqual([]);
+    expect(output.baseEnvironment).toMatchObject({ baseCollectionWrite: 'yes' });
+    expect(output.collectionVariables).toMatchObject({ selectedCollectionWrite: 'yes' });
+  });
+
+  it('aliases selected APIs to base stores when no sub-environment is selected', async () => {
+    const output = await runWorkerSource(`insomnia.globals.set('globalAlias', 'yes'); insomnia.environment.set('collectionAlias', 'yes');`, {
+      baseGlobals: { initial: 'global' }, environment: {}, globalsAreBase: true,
+      baseEnvironment: { initial: 'collection' }, collectionVariables: {}, collectionVariablesAreBase: true,
+    });
+    expect(output.baseGlobals).toEqual(output.environment);
+    expect(output.baseGlobals).toMatchObject({ globalAlias: 'yes' });
+    expect(output.baseEnvironment).toEqual(output.collectionVariables);
+    expect(output.baseEnvironment).toMatchObject({ collectionAlias: 'yes' });
   });
 
   it('carries secondary response cookies and chaining records into later requests', () => {

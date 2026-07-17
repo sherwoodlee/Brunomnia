@@ -1,6 +1,6 @@
 {
   "format": "brunomnia",
-  "version": 3,
+  "version": 13,
   "name": "CLI example",
   "activeRequestId": "cli-health-request",
   "activeEnvironmentId": "cli-local",
@@ -9,6 +9,9 @@
       "id": "cli-health",
       "name": "CLI Health",
       "expanded": true,
+      "environment": [{ "id": "cli-collection-base-row", "name": "collectionBase", "value": "base", "enabled": true }],
+      "subEnvironments": [{ "id": "cli-collection-selected", "name": "CLI selected", "variables": [{ "id": "cli-collection-selected-row", "name": "collectionSelected", "value": "selected", "enabled": true }] }],
+      "activeSubEnvironmentId": "cli-collection-selected",
       "requests": [
         {
           "id": "cli-health-request",
@@ -53,17 +56,23 @@
             "clientCertificatePem": "",
             "clientKeyPem": ""
           },
-          "preRequestScript": "insomnia.environment.set('executedBy', 'cli');\ninsomnia.request.addHeader({ name: 'X-Brunomnia-CLI', value: 'true' });",
-          "tests": "insomnia.test('Status is 200', async () => { await Promise.resolve(); insomnia.expect(insomnia.response.status).to.be.oneOf([200, 204]); });\ninsomnia.test('Body is JSON', () => { insomnia.expect(insomnia.response.json()).to.be.an('object').that.has.all.keys('ok'); });"
+          "preRequestScript": "insomnia.baseGlobals.set('globalBaseWrite', 'base');\ninsomnia.globals.set('globalSelectedWrite', 'selected');\ninsomnia.baseEnvironment.set('collectionBaseWrite', 'base');\ninsomnia.environment.set('collectionSelectedWrite', 'selected');\ninsomnia.request.addHeader({ name: 'X-Brunomnia-CLI', value: 'true' });",
+          "tests": "insomnia.test('Status and scopes are exact', async () => { await Promise.resolve(); insomnia.expect(insomnia.response.status).to.be.oneOf([200, 204]); insomnia.expect(insomnia.baseGlobals.get('globalBaseWrite')).to.equal('base'); insomnia.expect(insomnia.globals.get('globalSelectedWrite')).to.equal('selected'); insomnia.expect(insomnia.baseEnvironment.get('collectionBaseWrite')).to.equal('base'); insomnia.expect(insomnia.environment.get('collectionSelectedWrite')).to.equal('selected'); });\ninsomnia.test('Body is JSON', () => { insomnia.expect(insomnia.response.json()).to.be.an('object').that.has.all.keys('ok'); });"
         }
       ]
     }
   ],
   "environments": [
     {
+      "id": "cli-base",
+      "name": "CLI Base",
+      "variables": [{ "id": "cli-global-base-row", "name": "globalBase", "value": "base", "enabled": true }]
+    },
+    {
       "id": "cli-local",
       "name": "CLI Local",
-      "variables": []
+      "parentId": "cli-base",
+      "variables": [{ "id": "cli-global-selected-row", "name": "globalSelected", "value": "selected", "enabled": true }]
     }
   ],
   "history": [],

@@ -230,13 +230,13 @@ export const importPostman = (sourceName: string, document: UnknownRecord): Arti
     name,
     expanded: true,
     requests,
+    environment: variables,
     source: sourceMetadata(postmanFormat, info?._postman_id, { schema: info?.schema }),
   };
   return {
     ...emptyResources(), format: postmanFormat, sourceName, warnings,
     metadata: { title: name, schema: asString(info?.schema), requests: String(requests.length) },
     collections: [collection],
-    environments: variables.length ? [{ id: sourceId('environment', postmanFormat, sourceName), name: `${name} variables`, variables, source: sourceMetadata(postmanFormat, sourceName) }] : [],
   };
 };
 

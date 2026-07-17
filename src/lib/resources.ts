@@ -1,5 +1,52 @@
 import type { ApiRequest, Collection, Environment, KeyValue, RequestFolder } from '../types';
 
+export type VariableScope = { values: Record<string, string>; disabled: string[] };
+
+export const variableScope = (layers: KeyValue[][]): VariableScope => {
+  const values: Record<string, string> = {};
+  const disabled = new Set<string>();
+  layers.forEach((rows) => rows.forEach((row) => {
+    const name = row.name.trim();
+    if (!name) return;
+    if (row.enabled) { values[name] = row.value; disabled.delete(name); }
+    else { delete values[name]; disabled.add(name); }
+  }));
+  return { values, disabled: [...disabled] };
+};
+
+export type ScriptEnvironmentScopes = {
+  baseId: string;
+  selectedId: string;
+  baseGlobals: VariableScope;
+  globals: VariableScope;
+  globalsAreBase: boolean;
+};
+
+export const scriptEnvironmentScopes = (environments: Environment[], activeId: string): ScriptEnvironmentScopes | undefined => {
+  const selected = environments.find((environment) => environment.id === activeId) ?? environments[0];
+  if (!selected) return undefined;
+  const ancestors = environmentAncestors(environments, selected.id);
+  const base = ancestors[0] ?? selected;
+  const globalsAreBase = base.id === selected.id;
+  return {
+    baseId: base.id,
+    selectedId: selected.id,
+    baseGlobals: variableScope([base.variables]),
+    globals: globalsAreBase ? variableScope([base.variables]) : variableScope([...ancestors.slice(1).map((environment) => environment.variables), selected.variables]),
+    globalsAreBase,
+  };
+};
+
+export const collectionEnvironmentScopes = (collection: Collection) => {
+  const selected = (collection.subEnvironments ?? []).find((environment) => environment.id === collection.activeSubEnvironmentId);
+  return {
+    baseEnvironment: variableScope([collection.environment ?? []]),
+    environment: selected ? variableScope([selected.variables]) : variableScope([collection.environment ?? []]),
+    environmentIsBase: !selected,
+    selectedId: selected?.id,
+  };
+};
+
 const rowMap = (rows: KeyValue[], caseInsensitive: boolean) => {
   const output = new Map<string, KeyValue>();
   rows.forEach((row) => {
@@ -65,9 +112,10 @@ const joinedScripts = (scripts: string[]) => scripts.map((script) => script.trim
 export const applyCollectionConfiguration = (collection: Collection, request: ApiRequest, environment: Environment): { request: ApiRequest; environment: Environment; folders: RequestFolder[] } => {
   const folders = folderAncestors(collection, request.folderId);
   const nearestAuth = [...folders].reverse().find((folder) => folder.auth)?.auth;
+  const selectedCollectionEnvironment = (collection.subEnvironments ?? []).find((candidate) => candidate.id === collection.activeSubEnvironmentId);
   return {
     folders,
-    environment: { ...environment, variables: mergeRows([environment.variables, collection.environment ?? [], ...folders.map((folder) => folder.environment)]) },
+    environment: { ...environment, variables: mergeRows([environment.variables, collection.environment ?? [], selectedCollectionEnvironment?.variables ?? [], ...folders.map((folder) => folder.environment)]) },
     request: {
       ...request,
       headers: mergeRows([...folders.map((folder) => folder.headers), request.headers], true),

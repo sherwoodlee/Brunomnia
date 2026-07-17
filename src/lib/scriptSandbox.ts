@@ -5,8 +5,15 @@ import { storeResponseCookies } from './cookies';
 export type ScriptFolderState = { id: string; name: string; environment: Record<string, string>; disabled?: string[] };
 
 export type ScriptRunOptions = {
+  baseGlobals?: Record<string, string>;
+  baseGlobalDisabled?: string[];
+  globalDisabled?: string[];
+  globalsAreBase?: boolean;
+  baseEnvironment?: Record<string, string>;
+  baseEnvironmentDisabled?: string[];
   collectionVariables?: Record<string, string>;
   collectionDisabled?: string[];
+  collectionVariablesAreBase?: boolean;
   folders?: ScriptFolderState[];
   vault?: Record<string, string>;
   sendRequest?: (request: ApiRequest, variables: Record<string, string>) => Promise<HttpResponse>;
@@ -20,7 +27,13 @@ type WorkerOutput = {
   error?: string;
   request: ApiRequest;
   environment: Record<string, string>;
+  baseGlobals: Record<string, string>;
+  baseGlobalDisabled: string[];
+  globalDisabled: string[];
   collectionVariables: Record<string, string>;
+  baseEnvironment: Record<string, string>;
+  baseEnvironmentDisabled: string[];
+  collectionDisabled: string[];
   folders: ScriptFolderState[];
   logs: string[];
   tests: ScriptRunResult['tests'];
@@ -197,15 +210,23 @@ self.onmessage = async ({ data }) => {
     error: (...values) => pushLog('[error] ' + values.map(String).join(' ')),
   };
   const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  if (state.globalsAreBase) state.environment = state.baseGlobals;
+  if (state.collectionVariablesAreBase) state.collectionVariables = state.baseEnvironment;
+  const applyScope = (values, scope, disabled) => {
+    (disabled || []).forEach((name) => delete values[name]);
+    Object.assign(values, scope);
+  };
   const mergedVariables = () => {
-    const values = Object.assign({}, state.environment);
-    state.collectionDisabled.forEach((name) => delete values[name]);
-    Object.assign(values, state.collectionVariables);
+    const values = {};
+    applyScope(values, state.baseGlobals, state.baseGlobalDisabled);
+    if (!state.globalsAreBase) applyScope(values, state.environment, state.globalDisabled);
+    applyScope(values, state.baseEnvironment, state.baseEnvironmentDisabled);
+    if (!state.collectionVariablesAreBase) applyScope(values, state.collectionVariables, state.collectionDisabled);
     state.folders.forEach((folder) => { (folder.disabled || []).forEach((name) => delete values[name]); Object.assign(values, folder.environment); });
     return Object.assign(values, state.iterationData, state.localVariables);
   };
   const replaceIn = (value) => String(value).replace(/{{\\s*([^{}]+?)\\s*}}/g, (match, name) => mergedVariables()[name] ?? match);
-  const variableApi = (values) => ({
+  const variableApi = (values, disabled = []) => ({
     get: (name) => values[name],
     set: (name, value) => {
       const key = String(name);
@@ -213,10 +234,12 @@ self.onmessage = async ({ data }) => {
       if (key.length > 256 || text.length > 1000000) throw new Error('Script variable exceeds the name or 1 MB value limit.');
       if (!Object.prototype.hasOwnProperty.call(values, key) && Object.keys(values).length >= 10000) throw new Error('Script variable scope exceeds 10,000 entries.');
       values[key] = text;
+      const disabledIndex = disabled.indexOf(key);
+      if (disabledIndex >= 0) disabled.splice(disabledIndex, 1);
     },
-    unset: (name) => { delete values[name]; },
+    unset: (name) => { const key = String(name); delete values[key]; const disabledIndex = disabled.indexOf(key); if (disabledIndex >= 0) disabled.splice(disabledIndex, 1); },
     has: (name) => Object.prototype.hasOwnProperty.call(values, name),
-    clear: () => { Object.keys(values).forEach((name) => delete values[name]); },
+    clear: () => { Object.keys(values).forEach((name) => delete values[name]); disabled.splice(0); },
     toObject: () => ({ ...values }),
     replaceIn,
   });
@@ -416,8 +439,10 @@ self.onmessage = async ({ data }) => {
     if (typeof callback === 'function') { Promise.resolve().then(run).then((response) => callback(null, response), (error) => callback(error)); return undefined; }
     return Promise.resolve().then(run);
   };
-  const globalApi = variableApi(state.environment);
-  const collectionApi = variableApi(state.collectionVariables);
+  const baseGlobalApi = variableApi(state.baseGlobals, state.baseGlobalDisabled);
+  const globalApi = variableApi(state.environment, state.globalsAreBase ? state.baseGlobalDisabled : state.globalDisabled);
+  const baseEnvironmentApi = variableApi(state.baseEnvironment, state.baseEnvironmentDisabled);
+  const collectionApi = variableApi(state.collectionVariables, state.collectionVariablesAreBase ? state.baseEnvironmentDisabled : state.collectionDisabled);
   const localApi = variableApi(state.localVariables);
   const iterationApi = variableApi(state.iterationData);
   const variablesApi = {
@@ -428,28 +453,28 @@ self.onmessage = async ({ data }) => {
     clear: localApi.clear,
     toObject: mergedVariables,
     replaceIn,
-    baseGlobalVars: globalApi,
+    baseGlobalVars: baseGlobalApi,
     globalVars: globalApi,
-    collectionVars: collectionApi,
-    collectionVariables: collectionApi,
+    collectionVars: baseEnvironmentApi,
+    collectionVariables: baseEnvironmentApi,
     environmentVars: collectionApi,
     localVars: localApi,
     iterationDataVars: iterationApi,
   };
-  const folderFacade = (folder) => ({ id: folder.id, name: folder.name, environment: variableApi(folder.environment) });
+  const folderFacade = (folder) => ({ id: folder.id, name: folder.name, environment: variableApi(folder.environment, folder.disabled) });
   const parentFolders = {
     get: (selector) => { const folder = [...state.folders].reverse().find((item) => item.id === String(selector) || item.name === String(selector)); return folder ? folderFacade(folder) : undefined; },
     getById: (id) => { const folder = state.folders.find((item) => item.id === String(id)); return folder ? folderFacade(folder) : undefined; },
     getByName: (name) => { const folder = [...state.folders].reverse().find((item) => item.name === String(name)); return folder ? folderFacade(folder) : undefined; },
-    getEnvironments: () => [...state.folders].reverse().map((folder) => variableApi(folder.environment)),
+    getEnvironments: () => [...state.folders].reverse().map((folder) => variableApi(folder.environment, folder.disabled)),
   };
   const insomnia = {
-    baseGlobals: globalApi,
+    baseGlobals: baseGlobalApi,
     globals: globalApi,
     environment: collectionApi,
-    baseEnvironment: collectionApi,
-    CollectionVariables: collectionApi,
-    collectionVariables: collectionApi,
+    baseEnvironment: baseEnvironmentApi,
+    CollectionVariables: baseEnvironmentApi,
+    collectionVariables: baseEnvironmentApi,
     variables: variablesApi,
     localVars: localApi,
     iterationData: iterationApi,
@@ -535,12 +560,12 @@ const sandboxSuffix = `
     await runUserScript();
     await Promise.all(pendingTests);
     cleanupRequest();
-    const output = { type: 'result', ok: true, request: state.request, environment: state.environment, collectionVariables: state.collectionVariables, folders: state.folders, localVariables: state.localVariables, logs, tests };
+    const output = { type: 'result', ok: true, request: state.request, environment: state.environment, baseGlobals: state.baseGlobals, baseGlobalDisabled: state.baseGlobalDisabled, globalDisabled: state.globalDisabled, collectionVariables: state.collectionVariables, baseEnvironment: state.baseEnvironment, baseEnvironmentDisabled: state.baseEnvironmentDisabled, collectionDisabled: state.collectionDisabled, folders: state.folders, localVariables: state.localVariables, logs, tests };
     if (JSON.stringify(output).length > 20000000) hostPostMessage({ type: 'result', ok: false, error: 'Script result exceeds the 20 MB bridge limit.' });
     else hostPostMessage(output);
   } catch (error) {
     cleanupRequest();
-    const output = { type: 'result', ok: false, error: error instanceof Error ? error.message : String(error), request: state.request, environment: state.environment, collectionVariables: state.collectionVariables, folders: state.folders, localVariables: state.localVariables, logs, tests };
+    const output = { type: 'result', ok: false, error: error instanceof Error ? error.message : String(error), request: state.request, environment: state.environment, baseGlobals: state.baseGlobals, baseGlobalDisabled: state.baseGlobalDisabled, globalDisabled: state.globalDisabled, collectionVariables: state.collectionVariables, baseEnvironment: state.baseEnvironment, baseEnvironmentDisabled: state.baseEnvironmentDisabled, collectionDisabled: state.collectionDisabled, folders: state.folders, localVariables: state.localVariables, logs, tests };
     if (JSON.stringify(output).length > 20000000) hostPostMessage({ type: 'result', ok: false, error: 'Script result exceeds the 20 MB bridge limit.' });
     else hostPostMessage(output);
   }
@@ -564,9 +589,14 @@ export const runBrowserScript = async (
   iterationData: Record<string, string> = {},
   options: ScriptRunOptions = {},
 ): Promise<ScriptRunResult> => {
-  const collectionVariables = { ...(options.collectionVariables ?? {}) };
+  const globalsAreBase = options.globalsAreBase === true;
+  const collectionVariablesAreBase = options.collectionVariablesAreBase === true;
+  const baseGlobals = { ...(options.baseGlobals ?? (globalsAreBase ? environment : {})) };
+  const globalVariables = globalsAreBase ? baseGlobals : { ...environment };
+  const baseEnvironment = { ...(options.baseEnvironment ?? (collectionVariablesAreBase ? options.collectionVariables : {})) };
+  const collectionVariables = collectionVariablesAreBase ? baseEnvironment : { ...(options.collectionVariables ?? {}) };
   const folders = structuredClone(options.folders ?? []);
-  if (!script.trim()) return { request: structuredClone(request), environment: { ...environment }, collectionVariables, folders, localVariables: { ...localVariables }, logs: [], tests: [] };
+  if (!script.trim()) return { request: structuredClone(request), environment: globalVariables, baseGlobals, baseGlobalDisabled: [...(options.baseGlobalDisabled ?? [])], globalDisabled: [...(options.globalDisabled ?? [])], collectionVariables, baseEnvironment, baseEnvironmentDisabled: [...(options.baseEnvironmentDisabled ?? [])], collectionDisabled: [...(options.collectionDisabled ?? [])], folders, localVariables: { ...localVariables }, logs: [], tests: [] };
   validateScriptSource(script);
   const blob = new Blob([buildScriptWorkerSource(script)], { type: 'text/javascript' });
   const workerUrl = URL.createObjectURL(blob);
@@ -603,9 +633,16 @@ export const runBrowserScript = async (
         type: 'run',
         state: {
           request,
-          environment,
+          environment: globalVariables,
+          baseGlobals,
+          baseGlobalDisabled: options.baseGlobalDisabled ?? [],
+          globalDisabled: options.globalDisabled ?? [],
+          globalsAreBase,
+          baseEnvironment,
+          baseEnvironmentDisabled: options.baseEnvironmentDisabled ?? [],
           collectionVariables,
           collectionDisabled: options.collectionDisabled ?? [],
+          collectionVariablesAreBase,
           folders,
           response,
           localVariables,
@@ -616,7 +653,7 @@ export const runBrowserScript = async (
       });
     });
     if (!output.ok) throw new Error(output.error || 'Script execution failed.');
-    return { request: output.request, environment: output.environment, collectionVariables: output.collectionVariables, folders: output.folders, localVariables: output.localVariables, logs: output.logs, tests: output.tests };
+    return { request: output.request, environment: output.environment, baseGlobals: output.baseGlobals, baseGlobalDisabled: output.baseGlobalDisabled, globalDisabled: output.globalDisabled, collectionVariables: output.collectionVariables, baseEnvironment: output.baseEnvironment, baseEnvironmentDisabled: output.baseEnvironmentDisabled, collectionDisabled: output.collectionDisabled, folders: output.folders, localVariables: output.localVariables, logs: output.logs, tests: output.tests };
   } finally {
     worker.terminate();
     URL.revokeObjectURL(workerUrl);

@@ -11,7 +11,7 @@ import type {
 } from '../types';
 import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
 import { parseRunnerData, runCollection } from '../lib/runner';
-import { resolveEnvironment } from '../lib/resources';
+import { resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
 import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
 import { storeResponseCookies } from '../lib/cookies';
 import { sendRequest } from '../lib/http';
@@ -147,7 +147,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       };
       const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
       const report = await runCollection(collection, environment, {
-        iterations, retries, delayMs, scriptTimeoutMs: workspace.preferences.scriptTimeoutMs, dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current,
+        iterations, retries, delayMs, scriptTimeoutMs: workspace.preferences.scriptTimeoutMs, environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id), dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current,
         onResult: (result) => setResults((current) => [...current, result]),
       }, async (request, variables) => {
         const requestEnvironment = {

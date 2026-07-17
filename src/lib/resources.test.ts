@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { Collection, Environment, RequestFolder } from '../types';
-import { applyCollectionConfiguration, folderAncestors, publicEnvironments, resolveEnvironment } from './resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes } from './resources';
 
 const row = (id: string, name: string, value: string) => ({ id, name, value, enabled: true });
 
@@ -26,15 +26,36 @@ describe('resource hierarchy', () => {
       { id: 'root', name: 'Root', parentId: '', expanded: true, headers: [row('root-header', 'X-Root', 'yes'), row('root-level', 'X-Level', 'root')], environment: [row('root-env', 'scope', 'root')], auth, preRequestScript: 'rootPre();', tests: 'rootAfter();', documentation: '' },
       { id: 'leaf', name: 'Leaf', parentId: 'root', expanded: true, headers: [], environment: [row('leaf-env', 'scope', 'leaf')], preRequestScript: 'leafPre();', tests: 'leafAfter();', documentation: '' },
     ];
-    const collection: Collection = { id: 'collection', name: 'Collection', expanded: true, requests: [request], folders, environment: [row('collection-env', 'collection', 'yes')] };
+    const collection: Collection = { id: 'collection', name: 'Collection', expanded: true, requests: [request], folders, environment: [row('collection-env', 'collection', 'yes')], subEnvironments: [{ id: 'selected', name: 'Selected', variables: [row('selected-env', 'selected', 'yes')] }], activeSubEnvironmentId: 'selected' };
     const environment: Environment = { id: 'env', name: 'Environment', variables: [row('global-env', 'scope', 'global')] };
     const configured = applyCollectionConfiguration(collection, request, environment);
     expect(folderAncestors(collection, 'leaf').map((folder) => folder.id)).toEqual(['root', 'leaf']);
-    expect(Object.fromEntries(configured.environment.variables.map((item) => [item.name, item.value]))).toEqual({ scope: 'leaf', collection: 'yes' });
+    expect(Object.fromEntries(configured.environment.variables.map((item) => [item.name, item.value]))).toEqual({ scope: 'leaf', collection: 'yes', selected: 'yes' });
     expect(Object.fromEntries(configured.request.headers.map((item) => [item.name, item.value]))).toEqual({ 'X-Root': 'yes', 'X-Level': 'request' });
     expect(configured.request.auth).toMatchObject({ type: 'bearer', token: 'folder-token' });
     expect(configured.request.preRequestScript).toBe('rootPre();\n\nleafPre();\n\nrequestPre();');
     expect(configured.request.tests).toBe('requestAfter();\n\nleafAfter();\n\nrootAfter();');
+  });
+
+  it('keeps global and collection base and selected script stores distinct', () => {
+    const environments: Environment[] = [
+      { id: 'base', name: 'Base', variables: [row('base-shared', 'shared', 'base'), { ...row('base-disabled', 'hidden', 'base'), enabled: false }] },
+      { id: 'selected', name: 'Selected', parentId: 'base', variables: [row('selected-shared', 'shared', 'global')] },
+    ];
+    const collection: Collection = {
+      id: 'collection', name: 'Collection', expanded: true, requests: [], environment: [row('collection-base', 'shared', 'collection-base')],
+      subEnvironments: [{ id: 'collection-selected', name: 'Selected', variables: [row('collection-selected-row', 'shared', 'collection-selected')] }], activeSubEnvironmentId: 'collection-selected',
+    };
+    expect(scriptEnvironmentScopes(environments, 'selected')).toMatchObject({
+      baseId: 'base', selectedId: 'selected', globalsAreBase: false,
+      baseGlobals: { values: { shared: 'base' }, disabled: ['hidden'] },
+      globals: { values: { shared: 'global' }, disabled: [] },
+    });
+    expect(collectionEnvironmentScopes(collection)).toMatchObject({
+      environmentIsBase: false,
+      baseEnvironment: { values: { shared: 'collection-base' } },
+      environment: { values: { shared: 'collection-selected' } },
+    });
   });
 
   it('removes private environments from shareable sets', () => {

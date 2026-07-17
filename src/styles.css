@@ -1035,6 +1035,10 @@ kbd {
 .inherited-variables code, .inherited-variables em { border-top: 1px solid var(--border-soft); font: 8px var(--font-mono); padding: 6px 9px; }
 .inherited-variables em { color: var(--muted); font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .environment-layout .kv-editor { padding: 12px 0 30px; }
+.collection-environment-layout { min-height: 390px; }
+.collection-environment-layout > aside button i { background: var(--accent); }
+.collection-environment-identity { grid-template-columns: minmax(180px, 1fr); }
+.collection-environment-delete { margin-top: 8px; }
 .environment-modal footer .danger-action, .folder-modal footer .danger-action { height: 34px; }
 .folder-modal { width: min(920px, calc(100vw - 32px)); }
 .folder-identity { flex: 0 0 auto; grid-template-columns: 1fr 1fr; padding: 14px 22px 4px; }
