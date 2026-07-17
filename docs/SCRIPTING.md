@@ -1,6 +1,6 @@
 # Permission-bounded scripting
 
-Milestones 12–15 expand Brunomnia's clean-room compatibility with the current [Insomnia scripting contract](https://developer.konghq.com/insomnia/scripts/) while keeping host capabilities explicit. Every feature in this document is local and free; the controls are safety grants, not account or subscription gates.
+Milestones 12–16 expand Brunomnia's clean-room compatibility with the current [Insomnia scripting contract](https://developer.konghq.com/insomnia/scripts/) while keeping host capabilities explicit. Every feature in this document is local and free; the controls are safety grants, not account or subscription gates.
 
 ## Runtime model
 
@@ -30,6 +30,17 @@ Desktop and trusted CLI scripts use the same self-contained adapter factory. It 
 
 These are clean-room compatibility adapters, not copies of the npm packages. They do not claim every package version, option, locale, parser edge case, cryptographic primitive, JSON Schema draft feature, DOM method, stream behavior, or Postman SDK interface. Unknown modules remain denied and scripts cannot load packages from disk or the network.
 
+## File-backed bodies and certificates
+
+**Preferences → General → Request scripts → Allow scripts to attach local body and certificate files** grants the documented `insomnia.request.body.update()` file modes and PEM certificate source paths on this device. It is off by default, available only in the Tauri desktop app, omitted from folder/Git projects and encrypted revisions, and reset on workspace import. A script with this capability can name any readable local path and cause its contents to be sent with the primary request, so enable it only for workspaces you trust.
+
+Supported body inputs are:
+
+- `{ mode: 'file', file: '/path/to/payload.bin' }` for a binary primary-request body; and
+- `{ mode: 'formdata', formdata: [{ key: 'upload', type: 'file', value: '/path/to/payload.csv' }] }` for multipart file parts, including optional `fileName` and `contentType` overrides.
+
+`insomnia.request.certificate.update()` accepts `cert: { src: '/path/to/client.crt' }` and `key: { src: '/path/to/client.key' }`, or the `certPath`/`keyPath` aliases. Certificate files must be UTF-8 PEM text. The Rust host reads each file only after the disposable Worker finishes; the Worker receives no filesystem function or file contents. Paths can use ordinary `{{ variable }}` substitution. Reads are limited to 5 MB per regular file, 20 files, and 20 MB across one script result. PFX/PKCS#12 sources remain unsupported by the current native PEM transport, and script-created secondary requests still reject file-backed bodies and certificate paths.
+
 ## Secondary requests
 
 **Preferences → General → Request scripts → Allow scripts to send secondary HTTP requests** grants `insomnia.sendRequest()` on this device. It is off by default and is neither exported nor accepted from imports, Git projects, or encrypted sync.
@@ -52,8 +63,8 @@ The bundled CLI uses Node's `vm` compatibility runtime, which is not a security 
 brunomnia run test workspace.json "Collection" --allow-scripts
 ```
 
-Secondary script requests require both `--allow-scripts` and `--allow-script-requests`. The CLI does not expose the desktop local vault. These invocation flags are intentionally not read from workspace preference data, preventing an imported workspace from granting itself script authority.
+Local attachments additionally require `--allow-script-files`; secondary script requests require `--allow-script-requests`. Both are effective only with `--allow-scripts`. The CLI does not expose the desktop local vault. These invocation flags are intentionally not read from workspace preference data, preventing an imported workspace from granting itself script authority.
 
 ## Remaining compatibility limits
 
-Every module name currently documented by Insomnia is available, but full npm-package behavioral equivalence remains open. In particular, complete Chai/Lodash APIs, arbitrary/local-reference JSON Schema behavior, the full Cheerio/XML parsers, additional CryptoJS algorithms, Moment locales/time zones, complete Node built-in semantics, and the complete Postman Collection SDK are not claimed. File-backed body/certificate helpers remain editor-only; external-vault scripts, broader deprecated Postman interfaces, and stronger portable CLI isolation remain in the [parity ledger](PARITY.md).
+Every module name currently documented by Insomnia is available, but full npm-package behavioral equivalence remains open. In particular, complete Chai/Lodash APIs, arbitrary/local-reference JSON Schema behavior, the full Cheerio/XML parsers, additional CryptoJS algorithms, Moment locales/time zones, complete Node built-in semantics, and the complete Postman Collection SDK are not claimed. PFX and secondary-request file sources, external-vault scripts, and stronger portable CLI isolation remain in the [parity ledger](PARITY.md). The official scripts reference says deprecated Postman interfaces are not supported by Insomnia, so they are not treated as an upstream parity requirement.

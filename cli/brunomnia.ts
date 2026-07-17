@@ -1,11 +1,12 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import { basename, extname } from 'node:path';
 import vm from 'node:vm';
 import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openapi';
 import { buildHeaders, buildRequestUrl, resolveTemplate } from '../src/lib/request';
 import { parseRunnerData, runCollection } from '../src/lib/runner';
 import type { ApiDesign, ApiRequest, AuthConfig, Environment, HttpResponse, ScriptRunResult, Workspace } from '../src/types';
 import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resources';
-import { normalizeScriptSubrequest, type ScriptRunOptions } from '../src/lib/scriptSandbox';
+import { hydrateScriptFileReferences, normalizeScriptSubrequest, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 import { createScriptModules } from '../src/lib/scriptModules';
 
 const args = process.argv.slice(2);
@@ -19,6 +20,14 @@ const fail = (message: string, code = 1): never => {
   process.exit(code);
 };
 const loadText = async (path: string) => readFile(path, 'utf8').catch((error) => fail(`Unable to read ${path}: ${error.message}`));
+const scriptFileMime = (path: string) => ({
+  '.cer': 'application/x-pem-file', '.crt': 'application/x-pem-file', '.csv': 'text/csv', '.gif': 'image/gif', '.htm': 'text/html', '.html': 'text/html', '.jpeg': 'image/jpeg', '.jpg': 'image/jpeg', '.json': 'application/json', '.key': 'application/x-pem-file', '.pdf': 'application/pdf', '.pem': 'application/x-pem-file', '.png': 'image/png', '.txt': 'text/plain', '.xml': 'application/xml',
+} as Record<string, string>)[extname(path).toLowerCase()] ?? 'application/octet-stream';
+const readCliScriptFile = async (path: string) => {
+  const bytes = await readFile(path);
+  if (bytes.byteLength > 5_000_000) throw new Error(`Script file '${path}' exceeds the 5 MB per-file limit.`);
+  return { fileName: basename(path) || 'attachment.bin', mimeType: scriptFileMime(path), dataBase64: bytes.toString('base64') };
+};
 const loadWorkspace = async (path: string): Promise<Workspace> => {
   const parsed = JSON.parse(await loadText(path)) as Partial<Workspace>;
   if (parsed.format !== 'brunomnia' || !Array.isArray(parsed.collections)) fail('The input is not a Brunomnia workspace.');
@@ -79,6 +88,7 @@ const runNodeScript = async (
   const logs: string[] = [];
   const tests: ScriptRunResult['tests'] = [];
   const pendingTests: Promise<unknown>[] = [];
+  const fileReferences: ScriptFileReference[] = [];
   if (!source.trim()) return { request, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
   const mergedVariables = () => {
     const values: Record<string, string> = {};
@@ -92,6 +102,18 @@ const runNodeScript = async (
     if (!collectionVariablesAreBase) applyScope(collectionVariables, collectionDisabled);
     folders.forEach((folder) => { (folder.disabled ?? []).forEach((name) => delete values[name]); Object.assign(values, folder.environment); });
     return { ...values, ...iterationData, ...localVariables };
+  };
+  const removeFileReferences = (...kinds: ScriptFileReference['kind'][]) => {
+    for (let index = fileReferences.length - 1; index >= 0; index -= 1) if (kinds.includes(fileReferences[index].kind)) fileReferences.splice(index, 1);
+  };
+  const addFileReference = (reference: ScriptFileReference) => {
+    if (!options.readFile) throw new Error('Script file access is disabled. Re-run trusted workspaces with --allow-script-files.');
+    const path = reference.path.replace(/{{\s*([^{}]+?)\s*}}/g, (match, name: string) => mergedVariables()[name] ?? match).trim();
+    if (!path) throw new Error('Script file path cannot be empty.');
+    if (path.length > 10_000) throw new Error('Script file path exceeds 10,000 characters.');
+    if (fileReferences.length >= 20) throw new Error('Script request exceeds the 20-file attachment limit.');
+    fileReferences.push({ ...reference, path });
+    return path;
   };
   const variableApi = (values: Record<string, string>, disabled: string[] = []) => ({
     get: (name: string) => values[name],
@@ -156,11 +178,20 @@ const runNodeScript = async (
     update: (body: unknown) => {
       const input = typeof body === 'string' ? { mode: 'raw', raw: body } : (body && typeof body === 'object' ? body as Record<string, unknown> : {});
       const mode = String(input.mode ?? 'raw').toLowerCase();
-      if (mode === 'raw') { request.bodyMode = 'text'; requestBody = String(input.raw ?? ''); }
-      else if (mode === 'urlencoded') { request.bodyMode = 'form-urlencoded'; request.formBody = (Array.isArray(input.urlencoded) ? input.urlencoded : []).flatMap((item, index) => { const row = item as Record<string, unknown>; const name = String(row.key ?? row.name ?? ''); return name ? [{ id: `cli-form-${index}`, name, value: String(row.value ?? ''), enabled: row.enabled !== false }] : []; }); }
-      else if (mode === 'graphql') { const graphql = (input.graphql && typeof input.graphql === 'object' ? input.graphql : input) as Record<string, unknown>; request.protocol = 'graphql'; request.method = 'POST'; request.graphql.query = String(graphql.query ?? ''); request.graphql.variables = typeof graphql.variables === 'string' ? graphql.variables : JSON.stringify(graphql.variables ?? {}, null, 2); request.graphql.operationName = String(graphql.operationName ?? ''); }
-      else if (mode === 'formdata') { const parts = Array.isArray(input.formdata) ? input.formdata as Array<Record<string, unknown>> : []; if (parts.some((part) => part.type === 'file' || part.src !== undefined)) throw new Error('Scripts cannot read file paths.'); request.bodyMode = 'multipart'; request.multipartBody = parts.flatMap((part, index) => { const name = String(part.key ?? part.name ?? ''); return name ? [{ id: `cli-part-${index}`, name, value: String(part.value ?? ''), enabled: part.enabled !== false, kind: 'text' as const }] : []; }); }
-      else if (mode === 'file') throw new Error('Scripts cannot read file paths.');
+      if (mode === 'raw') { removeFileReferences('body', 'multipart'); delete request.binaryBody; request.bodyMode = 'text'; requestBody = String(input.raw ?? ''); }
+      else if (mode === 'urlencoded') { removeFileReferences('body', 'multipart'); delete request.binaryBody; request.bodyMode = 'form-urlencoded'; request.formBody = (Array.isArray(input.urlencoded) ? input.urlencoded : []).flatMap((item, index) => { const row = item as Record<string, unknown>; const name = String(row.key ?? row.name ?? ''); return name ? [{ id: `cli-form-${index}`, name, value: String(row.value ?? ''), enabled: row.enabled !== false }] : []; }); }
+      else if (mode === 'graphql') { removeFileReferences('body', 'multipart'); delete request.binaryBody; const graphql = (input.graphql && typeof input.graphql === 'object' ? input.graphql : input) as Record<string, unknown>; request.protocol = 'graphql'; request.method = 'POST'; request.graphql.query = String(graphql.query ?? ''); request.graphql.variables = typeof graphql.variables === 'string' ? graphql.variables : JSON.stringify(graphql.variables ?? {}, null, 2); request.graphql.operationName = String(graphql.operationName ?? ''); }
+      else if (mode === 'formdata') {
+        removeFileReferences('body', 'multipart'); delete request.binaryBody; request.bodyMode = 'multipart';
+        const parts = (Array.isArray(input.formdata) ? input.formdata as Array<Record<string, unknown>> : []).slice(0, 1_000);
+        request.multipartBody = parts.flatMap((part, index) => {
+          const id = `cli-part-${index}`; const name = String(part.key ?? part.name ?? ''); if (!name) return [];
+          const isFile = part.type === 'file' || part.src !== undefined;
+          if (isFile) { addFileReference({ kind: 'multipart', path: String(part.src ?? part.value ?? ''), partId: id, fileName: String(part.fileName ?? part.filename ?? ''), contentType: String(part.contentType ?? '') }); return [{ id, name, value: '', enabled: part.enabled !== false, kind: 'file' as const, fileName: String(part.fileName ?? part.filename ?? ''), contentType: String(part.contentType ?? '') }]; }
+          return [{ id, name, value: String(part.value ?? ''), enabled: part.enabled !== false, kind: 'text' as const }];
+        });
+      }
+      else if (mode === 'file') { removeFileReferences('body', 'multipart'); const file = input.file; const path = file && typeof file === 'object' ? (file as Record<string, unknown>).src : file ?? input.src; addFileReference({ kind: 'body', path: String(path ?? '') }); request.bodyMode = 'binary'; delete request.binaryBody; requestBody = ''; }
       else throw new Error(`Request body mode '${mode}' is not supported.`);
       return bodyApi;
     },
@@ -169,13 +200,13 @@ const runNodeScript = async (
     [Symbol.toPrimitive]: () => requestBody,
   };
   Object.defineProperty(request, 'url', { configurable: true, enumerable: true, get: () => urlApi, set: (value) => { requestUrl = String(value); } });
-  Object.defineProperty(request, 'body', { configurable: true, enumerable: true, get: () => bodyApi, set: (value) => { requestBody = typeof value === 'string' ? value : JSON.stringify(value); request.bodyMode = 'text'; } });
+  Object.defineProperty(request, 'body', { configurable: true, enumerable: true, get: () => bodyApi, set: (value) => { removeFileReferences('body', 'multipart'); delete request.binaryBody; requestBody = typeof value === 'string' ? value : JSON.stringify(value); request.bodyMode = 'text'; } });
   requestWithHelpers.getUrl = () => requestUrl;
   requestWithHelpers.setUrl = (url) => { requestUrl = String(url); };
   requestWithHelpers.getMethod = () => request.method;
   requestWithHelpers.setMethod = (method) => { request.method = String(method).toUpperCase(); };
   requestWithHelpers.getBody = () => requestBody;
-  requestWithHelpers.setBody = (body) => { requestBody = typeof body === 'string' ? body : JSON.stringify(body); request.bodyMode = 'text'; };
+  requestWithHelpers.setBody = (body) => { removeFileReferences('body', 'multipart'); delete request.binaryBody; requestBody = typeof body === 'string' ? body : JSON.stringify(body); request.bodyMode = 'text'; };
   const authWithUpdate = request.auth as AuthConfig & { update?: (auth: Record<string, unknown>, requestedType?: string) => void };
   authWithUpdate.update = (input, requestedType) => {
     const type = String(requestedType ?? input.type ?? 'none').toLowerCase();
@@ -192,14 +223,18 @@ const runNodeScript = async (
     else if (input.host) request.transport.proxyUrl = `${String(input.protocol ?? 'http')}://${String(input.host)}${input.port ? `:${String(input.port)}` : ''}`;
     request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(',') : String(input.exclusions ?? request.transport.proxyExclusions);
   } };
-  requestWithHelpers.certificate = { key: { src: '' }, cert: { src: '' }, pfx: { src: '' }, passphrase: '', update: (input) => {
-    if (input.disabled === true) { request.transport.clientCertificatePem = ''; request.transport.clientKeyPem = ''; request.transport.clientCertificateDomains = ''; return; }
+  const certificateApi = requestWithHelpers.certificate = { key: { src: '' }, cert: { src: '' }, pfx: { src: '' }, passphrase: '', update: (input) => {
+    removeFileReferences('certificate-cert', 'certificate-key');
+    if (input.disabled === true) { request.transport.clientCertificatePem = ''; request.transport.clientKeyPem = ''; request.transport.clientCertificateDomains = ''; certificateApi.key.src = ''; certificateApi.cert.src = ''; certificateApi.pfx.src = ''; return; }
     const key = input.key as Record<string, unknown> | undefined;
     const cert = input.cert as Record<string, unknown> | undefined;
     const pfx = input.pfx as Record<string, unknown> | undefined;
-    if (input.certPath || input.keyPath || input.path || key?.src || cert?.src || pfx?.src) throw new Error('Scripts cannot read certificate file paths. Paste PEM content in Transport settings instead.');
-    request.transport.clientCertificatePem = String(cert?.pem ?? input.cert ?? input.certificate ?? '');
-    request.transport.clientKeyPem = String(key?.pem ?? input.key ?? '');
+    if (pfx?.src || input.pfxPath) throw new Error('PFX certificate files are not supported by the native PEM transport.');
+    const certPath = input.certPath ?? cert?.src; const keyPath = input.keyPath ?? key?.src;
+    if (certPath) { certificateApi.cert.src = addFileReference({ kind: 'certificate-cert', path: String(certPath) }); request.transport.clientCertificatePem = ''; }
+    else request.transport.clientCertificatePem = String(cert?.pem ?? input.cert ?? input.certificate ?? '');
+    if (keyPath) { certificateApi.key.src = addFileReference({ kind: 'certificate-key', path: String(keyPath) }); request.transport.clientKeyPem = ''; }
+    else request.transport.clientKeyPem = String(key?.pem ?? input.key ?? '');
     request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(',') : String(input.domains ?? '');
   } };
   const baseGlobalApi = variableApi(baseGlobals, baseGlobalDisabled);
@@ -337,7 +372,8 @@ const runNodeScript = async (
     delete request.body;
     request.body = requestBody;
   }
-  return { request, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
+  const hydratedRequest = await hydrateScriptFileReferences(request, fileReferences, options.readFile);
+  return { request: hydratedRequest, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
 };
 
 const executeHttp = async (request: ApiRequest, variables: Record<string, string>): Promise<HttpResponse> => {
@@ -379,7 +415,7 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--allow-scripts] [--allow-script-requests]
+  brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--allow-scripts] [--allow-script-requests] [--allow-script-files]
   brunomnia run test <workspace> <collection-name-or-id> [same options]
 `;
 
@@ -435,6 +471,7 @@ const main = async () => {
       return runNodeScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
         ...scriptOptions,
         sendRequest: hasFlag('--allow-script-requests') ? executeHttp : undefined,
+        readFile: hasFlag('--allow-script-files') ? readCliScriptFile : undefined,
       });
     });
     console.log(JSON.stringify(report, null, 2));

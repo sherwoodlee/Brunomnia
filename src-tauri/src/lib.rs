@@ -9,6 +9,7 @@ mod project;
 mod secure_store;
 mod streaming;
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use models::{HttpRequestInput, HttpResponseOutput};
 use serde_json::Value;
 use std::fs;
@@ -53,6 +54,82 @@ fn save_workspace(app: AppHandle, workspace: Value) -> Result<(), String> {
 #[tauri::command]
 async fn send_http_request(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
     http_client::send(input).await
+}
+
+const SCRIPT_FILE_LIMIT: u64 = 5_000_000;
+
+fn script_file_mime(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "csv" => "text/csv",
+        "html" | "htm" => "text/html",
+        "json" => "application/json",
+        "pem" | "crt" | "cer" | "key" => "application/x-pem-file",
+        "txt" => "text/plain",
+        "xml" => "application/xml",
+        "gif" => "image/gif",
+        "jpeg" | "jpg" => "image/jpeg",
+        "png" => "image/png",
+        "pdf" => "application/pdf",
+        _ => "application/octet-stream",
+    }
+}
+
+fn read_script_file_path(path: String) -> Result<models::FilePayload, String> {
+    let source = std::path::PathBuf::from(path.trim());
+    if source.as_os_str().is_empty() {
+        return Err("Script file path cannot be empty.".into());
+    }
+    let canonical = source
+        .canonicalize()
+        .map_err(|error| format!("Unable to open script file {}: {error}", source.display()))?;
+    let metadata = canonical.metadata().map_err(|error| {
+        format!(
+            "Unable to inspect script file {}: {error}",
+            canonical.display()
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(format!(
+            "Script file path is not a regular file: {}",
+            canonical.display()
+        ));
+    }
+    if metadata.len() > SCRIPT_FILE_LIMIT {
+        return Err(format!(
+            "Script file exceeds the {} MB per-file limit: {}",
+            SCRIPT_FILE_LIMIT / 1_000_000,
+            canonical.display()
+        ));
+    }
+    let bytes = fs::read(&canonical).map_err(|error| {
+        format!(
+            "Unable to read script file {}: {error}",
+            canonical.display()
+        )
+    })?;
+    if bytes.len() as u64 > SCRIPT_FILE_LIMIT {
+        return Err("Script file grew beyond the 5 MB per-file limit while it was read.".into());
+    }
+    Ok(models::FilePayload {
+        file_name: canonical
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("attachment.bin")
+            .to_string(),
+        mime_type: script_file_mime(&canonical).to_string(),
+        data_base64: BASE64.encode(bytes),
+    })
+}
+
+#[tauri::command]
+async fn script_read_file(path: String) -> Result<models::FilePayload, String> {
+    blocking(move || read_script_file_path(path)).await
 }
 
 async fn blocking<T, F>(operation: F) -> Result<T, String>
@@ -354,6 +431,7 @@ pub fn run() {
             load_workspace,
             save_workspace,
             send_http_request,
+            script_read_file,
             project_write,
             project_read,
             project_git_init,
@@ -395,4 +473,26 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Brunomnia");
+}
+
+#[cfg(test)]
+mod script_file_tests {
+    use super::*;
+
+    #[test]
+    fn reads_bounded_regular_script_files_and_rejects_oversized_inputs() {
+        let directory = tempfile::tempdir().unwrap();
+        let payload_path = directory.path().join("payload.csv");
+        fs::write(&payload_path, b"id,name\n1,Ada\n").unwrap();
+        let payload = read_script_file_path(payload_path.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(payload.file_name, "payload.csv");
+        assert_eq!(payload.mime_type, "text/csv");
+        assert_eq!(payload.data_base64, BASE64.encode(b"id,name\n1,Ada\n"));
+
+        let oversized_path = directory.path().join("oversized.bin");
+        fs::write(&oversized_path, vec![0_u8; SCRIPT_FILE_LIMIT as usize + 1]).unwrap();
+        let error =
+            read_script_file_path(oversized_path.to_string_lossy().into_owned()).unwrap_err();
+        assert!(error.contains("5 MB per-file limit"));
+    }
 }

@@ -228,9 +228,24 @@ Compatibility bounds remain explicit: global sub-environment chains deeper than 
 | CLI verification | Complete | The checked-in offline fixture exercises schema, CSV, and SHA-256 adapters under explicit `--allow-scripts` consent |
 | Documentation and evidence | Complete | Updated [permission-bounded scripting guide](SCRIPTING.md) and [Milestone 15 verification](QA_MILESTONE_15.md) |
 
-Compatibility bounds remain explicit: resolving every documented module name does not imply full npm-package equivalence. Complete package versions/options, all JSON Schema drafts and references, full parser/DOM/stream behavior, additional cryptographic algorithms, locales/time zones, the complete Postman SDK, file-backed script helpers, external-vault scripts, deprecated Postman interfaces, and stronger portable CLI isolation remain open.
+Compatibility bounds remain explicit: resolving every documented module name does not imply full npm-package equivalence. Complete package versions/options, all JSON Schema drafts and references, full parser/DOM/stream behavior, additional cryptographic algorithms, locales/time zones, and the complete Postman SDK remain open. File-backed helpers follow in Milestone 16; external-vault scripts and stronger portable CLI isolation remain open. Deprecated Postman interfaces are not an upstream parity requirement because the current Insomnia reference explicitly marks them unsupported.
 
-## Milestone 16 — remaining parity closure and release hardening
+## Milestone 16 — permission-bounded script files (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Body files | Complete baseline | Documented binary `file` mode and text/file multipart rows, with template-resolved paths plus filename/content-type overrides |
+| Certificate files | Complete baseline | Documented cert/key `src` and path aliases hydrate UTF-8 PEM into the existing domain-scoped native transport |
+| Desktop boundary | Complete | Off-by-default device-local grant; no file primitive or bytes enter the Worker; bounded Rust host read occurs only after the Worker returns |
+| CLI boundary | Complete | Trusted Node VM requires both `--allow-scripts` and the separate `--allow-script-files` authority flag |
+| Limits | Complete | Regular files only, 5 MB per file, 20 file references, and 20 MB aggregate per script result |
+| Workspace migration | Complete | Versions 1–13 migrate to v14 with disabled script-file authority; imported/shared data cannot grant it |
+| Verification fixture | Complete | The offline CLI fixture proves denial without file authority and exact attachment bytes with explicit consent |
+| Documentation and evidence | Complete | Updated [permission-bounded scripting guide](SCRIPTING.md) and [Milestone 16 verification](QA_MILESTONE_16.md) |
+
+Compatibility bounds remain explicit: PFX/PKCS#12 certificate sources and file-backed secondary requests are not supported, while the current primary-request body and PEM source-path contract is covered. External-vault scripts, stronger portable CLI isolation, full package behavior, and non-scripting ledger gaps remain open. Deprecated Postman interfaces remain explicitly unsupported by Insomnia itself.
+
+## Milestone 17 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
