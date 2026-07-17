@@ -66,13 +66,14 @@ describe('collection runner', () => {
     await runCollection(
       {
         id: 'collection', name: 'Collection', expanded: true, requests: [request],
-        environment: [{ id: 'collection-token', name: 'collectionToken', value: 'before', enabled: true }],
+        environment: [{ id: 'collection-token', name: 'collectionToken', value: 'before', enabled: true }, { id: 'collection-disabled', name: 'blocked', value: '', enabled: false }],
         folders: [{ id: 'child', name: 'Child', parentId: '', expanded: true, headers: [], environment: [{ id: 'folder-token', name: 'folderToken', value: 'before', enabled: true }], preRequestScript: '', tests: '', documentation: '' }],
       },
-      { id: 'env', name: 'Env', variables: [] },
+      { id: 'env', name: 'Env', variables: [{ id: 'global-blocked', name: 'blocked', value: 'global', enabled: true }] },
       { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
       async (_activeRequest, variables) => {
         expect(variables).toMatchObject({ collectionToken: 'after', folderToken: 'after' });
+        expect(variables).not.toHaveProperty('blocked');
         return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 };
       },
       async (_script, activeRequest, environment, response, _timeout, local, _iteration, options) => {

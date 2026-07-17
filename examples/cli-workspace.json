@@ -54,7 +54,7 @@
             "clientKeyPem": ""
           },
           "preRequestScript": "insomnia.environment.set('executedBy', 'cli');\ninsomnia.request.addHeader({ name: 'X-Brunomnia-CLI', value: 'true' });",
-          "tests": "insomnia.test('Status is 200', () => { expect(insomnia.response.status).toBe(200); });\ninsomnia.test('Body is JSON', () => { expect(insomnia.response.json()).toEqual({ ok: true }); });"
+          "tests": "insomnia.test('Status is 200', async () => { await Promise.resolve(); insomnia.expect(insomnia.response.status).to.be.oneOf([200, 204]); });\ninsomnia.test('Body is JSON', () => { insomnia.expect(insomnia.response.json()).to.be.an('object').that.has.all.keys('ok'); });"
         }
       ]
     }

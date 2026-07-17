@@ -54,35 +54,45 @@ export const runCollection = async (
   const iterations = boundedInteger(options.iterations, 1, 1000);
   const retries = boundedInteger(options.retries, 0, 10);
   let collectionVariables = Object.fromEntries((collection.environment ?? []).filter((row) => row.enabled && row.name).map((row) => [row.name, row.value]));
+  const collectionDisabled = new Set((collection.environment ?? []).filter((row) => !row.enabled && row.name).map((row) => row.name));
   const folderVariables = new Map((collection.folders ?? []).map((folder) => [folder.id, Object.fromEntries(folder.environment.filter((row) => row.enabled && row.name).map((row) => [row.name, row.value]))]));
+  const folderDisabled = new Map((collection.folders ?? []).map((folder) => [folder.id, new Set(folder.environment.filter((row) => !row.enabled && row.name).map((row) => row.name))]));
 
   outer: for (let iteration = 0; iteration < iterations; iteration += 1) {
     const iterationData = options.dataRows[iteration % Math.max(1, options.dataRows.length)] ?? {};
-    let variables = { ...environmentMap(environment), ...iterationData };
+    let globalVariables = environmentMap(environment);
     for (const originalRequest of collection.requests) {
       if (options.shouldCancel?.()) { cancelled = true; break outer; }
       for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
         const configured = applyCollectionConfiguration(collection, originalRequest, environment);
-        variables = { ...variables, ...environmentMap(configured.environment), ...iterationData };
         let request = structuredClone(configured.request);
         let response: HttpResponse | undefined;
         let tests: RunnerItemResult['tests'] = [];
         let error: string | undefined;
         const started = Date.now();
         try {
-          const scriptFolders = configured.folders.map((folder) => ({ id: folder.id, name: folder.name, environment: { ...(folderVariables.get(folder.id) ?? {}) } }));
-          const preRequest = await executeScript(request.preRequestScript, request, variables, undefined, options.scriptTimeoutMs ?? 10_000, {}, iterationData, { collectionVariables, folders: scriptFolders });
+          const scriptFolders = configured.folders.map((folder) => ({ id: folder.id, name: folder.name, environment: { ...(folderVariables.get(folder.id) ?? {}) }, disabled: [...(folderDisabled.get(folder.id) ?? [])] }));
+          const preRequest = await executeScript(request.preRequestScript, request, globalVariables, undefined, options.scriptTimeoutMs ?? 10_000, {}, iterationData, { collectionVariables, collectionDisabled: [...collectionDisabled], folders: scriptFolders });
           request = preRequest.request;
-          variables = preRequest.environment;
+          globalVariables = preRequest.environment;
           collectionVariables = preRequest.collectionVariables ?? collectionVariables;
           preRequest.folders?.forEach((folder) => folderVariables.set(folder.id, folder.environment));
           const localVariables = preRequest.localVariables ?? {};
-          response = await executeRequest(request, { ...variables, ...collectionVariables, ...Object.fromEntries(scriptFolders.flatMap((folder) => Object.entries(folderVariables.get(folder.id) ?? {}))), ...iterationData, ...localVariables });
-          const afterResponse = await executeScript(request.tests, request, variables, response, options.scriptTimeoutMs ?? 10_000, localVariables, iterationData, {
+          const requestVariables = { ...globalVariables };
+          collectionDisabled.forEach((name) => delete requestVariables[name]);
+          Object.assign(requestVariables, collectionVariables);
+          scriptFolders.forEach((folder) => {
+            folderDisabled.get(folder.id)?.forEach((name) => delete requestVariables[name]);
+            Object.assign(requestVariables, folderVariables.get(folder.id) ?? {});
+          });
+          Object.assign(requestVariables, iterationData, localVariables);
+          response = await executeRequest(request, requestVariables);
+          const afterResponse = await executeScript(request.tests, request, globalVariables, response, options.scriptTimeoutMs ?? 10_000, localVariables, iterationData, {
             collectionVariables,
+            collectionDisabled: [...collectionDisabled],
             folders: scriptFolders.map((folder) => ({ ...folder, environment: { ...(folderVariables.get(folder.id) ?? {}) } })),
           });
-          variables = afterResponse.environment;
+          globalVariables = afterResponse.environment;
           collectionVariables = afterResponse.collectionVariables ?? collectionVariables;
           afterResponse.folders?.forEach((folder) => folderVariables.set(folder.id, folder.environment));
           tests = afterResponse.tests;

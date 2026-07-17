@@ -1,10 +1,12 @@
 import { createBlankRequest } from '../data/seed';
-import type { ApiRequest, HttpResponse, KeyValue, ScriptRunResult } from '../types';
+import type { ApiRequest, CookieRecord, HttpResponse, KeyValue, ScriptRunResult, StoredResponse } from '../types';
+import { storeResponseCookies } from './cookies';
 
-export type ScriptFolderState = { id: string; name: string; environment: Record<string, string> };
+export type ScriptFolderState = { id: string; name: string; environment: Record<string, string>; disabled?: string[] };
 
 export type ScriptRunOptions = {
   collectionVariables?: Record<string, string>;
+  collectionDisabled?: string[];
   folders?: ScriptFolderState[];
   vault?: Record<string, string>;
   sendRequest?: (request: ApiRequest, variables: Record<string, string>) => Promise<HttpResponse>;
@@ -32,6 +34,19 @@ type WorkerSubrequest = {
   variables: Record<string, string>;
 };
 
+export const applyScriptSubresponse = (
+  cookies: CookieRecord[],
+  responses: StoredResponse[],
+  request: ApiRequest,
+  response: HttpResponse,
+  receivedAt = new Date().toISOString(),
+): { cookies: CookieRecord[]; responses: StoredResponse[] } => {
+  const requestUrl = response.requestUrl ?? request.url;
+  const nextCookies = request.transport.storeCookies ? storeResponseCookies(cookies, requestUrl, response.setCookies ?? []) : cookies;
+  const stored: StoredResponse = { ...response, requestId: request.id, requestName: request.name, requestUrl, receivedAt };
+  return { cookies: nextCookies, responses: [stored, ...responses].slice(0, 100) };
+};
+
 const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const stringValue = (value: unknown, fallback = '') => typeof value === 'string' ? value : value === undefined || value === null ? fallback : String(value);
 const scriptRow = (value: unknown, index: number, prefix: string): KeyValue | undefined => {
@@ -54,7 +69,10 @@ const scriptHeaders = (value: unknown): KeyValue[] => {
 const assertHttpUrl = (value: unknown): string => {
   const url = stringValue(value).trim();
   let parsed: URL;
-  try { parsed = new URL(url); } catch { throw new Error('Script requests require an absolute http:// or https:// URL.'); }
+  try { parsed = new URL(url); } catch {
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d+)?(?:\/|$)/.test(url)) throw new Error('Script requests require an HTTP(S) URL or bare hostname.');
+    try { parsed = new URL(`https://${url}`); } catch { throw new Error('Script requests require an HTTP(S) URL or bare hostname.'); }
+  }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Script requests are limited to http:// and https:// URLs.');
   return parsed.toString();
 };
@@ -77,10 +95,11 @@ export const normalizeScriptSubrequest = (input: unknown, sourceRequest: ApiRequ
   const auth = record(source.auth);
   if (auth) {
     const type = stringValue(auth.type, 'none').toLowerCase();
+    const keyed = (name: string, key: string, fallback: unknown) => Array.isArray(auth[name]) ? record((auth[name] as unknown[]).find((item) => record(item)?.key === key))?.value ?? fallback : fallback;
     request.auth.disabled = false;
-    if (type === 'basic') { request.auth.type = 'basic'; request.auth.username = stringValue(auth.username); request.auth.password = stringValue(auth.password); }
-    else if (type === 'bearer') { request.auth.type = 'bearer'; request.auth.token = stringValue(auth.token ?? auth.accessToken); request.auth.prefix = stringValue(auth.prefix, 'Bearer'); }
-    else if (type === 'apikey' || type === 'api-key') { request.auth.type = 'api-key'; request.auth.apiKeyName = stringValue(auth.key ?? auth.name); request.auth.apiKeyValue = stringValue(auth.value); request.auth.apiKeyLocation = auth.in === 'query' || auth.location === 'query' ? 'query' : 'header'; }
+    if (type === 'basic') { request.auth.type = 'basic'; request.auth.username = stringValue(keyed('basic', 'username', auth.username)); request.auth.password = stringValue(keyed('basic', 'password', auth.password)); }
+    else if (type === 'bearer') { request.auth.type = 'bearer'; request.auth.token = stringValue(keyed('bearer', 'token', auth.token ?? auth.accessToken)); request.auth.prefix = stringValue(keyed('bearer', 'prefix', auth.prefix), 'Bearer'); }
+    else if (type === 'apikey' || type === 'api-key') { request.auth.type = 'api-key'; request.auth.apiKeyName = stringValue(keyed('apikey', 'key', auth.key ?? auth.name)); request.auth.apiKeyValue = stringValue(keyed('apikey', 'value', auth.value)); const location = keyed('apikey', 'in', auth.in ?? auth.location); request.auth.apiKeyLocation = location === 'query' ? 'query' : 'header'; }
     else if (type !== 'none' && type !== 'noauth') throw new Error(`Script request auth type '${type}' is not supported.`);
   }
   const proxy = record(source.proxy);
@@ -147,6 +166,7 @@ self.onmessage = async ({ data }) => {
   const hostPostMessage = self.postMessage.bind(self);
   const logs = [];
   const tests = [];
+  const pendingTests = [];
   let subrequestCount = 0;
   const constructors = [Function, (async () => {}).constructor, (function* () {}).constructor, (async function* () {}).constructor];
   constructors.forEach((constructor) => {
@@ -177,7 +197,13 @@ self.onmessage = async ({ data }) => {
     error: (...values) => pushLog('[error] ' + values.map(String).join(' ')),
   };
   const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
-  const mergedVariables = () => Object.assign({}, state.environment, state.collectionVariables, ...state.folders.map((folder) => folder.environment), state.localVariables, state.iterationData);
+  const mergedVariables = () => {
+    const values = Object.assign({}, state.environment);
+    state.collectionDisabled.forEach((name) => delete values[name]);
+    Object.assign(values, state.collectionVariables);
+    state.folders.forEach((folder) => { (folder.disabled || []).forEach((name) => delete values[name]); Object.assign(values, folder.environment); });
+    return Object.assign(values, state.iterationData, state.localVariables);
+  };
   const replaceIn = (value) => String(value).replace(/{{\\s*([^{}]+?)\\s*}}/g, (match, name) => mergedVariables()[name] ?? match);
   const variableApi = (values) => ({
     get: (name) => values[name],
@@ -195,6 +221,7 @@ self.onmessage = async ({ data }) => {
     replaceIn,
   });
   const expect = (actual, negated = false) => {
+    let keyMode = 'all';
     const verify = (condition, message) => { if (negated ? condition : !condition) throw new Error(message); };
     const api = {
       toBe: (expected) => verify(actual === expected, 'Expected ' + JSON.stringify(actual) + ' to be ' + JSON.stringify(expected)),
@@ -209,16 +236,26 @@ self.onmessage = async ({ data }) => {
       match: (expected) => verify(expected instanceof RegExp && expected.test(String(actual)), 'Expected value to match ' + expected),
       above: (expected) => verify(actual > expected, 'Expected ' + actual + ' to be above ' + expected),
       below: (expected) => verify(actual < expected, 'Expected ' + actual + ' to be below ' + expected),
-      a: (expected) => verify(expected === 'array' ? Array.isArray(actual) : typeof actual === expected, 'Expected value to be a ' + expected),
-      an: (expected) => verify(expected === 'array' ? Array.isArray(actual) : typeof actual === expected, 'Expected value to be an ' + expected),
+      a: (expected) => { verify(expected === 'array' ? Array.isArray(actual) : typeof actual === expected, 'Expected value to be a ' + expected); return api; },
+      an: (expected) => { verify(expected === 'array' ? Array.isArray(actual) : typeof actual === expected, 'Expected value to be an ' + expected); return api; },
       property(name, expected) {
         const exists = actual !== null && actual !== undefined && Object.prototype.hasOwnProperty.call(Object(actual), name);
         verify(exists && (arguments.length < 2 || same(actual[name], expected)), 'Expected value to have property ' + name);
         return expect(actual?.[name], negated);
       },
       length: (expected) => verify(actual?.length === expected, 'Expected length ' + expected + ' but got ' + actual?.length),
+      lengthOf: (expected) => verify(actual?.length === expected, 'Expected length ' + expected + ' but got ' + actual?.length),
+      oneOf: (expected) => verify(Array.isArray(expected) && expected.includes(actual), 'Expected value to be one of ' + JSON.stringify(expected)),
+      keys: (...expected) => {
+        const values = expected.length === 1 && Array.isArray(expected[0]) ? expected[0] : expected;
+        const actualKeys = actual && typeof actual === 'object' ? Object.keys(actual) : [];
+        const condition = keyMode === 'any' ? values.some((key) => actualKeys.includes(String(key))) : values.every((key) => actualKeys.includes(String(key)));
+        verify(condition, 'Expected value to have ' + keyMode + ' keys ' + values.join(', '));
+      },
     };
     ['to', 'be', 'been', 'is', 'that', 'which', 'and', 'has', 'have', 'with', 'at', 'of', 'same'].forEach((name) => Object.defineProperty(api, name, { get: () => api }));
+    Object.defineProperty(api, 'all', { get: () => { keyMode = 'all'; return api; } });
+    Object.defineProperty(api, 'any', { get: () => { keyMode = 'any'; return api; } });
     Object.defineProperty(api, 'not', { get: () => expect(actual, !negated) });
     Object.defineProperty(api, 'ok', { get: () => { verify(Boolean(actual), 'Expected value to be truthy'); return api; } });
     Object.defineProperty(api, 'true', { get: () => { verify(actual === true, 'Expected value to be true'); return api; } });
@@ -271,7 +308,9 @@ self.onmessage = async ({ data }) => {
   let requestUrl = String(state.request.url || '');
   const urlApi = {
     addQueryParams: (items) => {
-      const entries = Array.isArray(items) ? items : Object.entries(items || {}).map(([name, value]) => ({ name, value }));
+      const entries = typeof items === 'string'
+        ? [...new URLSearchParams(items).entries()].map(([name, value]) => ({ name, value }))
+        : Array.isArray(items) ? items : Object.entries(items || {}).map(([name, value]) => ({ name, value }));
       try {
         const url = new URL(requestUrl);
         entries.forEach((item) => { const name = item.name ?? item.key; if (name) url.searchParams.append(String(name), String(item.value ?? '')); });
@@ -307,17 +346,19 @@ self.onmessage = async ({ data }) => {
   };
   Object.defineProperty(state.request, 'url', { configurable: true, enumerable: true, get: () => urlApi, set: (value) => { const next = String(value); if (next.length > 100000) throw new Error('Script request URL exceeds 100 KB.'); requestUrl = next; } });
   Object.defineProperty(state.request, 'body', { configurable: true, enumerable: true, get: () => bodyApi, set: (value) => { const next = typeof value === 'string' ? value : JSON.stringify(value); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); requestBody = next; state.request.bodyMode = 'text'; } });
-  state.request.auth.update = (auth) => {
+  state.request.auth.update = (auth, requestedType) => {
     const input = auth || {};
-    const type = String(input.type || 'none').toLowerCase();
+    const type = String(requestedType || input.type || 'none').toLowerCase();
+    const keyed = (name, key, fallback) => Array.isArray(input[name]) ? input[name].find((item) => item.key === key)?.value ?? fallback : fallback;
     state.request.auth.disabled = false;
-    if (type === 'basic') { state.request.auth.type = 'basic'; state.request.auth.username = String(input.username ?? ''); state.request.auth.password = String(input.password ?? ''); }
-    else if (type === 'bearer') { state.request.auth.type = 'bearer'; state.request.auth.token = String(input.token ?? input.accessToken ?? ''); state.request.auth.prefix = String(input.prefix ?? 'Bearer'); }
-    else if (type === 'apikey' || type === 'api-key') { state.request.auth.type = 'api-key'; state.request.auth.apiKeyName = String(input.key ?? input.name ?? ''); state.request.auth.apiKeyValue = String(input.value ?? ''); state.request.auth.apiKeyLocation = input.in === 'query' || input.location === 'query' ? 'query' : 'header'; }
+    if (type === 'basic') { state.request.auth.type = 'basic'; state.request.auth.username = String(keyed('basic', 'username', input.username ?? '')); state.request.auth.password = String(keyed('basic', 'password', input.password ?? '')); }
+    else if (type === 'bearer') { state.request.auth.type = 'bearer'; state.request.auth.token = String(keyed('bearer', 'token', input.token ?? input.accessToken ?? '')); state.request.auth.prefix = String(keyed('bearer', 'prefix', input.prefix ?? 'Bearer')); }
+    else if (type === 'apikey' || type === 'api-key') { state.request.auth.type = 'api-key'; state.request.auth.apiKeyName = String(keyed('apikey', 'key', input.key ?? input.name ?? '')); state.request.auth.apiKeyValue = String(keyed('apikey', 'value', input.value ?? '')); const location = keyed('apikey', 'in', input.in ?? input.location); state.request.auth.apiKeyLocation = location === 'query' ? 'query' : 'header'; }
     else if (type === 'none' || type === 'noauth') { state.request.auth.type = 'none'; state.request.auth.disabled = true; }
     else throw new Error("Request auth type '" + type + "' is not supported by script mutation yet.");
   };
   state.request.proxy = {
+    getProxyUrl: () => state.request.transport.proxyUrl,
     update: (proxy) => {
       const input = proxy || {};
       if (input.url) state.request.transport.proxyUrl = String(input.url);
@@ -326,11 +367,16 @@ self.onmessage = async ({ data }) => {
     },
   };
   state.request.certificate = {
+    key: { src: '' },
+    cert: { src: '' },
+    pfx: { src: '' },
+    passphrase: '',
     update: (certificate) => {
       const input = certificate || {};
-      if (input.certPath || input.keyPath || input.path) throw new Error('Scripts cannot read certificate file paths. Paste PEM content in Transport settings instead.');
-      state.request.transport.clientCertificatePem = String(input.cert ?? input.certificate ?? '');
-      state.request.transport.clientKeyPem = String(input.key ?? '');
+      if (input.disabled === true) { state.request.transport.clientCertificatePem = ''; state.request.transport.clientKeyPem = ''; state.request.transport.clientCertificateDomains = ''; return; }
+      if (input.certPath || input.keyPath || input.path || input.cert?.src || input.key?.src || input.pfx?.src) throw new Error('Scripts cannot read certificate file paths. Paste PEM content in Transport settings instead.');
+      state.request.transport.clientCertificatePem = String(input.cert?.pem ?? input.cert ?? input.certificate ?? '');
+      state.request.transport.clientKeyPem = String(input.key?.pem ?? input.key ?? '');
       state.request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(',') : String(input.domains ?? '');
     },
   };
@@ -370,25 +416,41 @@ self.onmessage = async ({ data }) => {
     if (typeof callback === 'function') { Promise.resolve().then(run).then((response) => callback(null, response), (error) => callback(error)); return undefined; }
     return Promise.resolve().then(run);
   };
-  const environmentApi = variableApi(state.environment);
+  const globalApi = variableApi(state.environment);
   const collectionApi = variableApi(state.collectionVariables);
   const localApi = variableApi(state.localVariables);
   const iterationApi = variableApi(state.iterationData);
-  localApi.environmentVars = environmentApi;
-  localApi.collectionVariables = collectionApi;
-  localApi.localVars = localApi;
-  localApi.iterationDataVars = iterationApi;
+  const variablesApi = {
+    get: (name) => mergedVariables()[name],
+    set: localApi.set,
+    unset: localApi.unset,
+    has: (name) => Object.prototype.hasOwnProperty.call(mergedVariables(), name),
+    clear: localApi.clear,
+    toObject: mergedVariables,
+    replaceIn,
+    baseGlobalVars: globalApi,
+    globalVars: globalApi,
+    collectionVars: collectionApi,
+    collectionVariables: collectionApi,
+    environmentVars: collectionApi,
+    localVars: localApi,
+    iterationDataVars: iterationApi,
+  };
   const folderFacade = (folder) => ({ id: folder.id, name: folder.name, environment: variableApi(folder.environment) });
   const parentFolders = {
-    get: () => [...state.folders].reverse().map(folderFacade),
+    get: (selector) => { const folder = [...state.folders].reverse().find((item) => item.id === String(selector) || item.name === String(selector)); return folder ? folderFacade(folder) : undefined; },
     getById: (id) => { const folder = state.folders.find((item) => item.id === String(id)); return folder ? folderFacade(folder) : undefined; },
     getByName: (name) => { const folder = [...state.folders].reverse().find((item) => item.name === String(name)); return folder ? folderFacade(folder) : undefined; },
+    getEnvironments: () => [...state.folders].reverse().map((folder) => variableApi(folder.environment)),
   };
   const insomnia = {
-    environment: environmentApi,
-    baseEnvironment: environmentApi,
+    baseGlobals: globalApi,
+    globals: globalApi,
+    environment: collectionApi,
+    baseEnvironment: collectionApi,
+    CollectionVariables: collectionApi,
     collectionVariables: collectionApi,
-    variables: localApi,
+    variables: variablesApi,
     localVars: localApi,
     iterationData: iterationApi,
     parentFolders,
@@ -400,8 +462,13 @@ self.onmessage = async ({ data }) => {
     expect,
     test: (name, callback) => {
       if (tests.length >= 1000) throw new Error('Script exceeds 1,000 test results.');
-      try { callback(); tests.push({ name, passed: true }); }
-      catch (error) { tests.push({ name, passed: false, error: error instanceof Error ? error.message : String(error) }); }
+      const result = { name, passed: true };
+      tests.push(result);
+      try {
+        const outcome = callback();
+        if (outcome && typeof outcome.then === 'function') pendingTests.push(Promise.resolve(outcome).catch((error) => { result.passed = false; result.error = error instanceof Error ? error.message : String(error); }));
+      }
+      catch (error) { result.passed = false; result.error = error instanceof Error ? error.message : String(error); }
     },
   };
   insomnia.request.headersApi = headerApi;
@@ -452,6 +519,7 @@ self.onmessage = async ({ data }) => {
       const requestBody = undefined;
       const logs = undefined;
       const tests = undefined;
+      const pendingTests = undefined;
       const Function = undefined;
       const WebAssembly = undefined;
       const WebTransport = undefined;
@@ -465,6 +533,7 @@ self.onmessage = async ({ data }) => {
 const sandboxSuffix = `
     };
     await runUserScript();
+    await Promise.all(pendingTests);
     cleanupRequest();
     const output = { type: 'result', ok: true, request: state.request, environment: state.environment, collectionVariables: state.collectionVariables, folders: state.folders, localVariables: state.localVariables, logs, tests };
     if (JSON.stringify(output).length > 20000000) hostPostMessage({ type: 'result', ok: false, error: 'Script result exceeds the 20 MB bridge limit.' });
@@ -536,6 +605,7 @@ export const runBrowserScript = async (
           request,
           environment,
           collectionVariables,
+          collectionDisabled: options.collectionDisabled ?? [],
           folders,
           response,
           localVariables,

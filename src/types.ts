@@ -523,7 +523,7 @@ export type ScriptRunResult = {
   request: ApiRequest;
   environment: Record<string, string>;
   collectionVariables?: Record<string, string>;
-  folders?: Array<{ id: string; name: string; environment: Record<string, string> }>;
+  folders?: Array<{ id: string; name: string; environment: Record<string, string>; disabled?: string[] }>;
   logs: string[];
   tests: ScriptTestResult[];
   localVariables?: Record<string, string>;

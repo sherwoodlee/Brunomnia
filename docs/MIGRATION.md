@@ -184,9 +184,24 @@ Compatibility bounds remain explicit: generated snippets do not yet embed multip
 | Workspace migration | Complete | Versions 1–11 migrate to v12 safe script timeout and disabled network/vault grants; imports reset authority and shared reads preserve device-local preferences |
 | Documentation and evidence | Complete | [Permission-bounded scripting guide](SCRIPTING.md) and [Milestone 12 verification](QA_MILESTONE_12.md) |
 
-Compatibility bounds remain explicit: the full upstream library/Node module set, complete Chai/Lodash behavior, advanced auth/body helpers, separately persisted base-environment mutation, async tests, secondary response-cookie persistence, script access to external-vault providers, and broader Postman-global compatibility remain. The browser Worker is the desktop capability boundary; CLI scripts use Node `vm` and therefore require an explicit trusted-workspace flag rather than being represented as hostile-code isolation.
+Compatibility bounds remain explicit: the full upstream library/Node module set, complete Chai/Lodash behavior, advanced auth/body helpers, separately persisted base-environment mutation, script access to external-vault providers, and broader Postman compatibility remain. The browser Worker is the desktop capability boundary; CLI scripts use Node `vm` and therefore require an explicit trusted-workspace flag rather than being represented as hostile-code isolation. Exact scope/helper/async/state-continuity work follows in Milestone 13.
 
-## Milestone 13 — remaining parity closure and release hardening
+## Milestone 13 — script contract fidelity and state continuity (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Variable contract | Complete baseline | `baseGlobals`/`globals`, collection environment/base aliases, uppercase/lowercase collection aliases, local/iteration aliases, documented local-to-global lookup priority, nearest-folder lookup, and disabled-row masking |
+| Request helpers | Complete baseline | Query-string/object/repeated `addQueryParams`, keyed-array Basic/Bearer/API-key updates with second type argument, proxy URL getter, bounded certificate metadata, and bare-hostname HTTPS normalization |
+| Async assertions | Complete baseline | Ordered synchronous/asynchronous test completion plus Chai `lengthOf`, `oneOf`, chain-returning type checks, and all/any object-key assertions in desktop and trusted CLI runs |
+| Secondary continuity | Complete baseline | Secondary response records and `Set-Cookie` state feed later secondary/primary requests and request chaining in direct sends and collection runs |
+| Postman translation | Complete baseline | Imported environment/collection/global/local/iteration/vault scopes, secondary requests, request operations, response helpers, tests, and expectations map to their matching permission-bounded Insomnia APIs |
+| Runner scopes | Complete baseline | Global, collection, folder, iteration, and local maps remain separate through scripts and rendering; disabled collection/folder rows mask lower scopes |
+| Verification fixture | Complete | The checked-in CLI fixture exercises ordered async Chai assertions under explicit `--allow-scripts` consent |
+| Documentation and evidence | Complete | Updated [permission-bounded scripting guide](SCRIPTING.md) and [Milestone 13 verification](QA_MILESTONE_13.md) |
+
+Compatibility bounds remain explicit: `baseGlobals` currently aliases the selected global store and `baseEnvironment` aliases the collection store because separate global-base/selected-global and collection-base/selected-collection editors are not yet modeled. The full bundled module set, file-backed script bodies/certificates, complete Chai/Lodash APIs, external-vault script access, deprecated Postman interfaces, and stronger portable CLI isolation remain open.
+
+## Milestone 14 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
