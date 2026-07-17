@@ -386,7 +386,7 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
     signal: AbortSignal.timeout(request.transport.timeoutMs),
   });
   const responseBody = await response.text();
-  return { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody) };
+  return { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url };
 };
 
 const usage = `Brunomnia CLI

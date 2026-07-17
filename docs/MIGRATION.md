@@ -328,7 +328,22 @@ Compatibility bounds remain explicit: the request plan is device-session state r
 
 Compatibility bounds remain explicit: snapshots are previews, not full request/response console archives. Request headers/bodies, redirect traces, cookie deltas, syntax-highlighted viewers, arbitrary-size bodies, binary rendering, and full protocol-specific runner consoles remain open.
 
-## Milestone 23 — remaining parity closure and release hardening
+## Milestone 23 — bounded collection-run request evidence (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Request snapshots | Complete baseline | Attempts retain protocol, method, resolved/redacted URL, configured headers, body mode/summary/size, and explicit truncation state |
+| Secret handling | Complete baseline | Named authorization/cookie/token/secret/password/passphrase/API-key headers and query parameters are replaced with `[redacted]`; request body content is never stored |
+| Body metadata | Complete baseline | JSON/text/GraphQL/gRPC/WebSocket sizes, URL-encoded field names, multipart field/file names with payload estimates, and binary filename/size are recorded without content |
+| Snapshot bounds | Complete | At most 16 KB of UTF-8 content per attempt and 500 KB per report, with URL/header/summary sub-limits and UTF-8-safe truncation |
+| URL continuity | Complete baseline | Native/browser responses, deterministic demo responses, streams, and the CLI return the executed URL where their transport exposes it |
+| Desktop inspection | Complete baseline | The existing attempt pane shows request evidence above the bounded response snapshot for live and saved results |
+| Executable coverage | Complete | Tests prove resolution, named-secret redaction, body-content omission, per-item limits, and the 70-attempt aggregate budget |
+| Documentation and evidence | Complete | Updated [runner reports and CI guide](RUNNER_REPORTS.md) and [Milestone 23 verification](QA_MILESTONE_23.md) |
+
+Compatibility bounds remain explicit: configured headers do not include every transport-added cookie or advanced-auth signing header, and body sizes describe configured payload content rather than exact multipart wire framing. Arbitrary custom secret names cannot be inferred; request URLs, non-redacted headers, field names, and filenames can still be sensitive.
+
+## Milestone 24 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

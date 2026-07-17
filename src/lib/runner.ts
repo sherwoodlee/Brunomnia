@@ -5,10 +5,11 @@ import type {
   HttpResponse,
   RunnerItemResult,
   RunnerReport,
+  RunnerRequestSnapshot,
   RunnerResponseSnapshot,
   ScriptRunResult,
 } from '../types';
-import { environmentMap } from './request';
+import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, type ScriptEnvironmentScopes } from './resources';
 import type { ScriptRunOptions } from './scriptSandbox';
 
@@ -47,6 +48,8 @@ const boundedInteger = (value: number, minimum: number, maximum: number) => {
 
 export const RUNNER_RESPONSE_PER_RESULT_BYTES = 32_000;
 export const RUNNER_RESPONSE_REPORT_BYTES = 1_000_000;
+export const RUNNER_REQUEST_PER_RESULT_BYTES = 16_000;
+export const RUNNER_REQUEST_REPORT_BYTES = 500_000;
 const RUNNER_RESPONSE_BODY_BYTES = 16_000;
 const RUNNER_RESPONSE_HEADERS = 64;
 
@@ -101,6 +104,82 @@ export const captureRunnerResponse = (response: HttpResponse, budget: ResponseSn
   };
 };
 
+const sensitiveName = (name: string) => /(^|[-_])(authorization|cookie|token|secret|password|passphrase|api[-_]?key)([-_]|$)/i.test(name);
+const redactSensitiveQuery = (value: string) => {
+  try {
+    const url = new URL(value);
+    [...url.searchParams.keys()].forEach((name) => { if (sensitiveName(name)) url.searchParams.set(name, '[redacted]'); });
+    return url.toString();
+  } catch {
+    return value;
+  }
+};
+const base64Bytes = (value: string) => {
+  const source = value.replace(/\s/g, '');
+  return Math.max(0, Math.floor((source.length * 3) / 4) - (source.endsWith('==') ? 2 : source.endsWith('=') ? 1 : 0));
+};
+const requestBodyMetadata = (request: ApiRequest, variables: Record<string, string>) => {
+  if (request.protocol === 'graphql') {
+    const variablesText = resolveTemplate(request.graphql.variables || '{}', variables);
+    const body = JSON.stringify({ query: request.graphql.query, variables: variablesText, operationName: request.graphql.operationName || undefined });
+    return { mode: 'graphql', summary: 'GraphQL query and variables', bytes: new TextEncoder().encode(body).byteLength, estimated: false };
+  }
+  if (request.protocol === 'grpc') {
+    const input = resolveTemplate(request.grpc.input, variables);
+    return { mode: 'grpc', summary: `${request.grpc.service}/${request.grpc.method}`, bytes: new TextEncoder().encode(input).byteLength, estimated: false };
+  }
+  if (request.protocol === 'websocket') {
+    const body = resolveTemplate(request.body, variables);
+    return { mode: 'websocket', summary: body ? 'Startup text frame' : 'No startup frame', bytes: new TextEncoder().encode(body).byteLength, estimated: false };
+  }
+  if (request.bodyMode === 'json' || request.bodyMode === 'text') {
+    const body = resolveTemplate(request.body, variables);
+    return { mode: request.bodyMode, summary: `${request.bodyMode === 'json' ? 'JSON' : 'Text'} body`, bytes: new TextEncoder().encode(body).byteLength, estimated: false };
+  }
+  if (request.bodyMode === 'form-urlencoded') {
+    const fields = request.formBody.filter((row) => row.enabled && row.name);
+    const body = new URLSearchParams(fields.map((row) => [resolveTemplate(row.name, variables), resolveTemplate(row.value, variables)])).toString();
+    return { mode: request.bodyMode, summary: `${fields.length} fields: ${fields.map((row) => row.name).join(', ')}`, bytes: new TextEncoder().encode(body).byteLength, estimated: false };
+  }
+  if (request.bodyMode === 'multipart') {
+    const parts = request.multipartBody.filter((part) => part.enabled && part.name);
+    const bytes = parts.reduce((total, part) => total + (part.kind === 'file' && part.file ? base64Bytes(part.file.dataBase64) : new TextEncoder().encode(resolveTemplate(part.value, variables)).byteLength), 0);
+    return { mode: request.bodyMode, summary: `${parts.length} parts: ${parts.map((part) => part.kind === 'file' ? `${part.name} (${part.fileName || part.file?.fileName || 'file'})` : part.name).join(', ')}`, bytes, estimated: true };
+  }
+  if (request.bodyMode === 'binary' && request.binaryBody) return { mode: request.bodyMode, summary: request.binaryBody.fileName || 'Binary file', bytes: base64Bytes(request.binaryBody.dataBase64), estimated: false };
+  return { mode: request.bodyMode, summary: 'No request body', bytes: 0, estimated: false };
+};
+
+export const captureRunnerRequest = (request: ApiRequest, variables: Record<string, string>, requestUrl: string | undefined, budget: ResponseSnapshotBudget): RunnerRequestSnapshot => {
+  let remaining = Math.min(RUNNER_REQUEST_PER_RESULT_BYTES, Math.max(0, budget.remaining));
+  let storedBytes = 0;
+  const take = (value: string, limit: number) => {
+    const result = takeUtf8(value, Math.min(limit, remaining));
+    remaining -= result.bytes;
+    budget.remaining -= result.bytes;
+    storedBytes += result.bytes;
+    return result;
+  };
+  let resolvedUrl = requestUrl ?? request.url;
+  try { resolvedUrl = requestUrl ?? buildRequestUrl(request, variables); } catch { /* retain the editable URL */ }
+  const url = take(redactSensitiveQuery(resolvedUrl), 4_000);
+  let configuredHeaders: ReturnType<typeof buildHeaders> = [];
+  try { configuredHeaders = buildHeaders(request, variables).filter((header) => header.enabled && header.name); } catch { /* retain an empty header snapshot */ }
+  const headers: RunnerRequestSnapshot['headers'] = [];
+  let headersTruncated = configuredHeaders.length > 64;
+  for (const header of configuredHeaders.slice(0, 64)) {
+    if (remaining <= 0) { headersTruncated = true; break; }
+    const name = take(header.name, 256);
+    const redacted = sensitiveName(header.name);
+    const value = take(redacted ? '[redacted]' : header.value, 2_048);
+    headersTruncated ||= name.truncated || value.truncated;
+    if (name.value) headers.push({ name: name.value, value: value.value, redacted });
+  }
+  const body = requestBodyMetadata(request, variables);
+  const bodySummary = take(body.summary, 2_000);
+  return { protocol: request.protocol, method: request.method, url: url.value, urlTruncated: url.truncated, headers, headersTruncated, bodyMode: body.mode, bodySummary: bodySummary.value, bodySizeBytes: body.bytes, bodySizeEstimated: body.estimated, storedBytes };
+};
+
 export const runCollection = async (
   collection: Collection,
   environment: Environment,
@@ -113,6 +192,7 @@ export const runCollection = async (
   let cancelled = false;
   let bailed = false;
   const responseSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_RESPONSE_REPORT_BYTES };
+  const requestSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_REQUEST_REPORT_BYTES };
   const iterations = boundedInteger(options.iterations, 1, 1000);
   const retries = boundedInteger(options.retries, 0, 10);
   const requestsById = new Map(collection.requests.map((request) => [request.id, request]));
@@ -144,6 +224,7 @@ export const runCollection = async (
         let response: HttpResponse | undefined;
         let tests: RunnerItemResult['tests'] = [];
         let error: string | undefined;
+        let requestVariables: Record<string, string> = {};
         const started = Date.now();
         try {
           const scriptFolders = configured.folders.map((folder) => ({ id: folder.id, name: folder.name, environment: { ...(folderVariables.get(folder.id) ?? {}) }, disabled: [...(folderDisabled.get(folder.id) ?? [])] }));
@@ -171,7 +252,7 @@ export const runCollection = async (
           collectionDisabled = preRequest.collectionDisabled ?? collectionDisabled;
           preRequest.folders?.forEach((folder) => { folderVariables.set(folder.id, folder.environment); folderDisabled.set(folder.id, new Set(folder.disabled ?? [])); });
           const localVariables = preRequest.localVariables ?? {};
-          const requestVariables: Record<string, string> = {};
+          requestVariables = {};
           const applyScope = (scope: Record<string, string>, disabled: string[]) => { disabled.forEach((name) => delete requestVariables[name]); Object.assign(requestVariables, scope); };
           applyScope(baseGlobalVariables, baseGlobalDisabled);
           if (!globalsAreBase) applyScope(globalVariables, globalDisabled);
@@ -220,6 +301,7 @@ export const runCollection = async (
           passed,
           error,
           tests,
+          request: captureRunnerRequest(request, requestVariables, response?.requestUrl, requestSnapshotBudget),
           response: response ? captureRunnerResponse(response, responseSnapshotBudget) : undefined,
         };
         results.push(result);

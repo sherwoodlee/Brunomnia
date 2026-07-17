@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the twenty-second runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the twenty-third runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -22,7 +22,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Request history and response body/header/timeline inspection
 - Delayed one-shot sends and sequential repeating sends with explicit cancellation and a 1,000-run safety bound
 - Permission-bounded pre-request scripts and async after-response tests with documented seven-level environment lookup, exact base/selected scope aliases, folder/query/auth helpers, shared Chai `assert` and chainable `expect` surfaces, bounded adapters for every documented bundled module name, opt-in primary/secondary local body and PEM attachment, and mediated HTTP/vault capabilities
-- Selectable drag/keyboard-ordered collection runs with JSON/CSV iteration data, retries, bail/cancellation, cookie/response chaining, bounded WebSocket/SSE samples, size-limited response inspection, saved reports, and downloadable JSON/JUnit evidence
+- Selectable drag/keyboard-ordered collection runs with JSON/CSV iteration data, retries, bail/cancellation, cookie/response chaining, bounded WebSocket/SSE samples, redacted request metadata, size-limited response inspection, saved reports, and downloadable JSON/JUnit evidence
 - OpenAPI 3.x YAML/JSON editing, structural and safe Spectral-style custom linting, operation preview, formatting, and request generation
 - Native loopback mock servers with route parameters, delays, headers, CORS, and dynamic response tokens
 - A headless CLI for OpenAPI lint/generation/export and collection/test execution with the documented Inso reporter names plus JSON/JUnit artifacts

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, parseRunnerData, runCollection } from './runner';
+import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, parseRunnerData, runCollection } from './runner';
 
 describe('collection runner', () => {
   it('parses JSON and quoted CSV iteration data', () => {
@@ -93,7 +93,7 @@ describe('collection runner', () => {
   });
 
   it('stores UTF-8-safe response previews within per-result and report budgets', async () => {
-    const requests = Array.from({ length: 70 }, (_, index) => createBlankRequest(`request-${index}`));
+    const requests = Array.from({ length: 70 }, (_, index) => ({ ...createBlankRequest(`request-${index}`), headers: Array.from({ length: 10 }, (_value, headerIndex) => ({ id: `header-${index}-${headerIndex}`, name: `X-Debug-${headerIndex}`, value: 'x'.repeat(20_000), enabled: true })) }));
     const headers = Object.fromEntries(Array.from({ length: 70 }, (_, index) => [`x-header-${index}`, `value-${index}`]));
     const body = '🙂'.repeat(5_000);
     const report = await runCollection(
@@ -113,6 +113,44 @@ describe('collection runner', () => {
     expect(snapshots.reduce((total, snapshot) => total + snapshot.storedBytes, 0)).toBeLessThanOrEqual(RUNNER_RESPONSE_REPORT_BYTES);
     expect(snapshots.at(-1)?.bodyTruncated).toBe(true);
     expect(snapshots.at(-1)?.storedBytes).toBe(0);
+    const requestSnapshots = report.results.flatMap((result) => result.request ?? []);
+    expect(requestSnapshots.every((snapshot) => snapshot.storedBytes <= RUNNER_REQUEST_PER_RESULT_BYTES)).toBe(true);
+    expect(requestSnapshots.reduce((total, snapshot) => total + snapshot.storedBytes, 0)).toBeLessThanOrEqual(RUNNER_REQUEST_REPORT_BYTES);
+    expect(requestSnapshots.at(-1)?.headersTruncated).toBe(true);
+    expect(requestSnapshots.at(-1)?.storedBytes).toBe(0);
+  });
+
+  it('records resolved request metadata while redacting named secrets and omitting body content', async () => {
+    const request = {
+      ...createBlankRequest('request'),
+      url: 'https://example.test/orders/{{ orderId }}?access_token=secret&view=full',
+      headers: [
+        { id: 'accept', name: 'Accept', value: 'application/json', enabled: true },
+        { id: 'token', name: 'X-API-Key', value: '{{ apiKey }}', enabled: true },
+      ],
+      bodyMode: 'json' as const,
+      body: '{"password":"{{ password }}"}',
+    };
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+      { id: 'env', name: 'Env', variables: [{ id: 'order', name: 'orderId', value: '42', enabled: true }, { id: 'key', name: 'apiKey', value: 'top-secret', enabled: true }, { id: 'password', name: 'password', value: 'hidden', enabled: true }] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
+      async () => ({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, requestUrl: 'https://example.test/orders/42?access_token=secret&view=full' }),
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    );
+
+    const snapshot = report.results[0].request;
+    expect(snapshot?.url).toContain('access_token=%5Bredacted%5D');
+    expect(snapshot?.url).toContain('view=full');
+    expect(snapshot?.headers).toEqual([
+      { name: 'Accept', value: 'application/json', redacted: false },
+      { name: 'X-API-Key', value: '[redacted]', redacted: true },
+    ]);
+    expect(snapshot?.bodyMode).toBe('json');
+    expect(snapshot?.bodySummary).toBe('JSON body');
+    expect(snapshot?.bodySizeBytes).toBe(new TextEncoder().encode('{"password":"hidden"}').byteLength);
+    expect(JSON.stringify(snapshot)).not.toContain('top-secret');
+    expect(JSON.stringify(snapshot)).not.toContain('hidden');
   });
 
   it('passes iteration data and request-local variables through scripts and request rendering', async () => {
