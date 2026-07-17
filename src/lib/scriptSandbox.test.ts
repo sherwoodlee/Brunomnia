@@ -12,7 +12,7 @@ describe('script sandbox source validation', () => {
       postMessage: (message: unknown) => messages.push(message),
       onmessage: undefined as undefined | ((event: { data: unknown }) => Promise<void>),
     };
-    runInNewContext(buildScriptWorkerSource(script), { self, structuredClone, URL, URLSearchParams, crypto, atob, btoa, setTimeout, clearTimeout, setInterval, clearInterval, encodeURIComponent });
+    runInNewContext(buildScriptWorkerSource(script), { self, structuredClone, TextDecoder, TextEncoder, URL, URLSearchParams, crypto, atob, btoa, setTimeout, clearTimeout, setInterval, clearInterval, encodeURIComponent });
     const request = createBlankRequest('runtime');
     request.url = 'https://api.example.com/items';
     await self.onmessage?.({ data: { type: 'run', state: {
@@ -101,6 +101,33 @@ describe('script sandbox source validation', () => {
     expect((output.folders as Array<{ environment: Record<string, string> }>)[1].environment).toMatchObject({ folder: 'child', folderWrite: 'yes' });
     expect(output.request).toMatchObject({ url: 'https://api.example.com/items?page=1&page=2', auth: { type: 'basic', username: 'Ada', password: 'secret' } });
     expect(output.tests).toEqual([{ name: 'async contract', passed: true }]);
+  });
+
+  it('executes the documented bundled module surface inside the disposable Worker', async () => {
+    const output = await runWorkerSource(`
+      const names = ['ajv', 'atob', 'btoa', 'chai', 'cheerio', 'crypto-js', 'csv-parse', 'lodash', 'moment', 'postman-collection', 'tv4', 'uuid', 'xml2js', 'assert', 'buffer', 'events', 'path', 'querystring', 'punycode', 'stream', 'string-decoder', 'timers', 'url', 'util'];
+      names.forEach((name) => require(name));
+      const Ajv = require('ajv');
+      const csv = require('csv-parse').sync('id,name\\n1,Ada', { columns: true });
+      const digest = require('crypto-js').SHA256('abc').toString();
+      const xml = await require('xml2js').parseStringPromise('<root><id>1</id></root>', { explicitArray: false });
+      insomnia.test('documented modules', () => {
+        expect(new Ajv().validate({ required: ['id'] }, csv[0])).to.be.true;
+        expect(digest).to.equal('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+        expect(require('cheerio').load('<p class="ok">yes</p>')('.ok').text()).to.equal('yes');
+        expect(xml.root.id).to.equal('1');
+        expect(require('moment')('2026-07-17T00:00:00Z').utc().format('YYYY-MM-DD')).to.equal('2026-07-17');
+        expect(require('buffer').Buffer.from('ok').toString('hex')).to.equal('6f6b');
+      });
+    `);
+    expect(output.ok).toBe(true);
+    expect(output.tests).toEqual([{ name: 'documented modules', passed: true }]);
+  });
+
+  it('keeps unlisted modules outside the Worker capability boundary', async () => {
+    const output = await runWorkerSource("require('node:fs');");
+    expect(output.ok).toBe(false);
+    expect(output.error).toContain("Module 'node:fs' is not bundled");
   });
 
   it('resolves all seven variable layers and mutates distinct base and selected stores', async () => {

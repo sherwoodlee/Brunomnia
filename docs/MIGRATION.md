@@ -214,9 +214,23 @@ Compatibility bounds remain explicit: the full bundled module set, file-backed s
 | Workspace migration | Complete | Versions 1–12 migrate to v13 with normalized collection sub-environments and stale active selections cleared |
 | Documentation and evidence | Complete | Updated [permission-bounded scripting guide](SCRIPTING.md) and [Milestone 14 verification](QA_MILESTONE_14.md) |
 
-Compatibility bounds remain explicit: global sub-environment chains deeper than one level are exposed to scripts as one effective selected-global store, and disabled masks inherited through that effective store can be persisted on the selected environment after mutation. The remaining bundled libraries, file-backed script helpers, deprecated Postman surfaces, and portable CLI isolation remain open.
+Compatibility bounds remain explicit: global sub-environment chains deeper than one level are exposed to scripts as one effective selected-global store, and disabled masks inherited through that effective store can be persisted on the selected environment after mutation. The remaining bundled-library name surface follows in Milestone 15; file-backed script helpers, deprecated Postman surfaces, and portable CLI isolation remain open.
 
-## Milestone 15 — remaining parity closure and release hardening
+## Milestone 15 — documented script-module surface (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Documented names | Complete baseline | All 13 external-library and 11 Node-module names in the current Insomnia scripts reference resolve locally, plus synchronous CSV compatibility aliases |
+| Shared execution | Complete baseline | One self-contained factory supplies the disposable desktop Worker and explicitly trusted CLI VM, preventing their module contracts from drifting |
+| Data and validation | Complete baseline | Common bounded AJV/TV4 schema, CSV, SHA-256/encoding, HTML/XML, date, Lodash, and Postman collection-model operations |
+| Node compatibility | Complete baseline | Common assert, Buffer, EventEmitter, POSIX path, query-string, stream, string-decoder, timers, URL, util, UUID, and Punycode operations |
+| Capability boundary | Complete | Unknown modules remain denied; adapters cannot read package files or load code from disk or the network; text/parser inputs are bounded to 5 MB |
+| CLI verification | Complete | The checked-in offline fixture exercises schema, CSV, and SHA-256 adapters under explicit `--allow-scripts` consent |
+| Documentation and evidence | Complete | Updated [permission-bounded scripting guide](SCRIPTING.md) and [Milestone 15 verification](QA_MILESTONE_15.md) |
+
+Compatibility bounds remain explicit: resolving every documented module name does not imply full npm-package equivalence. Complete package versions/options, all JSON Schema drafts and references, full parser/DOM/stream behavior, additional cryptographic algorithms, locales/time zones, the complete Postman SDK, file-backed script helpers, external-vault scripts, deprecated Postman interfaces, and stronger portable CLI isolation remain open.
+
+## Milestone 16 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

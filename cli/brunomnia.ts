@@ -6,6 +6,7 @@ import { parseRunnerData, runCollection } from '../src/lib/runner';
 import type { ApiDesign, ApiRequest, AuthConfig, Environment, HttpResponse, ScriptRunResult, Workspace } from '../src/types';
 import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resources';
 import { normalizeScriptSubrequest, type ScriptRunOptions } from '../src/lib/scriptSandbox';
+import { createScriptModules } from '../src/lib/scriptModules';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -272,29 +273,27 @@ const runNodeScript = async (
       catch (error) { result.passed = false; result.error = error instanceof Error ? error.message : String(error); }
     },
   };
+  const scriptModules = createScriptModules({
+    atob,
+    btoa,
+    crypto,
+    expect: expectApi,
+    structuredClone,
+    TextDecoder,
+    TextEncoder,
+    URL,
+    URLSearchParams,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+  });
   const context = vm.createContext({
     insomnia,
     expect: expectApi,
     require: (name: string) => {
-      const assertion = Object.assign((condition: unknown, message?: string) => { if (!condition) throw new Error(message || 'Assertion failed'); }, {
-        equal: (actual: unknown, expected: unknown) => { if (actual != expected) throw new Error('Expected values to be equal'); },
-        strictEqual: (actual: unknown, expected: unknown) => { if (actual !== expected) throw new Error('Expected values to be strictly equal'); },
-        deepEqual: (actual: unknown, expected: unknown) => { if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('Expected values to be deeply equal'); },
-      });
-      const modules: Record<string, unknown> = {
-        assert: assertion,
-        atob,
-        btoa,
-        chai: { expect: expectApi },
-        lodash: { cloneDeep: structuredClone, get: (value: unknown, path: string, fallback: unknown) => path.split('.').filter(Boolean).reduce<unknown>((current, key) => (current as Record<string, unknown> | undefined)?.[key], value) ?? fallback },
-        querystring: { parse: (value: string) => Object.fromEntries(new URLSearchParams(value)), stringify: (value: Record<string, unknown>) => new URLSearchParams(Object.entries(value).map(([key, item]) => [key, String(item)])).toString() },
-        timers: { setTimeout, clearTimeout, setInterval, clearInterval },
-        url: { URL, URLSearchParams },
-        util: { format: (...values: unknown[]) => values.map(String).join(' ') },
-        uuid: { v4: () => crypto.randomUUID() },
-      };
-      if (!Object.hasOwn(modules, name)) throw new Error(`Module '${name}' is not bundled in Brunomnia's script sandbox.`);
-      return modules[name];
+      if (!Object.hasOwn(scriptModules, name)) throw new Error(`Module '${name}' is not bundled in Brunomnia's script sandbox.`);
+      return scriptModules[name];
     },
     console: {
       log: (...values: unknown[]) => logs.push(values.map(String).join(' ')),

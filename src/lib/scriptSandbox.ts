@@ -1,6 +1,7 @@
 import { createBlankRequest } from '../data/seed';
 import type { ApiRequest, CookieRecord, HttpResponse, KeyValue, ScriptRunResult, StoredResponse } from '../types';
 import { storeResponseCookies } from './cookies';
+import { createScriptModules } from './scriptModules';
 
 export type ScriptFolderState = { id: string; name: string; environment: Record<string, string>; disabled?: string[] };
 
@@ -286,33 +287,21 @@ self.onmessage = async ({ data }) => {
     Object.defineProperty(api, 'empty', { get: () => { verify(actual?.length === 0 || Object.keys(actual || {}).length === 0, 'Expected value to be empty'); return api; } });
     return api;
   };
-  const assertion = (condition, message) => { if (!condition) throw new Error(message || 'Assertion failed'); };
-  assertion.ok = assertion;
-  assertion.equal = (actual, expected, message) => assertion(actual == expected, message || 'Expected values to be equal');
-  assertion.strictEqual = (actual, expected, message) => assertion(actual === expected, message || 'Expected values to be strictly equal');
-  assertion.deepEqual = (actual, expected, message) => assertion(same(actual, expected), message || 'Expected values to be deeply equal');
-  const lodash = {
-    cloneDeep: (value) => structuredClone(value),
-    get: (value, path, fallback) => String(path).replace(/\\[(\\w+)\\]/g, '.$1').split('.').filter(Boolean).reduce((current, key) => current?.[key], value) ?? fallback,
-    has: (value, path) => lodash.get(value, path, undefined) !== undefined,
-    merge: (target, ...sources) => Object.assign(target, ...sources),
-  };
-  const querystring = {
-    parse: (value) => Object.fromEntries(new URLSearchParams(String(value))),
-    stringify: (value) => new URLSearchParams(Object.entries(value || {}).map(([key, item]) => [key, String(item)])).toString(),
-  };
-  const modules = {
-    assert: assertion,
+  const modules = (${createScriptModules.toString()})({
     atob,
     btoa,
-    chai: { expect },
-    lodash,
-    querystring,
-    timers: { setTimeout, clearTimeout, setInterval, clearInterval },
-    url: { URL, URLSearchParams },
-    util: { format: (...values) => values.map(String).join(' ') },
-    uuid: { v4: () => crypto.randomUUID() },
-  };
+    crypto,
+    expect,
+    structuredClone,
+    TextDecoder,
+    TextEncoder,
+    URL,
+    URLSearchParams,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+  });
   const require = (name) => {
     if (Object.prototype.hasOwnProperty.call(modules, name)) return modules[name];
     throw new Error("Module '" + name + "' is not bundled in Brunomnia's script sandbox.");
