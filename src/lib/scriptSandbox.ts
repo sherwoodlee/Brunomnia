@@ -188,6 +188,7 @@ const normalizeScriptSubrequestInput = (input: unknown, sourceRequest: ApiReques
   }
   const proxy = record(source.proxy);
   if (proxy) {
+    request.transport.proxyMode = 'custom';
     if (proxy.url) request.transport.proxyUrl = stringValue(proxy.url);
     else if (proxy.host) request.transport.proxyUrl = `${stringValue(proxy.protocol, 'http')}://${stringValue(proxy.host)}${proxy.port ? `:${stringValue(proxy.port)}` : ''}`;
     request.transport.proxyExclusions = Array.isArray(proxy.exclusions) ? proxy.exclusions.map(String).join(',') : stringValue(proxy.exclusions);
@@ -466,6 +467,7 @@ self.onmessage = async ({ data }) => {
     getProxyUrl: () => state.request.transport.proxyUrl,
     update: (proxy) => {
       const input = proxy || {};
+      state.request.transport.proxyMode = 'custom';
       if (input.url) state.request.transport.proxyUrl = String(input.url);
       else if (input.host) state.request.transport.proxyUrl = String(input.protocol || 'http') + '://' + String(input.host) + (input.port ? ':' + String(input.port) : '');
       state.request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(',') : String(input.exclusions ?? state.request.transport.proxyExclusions);

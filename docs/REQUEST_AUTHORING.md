@@ -45,6 +45,12 @@ Preferences has separate on-by-default choices for **Validate certificates for A
 
 Each request selects **Use Preferences**, **Always**, or **Never** in Transport. Workspace v15 and earlier requests migrate their saved boolean to Always/Never so upgrades preserve behavior; **Make every request inherit certificate validation** opts them into the device default. Never affects only native desktop transport. Browser Fetch owns certificate verification, and the CLI safely refuses a request whose effective mode is Never rather than weakening Node globally.
 
+## Proxy policy
+
+With **Use manual proxy configuration** off, native HTTP/GraphQL and Event Stream requests leave proxy discovery to reqwest's system/environment support. With it on, resolved `http:` URLs use the HTTP proxy, `https:` URLs use the HTTPS proxy, and both apply the no-proxy list. Proxy URLs can include credentials and remain device-local with other Preferences.
+
+Each request chooses **Use Preferences**, **Custom**, or **Direct connection**. Workspace v16 and earlier requests with a saved URL/exclusion list migrate to Custom; empty legacy settings migrate to inheritance. cURL `--proxy` and script proxy updates select Custom. Browser Fetch owns routing, gRPC/WebSocket proxying remains open, and the CLI rejects manual proxy requirements rather than silently sending direct.
+
 ## Response history
 
 After a request completes, use the history selector in the response summary to reopen an earlier saved result. Saved entries retain the response body, headers, status, timing, negotiated protocol, request URL, request identity, active environment identity, and receipt time. Selecting another request restores its newest eligible response instead of leaving the previous request's result on screen.

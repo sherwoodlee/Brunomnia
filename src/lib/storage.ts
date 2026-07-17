@@ -218,6 +218,10 @@ const normalizePreferences = (value: unknown): AppPreferences => {
       : defaultPreferences.requestTimeoutMs,
     validateCertificates: source?.validateCertificates !== false,
     validateAuthCertificates: source?.validateAuthCertificates !== false,
+    proxyEnabled: source?.proxyEnabled === true,
+    httpProxy: stringValue(source?.httpProxy).slice(0, 4_096),
+    httpsProxy: stringValue(source?.httpsProxy).slice(0, 4_096),
+    noProxy: stringValue(source?.noProxy).slice(0, 20_000),
     scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
     allowScriptRequests: source?.allowScriptRequests === true,
     allowScriptFileAccess: source?.allowScriptFileAccess === true,
@@ -381,6 +385,13 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         : typeof request.transport?.validateCertificates === 'boolean'
           ? request.transport.validateCertificates ? 'on' : 'off'
           : 'global';
+      const proxyMode = request.transport?.proxyMode === 'global'
+        || request.transport?.proxyMode === 'custom'
+        || request.transport?.proxyMode === 'disabled'
+        ? request.transport.proxyMode
+        : stringValue(request.transport?.proxyUrl).trim() || stringValue(request.transport?.proxyExclusions).trim()
+          ? 'custom'
+          : 'global';
       return {
         ...defaults,
         ...request,
@@ -413,6 +424,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
             : defaults.transport.timeoutMs,
           validateCertificates: validateCertificatesMode !== 'off',
           validateCertificatesMode,
+          proxyMode,
         },
         sse: {
           ...defaults.sse,
@@ -452,7 +464,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 16,
+    version: 17,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

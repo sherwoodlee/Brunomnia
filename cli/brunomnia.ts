@@ -10,7 +10,7 @@ import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resource
 import { hydrateScriptFileReferences, prepareScriptSubrequest, type ScriptFileBudget, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 import { createScriptExpect } from '../src/lib/scriptExpect';
 import { createScriptModules } from '../src/lib/scriptModules';
-import { resolveCertificateValidation, resolveRequestTimeout } from '../src/lib/transport';
+import { resolveCertificateValidation, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from '../src/lib/transport';
 import { migrateWorkspace } from '../src/lib/storage';
 
 const args = process.argv.slice(2);
@@ -200,6 +200,7 @@ const runNodeScript = async (
     else throw new Error(`Request auth type '${type}' is not supported by script mutation yet.`);
   };
   requestWithHelpers.proxy = { getProxyUrl: () => request.transport.proxyUrl, update: (input) => {
+    request.transport.proxyMode = 'custom';
     if (input.url) request.transport.proxyUrl = String(input.url);
     else if (input.host) request.transport.proxyUrl = `${String(input.protocol ?? 'http')}://${String(input.host)}${input.port ? `:${String(input.port)}` : ''}`;
     request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(',') : String(input.exclusions ?? request.transport.proxyExclusions);
@@ -363,7 +364,7 @@ const runNodeScript = async (
   return { request: hydratedRequest, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
 };
 
-const executeHttp = async (request: ApiRequest, variables: Record<string, string>, requestTimeoutMs = 30_000): Promise<HttpResponse> => {
+const executeHttp = async (request: ApiRequest, variables: Record<string, string>, requestTimeoutMs = 30_000, proxyPreferences?: ProxyPreferences): Promise<HttpResponse> => {
   if (request.protocol !== 'http' && request.protocol !== 'graphql') throw new Error(`CLI collection execution does not yet support ${request.protocol}.`);
   const url = buildRequestUrl(request, variables);
   const headers = buildHeaders(request, variables);
@@ -387,6 +388,9 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
   else if (request.bodyMode === 'binary' && request.binaryBody) body = Buffer.from(request.binaryBody.dataBase64, 'base64');
   const started = performance.now();
   const timeoutMs = resolveRequestTimeout(request.transport, requestTimeoutMs);
+  if (resolveProxyTransport(request.transport, url, proxyPreferences).proxyMode === 'custom') {
+    throw new Error('The CLI cannot use a manual proxy because Node Fetch does not expose per-request proxy configuration. Use the native desktop transport or configure a supported runner-level proxy.');
+  }
   const response = await fetch(url, {
     method: request.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled && header.name).map((header) => [header.name, header.value])),
@@ -459,7 +463,12 @@ const main = async () => {
       if (!resolveCertificateValidation(request.transport, validateCertificates)) {
         throw new Error('The CLI cannot disable TLS certificate validation because Node Fetch does not expose that authority. Use the native desktop transport for explicitly untrusted development certificates.');
       }
-      return executeHttp(request, variables, workspace.preferences.requestTimeoutMs);
+      return executeHttp(request, variables, workspace.preferences.requestTimeoutMs, {
+        enabled: workspace.preferences.proxyEnabled,
+        httpProxy: workspace.preferences.httpProxy,
+        httpsProxy: workspace.preferences.httpsProxy,
+        noProxy: workspace.preferences.noProxy,
+      });
     };
     const report = await runCollection(collection, environment, {
       iterations: Number(flag('--iterations') ?? 1), retries: Number(flag('--retries') ?? 0), bail: hasFlag('--bail'), delayMs: 0,

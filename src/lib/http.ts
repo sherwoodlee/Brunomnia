@@ -5,7 +5,7 @@ import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
 import { renderTemplate } from './templates';
 import { buildResponseTimeline } from './timeline';
-import { resolveCertificateValidation, resolveFollowRedirects, resolveRequestTimeout } from './transport';
+import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
 
 export type SendRequestContext = {
   cookies?: CookieRecord[];
@@ -16,6 +16,7 @@ export type SendRequestContext = {
   requestTimeoutMs?: number;
   validateCertificates?: boolean;
   validateAuthCertificates?: boolean;
+  proxy?: ProxyPreferences;
   maxTimelineDataSizeKB?: number;
   filterResponsesByEnv?: boolean;
   vault?: Record<string, string>;
@@ -125,6 +126,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     ? context.pluginRuntime.afterResponse(prepared, response)
     : response;
   let url = buildRequestUrl(prepared, variables);
+  const proxy = resolveProxyTransport(prepared.transport, url, context.proxy);
   let headers = buildHeaders(prepared, variables);
   const contentType = (value: string) => value.toLowerCase() === 'content-type';
   if (prepared.protocol === 'graphql' && !headers.some((header) => header.enabled && contentType(header.name))) {
@@ -178,6 +180,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
           followRedirects,
           timeoutMs,
           validateCertificates,
+          ...proxy,
           preferredHttpVersion: context.preferredHttpVersion ?? 'default',
           maxRedirects: context.maxRedirects ?? 10,
         },

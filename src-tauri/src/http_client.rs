@@ -133,7 +133,11 @@ fn build_client_with_options(
         builder = builder.no_gzip().no_brotli().no_deflate().no_zstd();
     }
 
-    if !transport.proxy_url.trim().is_empty() {
+    if transport.proxy_mode == "disabled" {
+        builder = builder.no_proxy();
+    } else if (transport.proxy_mode == "custom" || transport.proxy_mode.is_empty())
+        && !transport.proxy_url.trim().is_empty()
+    {
         let proxy = reqwest::Proxy::all(transport.proxy_url.trim())
             .map_err(|error| format!("Invalid proxy URL: {error}"))?
             .no_proxy(reqwest::NoProxy::from_string(
