@@ -29,19 +29,20 @@ describe('GraphQL request serialization', () => {
 });
 
 describe('native HTTP transport preferences', () => {
-  it('passes the selected device HTTP version without changing saved request transport', async () => {
+  it('passes device HTTP and redirect preferences without changing saved request transport', async () => {
     tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/2.0' });
     const request = createBlankRequest('preferred-http-version');
     request.url = 'https://example.test/status';
 
-    const response = await sendRequest(request, undefined, { preferredHttpVersion: 'http2' });
+    const response = await sendRequest(request, undefined, { preferredHttpVersion: 'http2', maxRedirects: -1 });
 
     expect(response.httpVersion).toBe('HTTP/2.0');
     expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({
       input: expect.objectContaining({
-        transport: expect.objectContaining({ preferredHttpVersion: 'http2' }),
+        transport: expect.objectContaining({ preferredHttpVersion: 'http2', maxRedirects: -1 }),
       }),
     }));
     expect(request.transport).not.toHaveProperty('preferredHttpVersion');
+    expect(request.transport).not.toHaveProperty('maxRedirects');
   });
 });

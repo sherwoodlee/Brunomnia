@@ -9,6 +9,7 @@ export type SendRequestContext = {
   cookies?: CookieRecord[];
   responses?: StoredResponse[];
   preferredHttpVersion?: PreferredHttpVersion;
+  maxRedirects?: number;
   vault?: Record<string, string>;
   externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
   pluginRuntime?: {
@@ -153,7 +154,11 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         formBody: prepared.formBody,
         multipartBody: prepared.multipartBody,
         binaryBody: prepared.binaryBody,
-        transport: { ...prepared.transport, preferredHttpVersion: context.preferredHttpVersion ?? 'default' },
+        transport: {
+          ...prepared.transport,
+          preferredHttpVersion: context.preferredHttpVersion ?? 'default',
+          maxRedirects: context.maxRedirects ?? 10,
+        },
         auth: {
           authType: prepared.auth.type,
           disabled: prepared.auth.disabled,

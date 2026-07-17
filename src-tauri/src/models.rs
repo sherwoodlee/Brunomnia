@@ -31,7 +31,7 @@ pub struct MultipartPart {
     pub file_name: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransportConfig {
     #[serde(default = "default_true")]
@@ -52,6 +52,25 @@ pub struct TransportConfig {
     pub client_certificate_domains: String,
     #[serde(default)]
     pub preferred_http_version: String,
+    #[serde(default = "default_max_redirects")]
+    pub max_redirects: i64,
+}
+
+impl Default for TransportConfig {
+    fn default() -> Self {
+        Self {
+            follow_redirects: true,
+            timeout_ms: default_timeout(),
+            validate_certificates: true,
+            proxy_url: String::new(),
+            proxy_exclusions: String::new(),
+            client_certificate_pem: String::new(),
+            client_key_pem: String::new(),
+            client_certificate_domains: String::new(),
+            preferred_http_version: String::new(),
+            max_redirects: default_max_redirects(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -87,6 +106,10 @@ fn default_true() -> bool {
 
 fn default_timeout() -> u64 {
     60_000
+}
+
+fn default_max_redirects() -> i64 {
+    10
 }
 
 fn default_sse_reconnect_delay() -> u64 {

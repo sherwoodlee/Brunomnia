@@ -16,6 +16,23 @@ enum HttpVersionMode {
     Http2PriorKnowledge,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RedirectMode {
+    Disabled,
+    Limited(usize),
+    Unlimited,
+}
+
+fn redirect_mode(transport: &TransportConfig) -> RedirectMode {
+    if !transport.follow_redirects {
+        RedirectMode::Disabled
+    } else if transport.max_redirects < 0 {
+        RedirectMode::Unlimited
+    } else {
+        RedirectMode::Limited(usize::try_from(transport.max_redirects).unwrap_or(usize::MAX))
+    }
+}
+
 fn http_version_mode(transport: &TransportConfig) -> HttpVersionMode {
     match transport.preferred_http_version.as_str() {
         "http1.0" => HttpVersionMode::Http10,
@@ -91,10 +108,10 @@ fn build_client_with_options(
     total_timeout: bool,
     automatic_decompression: bool,
 ) -> Result<Client, String> {
-    let redirect = if transport.follow_redirects {
-        reqwest::redirect::Policy::limited(10)
-    } else {
-        reqwest::redirect::Policy::none()
+    let redirect = match redirect_mode(transport) {
+        RedirectMode::Disabled => reqwest::redirect::Policy::none(),
+        RedirectMode::Limited(limit) => reqwest::redirect::Policy::limited(limit),
+        RedirectMode::Unlimited => reqwest::redirect::Policy::custom(|attempt| attempt.follow()),
     };
     let mut builder = Client::builder()
         .redirect(redirect)
@@ -573,5 +590,21 @@ mod tests {
             Some("https://example.test")
         )
         .is_ok());
+    }
+
+    #[test]
+    fn normalizes_redirect_policy_modes() {
+        let mode = |follow_redirects, max_redirects| {
+            redirect_mode(&TransportConfig {
+                follow_redirects,
+                max_redirects,
+                ..TransportConfig::default()
+            })
+        };
+        assert_eq!(mode(false, -1), RedirectMode::Disabled);
+        assert_eq!(mode(false, 10), RedirectMode::Disabled);
+        assert_eq!(mode(true, -1), RedirectMode::Unlimited);
+        assert_eq!(mode(true, 0), RedirectMode::Limited(0));
+        assert_eq!(mode(true, 10), RedirectMode::Limited(10));
     }
 }

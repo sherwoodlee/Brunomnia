@@ -202,6 +202,9 @@ const normalizePreferences = (value: unknown): AppPreferences => {
       || source?.preferredHttpVersion === 'http2-prior-knowledge'
       ? source.preferredHttpVersion
       : 'default',
+    maxRedirects: typeof source?.maxRedirects === 'number' && Number.isFinite(source.maxRedirects)
+      ? Math.max(-1, Math.trunc(source.maxRedirects))
+      : defaultPreferences.maxRedirects,
     requestTimeoutMs: Math.min(600_000, Math.max(1_000, Number(source?.requestTimeoutMs) || defaultPreferences.requestTimeoutMs)),
     scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
     allowScriptRequests: source?.allowScriptRequests === true,

@@ -36,6 +36,7 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - comfortable or compact density;
 - 11–20 px editor font size;
 - a preferred native protocol of Default negotiation, HTTP 1.0, HTTP 1.1, HTTP/2, or HTTP/2 Prior Knowledge;
+- a native maximum redirect count, where `0` follows none and `-1` allows redirects until the request or Event Stream handshake deadline;
 - a 1–600 second default timeout for new requests, with an explicit apply-to-existing action;
 - a 1–60 second script deadline plus separate off-by-default secondary-request, local-file, and local-vault script authorities;
 - automatic GraphQL introspection;
@@ -46,4 +47,4 @@ Click a shortcut field and press a combination. `Mod` maps to Command on macOS a
 
 Preferences stay on this device. Split-YAML folder/Git projects omit them, encrypted-sync pulls preserve the current device's values, and imported workspace files start with safe defaults. Plugin themes take precedence while active.
 
-The HTTP version preference reaches ordinary HTTP and GraphQL sends, Event Streams, collection runs, secondary script/plugin requests, artifact URL imports, OAuth token calls, and HTTP-backed integrations. Standard HTTP/2 negotiates and can fall back; Prior Knowledge requires an HTTP/2-capable peer. Native responses show the protocol actually used in the response summary and timeline. Browser development mode leaves protocol selection to the browser.
+The HTTP version and maximum-redirect preferences reach ordinary HTTP and GraphQL sends, Event Streams, collection runs, secondary script/plugin requests, artifact URL imports, OAuth token calls, and HTTP-backed integrations. Each request's **Follow HTTP redirects** switch takes precedence: when it is off, the client never follows a redirect regardless of the device maximum. Standard HTTP/2 negotiates and can fall back; Prior Knowledge requires an HTTP/2-capable peer. Native responses show the protocol actually used in the response summary and timeline. Browser development mode leaves protocol selection and redirect counting to the browser.

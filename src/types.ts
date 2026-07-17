@@ -310,6 +310,7 @@ export type AppPreferences = {
   density: 'comfortable' | 'compact';
   fontSize: number;
   preferredHttpVersion: PreferredHttpVersion;
+  maxRedirects: number;
   requestTimeoutMs: number;
   scriptTimeoutMs: number;
   allowScriptRequests: boolean;

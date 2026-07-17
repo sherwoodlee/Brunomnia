@@ -55,11 +55,12 @@ describe('sseConnectConfig', () => {
 });
 
 describe('streamTransportConfig', () => {
-  it('adds the device HTTP preference without mutating request transport', () => {
+  it('adds device HTTP and redirect preferences without mutating request transport', () => {
     const request = cloneSeedWorkspace().collections[0].requests[0];
-    const transport = streamTransportConfig(request, 'http2-prior-knowledge');
+    const transport = streamTransportConfig(request, 'http2-prior-knowledge', 3);
 
-    expect(transport).toMatchObject({ timeoutMs: request.transport.timeoutMs, preferredHttpVersion: 'http2-prior-knowledge' });
+    expect(transport).toMatchObject({ timeoutMs: request.transport.timeoutMs, preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: 3 });
     expect(request.transport).not.toHaveProperty('preferredHttpVersion');
+    expect(request.transport).not.toHaveProperty('maxRedirects');
   });
 });
