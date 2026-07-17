@@ -303,10 +303,13 @@ export type Workspace = {
 
 export type ShortcutAction = 'palette' | 'preferences' | 'send' | 'environment' | 'history' | 'toggle-sidebar' | 'new-request' | 'duplicate-request' | 'delete-request' | 'focus-url' | 'generate-code';
 
+export type PreferredHttpVersion = 'default' | 'http1.0' | 'http1.1' | 'http2' | 'http2-prior-knowledge';
+
 export type AppPreferences = {
   theme: 'system' | 'dark' | 'light';
   density: 'comfortable' | 'compact';
   fontSize: number;
+  preferredHttpVersion: PreferredHttpVersion;
   requestTimeoutMs: number;
   scriptTimeoutMs: number;
   allowScriptRequests: boolean;
@@ -472,6 +475,7 @@ export type HttpResponse = {
   sizeBytes: number;
   setCookies?: string[];
   requestUrl?: string;
+  httpVersion?: string;
 };
 
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests' | 'docs';

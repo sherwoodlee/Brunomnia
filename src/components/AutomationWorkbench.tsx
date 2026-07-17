@@ -190,7 +190,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       let runnerResponses = [...workspace.responses];
       const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
       const pluginCallbacks: PluginHostCallbacks = {
-        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses }),
+        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion }),
         prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
         readClipboard: () => navigator.clipboard.readText(),
         writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -205,8 +205,8 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           variables: Object.entries(variables).map(([name, value]) => ({ id: `runner-${name}`, name, value, enabled: true })),
         };
         const result = request.protocol === 'websocket' || request.protocol === 'sse'
-          ? await runStreamSample(request, requestEnvironment, streamWindowMs)
-          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
+          ? await runStreamSample(request, requestEnvironment, streamWindowMs, workspace.preferences.preferredHttpVersion)
+          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
         const requestUrl = result.requestUrl ?? request.url;
         if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
         const stored = { ...result, requestId: request.id, requestName: request.name, requestUrl, receivedAt: new Date().toISOString() };
@@ -223,6 +223,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           }, {
             cookies: runnerCookies,
             responses: runnerResponses,
+            preferredHttpVersion: workspace.preferences.preferredHttpVersion,
             vault: workspace.preferences.enableVaultInScripts ? vault : {},
           });
           const state = applyScriptSubresponse(runnerCookies, runnerResponses, subrequest, subresponse);
@@ -313,7 +314,7 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     if (generating) return;
     setGenerating(true); setError('');
     try {
-      const generated = await generateMockWithAi(workspace.ai, aiPrompt, aiPort, activeEnvironment, { vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
+      const generated = await generateMockWithAi(workspace.ai, aiPrompt, aiPort, activeEnvironment, { preferredHttpVersion: workspace.preferences.preferredHttpVersion, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
       onChangeWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, generated] }));
       setActiveId(generated.id); setActiveRouteId(generated.routes[0]?.id ?? ''); setShowAi(false); setAiPrompt('');
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }

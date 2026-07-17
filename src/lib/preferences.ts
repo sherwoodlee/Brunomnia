@@ -32,6 +32,7 @@ export const defaultPreferences: AppPreferences = {
   theme: 'system',
   density: 'comfortable',
   fontSize: 13,
+  preferredHttpVersion: 'default',
   requestTimeoutMs: 30_000,
   scriptTimeoutMs: 10_000,
   allowScriptRequests: false,

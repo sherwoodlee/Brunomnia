@@ -106,6 +106,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace }: PluginWorkbenc
     network: async (pluginRequest) => sendRequest(pluginRequest, workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId), {
       cookies: workspace.cookies,
       responses: workspace.responses,
+      preferredHttpVersion: workspace.preferences.preferredHttpVersion,
     }),
     prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
     readClipboard: async () => navigator.clipboard.readText(),

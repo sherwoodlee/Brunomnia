@@ -1,5 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import type { ApiRequest, CookieRecord, Environment, HttpResponse, StoredResponse } from '../types';
+import type { ApiRequest, CookieRecord, Environment, HttpResponse, PreferredHttpVersion, StoredResponse } from '../types';
 import { applyAdvancedAuth } from './auth';
 import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
@@ -8,6 +8,7 @@ import { renderTemplate } from './templates';
 export type SendRequestContext = {
   cookies?: CookieRecord[];
   responses?: StoredResponse[];
+  preferredHttpVersion?: PreferredHttpVersion;
   vault?: Record<string, string>;
   externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
   pluginRuntime?: {
@@ -152,7 +153,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         formBody: prepared.formBody,
         multipartBody: prepared.multipartBody,
         binaryBody: prepared.binaryBody,
-        transport: prepared.transport,
+        transport: { ...prepared.transport, preferredHttpVersion: context.preferredHttpVersion ?? 'default' },
         auth: {
           authType: prepared.auth.type,
           disabled: prepared.auth.disabled,

@@ -1,5 +1,5 @@
 use crate::{
-    http_client::build_streaming_client,
+    http_client::{apply_preferred_request_version, build_streaming_client},
     models::{StreamConnectInput, StreamEvent},
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -189,7 +189,8 @@ async fn open_sse(
     last_event_id: Option<&str>,
 ) -> Result<reqwest::Response, String> {
     let client = build_streaming_client(&input.transport, Some(&input.url))?;
-    let mut request = client.get(&input.url).header("Accept", "text/event-stream");
+    let mut request = apply_preferred_request_version(client.get(&input.url), &input.transport)
+        .header("Accept", "text/event-stream");
     for header in input.headers.iter().filter(|header| header.enabled) {
         request = request.header(&header.name, &header.value);
     }
@@ -229,6 +230,7 @@ pub async fn connect_sse(
 
     let response = open_sse(&input, None).await?;
     let status = response.status();
+    let version = format!("{:?}", response.version());
 
     let (cancel, mut cancel_receiver) = mpsc::unbounded_channel();
     state
@@ -241,7 +243,7 @@ pub async fn connect_sse(
     let _ = on_event.send(StreamEvent::system(
         &session_id,
         "open",
-        format!("Listening · HTTP {status}"),
+        format!("Listening · HTTP {status} · {version}"),
     ));
 
     tokio::spawn(async move {
@@ -312,10 +314,11 @@ pub async fn connect_sse(
             match reopened {
                 Ok(next_response) => {
                     let status = next_response.status();
+                    let version = format!("{:?}", next_response.version());
                     let _ = on_event.send(StreamEvent::system(
                         &session_id,
                         "open",
-                        format!("Reconnected · HTTP {status} · attempt {reconnects}"),
+                        format!("Reconnected · HTTP {status} · {version} · attempt {reconnects}"),
                     ));
                     response = Some(next_response);
                 }

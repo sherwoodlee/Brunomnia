@@ -50,6 +50,8 @@ pub struct TransportConfig {
     pub client_key_pem: String,
     #[serde(default)]
     pub client_certificate_domains: String,
+    #[serde(default)]
+    pub preferred_http_version: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -137,6 +139,7 @@ pub struct HttpResponseOutput {
     pub duration_ms: u128,
     pub size_bytes: usize,
     pub set_cookies: Vec<String>,
+    pub http_version: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]

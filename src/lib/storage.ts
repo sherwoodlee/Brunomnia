@@ -196,6 +196,12 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     theme: source?.theme === 'dark' || source?.theme === 'light' ? source.theme : 'system',
     density: source?.density === 'compact' ? 'compact' : 'comfortable',
     fontSize: Math.min(20, Math.max(11, Number(source?.fontSize) || defaultPreferences.fontSize)),
+    preferredHttpVersion: source?.preferredHttpVersion === 'http1.0'
+      || source?.preferredHttpVersion === 'http1.1'
+      || source?.preferredHttpVersion === 'http2'
+      || source?.preferredHttpVersion === 'http2-prior-knowledge'
+      ? source.preferredHttpVersion
+      : 'default',
     requestTimeoutMs: Math.min(600_000, Math.max(1_000, Number(source?.requestTimeoutMs) || defaultPreferences.requestTimeoutMs)),
     scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
     allowScriptRequests: source?.allowScriptRequests === true,

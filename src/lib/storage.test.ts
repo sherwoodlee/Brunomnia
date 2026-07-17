@@ -39,7 +39,7 @@ describe('workspace migrations', () => {
     expect(migrated.mcpClients).toEqual([]);
     expect(migrated.ai.enabled).toBe(false);
     expect(migrated.konnect.baseUrl).toBe('https://us.api.konghq.com');
-    expect(migrated.preferences).toMatchObject({ theme: 'system', requestTimeoutMs: 30_000, autoFetchGraphqlSchema: true });
+    expect(migrated.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', requestTimeoutMs: 30_000, autoFetchGraphqlSchema: true });
     expect(migrated.preferences).toMatchObject({ scriptTimeoutMs: 10_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
     expect(migrated.preferences.shortcuts['generate-code']).toBe('Mod+Shift+G');
     expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaEndpoint: '', schemaFetchedAt: '' });
@@ -153,7 +153,7 @@ describe('workspace migrations', () => {
     }];
     exported.ai = { ...exported.ai, enabled: true, apiKey: 'raw-ai-key', mockGeneration: true, commitSuggestions: true };
     exported.konnect = { ...exported.konnect, enabled: true, token: 'raw-konnect-token' };
-    exported.preferences = { ...exported.preferences, theme: 'light', requestTimeoutMs: 123_000, allowScriptRequests: true, allowScriptFileAccess: true, enableVaultInScripts: true };
+    exported.preferences = { ...exported.preferences, theme: 'light', preferredHttpVersion: 'http2-prior-knowledge', requestTimeoutMs: 123_000, allowScriptRequests: true, allowScriptFileAccess: true, enableVaultInScripts: true };
 
     const imported = parseWorkspaceImport(JSON.stringify(exported));
     expect(imported.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
@@ -162,16 +162,22 @@ describe('workspace migrations', () => {
     expect(imported.mcpClients[0]).toMatchObject({ enabled: false, token: '', password: '' });
     expect(imported.ai).toMatchObject({ enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false });
     expect(imported.konnect).toMatchObject({ enabled: false, token: '' });
-    expect(imported.preferences).toMatchObject({ theme: 'system', requestTimeoutMs: 30_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
+    expect(imported.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', requestTimeoutMs: 30_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
   });
 
   it('normalizes preference bounds and shortcut values', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
-    workspace.preferences = { theme: 'unknown', density: 'compact', fontSize: 99, requestTimeoutMs: 1, scriptTimeoutMs: 999_999, allowScriptRequests: 'yes', allowScriptFileAccess: 'yes', enableVaultInScripts: 1, shortcuts: { palette: ' mod + shift + p ', send: 42 } };
+    workspace.preferences = { theme: 'unknown', density: 'compact', fontSize: 99, preferredHttpVersion: 'http3', requestTimeoutMs: 1, scriptTimeoutMs: 999_999, allowScriptRequests: 'yes', allowScriptFileAccess: 'yes', enableVaultInScripts: 1, shortcuts: { palette: ' mod + shift + p ', send: 42 } };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 20, requestTimeoutMs: 1_000, scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
+    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 20, preferredHttpVersion: 'default', requestTimeoutMs: 1_000, scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
     expect(migrated.preferences.shortcuts.palette).toBe('Mod+Shift+P');
     expect(migrated.preferences.shortcuts.send).toBe('Mod+Enter');
+  });
+
+  it('preserves a supported device-local HTTP version preference', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.preferences.preferredHttpVersion = 'http2-prior-knowledge';
+    expect(migrateWorkspace(workspace).preferences.preferredHttpVersion).toBe('http2-prior-knowledge');
   });
 
   it('breaks malformed resource cycles and keeps private descendants device-local', () => {

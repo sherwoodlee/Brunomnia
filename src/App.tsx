@@ -723,6 +723,7 @@ function ResponsePanel({
           <span className={!streaming && response.status > 0 && response.status < 400 ? 'ok' : !streaming ? 'bad' : ''}>{streaming ? protocol === 'websocket' ? 'WebSocket' : 'Event stream' : response.statusText}</span>
           <span>{streaming ? `${streamMessages.length} events` : `${response.durationMs} ms`}</span>
           {!streaming ? <span>{formatBytes(response.sizeBytes)}</span> : null}
+          {!streaming && response.httpVersion ? <span>{response.httpVersion}</span> : null}
         </div>
         <button aria-label="Response source" className="icon-button subtle" type="button"><Icon name="globe" size={18} /></button>
       </div>
@@ -748,6 +749,7 @@ function ResponsePanel({
           <div className="timeline">
             <div><span className="timeline-dot" /><strong>Request started</strong><time>0 ms</time></div>
             <div><span className="timeline-dot" /><strong>Response received</strong><time>{response.durationMs} ms</time></div>
+            {response.httpVersion ? <div><span className="timeline-dot ok" /><strong>Protocol negotiated</strong><time>{response.httpVersion}</time></div> : null}
             <div><span className="timeline-dot ok" /><strong>Body decoded</strong><time>{response.durationMs} ms</time></div>
           </div>
         ) : null}
@@ -917,7 +919,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 14, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 13, requestTimeoutMs: 30000, scriptTimeoutMs: 10000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L', 'generate-code': 'Mod+Shift+G' } },
+    format: 'brunomnia', version: 14, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 13, preferredHttpVersion: 'default', requestTimeoutMs: 30000, scriptTimeoutMs: 10000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L', 'generate-code': 'Mod+Shift+G' } },
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -1154,7 +1156,7 @@ export default function App() {
     const targetRequest = applyCollectionConfiguration(collection, active.request, activeEnvironment).request;
     setGraphqlSchemaLoading(true);
     try {
-      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, vault: unlockedVault, externalSecret: externalSecretResolver });
+      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, vault: unlockedVault, externalSecret: externalSecretResolver });
       setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => ({ ...collection, requests: collection.requests.map((request) => request.id === targetRequest.id ? { ...request, graphql: { ...request.graphql, schema, schemaEndpoint: targetRequest.url, schemaFetchedAt: new Date().toISOString() } } : request) })) }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1257,7 +1259,7 @@ export default function App() {
       streamSession.current = sessionId;
       streamProtocol.current = request.protocol;
       try {
-        await connectStream(request, { ...executionEnvironment, variables: [...executionEnvironment.variables, ...Object.entries(unlockedVault).map(([name, value]) => ({ id: `vault-${name}`, name, value, enabled: true }))] }, sessionId, onStreamEvent);
+        await connectStream(request, { ...executionEnvironment, variables: [...executionEnvironment.variables, ...Object.entries(unlockedVault).map(([name, value]) => ({ id: `vault-${name}`, name, value, enabled: true }))] }, sessionId, onStreamEvent, workspace.preferences.preferredHttpVersion);
         setStreamStatus('connected');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1276,7 +1278,7 @@ export default function App() {
     let scriptResponses = [...workspace.responses];
     const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const pluginCallbacks: PluginHostCallbacks = {
-      network: (pluginRequest) => sendRequest(pluginRequest, executionEnvironment, { cookies: workspace.cookies, responses: workspace.responses }),
+      network: (pluginRequest) => sendRequest(pluginRequest, executionEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion }),
       prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
       readClipboard: () => navigator.clipboard.readText(),
       writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -1322,6 +1324,7 @@ export default function App() {
           }, {
             cookies: scriptCookies,
             responses: scriptResponses,
+            preferredHttpVersion: workspace.preferences.preferredHttpVersion,
             vault: workspace.preferences.enableVaultInScripts ? unlockedVault : {},
           });
           const state = applyScriptSubresponse(scriptCookies, scriptResponses, subrequest, subresponse);
@@ -1363,7 +1366,7 @@ export default function App() {
         result = await sendRequest(executableRequest, {
           ...executionEnvironment,
           variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
-        }, { cookies: workspace.cookies, responses: workspace.responses, pluginRuntime, vault: unlockedVault, externalSecret: externalSecretResolver });
+        }, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, pluginRuntime, vault: unlockedVault, externalSecret: externalSecretResolver });
       }
       const afterResponse = await runScript(executableRequest.tests, executableRequest, result, preRequest.localVariables, preRequest);
       setScriptTests(afterResponse.tests);
@@ -1514,7 +1517,7 @@ export default function App() {
     request.bodyMode = 'none';
     request.preRequestScript = '';
     request.tests = '';
-    const result = await sendRequest(request, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses });
+    const result = await sendRequest(request, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion });
     if (result.status < 200 || result.status >= 300) throw new Error(`Import URL returned ${result.status} ${result.statusText}.`);
     if (result.sizeBytes > 20_000_000) throw new Error('The import exceeds the 20 MB local conversion limit.');
     return result.body;
@@ -1623,7 +1626,7 @@ export default function App() {
             onSend={() => void executeRequest()}
             onTabChange={setRequestTab}
             request={active.request}
-            requestContext={{ vault: unlockedVault, externalSecret: externalSecretResolver }}
+            requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, vault: unlockedVault, externalSecret: externalSecretResolver }}
             scheduledSendLabel={scheduledSendLabel}
             storedResponses={workspace.responses}
             streamStatus={streamStatus}
@@ -1649,7 +1652,7 @@ export default function App() {
             streamMessages={streamMessages}
             streamStatus={streamStatus}
           />
-        </div> : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ vault: unlockedVault, externalSecret: externalSecretResolver }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ vault: unlockedVault, externalSecret: externalSecretResolver }} workspace={workspace} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : (
+        </div> : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, vault: unlockedVault, externalSecret: externalSecretResolver }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, vault: unlockedVault, externalSecret: externalSecretResolver }} workspace={workspace} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : (
           <Suspense fallback={<div className="dialog-loading">Loading automation…</div>}><AutomationWorkbench
             activeEnvironment={activeEnvironment}
             onChangeWorkspace={(updater) => setWorkspace(updater)}
@@ -1685,7 +1688,7 @@ export default function App() {
 
       {showEnvironment ? <EnvironmentDialog activeId={workspace.activeEnvironmentId} environments={workspace.environments} onAdd={addEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} onDelete={deleteEnvironment} onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))} /> : null}
       {configuredCollection ? <CollectionDialog collection={configuredCollection} onChange={updateCollection} onClose={() => setCollectionEditor(undefined)} /> : null}
-      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={activeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} requestContext={{ vault: unlockedVault, externalSecret: externalSecretResolver }} responses={workspace.responses} /> : null}
+      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={activeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, vault: unlockedVault, externalSecret: externalSecretResolver }} responses={workspace.responses} /> : null}
       {showSendOptions ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSendOptions(false)}>
         <section aria-labelledby="send-options-title" aria-modal="true" className="modal send-options-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
           <header><div><small>Request scheduling</small><h2 id="send-options-title">Send options</h2></div><button aria-label="Close" className="icon-button subtle" onClick={() => setShowSendOptions(false)} type="button"><Icon name="x" /></button></header>
