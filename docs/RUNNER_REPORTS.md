@@ -49,4 +49,18 @@ Supported names are `dot`, `list`, `min`, `progress`, `spec`, and `tap`, matchin
 
 `--bail` stops subsequent requests and iterations only after the current request exhausts its configured retries. Without it, the runner records the complete plan.
 
+## Test-name filtering
+
+`run test` accepts the current Inso-compatible `-t` / `--testNamePattern <regex>` option (and `--test-name-pattern` as a Brunomnia convenience alias):
+
+```bash
+node bin/brunomnia.cjs run test workspace.json "Collection" --allow-scripts -t '^Status is (?:200|201)$'
+```
+
+The regex is compiled and length-checked before any request executes. An invalid regex or a pattern longer than 1,000 characters exits non-zero without running the collection. Matching is case-sensitive JavaScript regex behavior, consistent with the documented regex contract.
+
+Unmatched `insomnia.test(name, callback)` callbacks are not invoked. Clean attempts with no matching registrations are omitted from the report, so a zero-match run reports `0 passed, 0 failed, 0 total, 0 matched tests`. Transport, HTTP, pre-request, or top-level after-response failures are retained even when no test name matches. Filtered JSON reports store `testNamePattern` and `matchedTests`; text summaries include the matched count.
+
+Brunomnia's current test model is request-centric: named tests are registered dynamically inside after-response scripts. The request and the script's top-level statements must therefore execute before Brunomnia can discover and filter those registrations. This does not claim persistence or selection parity with Insomnia's standalone unit-test-suite resources.
+
 The text reporters provide compatible roles and stable plain text, not byte-identical Mocha formatting. JSON and JUnit are Brunomnia portability formats and do not claim to be upstream Inso formats.

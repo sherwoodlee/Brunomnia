@@ -64,6 +64,12 @@ describe('runner report artifacts', () => {
     expect(createRunnerReportArtifact(report, 'progress').contents).toContain('[=======-------------]');
   });
 
+  it('reports the applied test-name pattern match count', () => {
+    const filtered = { ...report, testNamePattern: '^body', matchedTests: 1 };
+    expect(createRunnerReportArtifact(filtered, 'min').contents).toBe('1 passed, 2 failed, 3 total, 1 matched tests (1250 ms)\n');
+    expect(JSON.parse(createRunnerReportArtifact(filtered, 'json').contents).report).toMatchObject({ testNamePattern: '^body', matchedTests: 1 });
+  });
+
   it('rejects unknown reporter names with the supported inventory', () => {
     expect(parseRunnerReporter(undefined, 'spec')).toBe('spec');
     expect(parseRunnerReporter('tap')).toBe('tap');

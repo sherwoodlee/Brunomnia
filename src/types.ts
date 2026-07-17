@@ -594,6 +594,8 @@ export type RunnerReport = {
   finishedAt: string;
   iterations: number;
   retries: number;
+  testNamePattern?: string;
+  matchedTests?: number;
   total: number;
   passed: number;
   failed: number;

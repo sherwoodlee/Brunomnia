@@ -3,7 +3,7 @@ import { basename, extname } from 'node:path';
 import vm from 'node:vm';
 import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openapi';
 import { buildHeaders, buildRequestUrl, resolveTemplate } from '../src/lib/request';
-import { parseRunnerData, runCollection } from '../src/lib/runner';
+import { parseRunnerData, runCollection, validateTestNamePattern } from '../src/lib/runner';
 import { createRunnerReportArtifact, parseRunnerReporter } from '../src/lib/runnerReport';
 import type { ApiDesign, ApiRequest, AuthConfig, Environment, HttpResponse, ScriptRunResult, Workspace } from '../src/types';
 import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resources';
@@ -64,6 +64,8 @@ const runNodeScript = async (
   const logs: string[] = [];
   const tests: ScriptRunResult['tests'] = [];
   const pendingTests: Promise<unknown>[] = [];
+  const testNamePattern = options.testNamePattern === undefined ? undefined : new RegExp(options.testNamePattern);
+  let registeredTests = 0;
   const fileReferences: ScriptFileReference[] = [];
   const fileBudget: ScriptFileBudget = { files: 0, bytes: 0 };
   if (!source.trim()) return { request, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
@@ -281,7 +283,11 @@ const runNodeScript = async (
     },
     expect: expectApi,
     test: (name: string, callback: () => unknown) => {
-      const result: ScriptRunResult['tests'][number] = { name, passed: true };
+      registeredTests += 1;
+      if (registeredTests > 1_000) throw new Error('Script exceeds 1,000 test registrations.');
+      const testName = String(name);
+      if (testNamePattern && !testNamePattern.test(testName)) return;
+      const result: ScriptRunResult['tests'][number] = { name: testName, passed: true };
       tests.push(result);
       try { const outcome = callback(); if (outcome && typeof (outcome as PromiseLike<unknown>).then === 'function') pendingTests.push(Promise.resolve(outcome).catch((error) => { result.passed = false; result.error = error instanceof Error ? error.message : String(error); })); }
       catch (error) { result.passed = false; result.error = error instanceof Error ? error.message : String(error); }
@@ -395,7 +401,7 @@ const usage = `Brunomnia CLI
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
   brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files]
-  brunomnia run test <workspace> <collection-name-or-id> [same options]
+  brunomnia run test <workspace> <collection-name-or-id> [-t, --testNamePattern <regex>] [same options]
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
 `;
@@ -442,8 +448,12 @@ const main = async () => {
     const selectedEnvironment: Environment = workspace.environments.find((candidate) => candidate.id === environmentIdentifier || candidate.name === environmentIdentifier) ?? workspace.environments[0] ?? fail('The workspace has no environment.');
     const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
     const dataPath = flag('--data');
+    const requestedTestNamePattern = flag('--testNamePattern') ?? flag('-t') ?? flag('--test-name-pattern');
+    if (subject === 'collection' && requestedTestNamePattern !== undefined) fail('--testNamePattern is only available for run test.');
+    const testNamePattern = subject === 'test' ? validateTestNamePattern(requestedTestNamePattern) : undefined;
     const report = await runCollection(collection, environment, {
       iterations: Number(flag('--iterations') ?? 1), retries: Number(flag('--retries') ?? 0), bail: hasFlag('--bail'), delayMs: 0,
+      testNamePattern,
       scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(flag('--script-timeout') ?? 10_000))),
       environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
       dataRows: dataPath ? parseRunnerData(await loadText(dataPath)) : [],
