@@ -205,6 +205,7 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     maxRedirects: typeof source?.maxRedirects === 'number' && Number.isFinite(source.maxRedirects)
       ? Math.max(-1, Math.trunc(source.maxRedirects))
       : defaultPreferences.maxRedirects,
+    followRedirects: source?.followRedirects !== false,
     maxHistoryResponses: typeof source?.maxHistoryResponses === 'number' && Number.isFinite(source.maxHistoryResponses)
       ? Math.max(-1, Math.trunc(source.maxHistoryResponses))
       : defaultPreferences.maxHistoryResponses,
@@ -344,6 +345,11 @@ export const migrateWorkspace = (value: unknown): Workspace => {
       const graphql = record(request.graphql);
       const requestId = stringValue(request.id, `migrated-request-${crypto.randomUUID()}`);
       const method = normalizeHttpMethod(stringValue(request.method, defaults.method), defaults.method);
+      const followRedirectsMode = request.transport?.followRedirectsMode === 'global'
+        || request.transport?.followRedirectsMode === 'on'
+        || request.transport?.followRedirectsMode === 'off'
+        ? request.transport.followRedirectsMode
+        : request.transport?.followRedirects === false ? 'off' : 'global';
       return {
         ...defaults,
         ...request,
@@ -365,7 +371,12 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           schemaFetchedAt: stringValue(graphql?.schemaFetchedAt),
         },
         grpc: { ...defaults.grpc, ...request.grpc, metadata: normalizeRows(record(request.grpc)?.metadata, `${requestId}-metadata`) },
-        transport: { ...defaults.transport, ...request.transport },
+        transport: {
+          ...defaults.transport,
+          ...request.transport,
+          followRedirects: followRedirectsMode !== 'off',
+          followRedirectsMode,
+        },
         sse: {
           ...defaults.sse,
           ...request.sse,

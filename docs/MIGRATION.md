@@ -448,7 +448,22 @@ Compatibility bounds remain explicit: browser development mode uses Fetch and ca
 
 Compatibility bounds remain explicit: limit changes prune only when the relevant request next stores a response. The selector does not yet delete, pin, compare, export, or search individual saved responses. The legacy global 100-send activity log remains separate. Large/unlimited response retention can grow the device-local workspace file, and body pre-allocation limits remain open.
 
-## Milestone 31 — remaining parity closure and release hardening
+## Milestone 31 — global redirect default and per-request inheritance (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local Follow redirects by default is enabled on new devices and safely normalized/import-reset like the current upstream setting |
+| Request inheritance | Complete | Requests persist Use Preferences, Always, or Never; explicit modes take precedence over the device default, and Never takes precedence over the numeric ceiling |
+| Legacy safety | Complete | Existing false booleans migrate to Never, existing enabled requests migrate to Use Preferences, and contradictory stored booleans are normalized from the explicit mode |
+| Execution breadth | Complete baseline | Primary HTTP/GraphQL, Event Streams, collection runs, script/plugin calls, URL imports, OAuth, and HTTP-backed integrations receive the device default; security-sensitive internal requests keep explicit Never policies |
+| Interchange | Complete baseline | Insomnia v4 `settingFollowRedirects` and v5 `settings.followRedirects` preserve `global`, `on`, and `off` on import/export |
+| Browser behavior | Complete baseline | Browser Fetch follows the resolved device/request choice; its own redirect-count ceiling and protocol remain browser-controlled |
+| Executable coverage | Complete baseline | Frontend tests cover global inheritance, both explicit overrides, migration, native invocation, stream configuration, and Insomnia v4/v5 round trips; rendered and live redirect fixtures remain intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 31 verification](QA_MILESTONE_31.md) |
+
+Compatibility bounds remain explicit: redirect-hop timeline entries, per-request numeric ceilings, WebSocket handshake redirect controls, and live chain fixtures remain open. Browser Fetch does not expose its hop ceiling. Internal adapter requests that deliberately disable redirects do not inherit the device default.
+
+## Milestone 32 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -105,7 +105,7 @@ const httpRequest = async (
     password: client.password,
     disabled: client.authType === 'none',
   };
-  request.transport = { ...request.transport, followRedirects: false, timeoutMs: 30_000, sendCookies: false, storeCookies: false };
+  request.transport = { ...request.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMs: 30_000, sendCookies: false, storeCookies: false };
   const response = await sendRequest(request, environment, context);
   if (response.status === 401) throw new Error('MCP authentication failed with 401. Configure a PAT, Basic credentials, or a supported OAuth token.');
   if (response.status < 200 || response.status >= 300) throw new Error(`MCP HTTP request failed (${response.status}): ${response.body.slice(0, 2_000)}`);

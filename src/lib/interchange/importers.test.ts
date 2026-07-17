@@ -170,11 +170,12 @@ paths:
     const v4 = importArtifact(JSON.stringify({ __export_format: 4, __export_source: 'insomnia.desktop.app:v12', resources: [
       { _id: 'wrk_1', parentId: null, name: 'V4 Workspace', _type: 'workspace' },
       { _id: 'fld_1', parentId: 'wrk_1', name: 'Folder', _type: 'request_group' },
-      { _id: 'req_1', parentId: 'fld_1', name: 'Get one', method: 'GET', url: 'https://api.example.com/one', headers: [], parameters: [], _type: 'request' },
+      { _id: 'req_1', parentId: 'fld_1', name: 'Get one', method: 'GET', url: 'https://api.example.com/one', headers: [], parameters: [], settingFollowRedirects: 'off', _type: 'request' },
       { _id: 'env_1', parentId: 'wrk_1', name: 'Base', data: { token: 'abc' }, _type: 'environment' },
     ] }), 'insomnia-v4.json');
     expect(v4.format).toBe('insomnia-v4');
     expect(v4.collections[0].requests[0].name).toBe('Get one');
+    expect(v4.collections[0].requests[0].transport.followRedirectsMode).toBe('off');
     expect(v4.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
     expect(v4.collections[0].requests[0].folderId).toBe(v4.collections[0].folders?.[0].id);
     expect(v4.collections[0].environment?.[0]).toMatchObject({ name: 'token', value: 'abc' });
@@ -191,13 +192,14 @@ collection:
         meta: { id: req_v5 }
         method: POST
         url: https://api.example.com/items
+        settings: { followRedirects: on }
         body: { mimeType: application/json, text: '{"ok":true}' }
 environments:
   name: Base
   data: { baseUrl: https://api.example.com }
 `, 'insomnia-v5.yaml');
     expect(v5.format).toBe('insomnia-v5');
-    expect(v5.collections[0].requests[0]).toMatchObject({ name: 'Create', bodyMode: 'json' });
+    expect(v5.collections[0].requests[0]).toMatchObject({ name: 'Create', bodyMode: 'json', transport: expect.objectContaining({ followRedirectsMode: 'on' }) });
     expect(v5.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
     expect(v5.collections[0].requests[0].folderId).toBe(v5.collections[0].folders?.[0].id);
     expect(v5.collections[0].environment?.[0]).toMatchObject({ name: 'baseUrl', value: 'https://api.example.com' });

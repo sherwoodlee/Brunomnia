@@ -26,7 +26,7 @@ const getPage = async (config: KonnectConfig, url: string, environment: Environm
   request.url = url;
   request.auth = { ...request.auth, type: 'bearer', token: config.token, disabled: false };
   request.headers = [{ id: 'konnect-accept', name: 'Accept', value: 'application/json', enabled: true }];
-  request.transport = { ...request.transport, timeoutMs: 60_000, followRedirects: false, sendCookies: false, storeCookies: false };
+  request.transport = { ...request.transport, timeoutMs: 60_000, followRedirects: false, followRedirectsMode: 'off', sendCookies: false, storeCookies: false };
   const response = await sendRequest(request, environment, context);
   if (response.status === 401 || response.status === 403) throw new Error(`Konnect rejected the access token (${response.status}). Check its expiry and permissions.`);
   if (response.status < 200 || response.status >= 300) throw new Error(`Konnect request failed (${response.status}): ${response.body.slice(0, 2_000)}`);

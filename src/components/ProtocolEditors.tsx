@@ -270,7 +270,7 @@ export function TransportEditor({ request, onChange }: { request: ApiRequest; on
         <label>Certificate domains<input placeholder="api.example.com, *.internal.example" spellCheck={false} value={transport.clientCertificateDomains} onChange={(event) => update({ clientCertificateDomains: event.target.value })} /></label>
       </div>
       <div className="transport-switches">
-        <label><input checked={transport.followRedirects} type="checkbox" onChange={(event) => update({ followRedirects: event.target.checked })} /><span>Follow HTTP redirects</span></label>
+        <label><span>Follow HTTP redirects</span><select value={transport.followRedirectsMode} onChange={(event) => { const followRedirectsMode = event.target.value as typeof transport.followRedirectsMode; update({ followRedirectsMode, followRedirects: followRedirectsMode !== 'off' }); }}><option value="global">Use Preferences</option><option value="on">Always</option><option value="off">Never</option></select></label>
         <label><input checked={transport.validateCertificates} type="checkbox" onChange={(event) => update({ validateCertificates: event.target.checked })} /><span>Validate server certificates</span></label>
         <label><input checked={transport.sendCookies} type="checkbox" onChange={(event) => update({ sendCookies: event.target.checked })} /><span>Send matching workspace cookies</span></label>
         <label><input checked={transport.storeCookies} type="checkbox" onChange={(event) => update({ storeCookies: event.target.checked })} /><span>Store response cookies</span></label>

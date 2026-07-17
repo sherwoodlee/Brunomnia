@@ -35,16 +35,30 @@ describe('native HTTP transport preferences', () => {
     const request = createBlankRequest('preferred-http-version');
     request.url = 'https://example.test/status';
 
-    const response = await sendRequest(request, undefined, { preferredHttpVersion: 'http2', maxRedirects: -1 });
+    const response = await sendRequest(request, undefined, { preferredHttpVersion: 'http2', maxRedirects: -1, followRedirects: false });
 
     expect(response.httpVersion).toBe('HTTP/2.0');
     expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({
       input: expect.objectContaining({
-        transport: expect.objectContaining({ preferredHttpVersion: 'http2', maxRedirects: -1 }),
+        transport: expect.objectContaining({ preferredHttpVersion: 'http2', maxRedirects: -1, followRedirects: false }),
       }),
     }));
     expect(request.transport).not.toHaveProperty('preferredHttpVersion');
     expect(request.transport).not.toHaveProperty('maxRedirects');
+    expect(request.transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global' });
+  });
+
+  it('honors explicit per-request redirect overrides over the device default', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
+    const request = createBlankRequest('redirect-override');
+    request.url = 'https://example.test/status';
+    request.transport.followRedirectsMode = 'on';
+    await sendRequest(request, undefined, { followRedirects: false });
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({ followRedirects: true }) }) }));
+
+    request.transport.followRedirectsMode = 'off';
+    await sendRequest(request, undefined, { followRedirects: true });
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({ followRedirects: false }) }) }));
   });
 
   it('filters response template history to the active environment when enabled', async () => {
