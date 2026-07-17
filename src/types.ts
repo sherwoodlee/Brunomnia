@@ -555,6 +555,18 @@ export type RunnerItemResult = {
   passed: boolean;
   error?: string;
   tests: ScriptTestResult[];
+  response?: RunnerResponseSnapshot;
+};
+
+export type RunnerResponseSnapshot = {
+  statusText: string;
+  statusTextTruncated: boolean;
+  headers: Record<string, string>;
+  headersTruncated: boolean;
+  bodyPreview: string;
+  bodyTruncated: boolean;
+  sizeBytes: number;
+  storedBytes: number;
 };
 
 export type RunnerReport = {

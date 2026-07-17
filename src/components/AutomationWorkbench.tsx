@@ -128,6 +128,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const [data, setData] = useState('');
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<RunnerItemResult[]>([]);
+  const [selectedResultId, setSelectedResultId] = useState('');
   const [error, setError] = useState('');
   const [requestPlan, setRequestPlan] = useState<Array<{ id: string; enabled: boolean }>>(() => (workspace.collections[0]?.requests ?? []).map((request) => ({ id: request.id, enabled: true })));
   const cancelled = useRef(false);
@@ -183,7 +184,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
     if (!collection || running) return;
     const requestIds = requestPlan.filter((item) => item.enabled).map((item) => item.id);
     if (!requestIds.length) { setError('Select at least one request for this run.'); return; }
-    setRunning(true); setResults([]); setError(''); cancelled.current = false;
+    setRunning(true); setResults([]); setSelectedResultId(''); setError(''); cancelled.current = false;
     try {
       let runnerCookies = [...workspace.cookies];
       let runnerResponses = [...workspace.responses];
@@ -197,7 +198,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
       const report = await runCollection(collection, environment, {
         iterations, retries, bail, requestIds, delayMs, scriptTimeoutMs: workspace.preferences.scriptTimeoutMs, environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id), dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current,
-        onResult: (result) => setResults((current) => [...current, result]),
+        onResult: (result) => { setResults((current) => [...current, result]); setSelectedResultId((current) => current || result.id); },
       }, async (request, variables) => {
         const requestEnvironment = {
           id: environment.id, name: environment.name,
@@ -240,6 +241,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
 
   const visibleResults = results.length ? results : latestReport?.results ?? [];
   const passed = visibleResults.filter((result) => result.passed).length;
+  const selectedResult = visibleResults.find((result) => result.id === selectedResultId);
   return (
     <section className="automation-workbench runner-workbench">
       <AutomationHeader eyebrow="Test" title="Collection runner" subtitle="Run requests in order with iteration data, scripts, assertions, delays, and retries.">
@@ -266,7 +268,8 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
         </aside>
         <div className="runner-results">
           <header><div><small>{running ? 'Run in progress' : latestReport ? `Last run · ${new Date(latestReport.finishedAt).toLocaleString()}` : 'Ready to run'}</small><h2>{collection?.name ?? 'No collection'}</h2></div><div className="runner-stats"><strong>{visibleResults.length}</strong><span>Total attempts</span><strong className="ok">{passed}</strong><span>Passed</span><strong className={visibleResults.length - passed ? 'bad' : ''}>{visibleResults.length - passed}</strong><span>Failed</span></div></header>
-          <div className="runner-table"><div className="runner-table-head"><span>Request</span><span>Iteration</span><span>Attempt</span><span>Status</span><span>Duration</span><span>Result</span></div>{visibleResults.map((result) => <article key={result.id}><span><strong>{result.requestName}</strong><small>{result.tests.map((test) => test.name).join(', ') || result.error || 'HTTP response'}</small></span><span>{result.iteration}</span><span>{result.attempt}</span><span>{result.status || 'ERR'}</span><span>{result.durationMs} ms</span><span className={result.passed ? 'ok' : 'bad'}>{result.passed ? 'PASS' : 'FAIL'}</span></article>)}{!visibleResults.length ? <div className="empty-state compact"><Icon name="history" size={28} /><strong>No runner results</strong><span>Start the selected collection to build a local report.</span></div> : null}</div>
+          <div className="runner-table"><div className="runner-table-head"><span>Request</span><span>Iteration</span><span>Attempt</span><span>Status</span><span>Duration</span><span>Result</span></div>{visibleResults.map((result) => <article aria-pressed={selectedResult?.id === result.id} className={selectedResult?.id === result.id ? 'selected' : ''} key={result.id} onClick={() => setSelectedResultId(result.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedResultId(result.id); } }} role="button" tabIndex={0}><span><strong>{result.requestName}</strong><small>{result.tests.map((test) => test.name).join(', ') || result.error || 'HTTP response'}</small></span><span>{result.iteration}</span><span>{result.attempt}</span><span>{result.status || 'ERR'}</span><span>{result.durationMs} ms</span><span className={result.passed ? 'ok' : 'bad'}>{result.passed ? 'PASS' : 'FAIL'}</span></article>)}{!visibleResults.length ? <div className="empty-state compact"><Icon name="history" size={28} /><strong>No runner results</strong><span>Start the selected collection to build a local report.</span></div> : null}</div>
+          {selectedResult ? <section className="runner-response-detail"><header><div><small>Response snapshot</small><strong>{selectedResult.requestName} · iteration {selectedResult.iteration}, attempt {selectedResult.attempt}</strong></div><button aria-label="Close response snapshot" onClick={() => setSelectedResultId('')} type="button">Close</button></header>{selectedResult.response ? <div className="runner-response-content"><div className="runner-response-meta"><span><strong>{selectedResult.status}</strong> {selectedResult.response.statusText}{selectedResult.response.statusTextTruncated ? '…' : ''}</span><span>{selectedResult.response.sizeBytes.toLocaleString()} response bytes</span><span>{selectedResult.durationMs} ms</span></div><details><summary>{Object.keys(selectedResult.response.headers).length} headers{selectedResult.response.headersTruncated ? ' · truncated' : ''}</summary><pre>{Object.entries(selectedResult.response.headers).map(([name, value]) => `${name}: ${value}`).join('\n') || '(no response headers)'}</pre></details><div className="runner-body-preview"><small>Body preview · {selectedResult.response.storedBytes.toLocaleString()} snapshot bytes{selectedResult.response.bodyTruncated ? ' · truncated' : ''}</small><pre>{selectedResult.response.bodyPreview || '(empty response body)'}</pre></div></div> : <p>{selectedResult.error || 'No response was returned for this attempt.'}</p>}</section> : null}
         </div>
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}

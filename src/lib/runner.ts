@@ -5,6 +5,7 @@ import type {
   HttpResponse,
   RunnerItemResult,
   RunnerReport,
+  RunnerResponseSnapshot,
   ScriptRunResult,
 } from '../types';
 import { environmentMap } from './request';
@@ -44,6 +45,62 @@ const boundedInteger = (value: number, minimum: number, maximum: number) => {
   return Math.max(minimum, Math.min(maximum, Math.floor(value)));
 };
 
+export const RUNNER_RESPONSE_PER_RESULT_BYTES = 32_000;
+export const RUNNER_RESPONSE_REPORT_BYTES = 1_000_000;
+const RUNNER_RESPONSE_BODY_BYTES = 16_000;
+const RUNNER_RESPONSE_HEADERS = 64;
+
+type ResponseSnapshotBudget = { remaining: number };
+
+const takeUtf8 = (value: string, maximumBytes: number) => {
+  const encoded = new TextEncoder().encode(value);
+  if (encoded.byteLength <= maximumBytes) return { value, bytes: encoded.byteLength, truncated: false };
+  let end = Math.max(0, maximumBytes);
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  while (end > 0) {
+    try {
+      return { value: decoder.decode(encoded.slice(0, end)), bytes: end, truncated: true };
+    } catch {
+      end -= 1;
+    }
+  }
+  return { value: '', bytes: 0, truncated: encoded.byteLength > 0 };
+};
+
+export const captureRunnerResponse = (response: HttpResponse, budget: ResponseSnapshotBudget): RunnerResponseSnapshot => {
+  let remaining = Math.min(RUNNER_RESPONSE_PER_RESULT_BYTES, Math.max(0, budget.remaining));
+  let storedBytes = 0;
+  const take = (value: string, limit: number) => {
+    const result = takeUtf8(value, Math.min(limit, remaining));
+    remaining -= result.bytes;
+    budget.remaining -= result.bytes;
+    storedBytes += result.bytes;
+    return result;
+  };
+
+  const statusText = take(response.statusText, 512);
+  const headers: Record<string, string> = {};
+  let headersTruncated = Object.keys(response.headers).length > RUNNER_RESPONSE_HEADERS;
+  for (const [rawName, rawValue] of Object.entries(response.headers).slice(0, RUNNER_RESPONSE_HEADERS)) {
+    if (remaining <= 0) { headersTruncated = true; break; }
+    const name = take(rawName, 256);
+    const value = take(rawValue, 2_048);
+    headersTruncated ||= name.truncated || value.truncated;
+    if (name.value) headers[name.value] = value.value;
+  }
+  const body = take(response.body, RUNNER_RESPONSE_BODY_BYTES);
+  return {
+    statusText: statusText.value,
+    statusTextTruncated: statusText.truncated,
+    headers,
+    headersTruncated,
+    bodyPreview: body.value,
+    bodyTruncated: body.truncated,
+    sizeBytes: response.sizeBytes,
+    storedBytes,
+  };
+};
+
 export const runCollection = async (
   collection: Collection,
   environment: Environment,
@@ -55,6 +112,7 @@ export const runCollection = async (
   const results: RunnerItemResult[] = [];
   let cancelled = false;
   let bailed = false;
+  const responseSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_RESPONSE_REPORT_BYTES };
   const iterations = boundedInteger(options.iterations, 1, 1000);
   const retries = boundedInteger(options.retries, 0, 10);
   const requestsById = new Map(collection.requests.map((request) => [request.id, request]));
@@ -162,6 +220,7 @@ export const runCollection = async (
           passed,
           error,
           tests,
+          response: response ? captureRunnerResponse(response, responseSnapshotBudget) : undefined,
         };
         results.push(result);
         options.onResult?.(result);
