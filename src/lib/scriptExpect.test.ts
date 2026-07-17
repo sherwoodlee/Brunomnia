@@ -30,7 +30,7 @@ describe('shared script expect adapter', () => {
     check('value').exist;
     check('value').exists;
     check([]).empty;
-    (function () { check(arguments).arguments.Arguments; })('value');
+    (function (..._values: unknown[]) { check(arguments).arguments.Arguments; })('value');
     check({}).extensible;
     check(Object.seal({})).sealed;
     check(Object.freeze({})).frozen;

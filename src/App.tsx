@@ -1076,7 +1076,7 @@ export default function App() {
   };
 
   const executeRequest = async () => {
-    if (!active || !activeEnvironment || isSending) return;
+    if (!active || !activeEnvironment || !selectedEnvironment || isSending) return;
     const collection = workspace.collections.find((candidate) => candidate.id === active.collectionId);
     if (!collection) return;
     const configured = applyCollectionConfiguration(collection, active.request, activeEnvironment);

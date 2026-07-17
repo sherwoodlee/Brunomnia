@@ -11,6 +11,7 @@ import type {
 } from '../types';
 import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
 import { parseRunnerData, runCollection } from '../lib/runner';
+import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
 import { resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
 import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
 import { readDesktopScriptFile } from '../lib/scriptFiles';
@@ -133,6 +134,17 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
   const latestReport = workspace.runnerReports.find((report) => report.collectionId === collection?.id);
 
+  const downloadReport = (reporter: Extract<RunnerReporter, 'json' | 'junit'>) => {
+    if (!latestReport) return;
+    const artifact = createRunnerReportArtifact(latestReport, reporter);
+    const url = URL.createObjectURL(new Blob([artifact.contents], { type: artifact.mimeType }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = artifact.fileName;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   const start = async () => {
     if (!collection || running) return;
     setRunning(true); setResults([]); setError(''); cancelled.current = false;
@@ -195,6 +207,8 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   return (
     <section className="automation-workbench runner-workbench">
       <AutomationHeader eyebrow="Test" title="Collection runner" subtitle="Run requests in order with iteration data, scripts, assertions, delays, and retries.">
+        {latestReport && !running ? <button className="secondary-action" onClick={() => downloadReport('json')} type="button">Export JSON</button> : null}
+        {latestReport && !running ? <button className="secondary-action" onClick={() => downloadReport('junit')} type="button">Export JUnit</button> : null}
         {running ? <button className="danger-action" onClick={() => { cancelled.current = true; }} type="button">Cancel run</button>
           : <button className="primary-action" disabled={!collection} onClick={() => void start()} type="button">Run collection</button>}
       </AutomationHeader>
