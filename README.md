@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the twenty-third runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the twenty-fourth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -15,7 +15,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Standard or custom HTTP methods, explicit encoded path parameters, repeated query keys, row descriptions, multiline values, and local JSON/XML body beautification
 - Local client-code generation for cURL, JavaScript Fetch, Python Requests, Go `net/http`, Java `HttpClient`, and C# `HttpClient`
 - Redirect, timeout, certificate validation, proxy exclusions, and domain-scoped client-certificate controls for native HTTP/SSE
-- Local collections with nested request folders, request/collection/folder documentation, and inherited folder headers, authentication, variables, and scripts
+- Local collections with persistent mixed folder/request drag ordering, cross-collection moves, nested request folders, request/collection/folder documentation, and inherited folder headers, authentication, variables, and scripts
 - Distinct global-base/selected-global and collection-base/selected-collection environments, device-local private global sub-environments, folder/iteration/request-local variables, dynamic aliases, and template tags for UUIDs, time, Faker values, encoding, hashing, JSONPath, cookies, prompts, requests, and chained responses
 - Basic, Digest, OAuth 1.0/2.0, NTLM, AWS IAM v4, Bearer, API key, Hawk, Atlassian ASAP, and Netrc authentication
 - Persistent editable cookie jar with per-request send/store controls

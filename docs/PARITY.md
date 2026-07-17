@@ -9,7 +9,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 | Capability family | Brunomnia status | Current evidence and remaining gap | Insomnia reference |
 | --- | --- | --- | --- |
 | Local projects and persistence | Baseline | Versioned local workspace with atomic native persistence and no account requirement. Multiple projects/vault management and recovery UI remain. | [Storage options](https://developer.konghq.com/insomnia/storage/) |
-| Collections, requests, environments, and history | Baseline | Editable collections/requests, nested folders, collection/folder/request documentation, inherited folder headers/auth/scripts/variables, distinct global-base/selected-global and collection-base/selected-collection editors, device-local private global sub-environments, iteration/request-local variables, delayed/repeating sends, custom methods, explicit path/query rows, descriptions, multiline values, and the last 100 results exist. Drag/drop ordering, richer resource actions, tag-builder UX, and collected-data breadth remain. | [Collections](https://developer.konghq.com/insomnia/collections/), [environments](https://developer.konghq.com/insomnia/environments/), [requests](https://developer.konghq.com/insomnia/requests/) |
+| Collections, requests, environments, and history | Baseline | Editable collections/requests, persistent mixed folder/request drag ordering and cross-collection moves, nested folders, collection/folder/request documentation, inherited folder headers/auth/scripts/variables, distinct global-base/selected-global and collection-base/selected-collection editors, device-local private global sub-environments, iteration/request-local variables, delayed/repeating sends, custom methods, explicit path/query rows, descriptions, multiline values, and the last 100 results exist. Richer resource actions, tag-builder UX, environment-tree ordering, collected-data breadth, and keyboard-equivalent tree reordering remain. | [Collections](https://developer.konghq.com/insomnia/collections/), [environments](https://developer.konghq.com/insomnia/environments/), [requests](https://developer.konghq.com/insomnia/requests/) |
 | REST/HTTP execution | Baseline | Native execution, custom token-valid methods, encoded `{path}` substitution, repeated query keys, response inspection, redirects, timeouts, TLS validation, proxy exclusions, domain-scoped PEM identity, and per-request cookie policy work. Local code generation covers six client targets with named payload/signing bounds. HTTP version controls, compression/client-network details, and browser forbidden-header limits remain. | [Requests](https://developer.konghq.com/insomnia/requests/) |
 | GraphQL | Baseline | Query, templated variables, operation name, native execution, bounded/cached introspection, automatic selection/URL refresh, structural and cached-root validation, documentation browsing, and safe root-field insertion work. Persisted queries, full language-service validation/autocomplete, subscriptions, and richer schema workflows remain. | [GraphQL](https://developer.konghq.com/insomnia/graphql/) |
 | WebSocket | Baseline | Native text and base64/file binary composition, headers, ordered events, and bounded runner samples work. Custom proxy/client identity and richer message collections remain. | [Insomnia documentation](https://developer.konghq.com/index/insomnia/) |
@@ -233,6 +233,16 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Combined request/response attempt evidence pane: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx)
 - Updated guide: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
 - Exact verification record: [`docs/QA_MILESTONE_23.md`](QA_MILESTONE_23.md)
+
+## Milestone 24 acceptance evidence
+
+- Persistent mixed-resource order and move contract: [`src/types.ts`](../src/types.ts) and [`src/lib/resources.ts`](../src/lib/resources.ts)
+- Collection, request, folder, and subtree move coverage: [`src/lib/resources.test.ts`](../src/lib/resources.test.ts)
+- Malformed/stale order normalization: [`src/lib/storage.ts`](../src/lib/storage.ts) and [`src/lib/storage.test.ts`](../src/lib/storage.test.ts)
+- Collision-safe imported-order remapping: [`src/lib/interchange/apply.ts`](../src/lib/interchange/apply.ts)
+- Native sidebar drag targets and drop indicators: [`src/App.tsx`](../src/App.tsx) and [`src/styles.css`](../src/styles.css)
+- Updated guide: [`docs/RESOURCE_HIERARCHY.md`](RESOURCE_HIERARCHY.md)
+- Exact verification record: [`docs/QA_MILESTONE_24.md`](QA_MILESTONE_24.md)
 
 ## Parity declaration rule
 

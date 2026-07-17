@@ -241,6 +241,12 @@ kbd {
 .collection-title span { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .collection-title small { color: var(--faint); font: 10px var(--font-mono); }
 .collection-title:hover { background: rgba(255, 255, 255, .025); color: var(--text); }
+.collection-title[draggable="true"], .request-folder-title[draggable="true"], .request-row[draggable="true"] { cursor: grab; }
+.collection-title[draggable="true"]:active, .request-folder-title[draggable="true"]:active, .request-row[draggable="true"]:active { cursor: grabbing; }
+.collection-title.is-dragging, .request-folder-title.is-dragging, .request-row.is-dragging { opacity: .42; }
+.collection-title.drop-before, .request-folder-title.drop-before, .request-row.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.collection-title.drop-after, .request-folder-title.drop-after, .request-row.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.collection-title.drop-inside, .request-folder-title.drop-inside { background: rgba(255, 101, 52, .1); outline: 1px solid rgba(255, 101, 52, .62); outline-offset: -1px; }
 
 .request-row {
   border-left: 2px solid transparent;

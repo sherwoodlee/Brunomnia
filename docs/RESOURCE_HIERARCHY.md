@@ -6,6 +6,21 @@ Milestone 10 adds nested request resources and inherited environments without an
 
 Use the **+** action on a collection or folder to create a folder. Open a folder's settings to rename or move it and to configure variables, headers, authentication, pre-request scripts, after-response scripts, or documentation. Requests can be assigned from the folder selector above the request tabs.
 
+### Ordering and moving resources
+
+Milestone 24 adds persistent pointer drag/drop to the collection tree:
+
+- drag a collection above or below another collection to reorder it;
+- drag a request or folder to the top or bottom edge of any request/folder row to place it before or after that mixed sibling;
+- drop a request or folder in the center of a folder row to move it inside the folder; and
+- drop a request or folder on a collection title to move it to that collection's root.
+
+Moving a folder across collections carries its complete descendant folder/request subtree and preserves every resource ID. A folder cannot be moved into itself or one of its descendants. Missing destinations and cross-collection ID collisions are rejected without a partial move. Destination collections and folders expand so the result remains visible.
+
+Order is stored in the native workspace and split-YAML project representation. Older workspaces are upgraded by retaining every valid folder/request once, discarding stale or duplicate order IDs, and appending valid resources that were absent from the saved order. Brunomnia compatibility imports remap saved order IDs with the imported resources.
+
+Drag/drop is intentionally disabled while sidebar search is active because hidden siblings make an apparent filtered order ambiguous. Clear the search field before reordering. Keyboard-equivalent tree reordering and arbitrary mixed-order guarantees in third-party compatibility exports remain open parity work.
+
 Configuration is composed for every execution path:
 
 1. the selected global environment is resolved from base to sub-environment;

@@ -154,7 +154,7 @@ Compatibility bounds remain explicit: validation is structural plus cached root-
 | Workspace migration | Complete | Versions 1–9 migrate to v10 normalized folder/environment fields, bounded ancestry, cycle repair, private-descendant propagation, and collision-safe imported references |
 | Documentation and evidence | Complete | [Resource hierarchy guide](RESOURCE_HIERARCHY.md) and [Milestone 10 verification](QA_MILESTONE_10.md) |
 
-Compatibility bounds remain explicit: drag/drop ordering, bulk folder actions, rendered Markdown, environment-tree reordering, richer collected-data UI, and a full template-tag builder remain open. Private values are omitted rather than encrypted by private-environment storage itself; vault references remain the encrypted-secret path. Insomnia compatibility export cannot represent every Brunomnia hierarchy variant or unsupported protocol without the warnings already recorded by the interchange layer.
+Compatibility bounds remain explicit: bulk folder actions, rendered Markdown, environment-tree reordering, richer collected-data UI, keyboard-equivalent tree reordering, and a full template-tag builder remain open. Private values are omitted rather than encrypted by private-environment storage itself; vault references remain the encrypted-secret path. Insomnia compatibility export cannot represent every Brunomnia hierarchy variant or unsupported protocol without the warnings already recorded by the interchange layer.
 
 ## Milestone 11 — request authoring and local client code (complete baseline)
 
@@ -343,7 +343,22 @@ Compatibility bounds remain explicit: snapshots are previews, not full request/r
 
 Compatibility bounds remain explicit: configured headers do not include every transport-added cookie or advanced-auth signing header, and body sizes describe configured payload content rather than exact multipart wire framing. Arbitrary custom secret names cannot be inferred; request URLs, non-redacted headers, field names, and filenames can still be sensitive.
 
-## Milestone 24 — remaining parity closure and release hardening
+## Milestone 24 — persistent collection-resource ordering (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Mixed sibling order | Complete baseline | Collections retain one sanitized order list spanning folders and requests, while old workspaces fall back to their established array order |
+| Native drag targets | Complete baseline | Collections reorder around collection titles; requests and folders reorder around resource edges; a folder center reparents inside it; a collection title moves a resource to its root |
+| Cross-collection moves | Complete baseline | Requests move directly and folders move with their complete descendant folder/request subtree without changing resource IDs |
+| Hierarchy safety | Complete | Same-collection folder cycles, missing parents/targets, and cross-collection ID collisions are rejected without mutating the workspace |
+| Persistence and imports | Complete | Workspace migration removes unknown/duplicate order IDs and appends valid omissions; merged imports remap order IDs with their resources |
+| Search confinement | Complete | Reordering is disabled while the collection tree is filtered so a partial view cannot silently redefine hidden sibling order |
+| Executable coverage | Complete | Resource tests cover mixed rendering, sibling ordering, reparenting, subtree transfer, cycle rejection, and collection ordering; migration tests cover malformed order metadata |
+| Documentation and evidence | Complete | Updated [resource hierarchy guide](RESOURCE_HIERARCHY.md) and [Milestone 24 verification](QA_MILESTONE_24.md) |
+
+Compatibility bounds remain explicit: the sidebar currently depends on native pointer drag/drop. Keyboard-equivalent reordering, multi-select/bulk resource actions, environment-tree ordering, and compatibility-format guarantees for arbitrary mixed sibling order remain open.
+
+## Milestone 25 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode, RefObject } from 'react';
+import type { CSSProperties, DragEvent as ReactDragEvent, ReactNode, RefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from './data/seed';
 import { sendRequest, type SendRequestContext } from './lib/http';
@@ -20,7 +20,8 @@ import { applyPluginTheme, createPluginRuntime, describePlugin, type PluginHostC
 import { plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
 import { fetchGraphqlSchema } from './lib/graphql';
 import { shortcutMatches } from './lib/preferences';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, moveWorkspaceResource, orderedCollectionChildren, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
+import type { WorkspaceResourceMove } from './lib/resources';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -230,7 +231,12 @@ type CollectionSidebarProps = {
   onEditCollection: (collectionId: string) => void;
   onEditFolder: (collectionId: string, folderId: string) => void;
   onToggleFolder: (collectionId: string, folderId: string) => void;
+  onMoveResource: (move: WorkspaceResourceMove) => void;
 };
+
+type SidebarDragSource =
+  | { kind: 'collection'; collectionId: string }
+  | { kind: 'folder' | 'request'; collectionId: string; resourceId: string };
 
 function CollectionSidebar({
   workspace,
@@ -245,11 +251,105 @@ function CollectionSidebar({
   onEditCollection,
   onEditFolder,
   onToggleFolder,
+  onMoveResource,
 }: CollectionSidebarProps) {
+  const dragSourceRef = useRef<SidebarDragSource | undefined>(undefined);
+  const [dragSource, setDragSource] = useState<SidebarDragSource>();
+  const [dropIndicator, setDropIndicator] = useState('');
   const normalizedSearch = search.trim().toLowerCase();
   const history = workspace.history.filter((entry) =>
     `${entry.name} ${entry.url} ${entry.method}`.toLowerCase().includes(normalizedSearch),
   );
+
+  const clearDrag = () => {
+    dragSourceRef.current = undefined;
+    setDragSource(undefined);
+    setDropIndicator('');
+  };
+  const beginDrag = (event: ReactDragEvent<HTMLElement>, source: SidebarDragSource) => {
+    if (normalizedSearch) {
+      event.preventDefault();
+      return;
+    }
+    dragSourceRef.current = source;
+    setDragSource(source);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', 'brunomnia-resource');
+  };
+  const commitDrop = (event: ReactDragEvent<HTMLElement>, move: WorkspaceResourceMove, indicator: string, commit: boolean) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'move';
+    setDropIndicator(indicator);
+    if (commit) {
+      onMoveResource(move);
+      clearDrag();
+    }
+  };
+  const dropOnCollection = (event: ReactDragEvent<HTMLElement>, targetCollectionId: string, commit: boolean) => {
+    const source = dragSourceRef.current;
+    if (!source || normalizedSearch) return;
+    if (source.kind === 'collection') {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const placement = event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
+      commitDrop(event, { kind: 'collection', collectionId: source.collectionId, targetCollectionId, placement }, `collection:${targetCollectionId}:${placement}`, commit);
+      return;
+    }
+    commitDrop(event, {
+      kind: source.kind,
+      collectionId: source.collectionId,
+      resourceId: source.resourceId,
+      targetCollectionId,
+      targetParentId: '',
+    }, `collection:${targetCollectionId}:inside`, commit);
+  };
+  const dropOnRequest = (event: ReactDragEvent<HTMLElement>, targetCollectionId: string, request: ApiRequest, commit: boolean) => {
+    const source = dragSourceRef.current;
+    if (!source || source.kind === 'collection' || normalizedSearch) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const placement = event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
+    commitDrop(event, {
+      kind: source.kind,
+      collectionId: source.collectionId,
+      resourceId: source.resourceId,
+      targetCollectionId,
+      targetParentId: request.folderId ?? '',
+      targetResourceId: request.id,
+      placement,
+    }, `resource:${request.id}:${placement}`, commit);
+  };
+  const dropOnFolder = (event: ReactDragEvent<HTMLElement>, targetCollectionId: string, folder: RequestFolder, commit: boolean) => {
+    const source = dragSourceRef.current;
+    if (!source || source.kind === 'collection' || normalizedSearch) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const position = (event.clientY - bounds.top) / Math.max(bounds.height, 1);
+    if (position > 0.28 && position < 0.72) {
+      commitDrop(event, {
+        kind: source.kind,
+        collectionId: source.collectionId,
+        resourceId: source.resourceId,
+        targetCollectionId,
+        targetParentId: folder.id,
+      }, `resource:${folder.id}:inside`, commit);
+      return;
+    }
+    const placement = position <= 0.28 ? 'before' : 'after';
+    commitDrop(event, {
+      kind: source.kind,
+      collectionId: source.collectionId,
+      resourceId: source.resourceId,
+      targetCollectionId,
+      targetParentId: folder.parentId,
+      targetResourceId: folder.id,
+      placement,
+    }, `resource:${folder.id}:${placement}`, commit);
+  };
+  const indicatorClass = (scope: 'collection' | 'resource', id: string) => {
+    const prefix = `${scope}:${id}:`;
+    if (!dropIndicator.startsWith(prefix)) return '';
+    return ` drop-${dropIndicator.slice(prefix.length)}`;
+  };
+  const sourceClass = (source: SidebarDragSource) => dragSource && JSON.stringify(dragSource) === JSON.stringify(source) ? ' is-dragging' : '';
 
   return (
     <aside className="collection-sidebar">
@@ -280,39 +380,81 @@ function CollectionSidebar({
           const visibleRequests = collection.requests.filter((request) =>
             `${request.name} ${request.method} ${request.protocol} ${request.url}`.toLowerCase().includes(normalizedSearch),
           );
+          const visibleRequestIds = new Set(visibleRequests.map((request) => request.id));
           const folders = collection.folders ?? [];
+          const folderById = new Map(folders.map((folder) => [folder.id, folder]));
+          const requestById = new Map(collection.requests.map((request) => [request.id, request]));
           const folderMatches = (folder: RequestFolder): boolean => folder.name.toLowerCase().includes(normalizedSearch)
             || visibleRequests.some((request) => request.folderId === folder.id)
             || folders.some((candidate) => candidate.parentId === folder.id && folderMatches(candidate));
           if (normalizedSearch && visibleRequests.length === 0 && !collection.name.toLowerCase().includes(normalizedSearch) && !folders.some(folderMatches)) {
             return null;
           }
-          const renderRequest = (request: ApiRequest, depth: number) => <button
-            className={`request-row${workspace.activeRequestId === request.id ? ' selected' : ''}`}
+          function renderRequest(request: ApiRequest, depth: number): ReactNode {
+            const source: SidebarDragSource = { kind: 'request', collectionId: collection.id, resourceId: request.id };
+            return <button
+            aria-grabbed={dragSource?.kind === 'request' && dragSource.resourceId === request.id}
+            className={`request-row${workspace.activeRequestId === request.id ? ' selected' : ''}${sourceClass(source)}${indicatorClass('resource', request.id)}`}
+            draggable={!normalizedSearch}
             key={request.id}
+            onDragEnd={clearDrag}
+            onDragOver={(event) => dropOnRequest(event, collection.id, request, false)}
+            onDragStart={(event) => beginDrag(event, source)}
+            onDrop={(event) => dropOnRequest(event, collection.id, request, true)}
             onClick={() => onSelectRequest(request.id)}
             style={{ '--resource-depth': depth } as CSSProperties}
+            title={normalizedSearch ? 'Clear search to reorder' : 'Drag to reorder or move'}
             type="button"
           ><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span>{request.name}</span></button>;
-          const renderFolder = (folder: RequestFolder, depth: number): ReactNode => {
+          }
+          function renderResources(parentId: string, depth: number): ReactNode[] {
+            return orderedCollectionChildren(collection, parentId).flatMap((resource): ReactNode[] => {
+              if (resource.kind === 'folder') {
+                const folder = folderById.get(resource.id);
+                return folder ? [renderFolder(folder, depth)] : [];
+              }
+              const request = requestById.get(resource.id);
+              return request && visibleRequestIds.has(request.id) ? [renderRequest(request, depth)] : [];
+            });
+          }
+          function renderFolder(folder: RequestFolder, depth: number): ReactNode {
             if (normalizedSearch && !folderMatches(folder)) return null;
-            const children = folders.filter((candidate) => candidate.parentId === folder.id);
-            const requests = visibleRequests.filter((request) => request.folderId === folder.id);
+            const source: SidebarDragSource = { kind: 'folder', collectionId: collection.id, resourceId: folder.id };
             return <div className="request-folder" key={folder.id}>
-              <div className="request-folder-title" style={{ '--resource-depth': depth } as CSSProperties}>
+              <div
+                aria-grabbed={dragSource?.kind === 'folder' && dragSource.resourceId === folder.id}
+                className={`request-folder-title${sourceClass(source)}${indicatorClass('resource', folder.id)}`}
+                draggable={!normalizedSearch}
+                onDragEnd={clearDrag}
+                onDragOver={(event) => dropOnFolder(event, collection.id, folder, false)}
+                onDragStart={(event) => beginDrag(event, source)}
+                onDrop={(event) => dropOnFolder(event, collection.id, folder, true)}
+                style={{ '--resource-depth': depth } as CSSProperties}
+                title={normalizedSearch ? 'Clear search to reorder' : 'Drag edges to reorder; drop in the center to move inside'}
+              >
                 <button aria-label={`${folder.expanded ? 'Collapse' : 'Expand'} ${folder.name}`} onClick={() => onToggleFolder(collection.id, folder.id)} type="button"><Icon name={folder.expanded ? 'chevron-down' : 'chevron-right'} size={12} /></button>
                 <button onClick={() => onEditFolder(collection.id, folder.id)} type="button"><Icon name="folder" size={14} /><span>{folder.name}</span></button>
                 <small>{collection.requests.filter((request) => folderAncestors(collection, request.folderId).some((ancestor) => ancestor.id === folder.id)).length}</small>
                 <button aria-label={`Add subfolder to ${folder.name}`} onClick={() => onAddFolder(collection.id, folder.id)} type="button"><Icon name="plus" size={12} /></button>
                 <button aria-label={`Configure ${folder.name}`} onClick={() => onEditFolder(collection.id, folder.id)} type="button"><Icon name="settings" size={12} /></button>
               </div>
-              {folder.expanded || normalizedSearch ? <div>{children.map((child) => renderFolder(child, depth + 1))}{requests.map((request) => renderRequest(request, depth + 1))}</div> : null}
+              {folder.expanded || normalizedSearch ? <div>{renderResources(folder.id, depth + 1)}</div> : null}
             </div>;
-          };
+          }
+          const collectionSource: SidebarDragSource = { kind: 'collection', collectionId: collection.id };
           return (
             <div className="collection-group" key={collection.id}>
-              <div className="collection-title"><button onClick={() => onToggleCollection(collection.id)} type="button"><Icon name={collection.expanded ? 'chevron-down' : 'chevron-right'} size={14} /><Icon name="archive" size={16} /><span>{collection.name}</span><small>{collection.requests.length}</small></button><button aria-label={`Add folder to ${collection.name}`} onClick={() => onAddFolder(collection.id, '')} type="button"><Icon name="plus" size={13} /></button><button aria-label={`Configure ${collection.name}`} onClick={() => onEditCollection(collection.id)} type="button"><Icon name="settings" size={13} /></button></div>
-              {collection.expanded ? <div>{folders.filter((folder) => !folder.parentId).map((folder) => renderFolder(folder, 0))}{visibleRequests.filter((request) => !request.folderId).map((request) => renderRequest(request, 0))}</div> : null}
+              <div
+                aria-grabbed={dragSource?.kind === 'collection' && dragSource.collectionId === collection.id}
+                className={`collection-title${sourceClass(collectionSource)}${indicatorClass('collection', collection.id)}`}
+                draggable={!normalizedSearch}
+                onDragEnd={clearDrag}
+                onDragOver={(event) => dropOnCollection(event, collection.id, false)}
+                onDragStart={(event) => beginDrag(event, collectionSource)}
+                onDrop={(event) => dropOnCollection(event, collection.id, true)}
+                title={normalizedSearch ? 'Clear search to reorder' : 'Drag to reorder collections; drop a resource here to move it to the root'}
+              ><button onClick={() => onToggleCollection(collection.id)} type="button"><Icon name={collection.expanded ? 'chevron-down' : 'chevron-right'} size={14} /><Icon name="archive" size={16} /><span>{collection.name}</span><small>{collection.requests.length}</small></button><button aria-label={`Add folder to ${collection.name}`} onClick={() => onAddFolder(collection.id, '')} type="button"><Icon name="plus" size={13} /></button><button aria-label={`Configure ${collection.name}`} onClick={() => onEditCollection(collection.id)} type="button"><Icon name="settings" size={13} /></button></div>
+              {collection.expanded ? <div>{renderResources('', 0)}</div> : null}
             </div>
           );
         }) : (
@@ -895,13 +1037,13 @@ export default function App() {
       const request = createBlankRequest(id);
       request.transport.timeoutMs = current.preferences.requestTimeoutMs;
       if (current.collections.length === 0) {
-        return { ...current, activeRequestId: id, collections: [{ id: uid('collection'), name: 'Requests', expanded: true, requests: [request] }] };
+        return { ...current, activeRequestId: id, collections: [{ id: uid('collection'), name: 'Requests', expanded: true, requests: [request], resourceOrder: [id] }] };
       }
       return {
         ...current,
         activeRequestId: id,
         collections: current.collections.map((collection, index) => index === 0
-          ? { ...collection, expanded: true, requests: [...collection.requests, request] }
+          ? { ...collection, expanded: true, requests: [...collection.requests, request], resourceOrder: [...(collection.resourceOrder ?? [...(collection.folders ?? []).map((folder) => folder.id), ...collection.requests.map((candidate) => candidate.id)]), id] }
           : collection),
       };
     });
@@ -912,13 +1054,13 @@ export default function App() {
   const addCollection = useCallback(() => {
     setWorkspace((current) => ({
       ...current,
-      collections: [...current.collections, { id: uid('collection'), name: `Collection ${current.collections.length + 1}`, expanded: true, requests: [], folders: [], environment: [], subEnvironments: [], activeSubEnvironmentId: '', documentation: '' }],
+      collections: [...current.collections, { id: uid('collection'), name: `Collection ${current.collections.length + 1}`, expanded: true, requests: [], folders: [], resourceOrder: [], environment: [], subEnvironments: [], activeSubEnvironmentId: '', documentation: '' }],
     }));
   }, []);
 
   const addFolder = (collectionId: string, parentId: string) => {
     const folderId = uid('folder');
-    setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === collectionId ? { ...collection, expanded: true, folders: [...(collection.folders ?? []), { id: folderId, name: 'Untitled Folder', parentId, expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }] } : collection) }));
+    setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === collectionId ? { ...collection, expanded: true, folders: [...(collection.folders ?? []), { id: folderId, name: 'Untitled Folder', parentId, expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }], resourceOrder: [...(collection.resourceOrder ?? [...(collection.folders ?? []).map((folder) => folder.id), ...collection.requests.map((request) => request.id)]), folderId] } : collection) }));
     setFolderEditor({ collectionId, folderId });
   };
 
@@ -926,13 +1068,15 @@ export default function App() {
 
   const updateCollection = (updated: Workspace['collections'][number]) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === updated.id ? updated : collection) }));
 
+  const moveResource = useCallback((move: WorkspaceResourceMove) => setWorkspace((current) => moveWorkspaceResource(current, move)), []);
+
   const deleteFolder = (collectionId: string, folderId: string) => {
     if (workspace.preferences.confirmDestructive && !window.confirm('Delete this folder? Descendant requests and folders will move to its parent.')) return;
     setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => {
       if (collection.id !== collectionId) return collection;
       const folder = (collection.folders ?? []).find((candidate) => candidate.id === folderId);
       if (!folder) return collection;
-      return { ...collection, folders: (collection.folders ?? []).filter((candidate) => candidate.id !== folderId).map((candidate) => candidate.parentId === folderId ? { ...candidate, parentId: folder.parentId } : candidate), requests: collection.requests.map((request) => request.folderId === folderId ? { ...request, folderId: folder.parentId } : request) };
+      return { ...collection, folders: (collection.folders ?? []).filter((candidate) => candidate.id !== folderId).map((candidate) => candidate.parentId === folderId ? { ...candidate, parentId: folder.parentId } : candidate), requests: collection.requests.map((request) => request.folderId === folderId ? { ...request, folderId: folder.parentId } : request), resourceOrder: (collection.resourceOrder ?? []).filter((id) => id !== folderId) };
     }) }));
     setFolderEditor(undefined);
   };
@@ -948,7 +1092,10 @@ export default function App() {
         const index = collection.requests.findIndex((request) => request.id === active.request.id);
         const requests = [...collection.requests];
         requests.splice(index + 1, 0, copy);
-        return { ...collection, requests };
+        const resourceOrder = [...(collection.resourceOrder ?? [...(collection.folders ?? []).map((folder) => folder.id), ...collection.requests.map((request) => request.id)])];
+        const orderIndex = resourceOrder.indexOf(active.request.id);
+        resourceOrder.splice(orderIndex < 0 ? resourceOrder.length : orderIndex + 1, 0, copy.id);
+        return { ...collection, requests, resourceOrder };
       }),
     }));
   };
@@ -963,14 +1110,14 @@ export default function App() {
         const index = collection.requests.findIndex((request) => request.id === active.request.id);
         const requests = collection.requests.filter((request) => request.id !== active.request.id);
         nextActive = requests[Math.min(index, requests.length - 1)]?.id ?? '';
-        return { ...collection, requests };
+        return { ...collection, requests, resourceOrder: (collection.resourceOrder ?? []).filter((id) => id !== active.request.id) };
       });
       if (!nextActive) nextActive = collections.flatMap((collection) => collection.requests)[0]?.id ?? '';
       if (!nextActive) {
         const request = createBlankRequest(uid('request'));
         request.transport.timeoutMs = current.preferences.requestTimeoutMs;
-        if (!collections.length) collections = [{ id: uid('collection'), name: 'Requests', expanded: true, requests: [request] }];
-        else collections = collections.map((collection, index) => index === 0 ? { ...collection, requests: [request] } : collection);
+        if (!collections.length) collections = [{ id: uid('collection'), name: 'Requests', expanded: true, requests: [request], resourceOrder: [request.id] }];
+        else collections = collections.map((collection, index) => index === 0 ? { ...collection, requests: [request], resourceOrder: [...(collection.resourceOrder ?? (collection.folders ?? []).map((folder) => folder.id)), request.id] } : collection);
         nextActive = request.id;
       }
       return { ...current, activeRequestId: nextActive, collections };
@@ -1443,6 +1590,7 @@ export default function App() {
           onAddFolder={addFolder}
           onEditCollection={setCollectionEditor}
           onEditFolder={(collectionId, folderId) => setFolderEditor({ collectionId, folderId })}
+          onMoveResource={moveResource}
           onAddRequest={addRequest}
           onSearch={setSearch}
           onSelectRequest={(id) => setWorkspace((current) => ({ ...current, activeRequestId: id }))}
