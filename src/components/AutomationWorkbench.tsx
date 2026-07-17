@@ -18,13 +18,14 @@ import { createPluginRuntime, type PluginHostCallbacks, type PluginRunState } fr
 import { startMockServer, stopMockServer, type RunningMock } from '../lib/mock';
 import { runStreamSample } from '../lib/protocol';
 import { resolveAuthorizedExternalSecret } from '../lib/security';
+import { generateMockWithAi } from '../lib/ai';
 import { Icon } from './Icon';
 import { CodeEditor } from './ProtocolEditors';
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
 type AutomationWorkbenchProps = {
-  section: Exclude<WorkbenchSection, 'requests' | 'git' | 'plugins' | 'security'>;
+  section: Exclude<WorkbenchSection, 'requests' | 'git' | 'plugins' | 'security' | 'integrations'>;
   workspace: Workspace;
   activeEnvironment: Environment;
   vault: Record<string, string>;
@@ -196,10 +197,14 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   );
 }
 
-function MockWorkbench({ workspace, onChangeWorkspace, runningMocks, onStartMock, onStopMock }: AutomationWorkbenchProps) {
+function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, runningMocks, onStartMock, onStopMock }: AutomationWorkbenchProps) {
   const [activeId, setActiveId] = useState(workspace.mockServers[0]?.id ?? '');
   const [activeRouteId, setActiveRouteId] = useState(workspace.mockServers[0]?.routes[0]?.id ?? '');
   const [error, setError] = useState('');
+  const [showAi, setShowAi] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiPort, setAiPort] = useState(4020);
+  const [generating, setGenerating] = useState(false);
   const server = workspace.mockServers.find((candidate) => candidate.id === activeId) ?? workspace.mockServers[0];
   const route = server?.routes.find((candidate) => candidate.id === activeRouteId) ?? server?.routes[0];
 
@@ -224,6 +229,16 @@ function MockWorkbench({ workspace, onChangeWorkspace, runningMocks, onStartMock
       }
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
   };
+  const generateAiMock = async () => {
+    if (generating) return;
+    setGenerating(true); setError('');
+    try {
+      const generated = await generateMockWithAi(workspace.ai, aiPrompt, aiPort, activeEnvironment, { vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
+      onChangeWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, generated] }));
+      setActiveId(generated.id); setActiveRouteId(generated.routes[0]?.id ?? ''); setShowAi(false); setAiPrompt('');
+    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    finally { setGenerating(false); }
+  };
 
   if (!server) return <AutomationEmpty title="No mock servers" action="Create local mock" onAction={() => {
     const created: MockServer = { id: uid('mock'), name: 'Local mock', host: '127.0.0.1', port: 4010, routes: [] };
@@ -235,9 +250,12 @@ function MockWorkbench({ workspace, onChangeWorkspace, runningMocks, onStartMock
     <section className="automation-workbench mock-workbench">
       <AutomationHeader eyebrow="Mock" title="Local mock servers" subtitle="Serve deterministic scenarios from this device with no account or hosted dependency.">
         <select aria-label="Mock server" value={server.id} onChange={(event) => { setActiveId(event.target.value); const next = workspace.mockServers.find((candidate) => candidate.id === event.target.value); setActiveRouteId(next?.routes[0]?.id ?? ''); }}>{workspace.mockServers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+        <button className="secondary-action" disabled={!workspace.ai.enabled || !workspace.ai.mockGeneration} onClick={() => setShowAi((current) => !current)} type="button">AI generate</button>
         <button className={activeRun ? 'danger-action' : 'primary-action'} onClick={() => void toggleServer()} type="button">{activeRun ? 'Stop server' : 'Start server'}</button>
       </AutomationHeader>
-      <div className="mock-grid">
+      <div className="mock-content">
+        {showAi ? <div className="ai-mock-generator"><label>Prompt, OpenAPI, or example response<textarea value={aiPrompt} onChange={(event) => setAiPrompt(event.target.value)} placeholder="Create an orders API with list, create, and status endpoints…" /></label><label>Local port<input min="1024" max="65535" type="number" value={aiPort} onChange={(event) => setAiPort(Number(event.target.value))} /></label><button disabled={!aiPrompt.trim() || generating} onClick={() => void generateAiMock()} type="button">{generating ? 'Generating…' : 'Create editable local mock'}</button><p>Only this input is sent to your configured model. Generated routes are validated locally and remain editable.</p></div> : null}
+        <div className="mock-grid">
         <aside className="mock-routes">
           <header><strong>Routes</strong><button onClick={() => { const created: MockRoute = { id: uid('route'), name: 'New scenario', enabled: true, method: 'GET', path: '/resource', status: 200, headers: [], body: '{}', delayMs: 0 }; updateServer({ routes: [...server.routes, created] }); setActiveRouteId(created.id); }} type="button"><Icon name="plus" size={14} /> New route</button></header>
           <div>{server.routes.map((item) => <button className={route?.id === item.id ? 'active' : ''} key={item.id} onClick={() => setActiveRouteId(item.id)} type="button"><span className={`method method-${item.method.toLowerCase()}`}>{item.method}</span><span><strong>{item.path}</strong><small>{item.status} · {item.name}</small></span><i className={item.enabled ? 'enabled' : ''} /></button>)}</div>
@@ -253,6 +271,7 @@ function MockWorkbench({ workspace, onChangeWorkspace, runningMocks, onStartMock
           <CodeEditor ariaLabel="Mock response body" value={route.body} onChange={(body) => updateRoute({ body })} />
         </div> : <AutomationEmpty title="No routes" action="Add route" onAction={() => { const created: MockRoute = { id: uid('route'), name: 'New scenario', enabled: true, method: 'GET', path: '/resource', status: 200, headers: [], body: '{}', delayMs: 0 }; updateServer({ routes: [created] }); setActiveRouteId(created.id); }} />}
         <aside className="mock-inspector"><div className={`mock-status-card${activeRun ? ' running' : ''}`}><i /><small>{activeRun ? 'Running locally' : 'Server stopped'}</small><strong>{activeRun?.baseUrl ?? `http://${server.host}:${server.port}`}</strong><span>{server.routes.filter((item) => item.enabled).length} enabled routes</span></div><h3>Dynamic tokens</h3><code>{'{{$timestamp}}'}</code><code>{'{{$randomUUID}}'}</code><code>{'{{request.path.id}}'}</code><p>Path tokens resolve from routes such as <code>/orders/{'{id}'}</code>.</p></aside>
+        </div>
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}
     </section>

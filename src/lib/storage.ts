@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
-import type { AuditEvent, CollaborationConfig, GovernanceMember, GovernancePolicy, GovernanceRole, PluginPermission, PluginRecord, Workspace } from '../types';
+import type { AiSettings, AuditEvent, CollaborationConfig, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, Workspace } from '../types';
 
 const storageKey = 'brunomnia.workspace.v1';
 
@@ -16,6 +16,12 @@ const knownPluginPermissions: PluginPermission[] = ['request:read', 'request:wri
 const governanceRoles: GovernanceRole[] = ['owner', 'admin', 'editor', 'viewer'];
 const storageModes: GovernancePolicy['allowedStorage'] = ['local', 'folder', 'git', 'encrypted-file'];
 const record = (value: unknown) => value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
+const stringValue = (value: unknown, fallback = '') => typeof value === 'string' ? value : fallback;
+const normalizeRows = (value: unknown, prefix: string): KeyValue[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
+  const row = record(item);
+  if (!row) return [];
+  return [{ id: stringValue(row.id, `${prefix}-${index}`), name: stringValue(row.name), value: stringValue(row.value), enabled: row.enabled !== false }];
+}).slice(0, 1_000);
 
 const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
   if (!item || typeof item !== 'object') return [];
@@ -93,6 +99,89 @@ const normalizeCollaboration = (value: unknown, defaults: CollaborationConfig): 
   };
 };
 
+const normalizeMcpResources = (value: unknown): McpResource[] => !Array.isArray(value) ? [] : value.flatMap((item): McpResource[] => {
+  const resource = record(item);
+  const uri = stringValue(resource?.uri);
+  if (!resource || !uri) return [];
+  return [{ uri, name: stringValue(resource.name, uri), description: stringValue(resource.description), mimeType: stringValue(resource.mimeType) }];
+}).slice(0, 5_000);
+
+const normalizeMcpClients = (value: unknown): McpClient[] => !Array.isArray(value) ? [] : value.flatMap((item, index): McpClient[] => {
+  const client = record(item);
+  if (!client) return [];
+  const authType = client.authType === 'bearer' || client.authType === 'basic' ? client.authType : 'none';
+  const tools = !Array.isArray(client.tools) ? [] : client.tools.flatMap((item): McpTool[] => {
+    const tool = record(item);
+    const name = stringValue(tool?.name);
+    if (!tool || !name) return [];
+    return [{ name, description: stringValue(tool.description), inputSchema: (tool.inputSchema ?? {}) as JsonValue }];
+  }).slice(0, 5_000);
+  const prompts = !Array.isArray(client.prompts) ? [] : client.prompts.flatMap((item): McpPrompt[] => {
+    const prompt = record(item);
+    const name = stringValue(prompt?.name);
+    if (!prompt || !name) return [];
+    const args = Array.isArray(prompt.arguments) ? prompt.arguments.flatMap((item): McpPrompt['arguments'] => {
+      const argument = record(item);
+      const argumentName = stringValue(argument?.name);
+      return argument && argumentName ? [{ name: argumentName, description: stringValue(argument.description), required: argument.required === true }] : [];
+    }).slice(0, 500) : [];
+    return [{ name, description: stringValue(prompt.description), arguments: args }];
+  }).slice(0, 5_000);
+  return [{
+    id: stringValue(client.id, `migrated-mcp-${index}`),
+    name: stringValue(client.name, `MCP Client ${index + 1}`),
+    enabled: client.enabled === true,
+    transport: client.transport === 'stdio' ? 'stdio' : 'http',
+    url: stringValue(client.url),
+    command: stringValue(client.command),
+    args: Array.isArray(client.args) ? client.args.filter((arg): arg is string => typeof arg === 'string').slice(0, 100) : [],
+    headers: normalizeRows(client.headers, `mcp-${index}-header`),
+    authType,
+    token: stringValue(client.token),
+    username: stringValue(client.username),
+    password: stringValue(client.password),
+    roots: Array.isArray(client.roots) ? client.roots.filter((root): root is string => typeof root === 'string').slice(0, 100) : [],
+    tools,
+    prompts,
+    resources: normalizeMcpResources(client.resources),
+    resourceTemplates: normalizeMcpResources(client.resourceTemplates),
+    lastSyncedAt: typeof client.lastSyncedAt === 'string' ? client.lastSyncedAt : undefined,
+  }];
+}).slice(0, 100);
+
+const normalizeAi = (value: unknown, defaults: AiSettings): AiSettings => {
+  const source = record(value);
+  const provider = source?.provider === 'openai' || source?.provider === 'anthropic' || source?.provider === 'gemini' || source?.provider === 'openai-compatible'
+    ? source.provider
+    : defaults.provider;
+  return {
+    enabled: source?.enabled === true,
+    provider,
+    baseUrl: stringValue(source?.baseUrl, defaults.baseUrl),
+    model: stringValue(source?.model),
+    apiKey: stringValue(source?.apiKey),
+    mockGeneration: source?.mockGeneration === true,
+    commitSuggestions: source?.commitSuggestions === true,
+  };
+};
+
+const normalizeKonnect = (value: unknown, defaults: KonnectConfig): KonnectConfig => {
+  const source = record(value);
+  const controlPlanes = !Array.isArray(source?.controlPlanes) ? [] : source.controlPlanes.flatMap((item): KonnectConfig['controlPlanes'] => {
+    const plane = record(item);
+    const id = stringValue(plane?.id);
+    return plane && id ? [{ id, name: stringValue(plane.name, id), description: stringValue(plane.description) }] : [];
+  }).slice(0, 1_000);
+  return {
+    enabled: source?.enabled === true,
+    baseUrl: stringValue(source?.baseUrl, defaults.baseUrl),
+    token: stringValue(source?.token),
+    controlPlaneId: stringValue(source?.controlPlaneId),
+    controlPlanes,
+    lastSyncedAt: typeof source?.lastSyncedAt === 'string' ? source.lastSyncedAt : undefined,
+  };
+};
+
 export const migrateWorkspace = (value: unknown): Workspace => {
   if (!isWorkspaceEnvelope(value)) throw new Error('This is not a Brunomnia workspace export.');
   const seed = cloneSeedWorkspace();
@@ -122,7 +211,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 7,
+    version: 8,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
@@ -140,6 +229,9 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     activePluginTheme: workspace.activePluginTheme ?? '',
     collaboration: normalizeCollaboration(workspace.collaboration, seed.collaboration),
     governance,
+    mcpClients: normalizeMcpClients(workspace.mcpClients),
+    ai: normalizeAi(workspace.ai, seed.ai),
+    konnect: normalizeKonnect(workspace.konnect, seed.konnect),
     collections,
   } as Workspace;
 };
@@ -151,6 +243,9 @@ export const secureImportedWorkspace = (value: unknown): Workspace => {
     plugins: workspace.plugins.map((plugin) => ({ ...plugin, enabled: false, grantedPermissions: [] })),
     pluginData: {},
     activePluginTheme: '',
+    mcpClients: workspace.mcpClients.map((client) => ({ ...client, enabled: false, token: '', password: '' })),
+    ai: { ...workspace.ai, enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false },
+    konnect: { ...workspace.konnect, enabled: false, token: '' },
   };
 };
 

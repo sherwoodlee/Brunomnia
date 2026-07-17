@@ -1,6 +1,6 @@
 import { isTauri } from '@tauri-apps/api/core';
 import { useEffect, useMemo, useState } from 'react';
-import type { Workspace } from '../types';
+import type { Environment, Workspace } from '../types';
 import {
   abortGitMerge,
   checkoutGitBranch,
@@ -25,15 +25,19 @@ import {
 } from '../lib/project';
 import { Icon } from './Icon';
 import { plaintextSecretCandidates } from '../lib/security';
+import { suggestCommitGroups, type AiCommitGroup } from '../lib/ai';
+import type { SendRequestContext } from '../lib/http';
 
 type ProjectWorkbenchProps = {
   workspace: Workspace;
+  environment: Environment | undefined;
+  requestContext: SendRequestContext;
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
 };
 
 const emptyStatus: GitStatus = { branch: '', upstream: '', ahead: 0, behind: 0, files: [], branches: [], remotes: [], mergeInProgress: false, rebaseInProgress: false };
 
-export function ProjectWorkbench({ workspace, onChangeWorkspace }: ProjectWorkbenchProps) {
+export function ProjectWorkbench({ workspace, environment, requestContext, onChangeWorkspace }: ProjectWorkbenchProps) {
   const [path, setPath] = useState(workspace.project.path);
   const [remoteUrl, setRemoteUrl] = useState(workspace.project.remoteUrl);
   const [status, setStatus] = useState<GitStatus>(emptyStatus);
@@ -41,6 +45,7 @@ export function ProjectWorkbench({ workspace, onChangeWorkspace }: ProjectWorkbe
   const [diff, setDiff] = useState('');
   const [showStagedDiff, setShowStagedDiff] = useState(false);
   const [commitMessage, setCommitMessage] = useState('');
+  const [aiGroups, setAiGroups] = useState<AiCommitGroup[]>([]);
   const [branchName, setBranchName] = useState('');
   const [mergeBranch, setMergeBranch] = useState('');
   const [conflicts, setConflicts] = useState<GitConflict[]>([]);
@@ -148,6 +153,15 @@ export function ProjectWorkbench({ workspace, onChangeWorkspace }: ProjectWorkbe
     setMessage(`Cloned ${remoteUrl}.`);
   });
 
+  const suggestCommits = () => run('Asking AI for commit groups', async () => {
+    requireShareableSafety();
+    const [working, stagedDiff] = await Promise.all([getGitDiff(path, false), getGitDiff(path, true)]);
+    const groups = await suggestCommitGroups(workspace.ai, `UNSTAGED\n${working}\n\nSTAGED\n${stagedDiff}`, status.files.map((file) => file.path), environment, requestContext);
+    if (!groups.length) throw new Error('The AI provider returned no usable commit groups for the current file set.');
+    setAiGroups(groups);
+    setMessage(`AI suggested ${groups.length} atomic commit group${groups.length === 1 ? '' : 's'}. Review every file and message before staging.`);
+  });
+
   const toggleSelected = (file: string) => setSelected((current) => current.includes(file) ? current.filter((path) => path !== file) : [...current, file]);
 
   if (!native) return (
@@ -177,7 +191,7 @@ export function ProjectWorkbench({ workspace, onChangeWorkspace }: ProjectWorkbe
       <div className="git-layout">
         <aside className="git-sidebar">
           <section><header><strong>Changes</strong><span>{status.files.length}</span></header><div className="git-file-list">{status.files.map((file) => <label className={file.conflicted ? 'conflicted' : ''} key={file.path}><input checked={selectedSet.has(file.path)} onChange={() => toggleSelected(file.path)} type="checkbox" /><code>{file.indexStatus}{file.worktreeStatus}</code><span>{file.path}</span></label>)}{!status.files.length ? <p>Working tree clean.</p> : null}</div><div className="git-row-actions"><button disabled={!selected.length || Boolean(busy)} onClick={() => run('Staging', async () => { requireShareableSafety(); await setNextStatus(await stageGitFiles(path, selected)); })} type="button">Stage</button><button disabled={!selected.length || Boolean(busy)} onClick={() => run('Unstaging', async () => setNextStatus(await unstageGitFiles(path, selected)))} type="button">Unstage</button></div></section>
-          <section><header><strong>Commit</strong><span>{staged.length} staged</span></header><textarea value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Describe this change" /><div className="git-author-grid"><input value={workspace.project.authorName} onChange={(event) => updateProject({ authorName: event.target.value })} placeholder="Author name (optional)" /><input value={workspace.project.authorEmail} onChange={(event) => updateProject({ authorEmail: event.target.value })} placeholder="Author email (optional)" /></div><button disabled={!commitMessage.trim() || !staged.length || Boolean(busy)} onClick={() => run('Committing', async () => { requireShareableSafety(); const result = await commitGitChanges(path, commitMessage, workspace.project.authorName, workspace.project.authorEmail); setCommitMessage(''); await setNextStatus(result.status); setMessage(result.stdout || 'Commit created.'); })} type="button">Commit staged changes</button></section>
+          <section><header><strong>Commit</strong><span>{staged.length} staged</span></header><textarea value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder="Describe this change" /><button disabled={!workspace.ai.enabled || !workspace.ai.commitSuggestions || !status.files.length || Boolean(busy)} onClick={suggestCommits} type="button">Suggest comments and grouping with AI</button>{aiGroups.length ? <div className="ai-commit-groups">{aiGroups.map((group, index) => <button key={`${group.message}-${index}`} onClick={() => { setSelected(group.files); setCommitMessage(group.message); setMessage(`Selected AI group ${index + 1}. Review the diff, stage the listed files, then commit.`); }} type="button"><strong>{group.message}</strong><span>{group.files.join(' · ')}</span><small>{group.comment}</small></button>)}</div> : null}<div className="git-author-grid"><input value={workspace.project.authorName} onChange={(event) => updateProject({ authorName: event.target.value })} placeholder="Author name (optional)" /><input value={workspace.project.authorEmail} onChange={(event) => updateProject({ authorEmail: event.target.value })} placeholder="Author email (optional)" /></div><button disabled={!commitMessage.trim() || !staged.length || Boolean(busy)} onClick={() => run('Committing', async () => { requireShareableSafety(); const result = await commitGitChanges(path, commitMessage, workspace.project.authorName, workspace.project.authorEmail); setCommitMessage(''); setAiGroups([]); await setNextStatus(result.status); setMessage(result.stdout || 'Commit created.'); })} type="button">Commit staged changes</button></section>
           <section><header><strong>Branches</strong><span>{status.branches.length}</span></header><select value={status.branch} onChange={(event) => { const branch = event.target.value; void run('Switching branch', async () => { const result = await checkoutGitBranch(path, branch); await reloadGitWorkspace(result.status); await setNextStatus(result.status); }); }}>{status.branches.map((branch) => <option key={branch}>{branch}</option>)}</select><div className="git-inline"><input value={branchName} onChange={(event) => setBranchName(event.target.value)} placeholder="new-branch" /><button disabled={!branchName || Boolean(busy)} onClick={() => run('Creating branch', async () => { const result = await checkoutGitBranch(path, branchName, true); setBranchName(''); await setNextStatus(result.status); })} type="button">Create</button></div><div className="git-inline"><select value={mergeBranch} onChange={(event) => setMergeBranch(event.target.value)}><option value="">Merge branch…</option>{status.branches.filter((branch) => branch !== status.branch).map((branch) => <option key={branch}>{branch}</option>)}</select><button disabled={!mergeBranch || Boolean(busy)} onClick={() => run('Merging', async () => { const result = await mergeGitBranch(path, mergeBranch); await setNextStatus(result.status); await reloadGitWorkspace(result.status); setMessage(result.stderr || result.stdout || 'Merge ready to commit.'); })} type="button">Merge</button></div></section>
           <section><header><strong>Remote</strong><span>{currentRemote?.name ?? 'none'}</span></header><input value={remoteUrl} onChange={(event) => setRemoteUrl(event.target.value)} placeholder={currentRemote?.fetchUrl || 'https://…'} /><button disabled={!remoteUrl || Boolean(busy)} onClick={() => run('Setting remote', async () => { const next = await setGitRemote(path, workspace.project.remoteName, remoteUrl); updateProject({ remoteUrl }); await setNextStatus(next); })} type="button">Set {workspace.project.remoteName}</button></section>
         </aside>

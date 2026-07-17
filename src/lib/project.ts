@@ -36,7 +36,7 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     ...current,
     ...project,
     format: 'brunomnia',
-    version: 7,
+    version: 8,
     history: current.history,
     runnerReports: current.runnerReports,
     imports: current.imports,

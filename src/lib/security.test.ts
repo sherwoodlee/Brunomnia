@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
-import { appendAudit, externalSecretReferenceKey, mergeSyncedWorkspace, plaintextSecretCandidates, resolveAuthorizedExternalSecret, shareableWorkspace, vaultVariables } from './security';
+import { appendAudit, externalSecretReferenceKey, isProtectedSecretReference, mergeSyncedWorkspace, plaintextSecretCandidates, resolveAuthorizedExternalSecret, shareableWorkspace, vaultVariables } from './security';
 
 describe('encrypted collaboration boundaries', () => {
   it('keeps local response, credential, Git, and plugin state out of shared payloads', () => {
@@ -53,11 +53,24 @@ describe('encrypted collaboration boundaries', () => {
     workspace.environments[0].variables.push({ id: 'token', name: 'apiToken', value: 'plaintext', enabled: false });
     workspace.collections[0].requests[0].auth.token = 'plaintext-bearer';
     workspace.collections[0].requests[0].headers.push({ id: 'auth-header', name: 'Authorization', value: 'Bearer plaintext', enabled: false });
-    expect(plaintextSecretCandidates(workspace)).toHaveLength(3);
+    workspace.ai.apiKey = 'plaintext-ai';
+    workspace.konnect.token = 'plaintext-konnect';
+    workspace.mcpClients.push({ id: 'mcp', name: 'Local tools', transport: 'http', enabled: true, url: 'https://mcp.example', command: '', args: [], authType: 'bearer', username: '', password: '', token: 'plaintext-mcp', headers: [], roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [], lastSyncedAt: '' });
+    expect(plaintextSecretCandidates(workspace)).toHaveLength(6);
     workspace.environments[0].variables.at(-1)!.value = '{{ vault.api_token }}';
     workspace.collections[0].requests[0].auth.token = "{% external 'aws', 'orders-token' %}";
     workspace.collections[0].requests[0].headers.at(-1)!.value = '{{ vault.bearer_header }}';
+    workspace.ai.apiKey = '{{ vault.ai_key }}';
+    workspace.konnect.token = "{% external 'aws', 'konnect-token' %}";
+    workspace.mcpClients[0].token = '{{ vault.mcp_token }}';
     expect(plaintextSecretCandidates(workspace)).toEqual([]);
+  });
+
+  it('accepts only complete protected references for credential fields', () => {
+    expect(isProtectedSecretReference('{{ vault.api_token }}')).toBe(true);
+    expect(isProtectedSecretReference("{% external 'aws', 'orders-token' %}")).toBe(true);
+    expect(isProtectedSecretReference('Bearer {{ vault.api_token }}')).toBe(false);
+    expect(isProtectedSecretReference('plaintext {{ vault.api_token }}')).toBe(false);
   });
 
   it('rejects unapproved external vault references before invoking a provider CLI', async () => {

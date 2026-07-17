@@ -19,7 +19,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(7);
+    expect(migrated.version).toBe(8);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
     expect(migrated.apiDesigns[0].name).toBe('Orders API');
@@ -27,6 +27,9 @@ describe('workspace migrations', () => {
     expect(migrated.imports).toEqual([]);
     expect(migrated.cookies).toEqual([]);
     expect(migrated.responses).toEqual([]);
+    expect(migrated.mcpClients).toEqual([]);
+    expect(migrated.ai.enabled).toBe(false);
+    expect(migrated.konnect.baseUrl).toBe('https://us.api.konghq.com');
   });
 
   it('repairs minimal exports with usable collections, environments, and active IDs', () => {
@@ -76,10 +79,18 @@ describe('workspace migrations', () => {
     }];
     exported.pluginData = { 'plugin-one': { token: 'secret' } };
     exported.activePluginTheme = 'plugin-one::theme:0';
+    exported.mcpClients = [{
+      id: 'mcp-one', name: 'Imported MCP', enabled: true, transport: 'stdio', url: '', command: '/tmp/server', args: [], headers: [], authType: 'bearer', token: 'raw-token', username: '', password: 'raw-password', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [],
+    }];
+    exported.ai = { ...exported.ai, enabled: true, apiKey: 'raw-ai-key', mockGeneration: true, commitSuggestions: true };
+    exported.konnect = { ...exported.konnect, enabled: true, token: 'raw-konnect-token' };
 
     const imported = parseWorkspaceImport(JSON.stringify(exported));
     expect(imported.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
     expect(imported.pluginData).toEqual({});
     expect(imported.activePluginTheme).toBe('');
+    expect(imported.mcpClients[0]).toMatchObject({ enabled: false, token: '', password: '' });
+    expect(imported.ai).toMatchObject({ enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false });
+    expect(imported.konnect).toMatchObject({ enabled: false, token: '' });
   });
 });

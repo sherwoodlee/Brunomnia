@@ -4,15 +4,20 @@ import { cloneSeedWorkspace } from '../../data/seed';
 import { applyArtifactImport, importArtifact } from './index';
 
 describe('artifact import adapters', () => {
-  it('warns and removes inherited authority from Brunomnia plugins', () => {
+  it('warns and removes inherited authority from Brunomnia plugins and integrations', () => {
     const workspace = cloneSeedWorkspace();
     workspace.plugins = [{
       id: 'plugin-one', name: 'Imported', version: '1.0.0', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true,
       requestedPermissions: ['network'], grantedPermissions: ['network'], installedAt: new Date().toISOString(),
     }];
+    workspace.mcpClients = [{ id: 'mcp-one', name: 'Imported MCP', enabled: true, transport: 'stdio', url: '', command: '/tmp/server', args: [], headers: [], authType: 'bearer', token: 'secret', username: '', password: '', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [] }];
+    workspace.ai = { ...workspace.ai, enabled: true, apiKey: 'secret' };
     const result = importArtifact(JSON.stringify(workspace), 'workspace.brunomnia.json');
     expect(result.warnings[0].message).toContain('capability grants were cleared');
+    expect(result.warnings.some((warning) => warning.code === 'integrations-disabled')).toBe(true);
     expect(result.replacement?.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
+    expect(result.replacement?.mcpClients[0]).toMatchObject({ enabled: false, token: '' });
+    expect(result.replacement?.ai).toMatchObject({ enabled: false, apiKey: '' });
   });
 
   it.each([
@@ -189,7 +194,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(7);
+    expect(second.version).toBe(8);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

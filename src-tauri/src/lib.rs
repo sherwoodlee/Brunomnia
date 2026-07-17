@@ -1,6 +1,7 @@
 mod external_vault;
 mod grpc_client;
 mod http_client;
+mod mcp_stdio;
 mod mock_server;
 mod models;
 mod plugin;
@@ -258,6 +259,13 @@ async fn secure_external_secret(
 }
 
 #[tauri::command]
+async fn mcp_stdio_call(
+    input: mcp_stdio::McpStdioInput,
+) -> Result<mcp_stdio::McpStdioOutput, String> {
+    blocking(move || mcp_stdio::call(input)).await
+}
+
+#[tauri::command]
 fn secure_external_cache_clear(
     state: State<'_, external_vault::ExternalSecretCache>,
 ) -> Result<(), String> {
@@ -374,6 +382,7 @@ pub fn run() {
             secure_sync_push,
             secure_external_secret,
             secure_external_cache_clear,
+            mcp_stdio_call,
             connect_websocket,
             send_websocket_message,
             disconnect_websocket,

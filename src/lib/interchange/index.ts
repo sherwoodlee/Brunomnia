@@ -28,8 +28,16 @@ export const importArtifact = (contents: string, sourceName = 'Imported artifact
   if (first.format === 'brunomnia') {
     const replacement = secureImportedWorkspace(first);
     const disabledPlugins = Array.isArray(first.plugins) && first.plugins.length > 0;
+    const importedAi = asRecord(first.ai);
+    const importedKonnect = asRecord(first.konnect);
+    const disabledIntegrations = (Array.isArray(first.mcpClients) && first.mcpClients.length > 0)
+      || importedAi?.enabled === true || Boolean(asString(importedAi?.apiKey))
+      || importedKonnect?.enabled === true || Boolean(asString(importedKonnect?.token));
     return {
-      format: 'brunomnia', sourceName, warnings: disabledPlugins ? [{ code: 'plugins-disabled', message: 'Imported plugins were disabled, their stored data was removed, and all capability grants were cleared. Review the source before enabling them.' }] : [], replacement,
+      format: 'brunomnia', sourceName, warnings: [
+        ...(disabledPlugins ? [{ code: 'plugins-disabled', message: 'Imported plugins were disabled, their stored data was removed, and all capability grants were cleared. Review the source before enabling them.' }] : []),
+        ...(disabledIntegrations ? [{ code: 'integrations-disabled', message: 'Imported MCP, AI, and Konnect integrations were disabled and credential fields were cleared. Review endpoints and commands before enabling them.' }] : []),
+      ], replacement,
       metadata: { version: String(replacement.version), collections: String(replacement.collections.length) },
       collections: [], environments: [], apiDesigns: [], mockServers: [], cookies: [],
     };

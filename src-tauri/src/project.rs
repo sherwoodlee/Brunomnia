@@ -12,12 +12,13 @@ use uuid::Uuid;
 const PROJECT_FILE: &str = ".brunomnia/project.yaml";
 const MANIFEST_FILE: &str = ".brunomnia/manifest.yaml";
 const MAX_TEXT_OUTPUT: usize = 2_000_000;
-const MANAGED_ROOTS: [&str; 6] = [
+const MANAGED_ROOTS: [&str; 7] = [
     ".brunomnia",
     "collections",
     "environments",
     "designs",
     "mocks",
+    "mcp-clients",
     "tests",
 ];
 
@@ -339,6 +340,7 @@ pub fn write_project(input: ProjectWriteInput) -> Result<ProjectWriteOutput, Str
         ("environments", "environments", "environment"),
         ("apiDesigns", "designs", "design"),
         ("mockServers", "mocks", "mock"),
+        ("mcpClients", "mcp-clients", "mcp-client"),
     ] {
         for value in workspace
             .get(key)
@@ -453,6 +455,10 @@ pub fn read_project(path: String) -> Result<Value, String> {
     workspace.insert(
         "mockServers".into(),
         read_yaml_directory(&root, "mocks")?.into(),
+    );
+    workspace.insert(
+        "mcpClients".into(),
+        read_yaml_directory(&root, "mcp-clients")?.into(),
     );
     Ok(Value::Object(workspace))
 }
@@ -1057,10 +1063,11 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         fs::write(temporary.path().join("README.md"), "keep me").unwrap();
         let workspace = serde_json::json!({
-            "format": "brunomnia", "version": 6, "name": "Example", "activeRequestId": "request", "activeEnvironmentId": "env",
+            "format": "brunomnia", "version": 8, "name": "Example", "activeRequestId": "request", "activeEnvironmentId": "env",
             "collections": [{"id":"collection", "name":"Orders", "expanded":true, "requests":[]}],
             "environments": [{"id":"env", "name":"Development", "variables":[]}],
-            "apiDesigns": [], "mockServers": []
+            "apiDesigns": [], "mockServers": [],
+            "mcpClients": [{"id":"mcp-one", "name":"Tools", "enabled":false, "transport":"http", "url":"https://mcp.example", "command":"", "args":[], "headers":[], "authType":"none", "token":"", "username":"", "password":"", "roots":[], "tools":[], "prompts":[], "resources":[], "resourceTemplates":[]}]
         });
         let first = write_project(ProjectWriteInput {
             path: temporary.path().to_string_lossy().into_owned(),
@@ -1070,6 +1077,7 @@ mod tests {
         assert!(first.files_written >= 4);
         let loaded = read_project(temporary.path().to_string_lossy().into_owned()).unwrap();
         assert_eq!(loaded["collections"][0]["name"], "Orders");
+        assert_eq!(loaded["mcpClients"][0]["name"], "Tools");
         assert_eq!(
             fs::read_to_string(temporary.path().join("README.md")).unwrap(),
             "keep me"
@@ -1085,7 +1093,7 @@ mod tests {
         let external = tempfile::tempdir().unwrap();
         symlink(external.path(), temporary.path().join("collections")).unwrap();
         let workspace = serde_json::json!({
-            "format": "brunomnia", "version": 6, "name": "Unsafe", "activeRequestId": "", "activeEnvironmentId": "",
+            "format": "brunomnia", "version": 8, "name": "Unsafe", "activeRequestId": "", "activeEnvironmentId": "",
             "collections": [{"id":"collection", "name":"Orders", "expanded":true, "requests":[]}],
             "environments": [], "apiDesigns": [], "mockServers": []
         });

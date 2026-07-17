@@ -192,7 +192,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 7;
+  version: 8;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -211,6 +211,74 @@ export type Workspace = {
   activePluginTheme: string;
   collaboration: CollaborationConfig;
   governance: GovernanceConfig;
+  mcpClients: McpClient[];
+  ai: AiSettings;
+  konnect: KonnectConfig;
+};
+
+export type McpTool = {
+  name: string;
+  description: string;
+  inputSchema: JsonValue;
+};
+
+export type McpPrompt = {
+  name: string;
+  description: string;
+  arguments: Array<{ name: string; description: string; required: boolean }>;
+};
+
+export type McpResource = {
+  uri: string;
+  name: string;
+  description: string;
+  mimeType: string;
+};
+
+export type McpClient = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  transport: 'http' | 'stdio';
+  url: string;
+  command: string;
+  args: string[];
+  headers: KeyValue[];
+  authType: 'none' | 'bearer' | 'basic';
+  token: string;
+  username: string;
+  password: string;
+  roots: string[];
+  tools: McpTool[];
+  prompts: McpPrompt[];
+  resources: McpResource[];
+  resourceTemplates: McpResource[];
+  lastSyncedAt?: string;
+};
+
+export type AiSettings = {
+  enabled: boolean;
+  provider: 'openai' | 'anthropic' | 'gemini' | 'openai-compatible';
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  mockGeneration: boolean;
+  commitSuggestions: boolean;
+};
+
+export type KonnectControlPlane = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+export type KonnectConfig = {
+  enabled: boolean;
+  baseUrl: string;
+  token: string;
+  controlPlaneId: string;
+  controlPlanes: KonnectControlPlane[];
+  lastSyncedAt?: string;
 };
 
 export type CollaborationConfig = {
@@ -308,7 +376,7 @@ export type HttpResponse = {
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests';
 export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline' | 'tests';
 export type SidebarMode = 'collections' | 'history';
-export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins' | 'security';
+export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins' | 'security' | 'integrations';
 
 export type ApiDesign = {
   id: string;

@@ -41,11 +41,11 @@ External tags currently cover HTTP, GraphQL, OAuth token requests, and non-strea
 
 ## Plaintext-secret guardrail
 
-When the vault policy is enabled, Brunomnia scans likely secret-named environment variables (including disabled values), credential-bearing headers and query parameters, embedded URL credentials, plus authentication, Netrc, client-key, and token fields. Managed-folder/Git stage, commit, push, and write operations plus encrypted-sync pushes are blocked until candidates use a `vault.*` variable or external-vault tag. This is a focused guardrail, not a general-purpose secret scanner; request bodies, arbitrary values, repository history, and files changed outside Brunomnia still require review.
+When the vault policy is enabled, Brunomnia scans likely secret-named environment variables (including disabled values), credential-bearing headers and query parameters, embedded URL credentials, authentication, Netrc, client-key and token fields, plus MCP, AI-provider, and Konnect credentials. Managed-folder/Git stage, commit, push, and write operations plus encrypted-sync pushes are blocked until candidates use a complete `vault.*` variable or external-vault tag. Integration execution independently rejects raw credential fields. This is a focused guardrail, not a general-purpose secret scanner; request bodies, arbitrary values, repository history, and files changed outside Brunomnia still require review.
 
 ## End-to-end encrypted shared file
 
-Encrypted sync serializes collections, environments, designs, mocks, and governance metadata, then encrypts the payload locally before writing a user-selected file. History, response bodies, cookies, runner reports, import history, Git paths/identity, plugins, plugin storage/themes, local vault contents, and the shared-file path stay device-local.
+Encrypted sync serializes collections, environments, designs, mocks, MCP project configuration, and governance metadata, then encrypts the payload locally before writing a user-selected file. History, response bodies, cookies, runner reports, import history, Git paths/identity, plugins, plugin storage/themes, local vault contents, AI/Konnect configuration, and the shared-file path stay device-local. MCP credential references can be shared, but raw MCP bearer/Basic values and sensitive headers are blocked by the plaintext-secret guardrail.
 
 Each payload contains a monotonically increasing revision. Push compares the encrypted remote revision to the local base revision and refuses a mismatch. Pull applies shareable data while preserving device-local fields and the current local actor. Force push requires an explicit checkbox and creates the next revision rather than reusing a revision number.
 
@@ -53,6 +53,6 @@ The encrypted file can live on a self-hosted filesystem share, mounted WebDAV vo
 
 ## Governance and audit boundary
 
-Workspace v7 carries owner, admin, editor, and viewer actor metadata. At least one active owner is required. Owner/admin actors can manage members, allowed storage modes, secret policy, external reference approvals, and audit retention. Editors can publish encrypted revisions; viewers cannot. Audit events record these operations without secret values and are retained up to the configured bound.
+Workspace v8 retains the v7 owner, admin, editor, and viewer actor model. At least one active owner is required. Owner/admin actors can manage members, allowed storage modes, secret policy, external reference approvals, and audit retention. Editors can publish encrypted revisions and operate integrations; viewers cannot. Audit events record governance and sync operations without secret values and are retained up to the configured bound.
 
 These controls are meaningful local policy checks but are not authentication or a tamper-proof log. Anyone who can directly edit the workspace file controls its metadata. Self-hosted SAML/OIDC authentication, SCIM provisioning, organization service, comprehensive RBAC enforcement, signed audit export, real-time presence, and comments are still tracked in [the parity ledger](PARITY.md).

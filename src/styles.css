@@ -587,7 +587,14 @@ kbd {
 .runner-table article strong { color: var(--text-soft); font-size: 10px; }
 .runner-table article small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.mock-grid { display: grid; grid-template-columns: 260px minmax(500px, 1fr) 250px; min-height: 0; min-width: 960px; overflow: auto; }
+.mock-content { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.mock-grid { display: grid; flex: 1; grid-template-columns: 260px minmax(500px, 1fr) 250px; min-height: 0; min-width: 960px; overflow: auto; }
+.ai-mock-generator { align-items: end; background: #0d1418; border-bottom: 1px solid var(--border); display: grid; flex: 0 0 auto; gap: 9px; grid-template-columns: minmax(320px, 1fr) 100px auto minmax(180px, .55fr); padding: 10px 14px; }
+.ai-mock-generator label { color: var(--muted); display: flex; flex-direction: column; font-size: 8px; gap: 5px; text-transform: uppercase; }
+.ai-mock-generator textarea, .ai-mock-generator input { background: var(--panel-soft); border: 1px solid var(--border); color: var(--text-soft); font: 9px var(--font-mono); min-height: 34px; padding: 7px; resize: vertical; }
+.ai-mock-generator textarea { max-height: 110px; min-height: 52px; }
+.ai-mock-generator button { background: var(--accent); border: 0; border-radius: 3px; color: white; font-size: 9px; min-height: 34px; padding: 0 12px; }
+.ai-mock-generator p { color: var(--faint); font-size: 8px; line-height: 1.4; margin: 0; }
 .mock-routes { border-right: 1px solid var(--border); display: grid; grid-template-rows: 43px minmax(0, 1fr); }
 .mock-routes > header { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 0 11px; }
 .mock-routes > header strong { font-size: 10px; }
@@ -678,6 +685,11 @@ kbd {
 .git-file-list p { color: var(--mint); font-size: 8px; }
 .git-row-actions, .git-inline { display: grid; gap: 6px; grid-template-columns: 1fr 1fr; }
 .git-author-grid { display: grid; gap: 5px; grid-template-columns: 1fr 1fr; }
+.ai-commit-groups { display: flex; flex-direction: column; gap: 5px; max-height: 220px; overflow: auto; }
+.ai-commit-groups button { align-items: flex-start; display: flex; flex-direction: column; gap: 3px; height: auto; min-height: 48px; padding: 7px 8px; text-align: left; }
+.ai-commit-groups strong { font-size: 8px; }
+.ai-commit-groups span { color: var(--accent); font: 7px/1.4 var(--font-mono); }
+.ai-commit-groups small { color: var(--faint); font-size: 7px; line-height: 1.35; }
 .git-main { min-height: 0; overflow: hidden; }
 .diff-workbench, .conflict-workbench { display: grid; height: 100%; min-height: 0; }
 .diff-workbench { grid-template-rows: 66px minmax(0, 1fr); }
@@ -810,6 +822,63 @@ kbd {
 .audit-card time, .audit-card small { color: var(--faint); font-family: var(--font-mono); }
 .audit-card article > span { color: var(--text-soft); }
 
+.integration-workbench { background: var(--bg); grid-column: 2 / -1; min-height: 0; min-width: 0; overflow: auto; position: relative; }
+.integration-header { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; min-height: 106px; padding: 20px 24px; }
+.integration-header small, .integration-card > header small { color: var(--accent); font-size: 8px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.integration-header h1 { font-size: 22px; font-weight: 550; margin: 4px 0; }
+.integration-header p, .integration-card p, .integration-card li { color: var(--muted); font-size: 9px; line-height: 1.55; margin: 0; }
+.integration-header .security-tabs { border: 0; padding: 0; }
+.integration-workbench > .policy-warning { margin: 12px 24px 0; }
+.integration-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(320px, 1fr)); padding: 18px 24px 60px; }
+.integration-mcp-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: calc(100% - 107px); }
+.integration-list { border-right: 1px solid var(--border); min-height: 0; padding: 13px 9px; }
+.integration-list > header { align-items: center; display: flex; justify-content: space-between; padding: 3px 5px 10px; }
+.integration-list > header strong { font-size: 10px; }
+.integration-list > header button { align-items: center; background: var(--panel-raised); border: 1px solid var(--border); color: var(--text-soft); display: flex; font-size: 8px; gap: 4px; min-height: 28px; }
+.integration-list > button { align-items: center; background: transparent; border: 1px solid transparent; color: var(--text-soft); display: flex; justify-content: space-between; padding: 9px 8px; text-align: left; width: 100%; }
+.integration-list > button.active { background: var(--panel-raised); border-color: var(--border); }
+.integration-list > button span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.integration-list > button strong { font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.integration-list > button small, .integration-list > p { color: var(--faint); font-size: 7px; }
+.integration-list > button em { color: var(--muted); font: normal 8px var(--font-mono); }
+.integration-mcp-main { display: grid; gap: 12px; min-width: 0; padding: 14px 18px 60px; }
+.integration-card { align-content: start; background: var(--panel-soft); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px; }
+.integration-card > header { align-items: center; display: flex; justify-content: space-between; }
+.integration-card > header > div:last-child { align-items: center; display: flex; gap: 7px; }
+.integration-card h2 { font-size: 14px; margin: 3px 0 0; }
+.integration-card button, .integration-card input, .integration-card select, .integration-card textarea { background: #0d1418; border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font-size: 9px; min-height: 34px; padding: 0 9px; }
+.integration-card textarea { font: 9px/1.5 var(--font-mono); min-height: 78px; padding: 8px 9px; resize: vertical; }
+.integration-card button { background: var(--panel-raised); }
+.integration-card button:disabled { cursor: not-allowed; opacity: .45; }
+.integration-card ul { display: flex; flex-direction: column; gap: 8px; margin: 0; padding-left: 17px; }
+.integration-card > pre { background: #0a0f12; border: 1px solid var(--border-soft); color: var(--text-soft); font: 8px/1.5 var(--font-mono); margin: 0; max-height: 260px; overflow: auto; padding: 10px; white-space: pre-wrap; }
+.integration-fields { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.integration-fields label, .mcp-operation-run label { color: var(--muted); display: flex; flex-direction: column; font-size: 8px; gap: 6px; text-transform: uppercase; }
+.integration-fields .wide { grid-column: 1 / -1; }
+.inline-toggle { align-items: center; color: var(--muted); display: flex; font-size: 8px; gap: 6px; }
+.inline-toggle input { accent-color: var(--accent); min-height: auto; }
+.integration-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.integration-actions small { color: var(--faint); font: 8px var(--font-mono); }
+.mcp-header-editor { display: flex; flex-direction: column; gap: 6px; }
+.mcp-header-editor > header { align-items: center; display: flex; justify-content: space-between; }
+.mcp-header-editor > header strong { font-size: 9px; }
+.mcp-header-editor > div { display: grid; gap: 6px; grid-template-columns: 24px minmax(100px, .7fr) minmax(160px, 1.3fr) 32px; }
+.mcp-header-editor input[type="checkbox"] { accent-color: var(--accent); min-height: auto; }
+.mcp-header-editor button { padding: 0; }
+.mcp-operation-grid { display: grid; gap: 10px; grid-template-columns: minmax(180px, .7fr) minmax(260px, 1.3fr); min-height: 280px; }
+.mcp-operation-list { border: 1px solid var(--border-soft); display: flex; flex-direction: column; max-height: 420px; overflow: auto; }
+.mcp-operation-list button { border: 0; border-bottom: 1px solid var(--border-soft); border-radius: 0; display: flex; flex-direction: column; gap: 3px; height: auto; min-height: 44px; padding: 8px; text-align: left; }
+.mcp-operation-list button.active { background: color-mix(in srgb, var(--accent) 16%, var(--panel-raised)); }
+.mcp-operation-list strong { font: 8px var(--font-mono); }
+.mcp-operation-list small { color: var(--faint); font-size: 7px; }
+.mcp-operation-run { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.mcp-operation-run pre { background: #0a0f12; border: 1px solid var(--border-soft); color: var(--text-soft); flex: 1; font: 8px/1.5 var(--font-mono); margin: 0; max-height: 320px; min-height: 120px; overflow: auto; padding: 9px; white-space: pre-wrap; }
+.mcp-console > div { display: flex; flex-direction: column; max-height: 280px; overflow: auto; }
+.mcp-console article { border-top: 1px solid var(--border-soft); display: grid; gap: 4px 8px; grid-template-columns: 90px minmax(140px, .25fr) minmax(240px, 1fr); padding: 8px 0; }
+.mcp-console time { color: var(--faint); font: 7px var(--font-mono); }
+.mcp-console strong { font-size: 8px; }
+.mcp-console pre { color: var(--muted); font: 7px/1.45 var(--font-mono); margin: 0; overflow: auto; white-space: pre-wrap; }
+
 .statusbar { align-items: center; background: #0a0f12; border-top: 1px solid var(--border); color: var(--muted); display: flex; font: 9px var(--font-mono); gap: 18px; padding: 0 16px; }
 .statusbar span { align-items: center; display: flex; gap: 7px; white-space: nowrap; }
 .statusbar i { background: var(--mint); border-radius: 50%; height: 6px; width: 6px; }
@@ -932,6 +1001,7 @@ kbd {
   .project-workbench { grid-column: 2; }
   .plugin-workbench { grid-column: 2; }
   .security-workbench { grid-column: 2; }
+  .integration-workbench { grid-column: 2; }
   .project-onboarding { padding: 18px 12px; }
   .project-connect-grid { grid-template-columns: minmax(0, 1fr); }
   .git-workbench { grid-template-rows: auto minmax(0, 1fr); overflow: auto; }
@@ -957,6 +1027,16 @@ kbd {
   .member-list article { grid-template-columns: minmax(0, 1fr) 105px 65px; }
   .audit-card article { grid-template-columns: 112px minmax(100px, .6fr) minmax(180px, 1fr); min-width: 520px; }
   .audit-card article small { display: none; }
+  .integration-header { align-items: flex-start; flex-direction: column; gap: 10px; padding: 15px; }
+  .integration-header .security-tabs { max-width: 100%; overflow-x: auto; }
+  .integration-workbench > .policy-warning { margin: 10px 12px 0; }
+  .integration-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+  .integration-mcp-layout { display: block; }
+  .integration-list { border-bottom: 1px solid var(--border); border-right: 0; max-height: 240px; overflow: auto; }
+  .integration-mcp-main { padding: 10px 12px 52px; }
+  .integration-fields, .mcp-operation-grid { grid-template-columns: minmax(0, 1fr); }
+  .mcp-console article { grid-template-columns: 80px minmax(120px, 1fr); }
+  .mcp-console pre { grid-column: 1 / -1; }
   .conflict-workbench > header { grid-template-columns: minmax(0, 1fr); }
   .automation-header { align-items: flex-start; flex-direction: column; gap: 8px; padding: 11px; }
   .automation-header p { line-height: 1.4; max-width: 300px; }
@@ -971,6 +1051,7 @@ kbd {
   .runner-table { overflow-x: auto; }
   .runner-table-head, .runner-table article { min-width: 620px; }
   .mock-routes { border-bottom: 1px solid var(--border); border-right: 0; min-height: 230px; }
+  .ai-mock-generator { align-items: stretch; grid-template-columns: minmax(0, 1fr); }
   .mock-route-editor { border-bottom: 1px solid var(--border); border-right: 0; min-height: 480px; }
   .mock-route-bar { grid-template-columns: 58px minmax(116px, 1fr) 58px 58px; min-width: 0; }
   .mock-route-editor { overflow-x: auto; }
