@@ -27,7 +27,7 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | gRPC schema discovery | Complete | Server Reflection v1 and pasted `.proto` compilation into a local descriptor pool |
 | gRPC execution | Complete | Dynamic protobuf JSON mapping; unary, client-streaming, server-streaming and bidirectional calls |
 | Rich HTTP bodies | Complete | None, JSON, text, URL-encoded, multipart text/files and binary files |
-| Transport configuration | Complete for HTTP/SSE | Redirect policy, inherited/custom connect/HTTP timeout with `0` disabled, unlimited active SSE duration, certificate validation, HTTP proxy and PEM client identity |
+| Transport configuration | Complete for HTTP/SSE | Redirect policy, inherited/custom connect/HTTP timeout with `0` disabled, inherited/always/never API certificate validation, unlimited active SSE duration, HTTP proxy and PEM client identity |
 | gRPC TLS | Complete | System trust roots, timeout and PEM client identity |
 | WebSocket TLS | Baseline | System trust roots and arbitrary handshake headers; custom proxy/client identity is deferred |
 | Workspace migration | Complete | Version 1 workspaces migrate in place to the version 2 protocol schema |
@@ -134,7 +134,7 @@ Compatibility bounds remain explicit: HTTP MCP OAuth discovery/redirect handling
 | GraphQL authoring | Complete baseline | Query/variables composition, operation name, structural checks, cached root-field validation, root-field search/insertion, deprecation display, and type documentation browsing |
 | GraphQL template boundary | Complete | Query template syntax remains literal to match Insomnia; variables retain local/vault/external template support |
 | Request scheduling | Complete baseline | Initial delay, sequential repeat interval, stop-future-runs control, and a 1,000-send local safety bound |
-| Desktop preferences | Complete baseline | System/dark/light appearance, comfortable/compact density, editor font size, preferred HTTP version, execution-time timeout with inherited/custom request modes and no-deadline support, GraphQL auto-fetch, and delete confirmation |
+| Desktop preferences | Complete baseline | System/dark/light appearance, comfortable/compact density, editor font size, preferred HTTP version, execution-time timeout and API/authentication certificate-validation defaults with request overrides, GraphQL auto-fetch, and delete confirmation |
 | Keyboard shortcuts | Complete baseline | Ten device-local editable bindings, platform `Mod` abstraction, collision warnings, clearing/reset, URL focus, request create/duplicate/delete, history, sidebar, environment, send, Preferences, and palette actions |
 | Workspace migration | Complete | Versions 1–8 migrate to v9 bounded GraphQL schema cache fields and normalized device-local preferences; imports receive safe defaults and project/encrypted-sync reads preserve local preferences |
 | Documentation and evidence | Complete | [GraphQL and preferences guide](GRAPHQL_AND_PREFERENCES.md) and [Milestone 9 verification](QA_MILESTONE_9.md) |
@@ -181,7 +181,7 @@ Compatibility bounds remain explicit: generated snippets do not yet embed multip
 | Secondary requests | Complete baseline | Off-by-default device-local grant, mediated HTTP(S) normalization, separate vault capability, five-request/256 KB input/5 MB response/10-second transport bounds, and no nested script/plugin execution |
 | Vault scripts | Complete baseline | Off-by-default device-local grant exposes only current unlocked local entries through `insomnia.vault.get`, with no result/export/project/sync serialization |
 | CLI safety | Complete baseline | Workspace JavaScript requires `--allow-scripts`; secondary requests additionally require `--allow-script-requests`; workspace data cannot self-grant either capability |
-| Workspace migration | Complete | Versions 1–14 migrate to v15 with legacy-safe custom timeouts, safe script timeout and disabled network/vault grants; imports reset authority and shared reads preserve device-local preferences |
+| Workspace migration | Complete | Versions 1–15 migrate to v16 with legacy-safe timeout/certificate overrides, safe script timeout and disabled network/vault grants; imports reset authority and shared reads preserve device-local preferences |
 | Documentation and evidence | Complete | [Permission-bounded scripting guide](SCRIPTING.md) and [Milestone 12 verification](QA_MILESTONE_12.md) |
 
 Compatibility bounds remain explicit: the full upstream library/Node module set, complete Chai/Lodash behavior, advanced auth/body helpers, separately persisted base-environment mutation, script access to external-vault providers, and broader Postman compatibility remain. The browser Worker is the desktop capability boundary; CLI scripts use Node `vm` and therefore require an explicit trusted-workspace flag rather than being represented as hostile-code isolation. Exact scope/helper/async/state-continuity work follows in Milestone 13.
@@ -495,7 +495,23 @@ Compatibility bounds remain explicit: reqwest and browser Fetch do not expose li
 
 Compatibility bounds remain explicit: WebSocket connection APIs do not expose the same total request timer as HTTP, an active SSE response intentionally has no lifetime deadline after headers, and no rendered or live slow-server fixture is claimed in this phase. Brunomnia's per-request Custom mode is an additional local capability; current Insomnia exposes the device preference globally.
 
-## Milestone 34 — remaining parity closure and release hardening
+## Milestone 34 — certificate-validation defaults and request inheritance (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Separate on-by-default device-local validation settings exist for API requests and OAuth/authentication traffic, matching current upstream's `validateSSL` and `validateAuthSSL` split |
+| Request inheritance | Complete | New requests persist Use Preferences; Always/Never override the API device default for native transports |
+| Authentication separation | Complete baseline | OAuth token requests ignore the API request mode and resolve the authentication validation preference, matching current upstream token behavior; automated authorization-window callback capture remains open |
+| Legacy safety | Complete | Workspace v15 and earlier request booleans migrate to Always/Never, while requests without a saved transport validation value adopt inheritance |
+| Execution breadth | Complete baseline | Native HTTP/GraphQL, Event Streams, gRPC, collection runs, script/plugin calls, URL imports, OAuth tokens, Git-AI, and HTTP-backed integrations receive the effective setting |
+| Browser/CLI safety | Complete baseline | Browser Fetch keeps browser-owned TLS verification; the CLI rejects an effective Never mode instead of weakening Node TLS globally |
+| Import behavior | Complete baseline | Ordinary cURL imports inherit the API preference; explicit `--insecure` becomes a Never override |
+| Executable coverage | Complete baseline | Frontend tests cover both defaults, explicit modes, legacy migration, OAuth separation, native invocation, stream configuration, and cURL defaults/override; rendered and live untrusted-certificate fixtures remain intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 34 verification](QA_MILESTONE_34.md) |
+
+Compatibility bounds remain explicit: browser engines own TLS validation, CLI Node Fetch cannot safely disable it per request, and OAuth authorization-window/callback capture is not implemented. Brunomnia's request-level Always/Never modes are an additional local capability; current Insomnia exposes the API and authentication choices globally.
+
+## Milestone 35 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

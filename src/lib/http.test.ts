@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { StoredResponse } from '../types';
-import { graphqlBody, sendRequest } from './http';
+import { fetchOAuth2Token, graphqlBody, sendRequest } from './http';
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
 
@@ -35,17 +35,45 @@ describe('native HTTP transport preferences', () => {
     const request = createBlankRequest('preferred-http-version');
     request.url = 'https://example.test/status';
 
-    const response = await sendRequest(request, undefined, { preferredHttpVersion: 'http2', maxRedirects: -1, followRedirects: false, requestTimeoutMs: 0 });
+    const response = await sendRequest(request, undefined, { preferredHttpVersion: 'http2', maxRedirects: -1, followRedirects: false, requestTimeoutMs: 0, validateCertificates: false });
 
     expect(response.httpVersion).toBe('HTTP/2.0');
     expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({
       input: expect.objectContaining({
-        transport: expect.objectContaining({ preferredHttpVersion: 'http2', maxRedirects: -1, followRedirects: false, timeoutMs: 0 }),
+        transport: expect.objectContaining({ preferredHttpVersion: 'http2', maxRedirects: -1, followRedirects: false, timeoutMs: 0, validateCertificates: false }),
       }),
     }));
     expect(request.transport).not.toHaveProperty('preferredHttpVersion');
     expect(request.transport).not.toHaveProperty('maxRedirects');
-    expect(request.transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global', timeoutMode: 'global', timeoutMs: 60_000 });
+    expect(request.transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global', timeoutMode: 'global', timeoutMs: 60_000, validateCertificates: true, validateCertificatesMode: 'global' });
+  });
+
+  it('honors explicit request certificate-validation modes over the device preference', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
+    const request = createBlankRequest('certificate-override');
+    request.url = 'https://example.test/status';
+    request.transport.validateCertificatesMode = 'on';
+    await sendRequest(request, undefined, { validateCertificates: false });
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({ validateCertificates: true }) }) }));
+
+    request.transport.validateCertificatesMode = 'off';
+    await sendRequest(request, undefined, { validateCertificates: true });
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({ validateCertificates: false }) }) }));
+  });
+
+  it('uses the separate authentication certificate preference for OAuth token calls', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{"access_token":"oauth-token"}', durationMs: 1, sizeBytes: 30, setCookies: [], httpVersion: 'HTTP/1.1' });
+    const request = createBlankRequest('oauth-certificates');
+    request.url = 'https://api.example.test/items';
+    request.auth.oauth2GrantType = 'client_credentials';
+    request.auth.accessTokenUrl = 'https://auth.example.test/token';
+    request.auth.clientId = 'client';
+    request.auth.clientSecret = 'secret';
+
+    await fetchOAuth2Token(request, undefined, { validateCertificates: true, validateAuthCertificates: false });
+
+    expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({ validateCertificates: false }) }) }));
+    expect(request.transport.validateCertificatesMode).toBe('global');
   });
 
   it('honors an explicit request timeout over the device preference', async () => {

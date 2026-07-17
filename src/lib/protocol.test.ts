@@ -57,9 +57,9 @@ describe('sseConnectConfig', () => {
 describe('streamTransportConfig', () => {
   it('adds device HTTP and redirect preferences without mutating request transport', () => {
     const request = cloneSeedWorkspace().collections[0].requests[0];
-    const transport = streamTransportConfig(request, 'http2-prior-knowledge', 3, false, 12_345);
+    const transport = streamTransportConfig(request, 'http2-prior-knowledge', 3, false, 12_345, false);
 
-    expect(transport).toMatchObject({ timeoutMs: 12_345, preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: 3, followRedirects: false });
+    expect(transport).toMatchObject({ timeoutMs: 12_345, validateCertificates: false, preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: 3, followRedirects: false });
     expect(request.transport).not.toHaveProperty('preferredHttpVersion');
     expect(request.transport).not.toHaveProperty('maxRedirects');
   });
@@ -77,5 +77,13 @@ describe('streamTransportConfig', () => {
     request.transport.timeoutMode = 'custom';
     request.transport.timeoutMs = 7_654;
     expect(streamTransportConfig(request, 'default', 10, true, 30_000).timeoutMs).toBe(7_654);
+  });
+
+  it('preserves an explicit stream validation mode over the device preference', () => {
+    const request = cloneSeedWorkspace().collections[0].requests[0];
+    request.transport.validateCertificatesMode = 'on';
+    expect(streamTransportConfig(request, 'default', 10, true, 30_000, false).validateCertificates).toBe(true);
+    request.transport.validateCertificatesMode = 'off';
+    expect(streamTransportConfig(request, 'default', 10, true, 30_000, true).validateCertificates).toBe(false);
   });
 });

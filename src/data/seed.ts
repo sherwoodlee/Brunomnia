@@ -63,6 +63,7 @@ message Order { string id = 1; string status = 2; double total = 3; }`,
     followRedirectsMode: 'global',
     timeoutMode: 'global',
     timeoutMs: 60000,
+    validateCertificatesMode: 'global',
     validateCertificates: true,
     proxyUrl: '',
     proxyExclusions: '',
@@ -112,7 +113,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 15,
+  version: 16,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',

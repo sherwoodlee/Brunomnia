@@ -9,7 +9,7 @@ import type {
   StreamMessage,
 } from '../types';
 import { buildHeaders, environmentMap, resolveTemplate } from './request';
-import { resolveFollowRedirects, resolveRequestTimeout } from './transport';
+import { resolveCertificateValidation, resolveFollowRedirects, resolveRequestTimeout } from './transport';
 
 type GrpcCallOutput = {
   status: string;
@@ -46,10 +46,11 @@ export const sseConnectConfig = (request: ApiRequest) => ({
   sendLastEventId: request.sse?.sendLastEventId !== false,
 });
 
-export const streamTransportConfig = (request: ApiRequest, preferredHttpVersion: PreferredHttpVersion, maxRedirects = 10, followRedirects = true, requestTimeoutMs = 30_000) => ({
+export const streamTransportConfig = (request: ApiRequest, preferredHttpVersion: PreferredHttpVersion, maxRedirects = 10, followRedirects = true, requestTimeoutMs = 30_000, validateCertificates = true) => ({
   ...request.transport,
   followRedirects: resolveFollowRedirects(request.transport, followRedirects),
   timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs),
+  validateCertificates: resolveCertificateValidation(request.transport, validateCertificates),
   preferredHttpVersion,
   maxRedirects,
 });
@@ -63,13 +64,14 @@ export const connectStream = async (
   maxRedirects = 10,
   followRedirects = true,
   requestTimeoutMs = 30_000,
+  validateCertificates = true,
 ) => {
   const variables = environmentMap(environment);
   const input = {
     sessionId,
     url: resolveTemplate(request.url, variables),
     headers: resolvedHeaders(request, environment),
-    transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs),
+    transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates),
     sse: sseConnectConfig(request),
   };
   if (isTauri()) {
@@ -130,6 +132,7 @@ export const runStreamSample = async (
   maxRedirects = 10,
   followRedirects = true,
   requestTimeoutMs = 30_000,
+  validateCertificates = true,
 ): Promise<HttpResponse> => {
   if (request.protocol !== 'websocket' && request.protocol !== 'sse') throw new Error('Stream sampling only supports WebSocket and SSE requests.');
   const sessionId = `runner-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -141,7 +144,7 @@ export const runStreamSample = async (
     messages.push(message);
     if (message.direction === 'incoming') resolveIncoming?.();
   };
-  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs);
+  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates);
   try {
     const variables = environmentMap(environment);
     const startupFrame = resolveTemplate(request.body, variables);
@@ -192,7 +195,7 @@ export const previewGrpcSchema = (protoText: string): GrpcSchema => {
 
 const mockGrpcSchema = (request: ApiRequest): GrpcSchema => previewGrpcSchema(request.grpc.protoText);
 
-export const loadGrpcSchema = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000): Promise<GrpcSchema> => {
+export const loadGrpcSchema = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000, validateCertificates = true): Promise<GrpcSchema> => {
   const variables = environmentMap(environment);
   if (!isTauri()) {
     await new Promise((resolve) => window.setTimeout(resolve, 300));
@@ -204,12 +207,12 @@ export const loadGrpcSchema = async (request: ApiRequest, environment?: Environm
       source: request.grpc.descriptorSource,
       protoText: request.grpc.protoText,
       metadata: request.grpc.metadata,
-      transport: { ...request.transport, timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs) },
+      transport: { ...request.transport, timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs), validateCertificates: resolveCertificateValidation(request.transport, validateCertificates) },
     },
   });
 };
 
-export const invokeGrpc = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000): Promise<GrpcCallOutput> => {
+export const invokeGrpc = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000, validateCertificates = true): Promise<GrpcCallOutput> => {
   const variables = environmentMap(environment);
   if (!isTauri()) {
     await new Promise((resolve) => window.setTimeout(resolve, 420));
@@ -231,7 +234,7 @@ export const invokeGrpc = async (request: ApiRequest, environment?: Environment,
       descriptorSetBase64: request.grpc.descriptorSetBase64,
       messagesJson: resolveTemplate(request.grpc.input, variables),
       metadata: request.grpc.metadata,
-      transport: { ...request.transport, timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs) },
+      transport: { ...request.transport, timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs), validateCertificates: resolveCertificateValidation(request.transport, validateCertificates) },
     },
   });
 };

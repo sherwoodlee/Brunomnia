@@ -216,6 +216,8 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     requestTimeoutMs: typeof source?.requestTimeoutMs === 'number' && Number.isFinite(source.requestTimeoutMs)
       ? Math.min(2_147_483_647, Math.max(0, Math.trunc(source.requestTimeoutMs)))
       : defaultPreferences.requestTimeoutMs,
+    validateCertificates: source?.validateCertificates !== false,
+    validateAuthCertificates: source?.validateAuthCertificates !== false,
     scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
     allowScriptRequests: source?.allowScriptRequests === true,
     allowScriptFileAccess: source?.allowScriptFileAccess === true,
@@ -372,6 +374,13 @@ export const migrateWorkspace = (value: unknown): Workspace => {
       const timeoutMode = request.transport?.timeoutMode === 'global' || request.transport?.timeoutMode === 'custom'
         ? request.transport.timeoutMode
         : typeof request.transport?.timeoutMs === 'number' ? 'custom' : 'global';
+      const validateCertificatesMode = request.transport?.validateCertificatesMode === 'global'
+        || request.transport?.validateCertificatesMode === 'on'
+        || request.transport?.validateCertificatesMode === 'off'
+        ? request.transport.validateCertificatesMode
+        : typeof request.transport?.validateCertificates === 'boolean'
+          ? request.transport.validateCertificates ? 'on' : 'off'
+          : 'global';
       return {
         ...defaults,
         ...request,
@@ -402,6 +411,8 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           timeoutMs: typeof request.transport?.timeoutMs === 'number' && Number.isFinite(request.transport.timeoutMs)
             ? Math.min(2_147_483_647, Math.max(0, Math.trunc(request.transport.timeoutMs)))
             : defaults.transport.timeoutMs,
+          validateCertificates: validateCertificatesMode !== 'off',
+          validateCertificatesMode,
         },
         sse: {
           ...defaults.sse,
@@ -441,7 +452,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 15,
+    version: 16,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

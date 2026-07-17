@@ -156,6 +156,7 @@ export type TransportConfig = {
   followRedirectsMode: 'global' | 'on' | 'off';
   timeoutMode: 'global' | 'custom';
   timeoutMs: number;
+  validateCertificatesMode: 'global' | 'on' | 'off';
   validateCertificates: boolean;
   proxyUrl: string;
   proxyExclusions: string;
@@ -287,7 +288,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 15;
+  version: 16;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -327,6 +328,8 @@ export type AppPreferences = {
   maxHistoryResponses: number;
   filterResponsesByEnv: boolean;
   requestTimeoutMs: number;
+  validateCertificates: boolean;
+  validateAuthCertificates: boolean;
   scriptTimeoutMs: number;
   allowScriptRequests: boolean;
   allowScriptFileAccess: boolean;

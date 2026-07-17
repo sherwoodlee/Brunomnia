@@ -39,6 +39,12 @@ Preferences keeps a device-local **Request timeout (ms)** value that defaults to
 
 Workspace v14 and earlier requests migrate their saved timeout to **Custom** so an upgrade never changes a working deadline. Choosing **Make every request inherit timeout** opts all requests into the live preference. The effective value reaches primary requests, collection runs, the CLI, scripts/plugins, URL imports, OAuth, and integrations. Internal GraphQL introspection, AI, MCP, Konnect, and bounded script requests deliberately retain custom safety deadlines.
 
+## Certificate-validation policy
+
+Preferences has separate on-by-default choices for **Validate certificates for API requests** and **Validate certificates during authentication**. HTTP, GraphQL, Event Stream, gRPC, collection-run, script/plugin, URL-import, and integration traffic resolve the API setting at execution time. OAuth token acquisition resolves the authentication setting instead, matching current Insomnia's separation.
+
+Each request selects **Use Preferences**, **Always**, or **Never** in Transport. Workspace v15 and earlier requests migrate their saved boolean to Always/Never so upgrades preserve behavior; **Make every request inherit certificate validation** opts them into the device default. Never affects only native desktop transport. Browser Fetch owns certificate verification, and the CLI safely refuses a request whose effective mode is Never rather than weakening Node globally.
+
 ## Response history
 
 After a request completes, use the history selector in the response summary to reopen an earlier saved result. Saved entries retain the response body, headers, status, timing, negotiated protocol, request URL, request identity, active environment identity, and receipt time. Selecting another request restores its newest eligible response instead of leaving the previous request's result on screen.

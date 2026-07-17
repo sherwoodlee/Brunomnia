@@ -10,7 +10,8 @@ import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resource
 import { hydrateScriptFileReferences, prepareScriptSubrequest, type ScriptFileBudget, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 import { createScriptExpect } from '../src/lib/scriptExpect';
 import { createScriptModules } from '../src/lib/scriptModules';
-import { resolveRequestTimeout } from '../src/lib/transport';
+import { resolveCertificateValidation, resolveRequestTimeout } from '../src/lib/transport';
+import { migrateWorkspace } from '../src/lib/storage';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -32,9 +33,9 @@ const readCliScriptFile = async (path: string) => {
   return { fileName: basename(path) || 'attachment.bin', mimeType: scriptFileMime(path), dataBase64: bytes.toString('base64') };
 };
 const loadWorkspace = async (path: string): Promise<Workspace> => {
-  const parsed = JSON.parse(await loadText(path)) as Partial<Workspace>;
-  if (parsed.format !== 'brunomnia' || !Array.isArray(parsed.collections)) fail('The input is not a Brunomnia workspace.');
-  return parsed as Workspace;
+  const parsed = JSON.parse(await loadText(path)) as unknown;
+  try { return migrateWorkspace(parsed); }
+  catch { return fail('The input is not a Brunomnia workspace.'); }
 };
 
 const expectApi = createScriptExpect();
@@ -453,7 +454,13 @@ const main = async () => {
     const requestedTestNamePattern = flag('--testNamePattern') ?? flag('-t') ?? flag('--test-name-pattern');
     if (subject === 'collection' && requestedTestNamePattern !== undefined) fail('--testNamePattern is only available for run test.');
     const testNamePattern = subject === 'test' ? validateTestNamePattern(requestedTestNamePattern) : undefined;
-    const executeWorkspaceHttp = (request: ApiRequest, variables: Record<string, string>) => executeHttp(request, variables, workspace.preferences?.requestTimeoutMs ?? 30_000);
+    const executeWorkspaceHttp = (request: ApiRequest, variables: Record<string, string>) => {
+      const validateCertificates = workspace.preferences.validateCertificates;
+      if (!resolveCertificateValidation(request.transport, validateCertificates)) {
+        throw new Error('The CLI cannot disable TLS certificate validation because Node Fetch does not expose that authority. Use the native desktop transport for explicitly untrusted development certificates.');
+      }
+      return executeHttp(request, variables, workspace.preferences.requestTimeoutMs);
+    };
     const report = await runCollection(collection, environment, {
       iterations: Number(flag('--iterations') ?? 1), retries: Number(flag('--retries') ?? 0), bail: hasFlag('--bail'), delayMs: 0,
       testNamePattern,
