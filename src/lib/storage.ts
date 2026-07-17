@@ -197,6 +197,9 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     density: source?.density === 'compact' ? 'compact' : 'comfortable',
     fontSize: Math.min(20, Math.max(11, Number(source?.fontSize) || defaultPreferences.fontSize)),
     requestTimeoutMs: Math.min(600_000, Math.max(1_000, Number(source?.requestTimeoutMs) || defaultPreferences.requestTimeoutMs)),
+    scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
+    allowScriptRequests: source?.allowScriptRequests === true,
+    enableVaultInScripts: source?.enableVaultInScripts === true,
     autoFetchGraphqlSchema: source?.autoFetchGraphqlSchema !== false,
     confirmDestructive: source?.confirmDestructive !== false,
     shortcuts,
@@ -337,7 +340,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 11,
+    version: 12,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

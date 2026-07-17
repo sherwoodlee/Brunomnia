@@ -258,7 +258,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 11;
+  version: 12;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -290,6 +290,9 @@ export type AppPreferences = {
   density: 'comfortable' | 'compact';
   fontSize: number;
   requestTimeoutMs: number;
+  scriptTimeoutMs: number;
+  allowScriptRequests: boolean;
+  enableVaultInScripts: boolean;
   autoFetchGraphqlSchema: boolean;
   confirmDestructive: boolean;
   shortcuts: Record<ShortcutAction, string>;
@@ -519,6 +522,8 @@ export type ScriptTestResult = {
 export type ScriptRunResult = {
   request: ApiRequest;
   environment: Record<string, string>;
+  collectionVariables?: Record<string, string>;
+  folders?: Array<{ id: string; name: string; environment: Record<string, string> }>;
   logs: string[];
   tests: ScriptTestResult[];
   localVariables?: Record<string, string>;

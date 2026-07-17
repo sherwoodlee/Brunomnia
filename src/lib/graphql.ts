@@ -129,7 +129,7 @@ const balancedIssue = (source: string): string => {
 
 const rootFieldNames = (source: string) => {
   const cleaned = withoutStringsAndComments(source).replace(/\.\.\.\s*(?:on\s+)?[_A-Za-z][_0-9A-Za-z]*/g, ' ');
-  const tokens = cleaned.match(/[_A-Za-z][_0-9A-Za-z]*|[{}():!@$,]/g) ?? [];
+  const tokens: string[] = cleaned.match(/[_A-Za-z][_0-9A-Za-z]*|[{}():!@$,]/g) ?? [];
   const open = tokens.indexOf('{');
   if (open < 0) return [];
   const fields: string[] = [];

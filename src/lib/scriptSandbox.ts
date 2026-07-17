@@ -1,52 +1,198 @@
-import type { ApiRequest, HttpResponse, ScriptRunResult } from '../types';
+import { createBlankRequest } from '../data/seed';
+import type { ApiRequest, HttpResponse, KeyValue, ScriptRunResult } from '../types';
+
+export type ScriptFolderState = { id: string; name: string; environment: Record<string, string> };
+
+export type ScriptRunOptions = {
+  collectionVariables?: Record<string, string>;
+  folders?: ScriptFolderState[];
+  vault?: Record<string, string>;
+  sendRequest?: (request: ApiRequest, variables: Record<string, string>) => Promise<HttpResponse>;
+  maxSubrequests?: number;
+  maxSubrequestBytes?: number;
+};
 
 type WorkerOutput = {
+  type: 'result';
   ok: boolean;
   error?: string;
   request: ApiRequest;
   environment: Record<string, string>;
+  collectionVariables: Record<string, string>;
+  folders: ScriptFolderState[];
   logs: string[];
   tests: ScriptRunResult['tests'];
   localVariables: Record<string, string>;
 };
 
+type WorkerSubrequest = {
+  type: 'subrequest';
+  id: string;
+  input: unknown;
+  variables: Record<string, string>;
+};
+
+const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+const stringValue = (value: unknown, fallback = '') => typeof value === 'string' ? value : value === undefined || value === null ? fallback : String(value);
+const scriptRow = (value: unknown, index: number, prefix: string): KeyValue | undefined => {
+  const source = record(value);
+  if (!source) return undefined;
+  const name = stringValue(source.key ?? source.name).trim();
+  if (!name) return undefined;
+  return { id: `${prefix}-${index}`, name, value: stringValue(source.value), enabled: source.enabled !== false, description: stringValue(source.description) };
+};
+
+const scriptHeaders = (value: unknown): KeyValue[] => {
+  if (Array.isArray(value)) return value.map((item, index) => scriptRow(item, index, 'script-header')).filter((item): item is KeyValue => Boolean(item));
+  const source = record(value);
+  return source ? Object.entries(source).flatMap(([name, item], index) => {
+    const values = Array.isArray(item) ? item : [item];
+    return values.map((entry, offset) => ({ id: `script-header-${index}-${offset}`, name, value: stringValue(entry), enabled: true }));
+  }) : [];
+};
+
+const assertHttpUrl = (value: unknown): string => {
+  const url = stringValue(value).trim();
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { throw new Error('Script requests require an absolute http:// or https:// URL.'); }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Script requests are limited to http:// and https:// URLs.');
+  return parsed.toString();
+};
+
+/** Converts the documented Insomnia sendRequest input into a bounded Brunomnia request. */
+export const normalizeScriptSubrequest = (input: unknown, sourceRequest: ApiRequest): ApiRequest => {
+  const serialized = JSON.stringify(input);
+  if (serialized && new Blob([serialized]).size > 256_000) throw new Error('Script request input exceeds the 256 KB bridge limit.');
+  const source = typeof input === 'string' ? { url: input } : record(input);
+  if (!source) throw new Error('Script requests must be a URL string or request object.');
+  const request = createBlankRequest('Script request');
+  request.id = `script-request-${crypto.randomUUID()}`;
+  request.url = assertHttpUrl(source.url);
+  request.method = stringValue(source.method, 'GET').trim().toUpperCase() || 'GET';
+  if (!/^[A-Z][A-Z0-9!#$%&'*+.^_`|~-]{0,31}$/.test(request.method)) throw new Error('Script request method is not a valid HTTP token.');
+  request.headers = scriptHeaders(source.header ?? source.headers);
+  request.transport = { ...sourceRequest.transport, timeoutMs: Math.min(10_000, Math.max(1_000, sourceRequest.transport.timeoutMs)) };
+  request.preRequestScript = '';
+  request.tests = '';
+  const auth = record(source.auth);
+  if (auth) {
+    const type = stringValue(auth.type, 'none').toLowerCase();
+    request.auth.disabled = false;
+    if (type === 'basic') { request.auth.type = 'basic'; request.auth.username = stringValue(auth.username); request.auth.password = stringValue(auth.password); }
+    else if (type === 'bearer') { request.auth.type = 'bearer'; request.auth.token = stringValue(auth.token ?? auth.accessToken); request.auth.prefix = stringValue(auth.prefix, 'Bearer'); }
+    else if (type === 'apikey' || type === 'api-key') { request.auth.type = 'api-key'; request.auth.apiKeyName = stringValue(auth.key ?? auth.name); request.auth.apiKeyValue = stringValue(auth.value); request.auth.apiKeyLocation = auth.in === 'query' || auth.location === 'query' ? 'query' : 'header'; }
+    else if (type !== 'none' && type !== 'noauth') throw new Error(`Script request auth type '${type}' is not supported.`);
+  }
+  const proxy = record(source.proxy);
+  if (proxy) {
+    if (proxy.url) request.transport.proxyUrl = stringValue(proxy.url);
+    else if (proxy.host) request.transport.proxyUrl = `${stringValue(proxy.protocol, 'http')}://${stringValue(proxy.host)}${proxy.port ? `:${stringValue(proxy.port)}` : ''}`;
+    request.transport.proxyExclusions = Array.isArray(proxy.exclusions) ? proxy.exclusions.map(String).join(',') : stringValue(proxy.exclusions);
+  }
+  const certificate = record(source.certificate);
+  if (certificate) {
+    if (certificate.certPath || certificate.keyPath || certificate.path) throw new Error('Script requests cannot read certificate file paths. Paste PEM content in Transport settings instead.');
+    request.transport.clientCertificatePem = stringValue(certificate.cert ?? certificate.certificate);
+    request.transport.clientKeyPem = stringValue(certificate.key);
+    request.transport.clientCertificateDomains = Array.isArray(certificate.domains) ? certificate.domains.map(String).join(',') : stringValue(certificate.domains);
+  }
+
+  const body = source.body;
+  if (typeof body === 'string') {
+    request.bodyMode = 'text';
+    request.body = body;
+  } else if (record(body)) {
+    const bodySource = body as Record<string, unknown>;
+    const mode = stringValue(bodySource.mode, 'raw').toLowerCase();
+    if (mode === 'raw') {
+      request.bodyMode = 'text';
+      request.body = stringValue(bodySource.raw);
+    } else if (mode === 'urlencoded') {
+      request.bodyMode = 'form-urlencoded';
+      request.formBody = (Array.isArray(bodySource.urlencoded) ? bodySource.urlencoded : []).map((item, index) => scriptRow(item, index, 'script-form')).filter((item): item is KeyValue => Boolean(item));
+    } else if (mode === 'graphql') {
+      const graphql = record(bodySource.graphql) ?? bodySource;
+      request.protocol = 'graphql';
+      request.method = 'POST';
+      request.graphql.query = stringValue(graphql.query);
+      request.graphql.variables = typeof graphql.variables === 'string' ? graphql.variables : JSON.stringify(graphql.variables ?? {}, null, 2);
+      request.graphql.operationName = stringValue(graphql.operationName);
+    } else if (mode === 'formdata') {
+      const parts = Array.isArray(bodySource.formdata) ? bodySource.formdata : [];
+      if (parts.some((item) => record(item)?.type === 'file' || record(item)?.src !== undefined)) throw new Error('Script requests cannot read file paths. Attach files in the request editor instead.');
+      request.bodyMode = 'multipart';
+      request.multipartBody = parts.map((item, index) => scriptRow(item, index, 'script-part')).filter((item): item is KeyValue => Boolean(item)).map((item) => ({ ...item, kind: 'text' as const }));
+    } else if (mode === 'file') {
+      throw new Error('Script requests cannot read file paths. Attach files in the request editor instead.');
+    } else {
+      throw new Error(`Script request body mode '${mode}' is not supported.`);
+    }
+  }
+  return request;
+};
+
 const sandboxPrefix = `
+const pendingSubrequests = new Map();
+self.addEventListener('message', ({ data }) => {
+  if (data?.type !== 'subresponse') return;
+  const pending = pendingSubrequests.get(data.id);
+  if (!pending) return;
+  pendingSubrequests.delete(data.id);
+  if (data.error) pending.reject(new Error(data.error));
+  else pending.resolve(data.response);
+});
 self.onmessage = async ({ data }) => {
-  const state = structuredClone(data);
+  if (data?.type !== 'run') return;
+  const state = structuredClone(data.state);
+  const hostPostMessage = self.postMessage.bind(self);
   const logs = [];
   const tests = [];
+  let subrequestCount = 0;
   const constructors = [Function, (async () => {}).constructor, (function* () {}).constructor, (async function* () {}).constructor];
   constructors.forEach((constructor) => {
     try { Object.defineProperty(constructor.prototype, 'constructor', { value: undefined, writable: false, configurable: false }); }
-    catch { /* The worker CSP remains the outer permission boundary. */ }
+    catch { /* The worker boundary remains the outer permission boundary. */ }
   });
   const denied = (capability) => () => { throw new Error(capability + ' is not available in the script sandbox.'); };
-  const fetch = denied('Network access');
+  const fetch = denied('Direct network access; enable and use insomnia.sendRequest()');
   const XMLHttpRequest = undefined;
   const WebSocket = undefined;
+  const WebTransport = undefined;
   const EventSource = undefined;
   const Worker = undefined;
+  const SharedWorker = undefined;
+  const BroadcastChannel = undefined;
   const importScripts = denied('Module imports');
   const indexedDB = undefined;
   const caches = undefined;
   const navigator = undefined;
+  const location = undefined;
   const document = undefined;
   const window = undefined;
+  const pushLog = (value) => { if (logs.length < 1000) logs.push(String(value).slice(0, 20000)); };
   const console = {
-    log: (...values) => logs.push(values.map((value) => typeof value === 'string' ? value : JSON.stringify(value)).join(' ')),
-    info: (...values) => logs.push(values.map(String).join(' ')),
-    warn: (...values) => logs.push('[warn] ' + values.map(String).join(' ')),
-    error: (...values) => logs.push('[error] ' + values.map(String).join(' ')),
+    log: (...values) => pushLog(values.map((value) => typeof value === 'string' ? value : JSON.stringify(value)).join(' ')),
+    info: (...values) => pushLog(values.map(String).join(' ')),
+    warn: (...values) => pushLog('[warn] ' + values.map(String).join(' ')),
+    error: (...values) => pushLog('[error] ' + values.map(String).join(' ')),
   };
   const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const mergedVariables = () => Object.assign({}, state.environment, state.collectionVariables, ...state.folders.map((folder) => folder.environment), state.localVariables, state.iterationData);
+  const replaceIn = (value) => String(value).replace(/{{\\s*([^{}]+?)\\s*}}/g, (match, name) => mergedVariables()[name] ?? match);
   const variableApi = (values) => ({
     get: (name) => values[name],
-    set: (name, value) => { values[name] = String(value); },
+    set: (name, value) => {
+      const key = String(name);
+      const text = String(value);
+      if (key.length > 256 || text.length > 1000000) throw new Error('Script variable exceeds the name or 1 MB value limit.');
+      if (!Object.prototype.hasOwnProperty.call(values, key) && Object.keys(values).length >= 10000) throw new Error('Script variable scope exceeds 10,000 entries.');
+      values[key] = text;
+    },
     unset: (name) => { delete values[name]; },
     has: (name) => Object.prototype.hasOwnProperty.call(values, name),
     clear: () => { Object.keys(values).forEach((name) => delete values[name]); },
     toObject: () => ({ ...values }),
-    replaceIn: (value) => String(value).replace(/{{\\s*([^{}]+?)\\s*}}/g, (match, name) => values[name] ?? state.localVariables[name] ?? match),
+    replaceIn,
   });
   const expect = (actual, negated = false) => {
     const verify = (condition, message) => { if (negated ? condition : !condition) throw new Error(message); };
@@ -80,49 +226,180 @@ self.onmessage = async ({ data }) => {
     Object.defineProperty(api, 'empty', { get: () => { verify(actual?.length === 0 || Object.keys(actual || {}).length === 0, 'Expected value to be empty'); return api; } });
     return api;
   };
+  const assertion = (condition, message) => { if (!condition) throw new Error(message || 'Assertion failed'); };
+  assertion.ok = assertion;
+  assertion.equal = (actual, expected, message) => assertion(actual == expected, message || 'Expected values to be equal');
+  assertion.strictEqual = (actual, expected, message) => assertion(actual === expected, message || 'Expected values to be strictly equal');
+  assertion.deepEqual = (actual, expected, message) => assertion(same(actual, expected), message || 'Expected values to be deeply equal');
+  const lodash = {
+    cloneDeep: (value) => structuredClone(value),
+    get: (value, path, fallback) => String(path).replace(/\\[(\\w+)\\]/g, '.$1').split('.').filter(Boolean).reduce((current, key) => current?.[key], value) ?? fallback,
+    has: (value, path) => lodash.get(value, path, undefined) !== undefined,
+    merge: (target, ...sources) => Object.assign(target, ...sources),
+  };
+  const querystring = {
+    parse: (value) => Object.fromEntries(new URLSearchParams(String(value))),
+    stringify: (value) => new URLSearchParams(Object.entries(value || {}).map(([key, item]) => [key, String(item)])).toString(),
+  };
+  const modules = {
+    assert: assertion,
+    atob,
+    btoa,
+    chai: { expect },
+    lodash,
+    querystring,
+    timers: { setTimeout, clearTimeout, setInterval, clearInterval },
+    url: { URL, URLSearchParams },
+    util: { format: (...values) => values.map(String).join(' ') },
+    uuid: { v4: () => crypto.randomUUID() },
+  };
+  const require = (name) => {
+    if (Object.prototype.hasOwnProperty.call(modules, name)) return modules[name];
+    throw new Error("Module '" + name + "' is not bundled in Brunomnia's script sandbox.");
+  };
   const headerApi = {
-    add: ({ key, name, value }) => state.request.headers.push({ id: 'script-' + Date.now() + '-' + state.request.headers.length, name: key || name, value: String(value), enabled: true }),
+    add: ({ key, name, value }) => { if (state.request.headers.length >= 500) throw new Error('Script request exceeds 500 headers.'); state.request.headers.push({ id: 'script-' + Date.now() + '-' + state.request.headers.length, name: String(key || name || '').slice(0, 1000), value: String(value).slice(0, 100000), enabled: true }); },
     remove: (name) => { state.request.headers = state.request.headers.filter((header) => header.name.toLowerCase() !== String(name).toLowerCase()); },
     get: (name) => state.request.headers.find((header) => header.enabled && header.name.toLowerCase() === String(name).toLowerCase())?.value,
     has: (name) => state.request.headers.some((header) => header.enabled && header.name.toLowerCase() === String(name).toLowerCase()),
     set: (name, value) => {
       const existing = state.request.headers.find((header) => header.name.toLowerCase() === String(name).toLowerCase());
-      if (existing) { existing.value = String(value); existing.enabled = true; }
-      else state.request.headers.push({ id: 'script-' + Date.now() + '-' + state.request.headers.length, name: String(name), value: String(value), enabled: true });
+      if (existing) { existing.value = String(value).slice(0, 100000); existing.enabled = true; }
+      else { if (state.request.headers.length >= 500) throw new Error('Script request exceeds 500 headers.'); state.request.headers.push({ id: 'script-' + Date.now() + '-' + state.request.headers.length, name: String(name).slice(0, 1000), value: String(value).slice(0, 100000), enabled: true }); }
     },
   };
-  const responseHeaders = state.response ? Object.entries(state.response.headers).map(([key, value]) => ({ key, value })) : [];
-  responseHeaders.get = (name) => responseHeaders.find((header) => header.key.toLowerCase() === String(name).toLowerCase())?.value;
-  responseHeaders.has = (name) => responseHeaders.some((header) => header.key.toLowerCase() === String(name).toLowerCase());
-  responseHeaders.toObject = () => Object.fromEntries(responseHeaders.map(({ key, value }) => [key, value]));
-  const insomnia = {
-    environment: variableApi(state.environment),
-    baseEnvironment: variableApi(state.environment),
-    collectionVariables: variableApi(state.environment),
-    variables: variableApi(state.localVariables),
-    localVars: variableApi(state.localVariables),
-    iterationData: variableApi(state.iterationData),
-    request: state.request,
-    response: state.response ? {
-      status: state.response.status,
-      responseTime: state.response.durationMs,
-      json: () => JSON.parse(state.response.body),
-      text: () => state.response.body,
-      headers: responseHeaders,
-      hasHeader: (name) => responseHeaders.has(name),
-      getHeader: (name) => responseHeaders.get(name),
+  let requestUrl = String(state.request.url || '');
+  const urlApi = {
+    addQueryParams: (items) => {
+      const entries = Array.isArray(items) ? items : Object.entries(items || {}).map(([name, value]) => ({ name, value }));
+      try {
+        const url = new URL(requestUrl);
+        entries.forEach((item) => { const name = item.name ?? item.key; if (name) url.searchParams.append(String(name), String(item.value ?? '')); });
+        requestUrl = url.toString();
+      } catch {
+        const query = entries.flatMap((item) => { const name = item.name ?? item.key; return name ? [encodeURIComponent(String(name)) + '=' + encodeURIComponent(String(item.value ?? ''))] : []; }).join('&');
+        if (query) requestUrl += (requestUrl.includes('?') ? '&' : '?') + query;
+      }
+      if (requestUrl.length > 100000) throw new Error('Script request URL exceeds 100 KB.');
+      return urlApi;
+    },
+    getQueryString: () => { try { return new URL(requestUrl).searchParams.toString(); } catch { return requestUrl.split('?')[1]?.split('#')[0] || ''; } },
+    toString: () => requestUrl,
+    valueOf: () => requestUrl,
+    [Symbol.toPrimitive]: () => requestUrl,
+  };
+  let requestBody = String(state.request.body || '');
+  const bodyApi = {
+    update: (body) => {
+      const input = typeof body === 'string' ? { mode: 'raw', raw: body } : body || {};
+      const mode = String(input.mode || 'raw').toLowerCase();
+      if (mode === 'raw') { const next = String(input.raw ?? ''); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); state.request.bodyMode = 'text'; requestBody = next; }
+      else if (mode === 'urlencoded') { state.request.bodyMode = 'form-urlencoded'; state.request.formBody = (input.urlencoded || []).map((item, index) => ({ id: 'script-form-' + index, name: String(item.key ?? item.name ?? ''), value: String(item.value ?? ''), enabled: item.enabled !== false, description: String(item.description ?? '') })).filter((item) => item.name); }
+      else if (mode === 'graphql') { const graphql = input.graphql || input; state.request.protocol = 'graphql'; state.request.method = 'POST'; state.request.graphql.query = String(graphql.query ?? ''); state.request.graphql.variables = typeof graphql.variables === 'string' ? graphql.variables : JSON.stringify(graphql.variables || {}, null, 2); state.request.graphql.operationName = String(graphql.operationName ?? ''); }
+      else if (mode === 'formdata') { if ((input.formdata || []).some((item) => item.type === 'file' || item.src !== undefined)) throw new Error('Scripts cannot read file paths.'); state.request.bodyMode = 'multipart'; state.request.multipartBody = (input.formdata || []).map((item, index) => ({ id: 'script-part-' + index, name: String(item.key ?? item.name ?? ''), value: String(item.value ?? ''), enabled: item.enabled !== false, description: String(item.description ?? ''), kind: 'text' })).filter((item) => item.name); }
+      else if (mode === 'file') throw new Error('Scripts cannot read file paths.');
+      else throw new Error("Request body mode '" + mode + "' is not supported.");
+      return bodyApi;
+    },
+    toString: () => requestBody,
+    valueOf: () => requestBody,
+    [Symbol.toPrimitive]: () => requestBody,
+  };
+  Object.defineProperty(state.request, 'url', { configurable: true, enumerable: true, get: () => urlApi, set: (value) => { const next = String(value); if (next.length > 100000) throw new Error('Script request URL exceeds 100 KB.'); requestUrl = next; } });
+  Object.defineProperty(state.request, 'body', { configurable: true, enumerable: true, get: () => bodyApi, set: (value) => { const next = typeof value === 'string' ? value : JSON.stringify(value); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); requestBody = next; state.request.bodyMode = 'text'; } });
+  state.request.auth.update = (auth) => {
+    const input = auth || {};
+    const type = String(input.type || 'none').toLowerCase();
+    state.request.auth.disabled = false;
+    if (type === 'basic') { state.request.auth.type = 'basic'; state.request.auth.username = String(input.username ?? ''); state.request.auth.password = String(input.password ?? ''); }
+    else if (type === 'bearer') { state.request.auth.type = 'bearer'; state.request.auth.token = String(input.token ?? input.accessToken ?? ''); state.request.auth.prefix = String(input.prefix ?? 'Bearer'); }
+    else if (type === 'apikey' || type === 'api-key') { state.request.auth.type = 'api-key'; state.request.auth.apiKeyName = String(input.key ?? input.name ?? ''); state.request.auth.apiKeyValue = String(input.value ?? ''); state.request.auth.apiKeyLocation = input.in === 'query' || input.location === 'query' ? 'query' : 'header'; }
+    else if (type === 'none' || type === 'noauth') { state.request.auth.type = 'none'; state.request.auth.disabled = true; }
+    else throw new Error("Request auth type '" + type + "' is not supported by script mutation yet.");
+  };
+  state.request.proxy = {
+    update: (proxy) => {
+      const input = proxy || {};
+      if (input.url) state.request.transport.proxyUrl = String(input.url);
+      else if (input.host) state.request.transport.proxyUrl = String(input.protocol || 'http') + '://' + String(input.host) + (input.port ? ':' + String(input.port) : '');
+      state.request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(',') : String(input.exclusions ?? state.request.transport.proxyExclusions);
+    },
+  };
+  state.request.certificate = {
+    update: (certificate) => {
+      const input = certificate || {};
+      if (input.certPath || input.keyPath || input.path) throw new Error('Scripts cannot read certificate file paths. Paste PEM content in Transport settings instead.');
+      state.request.transport.clientCertificatePem = String(input.cert ?? input.certificate ?? '');
+      state.request.transport.clientKeyPem = String(input.key ?? '');
+      state.request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(',') : String(input.domains ?? '');
+    },
+  };
+  const responseFacade = (response) => {
+    if (!response) return undefined;
+    const headers = Object.entries(response.headers || {}).map(([key, value]) => ({ key, value }));
+    headers.get = (name) => headers.find((header) => header.key.toLowerCase() === String(name).toLowerCase())?.value;
+    headers.has = (name) => headers.some((header) => header.key.toLowerCase() === String(name).toLowerCase());
+    headers.toObject = () => Object.fromEntries(headers.map(({ key, value }) => [key, value]));
+    const cookieValues = (response.setCookies || []).map((header) => header.split(';')[0]);
+    return {
+      status: response.status,
+      code: response.status,
+      statusText: response.statusText,
+      responseTime: response.durationMs,
+      json: () => JSON.parse(response.body),
+      text: () => response.body,
+      headers,
+      hasHeader: (name) => headers.has(name),
+      getHeader: (name) => headers.get(name),
       cookies: {
-        toObject: () => Object.fromEntries((state.response.setCookies || []).map((header) => {
-          const pair = header.split(';')[0]; const split = pair.indexOf('=');
-          return split > 0 ? [pair.slice(0, split).trim(), pair.slice(split + 1).trim()] : ['', ''];
-        }).filter(([name]) => name)),
-        get: (name) => {
-          const pair = (state.response.setCookies || []).map((header) => header.split(';')[0]).find((value) => value.slice(0, value.indexOf('=')).trim() === String(name));
-          return pair ? pair.slice(pair.indexOf('=') + 1).trim() : undefined;
-        },
+        toObject: () => Object.fromEntries(cookieValues.map((pair) => { const split = pair.indexOf('='); return split > 0 ? [pair.slice(0, split).trim(), pair.slice(split + 1).trim()] : ['', '']; }).filter(([name]) => name)),
+        get: (name) => { const pair = cookieValues.find((value) => value.slice(0, value.indexOf('=')).trim() === String(name)); return pair ? pair.slice(pair.indexOf('=') + 1).trim() : undefined; },
       },
-    } : undefined,
+    };
+  };
+  const sendRequest = (input, callback) => {
+    const run = () => {
+      if (!state.permissions.network) throw new Error('Script-initiated requests are disabled. Enable them in Preferences.');
+      if (subrequestCount >= state.permissions.maxSubrequests) throw new Error('Script exceeded the secondary-request limit.');
+      subrequestCount += 1;
+      const id = 'subrequest-' + subrequestCount + '-' + Date.now();
+      const promise = new Promise((resolve, reject) => pendingSubrequests.set(id, { resolve, reject }));
+      hostPostMessage({ type: 'subrequest', id, input, variables: mergedVariables() });
+      return promise.then(responseFacade);
+    };
+    if (typeof callback === 'function') { Promise.resolve().then(run).then((response) => callback(null, response), (error) => callback(error)); return undefined; }
+    return Promise.resolve().then(run);
+  };
+  const environmentApi = variableApi(state.environment);
+  const collectionApi = variableApi(state.collectionVariables);
+  const localApi = variableApi(state.localVariables);
+  const iterationApi = variableApi(state.iterationData);
+  localApi.environmentVars = environmentApi;
+  localApi.collectionVariables = collectionApi;
+  localApi.localVars = localApi;
+  localApi.iterationDataVars = iterationApi;
+  const folderFacade = (folder) => ({ id: folder.id, name: folder.name, environment: variableApi(folder.environment) });
+  const parentFolders = {
+    get: () => [...state.folders].reverse().map(folderFacade),
+    getById: (id) => { const folder = state.folders.find((item) => item.id === String(id)); return folder ? folderFacade(folder) : undefined; },
+    getByName: (name) => { const folder = [...state.folders].reverse().find((item) => item.name === String(name)); return folder ? folderFacade(folder) : undefined; },
+  };
+  const insomnia = {
+    environment: environmentApi,
+    baseEnvironment: environmentApi,
+    collectionVariables: collectionApi,
+    variables: localApi,
+    localVars: localApi,
+    iterationData: iterationApi,
+    parentFolders,
+    request: state.request,
+    response: responseFacade(state.response),
+    sendRequest,
+    replaceIn,
+    vault: { get: (name) => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); return state.vault[String(name)]; } },
+    expect,
     test: (name, callback) => {
+      if (tests.length >= 1000) throw new Error('Script exceeds 1,000 test results.');
       try { callback(); tests.push({ name, passed: true }); }
       catch (error) { tests.push({ name, passed: false, error: error instanceof Error ? error.message : String(error) }); }
     },
@@ -133,60 +410,77 @@ self.onmessage = async ({ data }) => {
   insomnia.request.setHeader = headerApi.set;
   insomnia.request.getHeader = headerApi.get;
   insomnia.request.hasHeader = headerApi.has;
-  insomnia.request.getUrl = () => insomnia.request.url;
-  insomnia.request.setUrl = (url) => { insomnia.request.url = String(url); };
+  insomnia.request.getUrl = () => requestUrl;
+  insomnia.request.setUrl = (url) => { const next = String(url); if (next.length > 100000) throw new Error('Script request URL exceeds 100 KB.'); requestUrl = next; };
   insomnia.request.getMethod = () => insomnia.request.method;
   insomnia.request.setMethod = (method) => { insomnia.request.method = String(method).toUpperCase(); };
-  insomnia.request.getBody = () => insomnia.request.body;
-  insomnia.request.setBody = (body) => { insomnia.request.body = typeof body === 'string' ? body : JSON.stringify(body); };
+  insomnia.request.getBody = () => requestBody;
+  insomnia.request.setBody = (body) => { const next = typeof body === 'string' ? body : JSON.stringify(body); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); requestBody = next; insomnia.request.bodyMode = 'text'; };
+  const cleanupRequest = () => {
+    delete state.request.headersApi;
+    delete state.request.addHeader;
+    delete state.request.removeHeader;
+    delete state.request.setHeader;
+    delete state.request.getHeader;
+    delete state.request.hasHeader;
+    delete state.request.getUrl;
+    delete state.request.setUrl;
+    delete state.request.getMethod;
+    delete state.request.setMethod;
+    delete state.request.getBody;
+    delete state.request.setBody;
+    delete state.request.auth.update;
+    delete state.request.proxy;
+    delete state.request.certificate;
+    delete state.request.url;
+    state.request.url = requestUrl;
+    delete state.request.body;
+    state.request.body = requestBody;
+  };
   try {
-    await (async () => {
+    const runUserScript = async function () {
+      'use strict';
       const globalThis = undefined;
       const self = undefined;
+      const state = undefined;
+      const hostPostMessage = undefined;
+      const pendingSubrequests = undefined;
+      const constructors = undefined;
+      const cleanupRequest = undefined;
+      const subrequestCount = undefined;
+      const requestUrl = undefined;
+      const requestBody = undefined;
+      const logs = undefined;
+      const tests = undefined;
       const Function = undefined;
-      const eval = undefined;
       const WebAssembly = undefined;
+      const WebTransport = undefined;
+      const SharedWorker = undefined;
+      const BroadcastChannel = undefined;
+      const location = undefined;
       const postMessage = undefined;
       const onmessage = undefined;
 `;
 
 const sandboxSuffix = `
-    })();
-    delete state.request.headersApi;
-    delete state.request.addHeader;
-    delete state.request.removeHeader;
-    delete state.request.setHeader;
-    delete state.request.getHeader;
-    delete state.request.hasHeader;
-    delete state.request.getUrl;
-    delete state.request.setUrl;
-    delete state.request.getMethod;
-    delete state.request.setMethod;
-    delete state.request.getBody;
-    delete state.request.setBody;
-    self.postMessage({ ok: true, request: state.request, environment: state.environment, localVariables: state.localVariables, logs, tests });
+    };
+    await runUserScript();
+    cleanupRequest();
+    const output = { type: 'result', ok: true, request: state.request, environment: state.environment, collectionVariables: state.collectionVariables, folders: state.folders, localVariables: state.localVariables, logs, tests };
+    if (JSON.stringify(output).length > 20000000) hostPostMessage({ type: 'result', ok: false, error: 'Script result exceeds the 20 MB bridge limit.' });
+    else hostPostMessage(output);
   } catch (error) {
-    delete state.request.headersApi;
-    delete state.request.addHeader;
-    delete state.request.removeHeader;
-    delete state.request.setHeader;
-    delete state.request.getHeader;
-    delete state.request.hasHeader;
-    delete state.request.getUrl;
-    delete state.request.setUrl;
-    delete state.request.getMethod;
-    delete state.request.setMethod;
-    delete state.request.getBody;
-    delete state.request.setBody;
-    self.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error), request: state.request, environment: state.environment, localVariables: state.localVariables, logs, tests });
+    cleanupRequest();
+    const output = { type: 'result', ok: false, error: error instanceof Error ? error.message : String(error), request: state.request, environment: state.environment, collectionVariables: state.collectionVariables, folders: state.folders, localVariables: state.localVariables, logs, tests };
+    if (JSON.stringify(output).length > 20000000) hostPostMessage({ type: 'result', ok: false, error: 'Script result exceeds the 20 MB bridge limit.' });
+    else hostPostMessage(output);
   }
 };
 `;
 
 export const validateScriptSource = (script: string) => {
-  if (/\bimport\s*(?:\/\*[\s\S]*?\*\/\s*)?\(/.test(script)) {
-    throw new Error('Module imports are not available in the script sandbox.');
-  }
+  if (/\bimport\s*(?:\/\*[\s\S]*?\*\/\s*)?\(/.test(script)) throw new Error('Module imports are not available in the script sandbox.');
+  if (/\beval\b/.test(script)) throw new Error('eval is not available in the script sandbox.');
 };
 
 export const buildScriptWorkerSource = (script: string) => `${sandboxPrefix}${script}${sandboxSuffix}`;
@@ -196,30 +490,63 @@ export const runBrowserScript = async (
   request: ApiRequest,
   environment: Record<string, string>,
   response?: HttpResponse,
-  timeoutMs = 2000,
+  timeoutMs = 10_000,
   localVariables: Record<string, string> = {},
   iterationData: Record<string, string> = {},
+  options: ScriptRunOptions = {},
 ): Promise<ScriptRunResult> => {
-  if (!script.trim()) return { request: structuredClone(request), environment: { ...environment }, localVariables: { ...localVariables }, logs: [], tests: [] };
+  const collectionVariables = { ...(options.collectionVariables ?? {}) };
+  const folders = structuredClone(options.folders ?? []);
+  if (!script.trim()) return { request: structuredClone(request), environment: { ...environment }, collectionVariables, folders, localVariables: { ...localVariables }, logs: [], tests: [] };
   validateScriptSource(script);
   const blob = new Blob([buildScriptWorkerSource(script)], { type: 'text/javascript' });
   const workerUrl = URL.createObjectURL(blob);
   const worker = new Worker(workerUrl);
+  const maxSubrequests = Math.min(20, Math.max(1, options.maxSubrequests ?? 5));
+  const maxSubrequestBytes = Math.min(20_000_000, Math.max(1_024, options.maxSubrequestBytes ?? 5_000_000));
   try {
     const output = await new Promise<WorkerOutput>((resolve, reject) => {
       const timeout = window.setTimeout(() => reject(new Error(`Script exceeded the ${timeoutMs} ms execution limit.`)), timeoutMs);
-      worker.onerror = (event) => {
-        window.clearTimeout(timeout);
-        reject(new Error(event.message || 'Script worker failed.'));
+      const fail = (error: Error) => { window.clearTimeout(timeout); reject(error); };
+      worker.onerror = (event) => fail(new Error(event.message || 'Script worker failed.'));
+      worker.onmessage = (event: MessageEvent<WorkerOutput | WorkerSubrequest>) => {
+        const message = event.data;
+        if (message.type === 'result') {
+          window.clearTimeout(timeout);
+          resolve(message);
+          return;
+        }
+        if (!options.sendRequest) {
+          worker.postMessage({ type: 'subresponse', id: message.id, error: 'Script-initiated requests are disabled. Enable them in Preferences.' });
+          return;
+        }
+        try {
+          const subrequest = normalizeScriptSubrequest(message.input, request);
+          void options.sendRequest(subrequest, message.variables).then((subresponse) => {
+            if (new Blob([subresponse.body]).size > maxSubrequestBytes) throw new Error(`Script response exceeds the ${Math.round(maxSubrequestBytes / 1_000_000)} MB bridge limit.`);
+            worker.postMessage({ type: 'subresponse', id: message.id, response: subresponse });
+          }).catch((error) => worker.postMessage({ type: 'subresponse', id: message.id, error: error instanceof Error ? error.message : String(error) }));
+        } catch (error) {
+          worker.postMessage({ type: 'subresponse', id: message.id, error: error instanceof Error ? error.message : String(error) });
+        }
       };
-      worker.onmessage = (event: MessageEvent<WorkerOutput>) => {
-        window.clearTimeout(timeout);
-        resolve(event.data);
-      };
-      worker.postMessage({ request, environment, response, localVariables, iterationData });
+      worker.postMessage({
+        type: 'run',
+        state: {
+          request,
+          environment,
+          collectionVariables,
+          folders,
+          response,
+          localVariables,
+          iterationData,
+          vault: options.vault ?? {},
+          permissions: { network: Boolean(options.sendRequest), vault: Boolean(options.vault), maxSubrequests },
+        },
+      });
     });
     if (!output.ok) throw new Error(output.error || 'Script execution failed.');
-    return { request: output.request, environment: output.environment, localVariables: output.localVariables, logs: output.logs, tests: output.tests };
+    return { request: output.request, environment: output.environment, collectionVariables: output.collectionVariables, folders: output.folders, localVariables: output.localVariables, logs: output.logs, tests: output.tests };
   } finally {
     worker.terminate();
     URL.revokeObjectURL(workerUrl);

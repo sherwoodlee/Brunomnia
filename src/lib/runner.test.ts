@@ -59,4 +59,38 @@ describe('collection runner', () => {
       { local: { local: 'yes' }, iteration: { row: '42', host: 'iteration' } },
     ]);
   });
+
+  it('carries collection and parent-folder script variables through the run', async () => {
+    const request = { ...createBlankRequest('one'), folderId: 'child' };
+    const seen: Array<{ collection: Record<string, string>; folder: Record<string, string> }> = [];
+    await runCollection(
+      {
+        id: 'collection', name: 'Collection', expanded: true, requests: [request],
+        environment: [{ id: 'collection-token', name: 'collectionToken', value: 'before', enabled: true }],
+        folders: [{ id: 'child', name: 'Child', parentId: '', expanded: true, headers: [], environment: [{ id: 'folder-token', name: 'folderToken', value: 'before', enabled: true }], preRequestScript: '', tests: '', documentation: '' }],
+      },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
+      async (_activeRequest, variables) => {
+        expect(variables).toMatchObject({ collectionToken: 'after', folderToken: 'after' });
+        return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 };
+      },
+      async (_script, activeRequest, environment, response, _timeout, local, _iteration, options) => {
+        seen.push({ collection: { ...(options?.collectionVariables ?? {}) }, folder: { ...(options?.folders?.[0]?.environment ?? {}) } });
+        return {
+          request: activeRequest,
+          environment,
+          collectionVariables: response ? options?.collectionVariables : { collectionToken: 'after' },
+          folders: response ? options?.folders : [{ id: 'child', name: 'Child', environment: { folderToken: 'after' } }],
+          localVariables: local,
+          logs: [],
+          tests: [],
+        };
+      },
+    );
+    expect(seen).toEqual([
+      { collection: { collectionToken: 'before' }, folder: { folderToken: 'before' } },
+      { collection: { collectionToken: 'after' }, folder: { folderToken: 'after' } },
+    ]);
+  });
 });

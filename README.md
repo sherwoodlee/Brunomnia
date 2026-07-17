@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the eleventh runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the twelfth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -21,7 +21,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Persistent editable cookie jar with per-request send/store controls
 - Request history and response body/header/timeline inspection
 - Delayed one-shot sends and sequential repeating sends with explicit cancellation and a 1,000-run safety bound
-- Permission-bounded pre-request scripts and after-response tests
+- Permission-bounded pre-request scripts and after-response tests with request mutation, scoped variables, parent-folder access, selected bundled modules, and opt-in mediated HTTP/vault capabilities
 - Ordered collection runs with JSON/CSV iteration data, retries, cancellation, cookie/response chaining, bounded WebSocket/SSE samples, and saved reports
 - OpenAPI 3.x YAML/JSON editing, structural and safe Spectral-style custom linting, operation preview, formatting, and request generation
 - Native loopback mock servers with route parameters, delays, headers, CORS, and dynamic response tokens
@@ -41,7 +41,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Project-scoped MCP clients over Streamable HTTP/JSON-RPC and native STDIO, with cached tools, prompts, resources, resource templates, roots, invocation, and an event console
 - Optional OpenAI, Anthropic, Gemini, and custom/local OpenAI-compatible providers with vault-only credential execution, AI mock generation, and reviewable Git commit grouping suggestions
 - Pull-only Konnect control-plane discovery and Gateway Service/HTTP Route mapping that preserves local request work and isolates unsupported routes
-- Workspace v11 migrations, bounded resource hierarchy and request-row normalization, private-environment publication filtering, split-YAML serialization, import-time authority stripping, and device-local AI/Konnect/preferences settings
+- Workspace v12 migrations, bounded resource hierarchy and request-row normalization, private-environment publication filtering, split-YAML serialization, import-time authority stripping, and device-local integration/script permissions
 - Atomic persistence in the OS application-data directory
 - System/dark/light appearance, comfortable/compact density, configurable editor sizing, request defaults, and customizable keyboard shortcuts
 - Responsive desktop UI with no login, upgrade, or cloud dependency
@@ -78,10 +78,10 @@ Examples:
 node bin/brunomnia.cjs lint spec examples/orders-api.yaml
 node bin/brunomnia.cjs generate collection examples/orders-api.yaml --output collection.json
 node bin/brunomnia.cjs export spec examples/cli-workspace.json "CLI API" --output api.yaml
-node bin/brunomnia.cjs run test examples/cli-workspace.json "CLI Health"
+node bin/brunomnia.cjs run test examples/cli-workspace.json "CLI Health" --allow-scripts
 ```
 
-The checked-in [CLI workspace fixture](examples/cli-workspace.json) is self-contained and does not make an internet request.
+The checked-in [CLI workspace fixture](examples/cli-workspace.json) is self-contained and does not make an internet request. CLI JavaScript is disabled unless `--allow-scripts` is present; trusted scripts can make secondary HTTP requests only when `--allow-script-requests` is also present.
 
 ## Verify it
 
