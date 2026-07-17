@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createBlankRequest } from './data/seed';
 import { sendRequest } from './lib/http';
+import { storeResponseCookies } from './lib/cookies';
 import { connectStream, disconnectStream, invokeGrpc, loadGrpcSchema, sendWebSocketMessage } from './lib/protocol';
 import { formatBytes, mockResponse, prettyBody } from './lib/request';
 import { loadWorkspace, saveWorkspace } from './lib/storage';
@@ -9,6 +10,7 @@ import { runBrowserScript } from './lib/scriptSandbox';
 import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import { AutomationWorkbench } from './components/AutomationWorkbench';
+import { AuthEditor } from './components/AuthEditor';
 import { applyArtifactImport } from './lib/interchange/apply';
 import type { ArtifactImport } from './lib/interchange/types';
 import {
@@ -22,6 +24,7 @@ import {
 } from './components/ProtocolEditors';
 import type {
   ApiRequest,
+  CookieRecord,
   Environment,
   GrpcSchema,
   HistoryEntry,
@@ -33,6 +36,7 @@ import type {
   ResponseTab,
   SidebarMode,
   StreamMessage,
+  StoredResponse,
   Workspace,
   WorkbenchSection,
 } from './types';
@@ -231,6 +235,9 @@ function CollectionSidebar({
 
 type RequestPanelProps = {
   request: ApiRequest;
+  environment: Environment;
+  workspaceCookies: CookieRecord[];
+  storedResponses: StoredResponse[];
   activeTab: RequestTab;
   isSending: boolean;
   streamStatus: 'disconnected' | 'connecting' | 'connected';
@@ -253,6 +260,9 @@ function RequestPanel({
   onChange,
   onSend,
   onLoadGrpcSchema,
+  environment,
+  workspaceCookies,
+  storedResponses,
 }: RequestPanelProps) {
   const streamProtocol = request.protocol === 'websocket' || request.protocol === 'sse';
   const actionLabel = streamProtocol
@@ -337,10 +347,10 @@ function RequestPanel({
         {activeTab === 'headers' && request.protocol === 'grpc' ? (
           <KeyValueEditor rows={request.grpc.metadata} onChange={(metadata) => onChange({ grpc: { ...request.grpc, metadata } })} namePlaceholder="Metadata" />
         ) : null}
-        {activeTab === 'auth' ? <AuthEditor request={request} onChange={onChange} /> : null}
+        {activeTab === 'auth' ? <AuthEditor cookies={workspaceCookies} environment={environment} request={request} responses={storedResponses} onChange={onChange} /> : null}
         {activeTab === 'body' && request.protocol === 'http' ? <HttpBodyEditor onChange={onChange} request={request} /> : null}
         {activeTab === 'body' && request.protocol === 'graphql' ? <GraphqlEditor onChange={onChange} request={request} /> : null}
-        {activeTab === 'body' && (request.protocol === 'websocket' || request.protocol === 'sse') ? <StreamSetup protocol={request.protocol} /> : null}
+        {activeTab === 'body' && (request.protocol === 'websocket' || request.protocol === 'sse') ? <StreamSetup onChange={onChange} request={request} /> : null}
         {activeTab === 'body' && request.protocol === 'grpc' ? <GrpcEditor onChange={onChange} onLoadSchema={onLoadGrpcSchema} request={request} schema={grpcSchema} schemaLoading={schemaLoading} /> : null}
         {activeTab === 'transport' ? <TransportEditor onChange={onChange} request={request} /> : null}
         {activeTab === 'scripts' ? (
@@ -361,28 +371,6 @@ function RequestPanel({
   );
 }
 
-function AuthEditor({ request, onChange }: Pick<RequestPanelProps, 'request' | 'onChange'>) {
-  const auth = request.auth;
-  const update = (patch: Partial<ApiRequest['auth']>) => onChange({ auth: { ...auth, ...patch } });
-  return (
-    <div className="auth-editor">
-      <label>Auth type
-        <select value={auth.type} onChange={(event) => update({ type: event.target.value as ApiRequest['auth']['type'] })}>
-          <option value="none">No auth</option><option value="bearer">Bearer token</option><option value="basic">Basic auth</option><option value="api-key">API key</option>
-        </select>
-      </label>
-      {auth.type === 'none' ? <p>This request does not add an authorization header.</p> : null}
-      {auth.type === 'bearer' ? <label>Token<input onChange={(event) => update({ token: event.target.value })} placeholder="{{ token }}" spellCheck={false} value={auth.token} /></label> : null}
-      {auth.type === 'basic' ? <><label>Username<input onChange={(event) => update({ username: event.target.value })} value={auth.username} /></label><label>Password<input onChange={(event) => update({ password: event.target.value })} type="password" value={auth.password} /></label></> : null}
-      {auth.type === 'api-key' ? <>
-        <label>Key<input onChange={(event) => update({ apiKeyName: event.target.value })} value={auth.apiKeyName} /></label>
-        <label>Value<input onChange={(event) => update({ apiKeyValue: event.target.value })} value={auth.apiKeyValue} /></label>
-        <label>Add to<select onChange={(event) => update({ apiKeyLocation: event.target.value as 'header' | 'query' })} value={auth.apiKeyLocation}><option value="header">Header</option><option value="query">Query string</option></select></label>
-      </> : null}
-    </div>
-  );
-}
-
 type ResponsePanelProps = {
   response: HttpResponse;
   protocol: Protocol;
@@ -391,12 +379,44 @@ type ResponsePanelProps = {
   streamMessages: StreamMessage[];
   streamStatus: 'disconnected' | 'connecting' | 'connected';
   streamDraft: string;
+  streamFrameKind: 'text' | 'binary';
   scriptTests: Array<{ name: string; passed: boolean; error?: string }>;
   scriptLogs: string[];
+  cookies: CookieRecord[];
+  requestUrl: string;
+  onChangeCookies: (cookies: CookieRecord[]) => void;
   onTabChange: (tab: ResponseTab) => void;
   onStreamDraftChange: (value: string) => void;
+  onStreamFrameKindChange: (value: 'text' | 'binary') => void;
   onSendStreamMessage: () => void;
 };
+
+function CookieEditor({ cookies, requestUrl, onChange }: { cookies: CookieRecord[]; requestUrl: string; onChange: (cookies: CookieRecord[]) => void }) {
+  const update = (id: string, patch: Partial<CookieRecord>) => onChange(cookies.map((cookie) => cookie.id === id ? { ...cookie, ...patch } : cookie));
+  const add = () => {
+    let domain = 'localhost';
+    try { domain = new URL(requestUrl).hostname || domain; } catch { /* keep local default */ }
+    onChange([...cookies, { id: uid('cookie'), name: 'cookie', value: '', domain, path: '/', secure: requestUrl.startsWith('https:'), httpOnly: false, sameSite: '', hostOnly: true, createdAt: new Date().toISOString() }]);
+  };
+  if (!cookies.length) return <div className="empty-state"><Icon name="archive" size={28} /><strong>No workspace cookies</strong><span>Cookies returned by native requests appear here automatically.</span><button className="secondary-button compact-button" onClick={add} type="button">Add cookie</button></div>;
+  return (
+    <div className="cookie-manager">
+      <header><div><strong>Workspace cookie jar</strong><span>{cookies.length} stored</span></div><button onClick={add} type="button"><Icon name="plus" size={14} /> Add cookie</button></header>
+      <div className="cookie-list">{cookies.map((cookie) => <article key={cookie.id}>
+        <label>Name<input value={cookie.name} onChange={(event) => update(cookie.id, { name: event.target.value })} /></label>
+        <label>Value<input value={cookie.value} onChange={(event) => update(cookie.id, { value: event.target.value })} /></label>
+        <label>Domain<input value={cookie.domain} onChange={(event) => update(cookie.id, { domain: event.target.value.toLowerCase() })} /></label>
+        <label>Path<input value={cookie.path} onChange={(event) => update(cookie.id, { path: event.target.value || '/' })} /></label>
+        <label className="cookie-flag"><input checked={cookie.secure} onChange={(event) => update(cookie.id, { secure: event.target.checked })} type="checkbox" /> Secure</label>
+        <label className="cookie-flag"><input checked={cookie.httpOnly} onChange={(event) => update(cookie.id, { httpOnly: event.target.checked })} type="checkbox" /> HTTP only</label>
+        <label>SameSite<select value={cookie.sameSite} onChange={(event) => update(cookie.id, { sameSite: event.target.value as CookieRecord['sameSite'] })}><option value="">Unspecified</option><option value="lax">Lax</option><option value="strict">Strict</option><option value="none">None</option></select></label>
+        <label>Expires<input type="datetime-local" value={cookie.expires ? cookie.expires.slice(0, 16) : ''} onChange={(event) => update(cookie.id, { expires: event.target.value ? new Date(event.target.value).toISOString() : undefined })} /></label>
+        <label className="cookie-flag"><input checked={cookie.hostOnly} onChange={(event) => update(cookie.id, { hostOnly: event.target.checked })} type="checkbox" /> Host only</label>
+        <button aria-label={`Delete ${cookie.name}`} className="icon-button subtle" onClick={() => onChange(cookies.filter((candidate) => candidate.id !== cookie.id))} type="button"><Icon name="trash" size={14} /></button>
+      </article>)}</div>
+    </div>
+  );
+}
 
 function ResponsePanel({
   response,
@@ -406,10 +426,15 @@ function ResponsePanel({
   streamMessages,
   streamStatus,
   streamDraft,
+  streamFrameKind,
   scriptTests,
   scriptLogs,
+  cookies,
+  requestUrl,
+  onChangeCookies,
   onTabChange,
   onStreamDraftChange,
+  onStreamFrameKindChange,
   onSendStreamMessage,
 }: ResponsePanelProps) {
   const streaming = protocol === 'websocket' || protocol === 'sse';
@@ -431,11 +456,11 @@ function ResponsePanel({
         <button aria-label="Response source" className="icon-button subtle" type="button"><Icon name="globe" size={18} /></button>
       </div>
       <nav className="tab-strip response-tabs" aria-label="Response details">
-        {responseTabs.map((tab) => <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">{titleCase(tab)}{tab === 'tests' && scriptTests.length ? <small>{scriptTests.filter((test) => test.passed).length}/{scriptTests.length}</small> : null}</button>)}
+        {responseTabs.map((tab) => <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">{titleCase(tab)}{tab === 'tests' && scriptTests.length ? <small>{scriptTests.filter((test) => test.passed).length}/{scriptTests.length}</small> : tab === 'cookies' && cookies.length ? <small>{cookies.length}</small> : null}</button>)}
       </nav>
       <div className="response-content">
         {activeTab === 'preview' && streaming ? (
-          <StreamConsole connected={streamStatus === 'connected'} draft={streamDraft} messages={streamMessages} onDraftChange={onStreamDraftChange} onSend={onSendStreamMessage} protocol={protocol} />
+          <StreamConsole connected={streamStatus === 'connected'} draft={streamDraft} frameKind={streamFrameKind} messages={streamMessages} onDraftChange={onStreamDraftChange} onFrameKindChange={onStreamFrameKindChange} onSend={onSendStreamMessage} protocol={protocol} />
         ) : null}
         {activeTab === 'preview' && !streaming ? (
           <div className="code-viewer">
@@ -447,7 +472,7 @@ function ResponsePanel({
         {activeTab === 'headers' ? (
           <div className="response-table">{Object.entries(response.headers).map(([name, value]) => <div key={name}><strong>{name}</strong><span>{value}</span></div>)}</div>
         ) : null}
-        {activeTab === 'cookies' ? <div className="empty-state"><Icon name="archive" size={28} /><strong>No cookies returned</strong><span>Response cookies will be listed here.</span></div> : null}
+        {activeTab === 'cookies' ? <CookieEditor cookies={cookies} requestUrl={requestUrl} onChange={onChangeCookies} /> : null}
         {activeTab === 'timeline' ? (
           <div className="timeline">
             <div><span className="timeline-dot" /><strong>Request started</strong><time>0 ms</time></div>
@@ -528,7 +553,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 4, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [],
+    format: 'brunomnia', version: 5, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [],
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -544,6 +569,7 @@ export default function App() {
   const [streamStatus, setStreamStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [streamMessages, setStreamMessages] = useState<StreamMessage[]>([]);
   const [streamDraft, setStreamDraft] = useState('');
+  const [streamFrameKind, setStreamFrameKind] = useState<'text' | 'binary'>('text');
   const [grpcSchemas, setGrpcSchemas] = useState<Record<string, GrpcSchema>>({});
   const [schemaLoading, setSchemaLoading] = useState(false);
   const [workbenchSection, setWorkbenchSection] = useState<WorkbenchSection>('requests');
@@ -732,6 +758,7 @@ export default function App() {
       const preRequest = await runBrowserScript(active.request.preRequestScript, active.request, variables);
       const executableRequest = preRequest.request;
       variables = preRequest.environment;
+      const requestVariables = { ...variables, ...(preRequest.localVariables ?? {}) };
       setScriptLogs(preRequest.logs);
       let result: HttpResponse;
       if (executableRequest.protocol === 'grpc') {
@@ -752,17 +779,17 @@ export default function App() {
         };
         const output = await invokeGrpc(callRequest, {
           ...activeEnvironment,
-          variables: Object.entries(variables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
+          variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
         });
         const body = JSON.stringify({ status: output.status, callType: output.callType, messages: output.messages }, null, 2);
         result = { status: 200, statusText: `gRPC ${output.status}`, headers: { 'grpc-call-type': output.callType }, body, durationMs: output.durationMs, sizeBytes: new Blob([body]).size };
       } else {
         result = await sendRequest(executableRequest, {
           ...activeEnvironment,
-          variables: Object.entries(variables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
-        });
+          variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
+        }, { cookies: workspace.cookies, responses: workspace.responses });
       }
-      const afterResponse = await runBrowserScript(executableRequest.tests, executableRequest, variables, result);
+      const afterResponse = await runBrowserScript(executableRequest.tests, executableRequest, variables, result, 2000, preRequest.localVariables);
       setScriptTests(afterResponse.tests);
       setScriptLogs((current) => [...current, ...afterResponse.logs]);
       persistScriptEnvironment(afterResponse.environment);
@@ -771,7 +798,21 @@ export default function App() {
         id: uid('history'), requestId: active.request.id, name: active.request.name, method: active.request.method,
         url: active.request.url, status: result.status, durationMs: result.durationMs, createdAt: new Date().toISOString(),
       };
-      setWorkspace((current) => ({ ...current, history: [historyEntry, ...current.history].slice(0, 100) }));
+      const storedResponse: StoredResponse = {
+        ...result,
+        requestId: active.request.id,
+        requestName: active.request.name,
+        requestUrl: result.requestUrl ?? executableRequest.url,
+        receivedAt: new Date().toISOString(),
+      };
+      setWorkspace((current) => ({
+        ...current,
+        history: [historyEntry, ...current.history].slice(0, 100),
+        responses: [storedResponse, ...current.responses.filter((candidate) => candidate.requestId !== active.request.id)].slice(0, 100),
+        cookies: executableRequest.transport.storeCookies
+          ? storeResponseCookies(current.cookies, storedResponse.requestUrl, result.setCookies ?? [])
+          : current.cookies,
+      }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setResponse({ status: 0, statusText: 'Request failed', headers: {}, body: message, durationMs: 0, sizeBytes: message.length });
@@ -785,7 +826,7 @@ export default function App() {
     const message = streamDraft;
     setStreamDraft('');
     try {
-      await sendWebSocketMessage(streamSession.current, message, onStreamEvent);
+      await sendWebSocketMessage(streamSession.current, message, streamFrameKind, onStreamEvent);
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       onStreamEvent({ id: uid('event'), direction: 'system', kind: 'error', text, timestamp: new Date().toISOString() });
@@ -810,7 +851,7 @@ export default function App() {
     request.bodyMode = 'none';
     request.preRequestScript = '';
     request.tests = '';
-    const result = await sendRequest(request, activeEnvironment);
+    const result = await sendRequest(request, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses });
     if (result.status < 200 || result.status >= 300) throw new Error(`Import URL returned ${result.status} ${result.statusText}.`);
     if (result.sizeBytes > 20_000_000) throw new Error('The import exceeds the 20 MB local conversion limit.');
     return result.body;
@@ -870,6 +911,7 @@ export default function App() {
         {workbenchSection === 'requests' ? <div className="workbench">
           <RequestPanel
             activeTab={requestTab}
+            environment={activeEnvironment}
             grpcSchema={grpcSchemas[active.request.id]}
             isSending={isSending}
             onChange={updateActiveRequest}
@@ -877,20 +919,27 @@ export default function App() {
             onSend={() => void executeRequest()}
             onTabChange={setRequestTab}
             request={active.request}
+            storedResponses={workspace.responses}
             schemaLoading={schemaLoading}
             streamStatus={streamStatus}
+            workspaceCookies={workspace.cookies}
           />
           <ResponsePanel
             activeTab={responseTab}
+            cookies={workspace.cookies}
             isSending={isSending}
             onSendStreamMessage={() => void sendStreamMessage()}
+            onChangeCookies={(cookies) => setWorkspace((current) => ({ ...current, cookies }))}
             onStreamDraftChange={setStreamDraft}
+            onStreamFrameKindChange={setStreamFrameKind}
             onTabChange={setResponseTab}
             protocol={active.request.protocol}
             response={response}
+            requestUrl={response.requestUrl ?? active.request.url}
             scriptLogs={scriptLogs}
             scriptTests={scriptTests}
             streamDraft={streamDraft}
+            streamFrameKind={streamFrameKind}
             streamMessages={streamMessages}
             streamStatus={streamStatus}
           />

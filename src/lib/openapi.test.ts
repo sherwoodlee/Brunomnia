@@ -27,4 +27,25 @@ describe('OpenAPI design tools', () => {
     const analysis = analyzeOpenApi('openapi: 3.1.0\ninfo: {}\npaths:\n  pets/{id}:\n    get: {}');
     expect(analysis.issues.filter((issue) => issue.severity === 'error').length).toBeGreaterThan(3);
   });
+
+  it('runs safe Spectral-style custom rules without executing JavaScript', () => {
+    const ruleset = `rules:
+  operation-summary:
+    message: Every operation needs a summary
+    severity: error
+    given: $.paths.*.*
+    then: { field: summary, function: truthy }
+  operation-id-casing:
+    given: $..operationId
+    then:
+      function: pattern
+      functionOptions: { match: '^[a-z][A-Za-z0-9]+$' }
+`;
+    const analysis = analyzeOpenApi(source, ruleset);
+    expect(analysis.issues).toContainEqual({ severity: 'error', path: 'paths./pets/{petId}.get.summary', message: 'Every operation needs a summary' });
+    expect(analysis.issues.some((issue) => issue.message.includes('operation-id-casing'))).toBe(false);
+    const unsupported = analyzeOpenApi(source, 'extends: spectral:oas\nrules:\n  custom: { given: $, then: { function: customJavaScript } }');
+    expect(unsupported.issues.some((issue) => issue.path === '$ruleset.extends')).toBe(true);
+    expect(unsupported.issues.some((issue) => issue.message.includes("customJavaScript"))).toBe(true);
+  });
 });

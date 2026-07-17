@@ -1,5 +1,5 @@
 import { stringify } from 'yaml';
-import type { ApiDesign, ApiRequest, Collection, Environment, ImportWarning, JsonValue, KeyValue, MockRoute, MockServer } from '../../types';
+import type { ApiDesign, ApiRequest, Collection, CookieRecord, Environment, ImportWarning, JsonValue, KeyValue, MockRoute, MockServer } from '../../types';
 import { asArray, asBoolean, asNumber, asRecord, asString, keyValues, normalizeMethod, objectVariables, requestFrom, sourceId, sourceMetadata, toJsonValue, type UnknownRecord } from './common';
 import { emptyResources, type ArtifactImport } from './types';
 
@@ -8,14 +8,51 @@ const joinScripts = (...scripts: unknown[]) => scripts.map((script) => asString(
 const applyInsomniaAuth = (request: ApiRequest, rawValue: unknown, format: string, warnings: ImportWarning[]) => {
   const auth = asRecord(rawValue);
   const type = asString(auth?.type);
-  if (!auth || !type || type === 'none' || auth.disabled === true) return;
-  if (type === 'basic') request.auth = { ...request.auth, type: 'basic', username: asString(auth.username), password: asString(auth.password) };
-  else if (type === 'bearer' || type === 'singleToken') request.auth = { ...request.auth, type: 'bearer', token: asString(auth.token) };
-  else if (type === 'apikey') request.auth = { ...request.auth, type: 'api-key', apiKeyName: asString(auth.key, 'X-API-Key'), apiKeyValue: asString(auth.value), apiKeyLocation: auth.addTo === 'queryParams' || auth.addTo === 'query' ? 'query' : 'header' };
+  if (!auth || !type) return;
+  const disabled = asBoolean(auth.disabled);
+  if (type === 'none') request.auth = { ...request.auth, type: 'none', disabled };
+  else if (type === 'basic' || type === 'digest') request.auth = { ...request.auth, type, disabled, username: asString(auth.username), password: asString(auth.password) };
+  else if (type === 'bearer' || type === 'singleToken') request.auth = { ...request.auth, type: 'bearer', disabled, token: asString(auth.token), prefix: asString(auth.prefix, 'Bearer') };
+  else if (type === 'apikey') request.auth = { ...request.auth, type: 'api-key', disabled, apiKeyName: asString(auth.key, 'X-API-Key'), apiKeyValue: asString(auth.value), apiKeyLocation: auth.addTo === 'queryParams' || auth.addTo === 'query' ? 'query' : 'header' };
+  else if (type === 'oauth1') request.auth = {
+    ...request.auth, type: 'oauth1', disabled,
+    oauth1SignatureMethod: ['HMAC-SHA1', 'HMAC-SHA256', 'RSA-SHA1', 'PLAINTEXT'].includes(asString(auth.signatureMethod)) ? asString(auth.signatureMethod) as ApiRequest['auth']['oauth1SignatureMethod'] : 'HMAC-SHA1',
+    consumerKey: asString(auth.consumerKey), consumerSecret: asString(auth.consumerSecret), tokenKey: asString(auth.tokenKey), tokenSecret: asString(auth.tokenSecret), privateKey: asString(auth.privateKey), version: asString(auth.version, '1.0'), nonce: asString(auth.nonce), timestamp: asString(auth.timestamp), callback: asString(auth.callback), realm: asString(auth.realm), verifier: asString(auth.verifier), includeBodyHash: asBoolean(auth.includeBodyHash),
+  };
+  else if (type === 'oauth2') {
+    const grantType = asString(auth.grantType);
+    const supportedGrant = ['authorization_code', 'client_credentials', 'implicit', 'password', 'refresh_token'].includes(grantType);
+    if (grantType && !supportedGrant) warnings.push({ code: 'unsupported-auth-option', message: `OAuth 2 grant '${grantType}' was imported as authorization code.`, resource: request.name });
+    const responseType = asString(auth.responseType);
+    request.auth = {
+      ...request.auth, type: 'oauth2', disabled,
+      oauth2GrantType: supportedGrant ? grantType as ApiRequest['auth']['oauth2GrantType'] : 'authorization_code',
+      accessTokenUrl: asString(auth.accessTokenUrl), authorizationUrl: asString(auth.authorizationUrl), clientId: asString(auth.clientId), clientSecret: asString(auth.clientSecret), audience: asString(auth.audience), scope: asString(auth.scope), resource: asString(auth.resource), username: asString(auth.username), password: asString(auth.password), redirectUrl: asString(auth.redirectUrl), credentialsInBody: asBoolean(auth.credentialsInBody), state: asString(auth.state), code: asString(auth.code), accessToken: asString(auth.accessToken), refreshToken: asString(auth.refreshToken), tokenPrefix: asString(auth.tokenPrefix, 'Bearer'), usePkce: asBoolean(auth.usePkce), pkceMethod: auth.pkceMethod === 'plain' ? 'plain' : 'S256', codeVerifier: asString(auth.codeVerifier), responseType: ['code', 'token', 'id_token'].includes(responseType) ? responseType as ApiRequest['auth']['responseType'] : 'code',
+    };
+  }
+  else if (type === 'ntlm') request.auth = { ...request.auth, type: 'ntlm', disabled, username: asString(auth.username), password: asString(auth.password), ntlmDomain: asString(auth.domain), ntlmWorkstation: asString(auth.workstation, request.auth.ntlmWorkstation) };
+  else if (type === 'iam') request.auth = { ...request.auth, type: 'iam', disabled, awsAccessKeyId: asString(auth.accessKeyId), awsSecretAccessKey: asString(auth.secretAccessKey), awsSessionToken: asString(auth.sessionToken), awsRegion: asString(auth.region, 'us-east-1'), awsService: asString(auth.service, 'execute-api') };
+  else if (type === 'hawk') request.auth = { ...request.auth, type: 'hawk', disabled, hawkId: asString(auth.id), hawkKey: asString(auth.key), hawkExt: asString(auth.ext), hawkAlgorithm: auth.algorithm === 'sha1' ? 'sha1' : 'sha256', hawkValidatePayload: asBoolean(auth.validatePayload, true) };
+  else if (type === 'asap') request.auth = { ...request.auth, type: 'asap', disabled, asapIssuer: asString(auth.issuer), asapSubject: asString(auth.subject), asapAudience: asString(auth.audience), asapAdditionalClaims: asString(auth.addintionalClaims ?? auth.additionalClaims, '{}'), asapPrivateKey: asString(auth.privateKey), asapKeyId: asString(auth.keyId) };
+  else if (type === 'netrc') request.auth = { ...request.auth, type: 'netrc', disabled, netrc: asString(auth.netrc) };
   else {
     request.source = sourceMetadata(format, request.source?.sourceId, { authentication: auth });
     warnings.push({ code: 'unsupported-auth', message: `Insomnia authentication '${type}' was preserved as source metadata.`, resource: request.name });
   }
+};
+
+const insomniaCookie = (rawValue: unknown, format: string, index: number): CookieRecord | undefined => {
+  const raw = asRecord(rawValue);
+  const name = asString(raw?.key ?? raw?.name);
+  const domain = asString(raw?.domain).replace(/^\./, '');
+  if (!raw || !name || !domain) return undefined;
+  const rawExpires = raw.expires;
+  const expires = typeof rawExpires === 'string' && rawExpires ? rawExpires : undefined;
+  const sameSiteValue = asString(raw.sameSite).toLowerCase();
+  return {
+    id: sourceId('cookie', format, `${name}:${domain}:${asString(raw.path, '/')}`, index), name, value: asString(raw.value), domain, path: asString(raw.path, '/'), expires,
+    secure: asBoolean(raw.secure), httpOnly: asBoolean(raw.httpOnly), sameSite: ['strict', 'lax', 'none'].includes(sameSiteValue) ? sameSiteValue as CookieRecord['sameSite'] : '', hostOnly: asBoolean(raw.hostOnly, !asString(raw.domain).startsWith('.')), createdAt: asString(raw.creation ?? raw.createdAt, new Date().toISOString()),
+  };
 };
 
 const applyInsomniaBody = (request: ApiRequest, rawValue: unknown, format: string, warnings: ImportWarning[]) => {
@@ -35,7 +72,7 @@ const applyInsomniaBody = (request: ApiRequest, rawValue: unknown, format: strin
       if (!item) return [];
       const fileName = asString(item.fileName);
       if (fileName) warnings.push({ code: 'external-file', message: `Insomnia file '${fileName}' requires re-selecting the local payload.`, resource: request.name });
-      return [{ id: `${request.id}-part-${index}`, name: asString(item.name), value: asString(item.value), enabled: !asBoolean(item.disabled), kind: fileName ? 'file' as const : 'text' as const }];
+      return [{ id: `${request.id}-part-${index}`, name: asString(item.name), value: asString(item.value), enabled: !asBoolean(item.disabled), kind: fileName ? 'file' as const : 'text' as const, fileName, contentType: asString(item.contentType ?? item.mimeType) }];
     });
   } else if (params.length || mime.includes('application/x-www-form-urlencoded')) {
     request.bodyMode = 'form-urlencoded';
@@ -166,6 +203,12 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
   const collections: Collection[] = [];
   const environments: Environment[] = [];
   const mockServers: MockServer[] = [];
+  const cookieMap = new Map<string, CookieRecord>();
+  resources.filter((resource) => resource._type === 'cookie_jar').flatMap((resource) => asArray(resource.cookies)).forEach((cookie, index) => {
+    const mapped = insomniaCookie(cookie, 'insomnia-v4', index);
+    if (mapped) cookieMap.set(`${mapped.name}\n${mapped.domain}\n${mapped.path}`, mapped);
+  });
+  const cookies = [...cookieMap.values()];
 
   for (const [workspaceIndex, workspace] of collectionWorkspaces.entries()) {
     const workspaceId = asString(workspace._id, '__WORKSPACE_ID__');
@@ -195,7 +238,7 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
   return {
     ...emptyResources(), format: 'insomnia-v4', sourceName, warnings,
     metadata: { source: asString(document.__export_source), date: asString(document.__export_date), resources: String(resources.length) },
-    collections, environments, apiDesigns, mockServers,
+    collections, environments, apiDesigns, mockServers, cookies,
   };
 };
 
@@ -244,11 +287,16 @@ export const importInsomniaV5 = (sourceName: string, documents: UnknownRecord[])
   const environments: Environment[] = [];
   const apiDesigns: ApiDesign[] = [];
   const mockServers: MockServer[] = [];
+  const cookies: CookieRecord[] = [];
   for (const [documentIndex, document] of documents.entries()) {
     const type = asString(document.type);
     const meta = asRecord(document.meta);
     const identity = asString(meta?.id, `${sourceName}-${documentIndex}`);
     if (type.startsWith('collection.') || type.startsWith('spec.')) {
+      asArray(asRecord(document.cookieJar)?.cookies).forEach((cookie, index) => {
+        const mapped = insomniaCookie(cookie, 'insomnia-v5', cookies.length + index);
+        if (mapped && !cookies.some((current) => current.name === mapped.name && current.domain === mapped.domain && current.path === mapped.path)) cookies.push(mapped);
+      });
       const requests: ApiRequest[] = [];
       nestedV5Requests(document.collection, [], { headers: [], preRequestScript: '', tests: '' }, warnings, requests);
       const name = asString(document.name, `Collection ${documentIndex + 1}`);
@@ -273,5 +321,5 @@ export const importInsomniaV5 = (sourceName: string, documents: UnknownRecord[])
     } else if (type.startsWith('environment.')) environments.push(...v5Environments(document, identity));
   }
   if (!collections.length && !environments.length && !mockServers.length) warnings.push({ code: 'empty-export', message: 'The Insomnia v5 file contained no supported resources.' });
-  return { ...emptyResources(), format: 'insomnia-v5', sourceName, warnings, metadata: { documents: String(documents.length), schemaVersions: [...new Set(documents.map((document) => asString(document.schema_version)).filter(Boolean))].join(', ') }, collections, environments, apiDesigns, mockServers };
+  return { ...emptyResources(), format: 'insomnia-v5', sourceName, warnings, metadata: { documents: String(documents.length), schemaVersions: [...new Set(documents.map((document) => asString(document.schema_version)).filter(Boolean))].join(', ') }, collections, environments, apiDesigns, mockServers, cookies };
 };

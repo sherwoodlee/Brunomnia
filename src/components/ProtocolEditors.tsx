@@ -100,7 +100,7 @@ export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onC
       ) : null}
       {request.bodyMode === 'multipart' ? (
         <div className="multipart-editor">
-          <div className="multipart-header"><span>Type</span><span>Name</span><span>Value / file</span><span /></div>
+          <div className="multipart-header"><span>Type</span><span>Name</span><span>Value / file</span><span>Part metadata</span><span /></div>
           {request.multipartBody.map((part) => (
             <div className="multipart-row" key={part.id}>
               <select value={part.kind} onChange={(event) => updateMultipart(part.id, { kind: event.target.value as MultipartPart['kind'], file: undefined })}>
@@ -108,12 +108,16 @@ export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onC
               </select>
               <input aria-label="Multipart field name" value={part.name} onChange={(event) => updateMultipart(part.id, { name: event.target.value })} placeholder="field" />
               {part.kind === 'file' ? (
-                <label className="file-picker"><Icon name="import" size={14} /><span>{part.file?.fileName ?? 'Choose file'}</span><input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void filePayload(file).then((payload) => updateMultipart(part.id, { file: payload })); }} /></label>
+                <label className="file-picker"><Icon name="import" size={14} /><span>{part.file?.fileName ?? 'Choose file'}</span><input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void filePayload(file).then((payload) => updateMultipart(part.id, { file: payload, fileName: payload.fileName, contentType: payload.mimeType })); }} /></label>
               ) : <input aria-label="Multipart field value" value={part.value} onChange={(event) => updateMultipart(part.id, { value: event.target.value })} placeholder="value" />}
+              <div className="multipart-metadata">
+                {part.kind === 'file' ? <input aria-label="Multipart file name" value={part.fileName ?? part.file?.fileName ?? ''} onChange={(event) => updateMultipart(part.id, { fileName: event.target.value })} placeholder="filename" /> : null}
+                <input aria-label="Multipart content type" value={part.contentType ?? part.file?.mimeType ?? ''} onChange={(event) => updateMultipart(part.id, { contentType: event.target.value })} placeholder={part.kind === 'file' ? 'application/octet-stream' : 'text/plain; charset=utf-8'} />
+              </div>
               <button aria-label="Remove multipart field" className="icon-button subtle" onClick={() => onChange({ multipartBody: request.multipartBody.filter((candidate) => candidate.id !== part.id) })} type="button"><Icon name="trash" size={14} /></button>
             </div>
           ))}
-          <button className="add-row" onClick={() => onChange({ multipartBody: [...request.multipartBody, { id: uid('part'), name: '', value: '', enabled: true, kind: 'text' }] })} type="button"><Icon name="plus" size={14} /> Add part</button>
+          <button className="add-row" onClick={() => onChange({ multipartBody: [...request.multipartBody, { id: uid('part'), name: '', value: '', enabled: true, kind: 'text', contentType: '', fileName: '' }] })} type="button"><Icon name="plus" size={14} /> Add part</button>
         </div>
       ) : null}
       {request.bodyMode === 'binary' ? (
@@ -209,12 +213,12 @@ export function GrpcEditor({
   );
 }
 
-export function StreamSetup({ protocol }: { protocol: ApiRequest['protocol'] }) {
+export function StreamSetup({ request, onChange }: { request: ApiRequest; onChange: ChangeRequest }) {
+  const protocol = request.protocol;
   return (
-    <div className="empty-state stream-setup">
-      <span className={`protocol-glyph ${protocol}`}>{protocol === 'websocket' ? 'WS' : 'SSE'}</span>
-      <strong>{protocol === 'websocket' ? 'Bidirectional WebSocket session' : 'Server-sent event stream'}</strong>
-      <span>{protocol === 'websocket' ? 'Connect, then send text frames from the response console.' : 'Connect to watch named events arrive in order.'}</span>
+    <div className="stream-setup">
+      <div className="empty-state compact"><span className={`protocol-glyph ${protocol}`}>{protocol === 'websocket' ? 'WS' : 'SSE'}</span><strong>{protocol === 'websocket' ? 'Bidirectional WebSocket session' : 'Server-sent event stream'}</strong><span>{protocol === 'websocket' ? 'Connect, then send text or binary frames from the response console.' : 'Connect to watch named events arrive in order.'}</span></div>
+      {protocol === 'websocket' ? <div className="editor-stack"><div className="editor-toolbar"><span>Runner startup text frame</span><small>Optional</small></div><CodeEditor ariaLabel="WebSocket runner startup frame" value={request.body} onChange={(body) => onChange({ body })} /></div> : null}
     </div>
   );
 }
@@ -227,10 +231,14 @@ export function TransportEditor({ request, onChange }: { request: ApiRequest; on
       <div className="transport-grid">
         <label>Request timeout (ms)<input min="100" max="600000" type="number" value={transport.timeoutMs} onChange={(event) => update({ timeoutMs: Number(event.target.value) })} /></label>
         <label>Proxy URL<input placeholder="http://127.0.0.1:8080" spellCheck={false} value={transport.proxyUrl} onChange={(event) => update({ proxyUrl: event.target.value })} /></label>
+        <label>Proxy exclusions<input placeholder="localhost, .example.com, 10.0.0.0/8" spellCheck={false} value={transport.proxyExclusions} onChange={(event) => update({ proxyExclusions: event.target.value })} /></label>
+        <label>Certificate domains<input placeholder="api.example.com, *.internal.example" spellCheck={false} value={transport.clientCertificateDomains} onChange={(event) => update({ clientCertificateDomains: event.target.value })} /></label>
       </div>
       <div className="transport-switches">
         <label><input checked={transport.followRedirects} type="checkbox" onChange={(event) => update({ followRedirects: event.target.checked })} /><span>Follow HTTP redirects</span></label>
         <label><input checked={transport.validateCertificates} type="checkbox" onChange={(event) => update({ validateCertificates: event.target.checked })} /><span>Validate server certificates</span></label>
+        <label><input checked={transport.sendCookies} type="checkbox" onChange={(event) => update({ sendCookies: event.target.checked })} /><span>Send matching workspace cookies</span></label>
+        <label><input checked={transport.storeCookies} type="checkbox" onChange={(event) => update({ storeCookies: event.target.checked })} /><span>Store response cookies</span></label>
       </div>
       <div className="certificate-grid">
         <label>Client certificate (PEM)<textarea aria-label="Client certificate PEM" placeholder="-----BEGIN CERTIFICATE-----" value={transport.clientCertificatePem} onChange={(event) => update({ clientCertificatePem: event.target.value })} /></label>
@@ -247,6 +255,8 @@ export function StreamConsole({
   connected,
   draft,
   onDraftChange,
+  frameKind,
+  onFrameKindChange,
   onSend,
 }: {
   protocol: ApiRequest['protocol'];
@@ -254,6 +264,8 @@ export function StreamConsole({
   connected: boolean;
   draft: string;
   onDraftChange: (value: string) => void;
+  frameKind: 'text' | 'binary';
+  onFrameKindChange: (value: 'text' | 'binary') => void;
   onSend: () => void;
 }) {
   return (
@@ -268,7 +280,8 @@ export function StreamConsole({
       </div>
       {protocol === 'websocket' ? (
         <div className="stream-composer">
-          <textarea aria-label="WebSocket message" disabled={!connected} placeholder={connected ? 'Type a text frame…' : 'Connect before sending a frame'} value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) onSend(); }} />
+          <div className="stream-frame-tools"><select aria-label="WebSocket frame type" disabled={!connected} value={frameKind} onChange={(event) => onFrameKindChange(event.target.value as 'text' | 'binary')}><option value="text">Text</option><option value="binary">Binary (base64)</option></select>{frameKind === 'binary' ? <label className="file-picker"><Icon name="import" size={14} /><span>{draft ? `${Math.floor(draft.length * .75)} bytes selected` : 'Choose binary file'}</span><input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void filePayload(file).then((payload) => onDraftChange(payload.dataBase64)); }} /></label> : null}</div>
+          <textarea aria-label="WebSocket message" disabled={!connected} placeholder={connected ? frameKind === 'binary' ? 'Paste base64 or choose a file…' : 'Type a text frame…' : 'Connect before sending a frame'} value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) onSend(); }} />
           <button disabled={!connected || !draft.trim()} onClick={onSend} type="button">Send frame</button>
         </div>
       ) : null}

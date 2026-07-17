@@ -36,12 +36,25 @@ const runNodeScript = async (
   originalRequest: ApiRequest,
   originalEnvironment: Record<string, string>,
   response?: HttpResponse,
+  _timeoutMs = 2000,
+  originalLocalVariables: Record<string, string> = {},
+  iterationData: Record<string, string> = {},
 ): Promise<ScriptRunResult> => {
   const request = structuredClone(originalRequest);
   const environment = { ...originalEnvironment };
+  const localVariables = { ...originalLocalVariables };
   const logs: string[] = [];
   const tests: ScriptRunResult['tests'] = [];
-  if (!source.trim()) return { request, environment, logs, tests };
+  if (!source.trim()) return { request, environment, localVariables, logs, tests };
+  const variableApi = (values: Record<string, string>) => ({
+    get: (name: string) => values[name],
+    set: (name: string, value: unknown) => { values[name] = String(value); },
+    unset: (name: string) => { delete values[name]; },
+    has: (name: string) => Object.hasOwn(values, name),
+    clear: () => Object.keys(values).forEach((name) => delete values[name]),
+    toObject: () => ({ ...values }),
+    replaceIn: (value: unknown) => String(value).replace(/{{\s*([^{}]+?)\s*}}/g, (match, name: string) => values[name] ?? localVariables[name] ?? match),
+  });
   const requestWithHelpers = request as ApiRequest & {
     addHeader?: (header: { key?: string; name?: string; value: unknown }) => void;
     removeHeader?: (name: string) => void;
@@ -53,12 +66,12 @@ const runNodeScript = async (
     request.headers = request.headers.filter((header) => header.name.toLowerCase() !== name.toLowerCase());
   };
   const insomnia = {
-    environment: {
-      get: (name: string) => environment[name],
-      set: (name: string, value: unknown) => { environment[name] = String(value); },
-      unset: (name: string) => { delete environment[name]; },
-      toObject: () => ({ ...environment }),
-    },
+    environment: variableApi(environment),
+    baseEnvironment: variableApi(environment),
+    collectionVariables: variableApi(environment),
+    variables: variableApi(localVariables),
+    localVars: variableApi(localVariables),
+    iterationData: variableApi(iterationData),
     request,
     response: response ? {
       status: response.status,
@@ -98,7 +111,7 @@ const runNodeScript = async (
     delete requestWithHelpers.addHeader;
     delete requestWithHelpers.removeHeader;
   }
-  return { request, environment, logs, tests };
+  return { request, environment, localVariables, logs, tests };
 };
 
 const executeHttp = async (request: ApiRequest, variables: Record<string, string>): Promise<HttpResponse> => {
@@ -115,7 +128,7 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
     const form = new FormData();
     request.multipartBody.filter((part) => part.enabled && part.name).forEach((part) => {
       if (part.kind === 'file' && part.file) {
-        form.append(part.name, new Blob([Buffer.from(part.file.dataBase64, 'base64')], { type: part.file.mimeType }), part.file.fileName);
+        form.append(part.name, new Blob([Buffer.from(part.file.dataBase64, 'base64')], { type: part.contentType || part.file.mimeType }), part.fileName || part.file.fileName);
       } else {
         form.append(part.name, resolveTemplate(part.value, variables));
       }
@@ -137,7 +150,7 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
 
 const usage = `Brunomnia CLI
 
-  brunomnia lint spec <openapi-file> [--json]
+  brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
   brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>]
@@ -150,7 +163,8 @@ const main = async () => {
 
   if (command === 'lint' && subject === 'spec') {
     const path = args[2] ?? fail('Provide an OpenAPI file.');
-    const analysis = analyzeOpenApi(await loadText(path));
+    const rulesetPath = flag('--ruleset');
+    const analysis = analyzeOpenApi(await loadText(path), rulesetPath ? await loadText(rulesetPath) : '');
     if (hasFlag('--json')) console.log(JSON.stringify(analysis.issues, null, 2));
     else analysis.issues.forEach((issue) => console.log(`${issue.severity.toUpperCase()} ${issue.path}: ${issue.message}`));
     console.log(`${analysis.operations.length} operations · ${analysis.issues.length} issues`);

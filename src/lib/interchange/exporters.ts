@@ -36,18 +36,29 @@ const scopedWorkspace = (workspace: Workspace, options: ExportOptions): Workspac
 };
 
 const insomniaAuth = (request: ApiRequest) => {
-  if (request.auth.type === 'basic') return { type: 'basic', username: request.auth.username, password: request.auth.password, disabled: false };
-  if (request.auth.type === 'bearer') return { type: 'bearer', token: request.auth.token, disabled: false };
-  if (request.auth.type === 'api-key') return { type: 'apikey', key: request.auth.apiKeyName, value: request.auth.apiKeyValue, addTo: request.auth.apiKeyLocation === 'query' ? 'queryParams' : 'header', disabled: false };
-  return { type: 'none', disabled: false };
+  const auth = request.auth;
+  const disabled = auth.disabled;
+  if (auth.type === 'basic' || auth.type === 'digest') return { type: auth.type, username: auth.username, password: auth.password, disabled };
+  if (auth.type === 'bearer') return { type: 'bearer', token: auth.token, prefix: auth.prefix, disabled };
+  if (auth.type === 'api-key') return { type: 'apikey', key: auth.apiKeyName, value: auth.apiKeyValue, addTo: auth.apiKeyLocation === 'query' ? 'queryParams' : 'header', disabled };
+  if (auth.type === 'oauth1') return { type: 'oauth1', disabled, signatureMethod: auth.oauth1SignatureMethod, consumerKey: auth.consumerKey, consumerSecret: auth.consumerSecret, tokenKey: auth.tokenKey, tokenSecret: auth.tokenSecret, privateKey: auth.privateKey, version: auth.version, nonce: auth.nonce, timestamp: auth.timestamp, callback: auth.callback, realm: auth.realm, verifier: auth.verifier, includeBodyHash: auth.includeBodyHash };
+  if (auth.type === 'oauth2') return { type: 'oauth2', disabled, grantType: auth.oauth2GrantType, accessTokenUrl: auth.accessTokenUrl, authorizationUrl: auth.authorizationUrl, clientId: auth.clientId, clientSecret: auth.clientSecret, audience: auth.audience, scope: auth.scope, resource: auth.resource, username: auth.username, password: auth.password, redirectUrl: auth.redirectUrl, credentialsInBody: auth.credentialsInBody, state: auth.state, code: auth.code, accessToken: auth.accessToken, refreshToken: auth.refreshToken, tokenPrefix: auth.tokenPrefix, usePkce: auth.usePkce, pkceMethod: auth.pkceMethod, responseType: auth.responseType };
+  if (auth.type === 'ntlm') return { type: 'ntlm', disabled, username: auth.username, password: auth.password, domain: auth.ntlmDomain, workstation: auth.ntlmWorkstation };
+  if (auth.type === 'iam') return { type: 'iam', disabled, accessKeyId: auth.awsAccessKeyId, secretAccessKey: auth.awsSecretAccessKey, sessionToken: auth.awsSessionToken, region: auth.awsRegion, service: auth.awsService };
+  if (auth.type === 'hawk') return { type: 'hawk', disabled, id: auth.hawkId, key: auth.hawkKey, ext: auth.hawkExt, validatePayload: auth.hawkValidatePayload, algorithm: auth.hawkAlgorithm };
+  if (auth.type === 'asap') return { type: 'asap', disabled, issuer: auth.asapIssuer, subject: auth.asapSubject, audience: auth.asapAudience, addintionalClaims: auth.asapAdditionalClaims, privateKey: auth.asapPrivateKey, keyId: auth.asapKeyId };
+  if (auth.type === 'netrc') return { type: 'netrc', disabled };
+  return { type: 'none', disabled };
 };
+
+const insomniaCookie = (cookie: Workspace['cookies'][number]) => ({ key: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expires ?? null, secure: cookie.secure, httpOnly: cookie.httpOnly, sameSite: cookie.sameSite || undefined, hostOnly: cookie.hostOnly, creation: cookie.createdAt });
 
 const insomniaBody = (request: ApiRequest, warnings: ImportWarning[]) => {
   if (request.protocol === 'graphql') return { mimeType: 'application/graphql', text: request.graphql.query };
   if (request.bodyMode === 'json') return { mimeType: 'application/json', text: request.body };
   if (request.bodyMode === 'text') return { mimeType: request.headers.find((header) => header.name.toLowerCase() === 'content-type')?.value || 'text/plain', text: request.body };
   if (request.bodyMode === 'form-urlencoded') return { mimeType: 'application/x-www-form-urlencoded', params: request.formBody.map((part) => ({ name: part.name, value: part.value, disabled: !part.enabled })) };
-  if (request.bodyMode === 'multipart') return { mimeType: 'multipart/form-data', params: request.multipartBody.map((part) => ({ name: part.name, value: part.kind === 'text' ? part.value : undefined, fileName: part.file?.fileName, disabled: !part.enabled })) };
+  if (request.bodyMode === 'multipart') return { mimeType: 'multipart/form-data', params: request.multipartBody.map((part) => ({ name: part.name, value: part.kind === 'text' ? part.value : undefined, fileName: part.fileName || part.file?.fileName, contentType: part.contentType || part.file?.mimeType, disabled: !part.enabled })) };
   if (request.bodyMode === 'binary') {
     warnings.push({ code: 'binary-export', message: 'Binary payload bytes are not embedded in Insomnia compatibility exports.', resource: request.name });
     return { mimeType: request.binaryBody?.mimeType ?? 'application/octet-stream', fileName: request.binaryBody?.fileName ?? '' };
@@ -75,6 +86,7 @@ const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): Artifac
     const workspaceId = `__WORKSPACE_${collectionIndex + 1}__`;
     resources.push({ _id: workspaceId, parentId: null, modified: Date.now(), created: Date.now(), name: collection.name, description: '', scope: 'collection', _type: 'workspace' });
     resources.push({ _id: `__BASE_ENVIRONMENT_${collectionIndex + 1}__`, parentId: workspaceId, modified: Date.now(), created: Date.now(), name: 'Base Environment', data: {}, _type: 'environment' });
+    resources.push({ _id: `__COOKIE_JAR_${collectionIndex + 1}__`, parentId: workspaceId, modified: Date.now(), created: Date.now(), name: 'Default Jar', cookies: workspace.cookies.map(insomniaCookie), _type: 'cookie_jar' });
     workspace.environments.forEach((environment, environmentIndex) => resources.push({ _id: `__ENVIRONMENT_${collectionIndex + 1}_${environmentIndex + 1}__`, parentId: `__BASE_ENVIRONMENT_${collectionIndex + 1}__`, modified: Date.now(), created: Date.now(), name: environment.name, data: Object.fromEntries(environment.variables.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])), _type: 'environment' }));
     collection.requests.forEach((request, requestIndex) => resources.push(v4Request(request, workspaceId, requestIndex, warnings)));
   });
@@ -117,7 +129,7 @@ const exportInsomniaV5 = (workspace: Workspace, options: ExportOptions): Artifac
   const documents: unknown[] = [];
   const standaloneCollections = options.scope === 'design' ? [] : selectedCollections(workspace, options);
   standaloneCollections.forEach((collection, index) => {
-    documents.push({ type: 'collection.insomnia.rest/5.0', schema_version: '5.1', name: collection.name, meta: { id: `wrk_${index + 1}`, description: 'Exported by Brunomnia' }, collection: collection.requests.map((request, requestIndex) => v5Request(request, requestIndex, warnings)), environments: v5Environment(workspace.environments, `wrk_${index + 1}`), cookieJar: { name: 'Default Jar', meta: { id: `jar_${index + 1}` }, cookies: [] }, certificates: [] });
+    documents.push({ type: 'collection.insomnia.rest/5.0', schema_version: '5.1', name: collection.name, meta: { id: `wrk_${index + 1}`, description: 'Exported by Brunomnia' }, collection: collection.requests.map((request, requestIndex) => v5Request(request, requestIndex, warnings)), environments: v5Environment(workspace.environments, `wrk_${index + 1}`), cookieJar: { name: 'Default Jar', meta: { id: `jar_${index + 1}` }, cookies: workspace.cookies.map(insomniaCookie) }, certificates: [] });
   });
   selectedDesigns(workspace, options).forEach((design, index) => {
     const collection = workspace.collections.find((candidate) => candidate.id === design.generatedCollectionId);
@@ -140,7 +152,7 @@ const harPostData = (request: ApiRequest, warnings: ImportWarning[]) => {
   if (request.bodyMode === 'form-urlencoded') return { mimeType: 'application/x-www-form-urlencoded', params: request.formBody.filter((part) => part.enabled).map((part) => ({ name: part.name, value: part.value })) };
   if (request.bodyMode === 'multipart') {
     request.multipartBody.filter((part) => part.enabled && part.kind === 'file').forEach((part) => warnings.push({ code: 'binary-export', message: `Multipart file '${part.file?.fileName ?? part.name}' is referenced by name in HAR; bytes are not embedded.`, resource: request.name }));
-    return { mimeType: 'multipart/form-data', params: request.multipartBody.filter((part) => part.enabled).map((part) => ({ name: part.name, value: part.kind === 'text' ? part.value : undefined, fileName: part.file?.fileName })) };
+    return { mimeType: 'multipart/form-data', params: request.multipartBody.filter((part) => part.enabled).map((part) => ({ name: part.name, value: part.kind === 'text' ? part.value : undefined, fileName: part.fileName || part.file?.fileName, contentType: part.contentType || part.file?.mimeType })) };
   }
   if (request.bodyMode === 'binary') warnings.push({ code: 'binary-export', message: 'Binary request bodies are not embedded in HAR.', resource: request.name });
   return undefined;

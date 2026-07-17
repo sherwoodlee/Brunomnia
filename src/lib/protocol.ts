@@ -3,6 +3,7 @@ import type {
   ApiRequest,
   Environment,
   GrpcSchema,
+  HttpResponse,
   KeyValue,
   StreamMessage,
 } from '../types';
@@ -87,14 +88,54 @@ export const disconnectStream = async (protocol: ApiRequest['protocol'], session
 export const sendWebSocketMessage = async (
   sessionId: string,
   message: string,
+  kind: 'text' | 'binary',
   onEvent: (message: StreamMessage) => void,
 ) => {
   if (isTauri()) {
-    await invoke('send_websocket_message', { sessionId, message });
+    await invoke('send_websocket_message', { sessionId, message, kind });
   } else {
-    onEvent(event(sessionId, 'outgoing', 'text', message));
-    window.setTimeout(() => onEvent(event(sessionId, 'incoming', 'echo', message)), 220);
+    onEvent(event(sessionId, 'outgoing', kind, message));
+    window.setTimeout(() => onEvent(event(sessionId, 'incoming', kind === 'binary' ? 'binary echo' : 'echo', message)), 220);
   }
+};
+
+export const runStreamSample = async (
+  request: ApiRequest,
+  environment: Environment,
+  windowMs = 1000,
+): Promise<HttpResponse> => {
+  if (request.protocol !== 'websocket' && request.protocol !== 'sse') throw new Error('Stream sampling only supports WebSocket and SSE requests.');
+  const sessionId = `runner-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const messages: StreamMessage[] = [];
+  let resolveIncoming: (() => void) | undefined;
+  const firstIncoming = new Promise<void>((resolve) => { resolveIncoming = resolve; });
+  const started = performance.now();
+  const onEvent = (message: StreamMessage) => {
+    messages.push(message);
+    if (message.direction === 'incoming') resolveIncoming?.();
+  };
+  await connectStream(request, environment, sessionId, onEvent);
+  try {
+    const variables = environmentMap(environment);
+    const startupFrame = resolveTemplate(request.body, variables);
+    if (request.protocol === 'websocket' && startupFrame.trim()) await sendWebSocketMessage(sessionId, startupFrame, 'text', onEvent);
+    await Promise.race([
+      firstIncoming,
+      new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(100, Math.min(30_000, windowMs)))),
+    ]);
+  } finally {
+    await disconnectStream(request.protocol, sessionId).catch(() => undefined);
+  }
+  const body = JSON.stringify(messages.map(({ direction, kind, text, timestamp }) => ({ direction, kind, text, timestamp })), null, 2);
+  return {
+    status: request.protocol === 'websocket' ? 101 : 200,
+    statusText: request.protocol === 'websocket' ? 'WebSocket sample' : 'SSE sample',
+    headers: { 'content-type': 'application/json', 'x-brunomnia-stream-events': String(messages.length) },
+    body,
+    durationMs: Math.round(performance.now() - started),
+    sizeBytes: new Blob([body]).size,
+    requestUrl: resolveTemplate(request.url, environmentMap(environment)),
+  };
 };
 
 export const previewGrpcSchema = (protoText: string): GrpcSchema => {

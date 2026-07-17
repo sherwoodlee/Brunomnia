@@ -78,9 +78,7 @@ export const requestFrom = (format: string, identity: string, index: number): Ap
   return request;
 };
 
-export const emptyAuth = (): AuthConfig => ({
-  type: 'none', token: '', username: '', password: '', apiKeyName: 'X-API-Key', apiKeyValue: '', apiKeyLocation: 'header',
-});
+export const emptyAuth = (): AuthConfig => ({ ...createBlankRequest('auth-default').auth });
 
 export const decodeBase64 = (value: string): string => {
   try {

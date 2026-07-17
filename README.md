@@ -2,30 +2,31 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the fourth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the fifth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
 - Native Rust transports for HTTP, GraphQL, WebSocket, SSE, and dynamic gRPC calls
 - GraphQL operation and variables editor
-- WebSocket text-frame sessions with an ordered bidirectional event log
+- WebSocket text/binary-frame sessions with an ordered bidirectional event log
 - Incremental Server-Sent Events parsing with named-event history
 - gRPC reflection, pasted `.proto` compilation, dynamic JSON messages, and unary/client/server/bidirectional streaming calls
-- JSON, text, URL-encoded, multipart file, and binary request bodies
-- Redirect, timeout, certificate validation, proxy, and client-certificate controls for native HTTP/SSE
+- JSON, text, URL-encoded, multipart file/part-metadata, and binary request bodies
+- Redirect, timeout, certificate validation, proxy exclusions, and domain-scoped client-certificate controls for native HTTP/SSE
 - Local collections and editable requests
-- Local environments with `{{ variable }}` expansion
-- Bearer, Basic, and API-key authentication
+- Local environments, iteration/request-local variables, dynamic aliases, and template tags for UUIDs, time, Faker values, encoding, hashing, JSONPath, cookies, prompts, requests, and chained responses
+- Basic, Digest, OAuth 1.0/2.0, NTLM, AWS IAM v4, Bearer, API key, Hawk, Atlassian ASAP, and Netrc authentication
+- Persistent editable cookie jar with per-request send/store controls
 - Request history and response body/header/timeline inspection
 - Permission-bounded pre-request scripts and after-response tests
-- Ordered collection runs with JSON/CSV iteration data, retries, cancellation, and saved reports
-- OpenAPI 3.x YAML/JSON editing, structural linting, operation preview, formatting, and request generation
+- Ordered collection runs with JSON/CSV iteration data, retries, cancellation, cookie/response chaining, bounded WebSocket/SSE samples, and saved reports
+- OpenAPI 3.x YAML/JSON editing, structural and safe Spectral-style custom linting, operation preview, formatting, and request generation
 - Native loopback mock servers with route parameters, delays, headers, CORS, and dynamic response tokens
 - A headless CLI for OpenAPI lint/generation/export and collection/test execution
 - File, pasted-text, and HTTP(S) URL imports with format detection and a warning preview
 - Insomnia JSON v4/v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports
 - Scoped Brunomnia JSON, Insomnia v4/v5, HAR, and raw OpenAPI exports
-- Versioned workspace migrations with collision-safe import history and preserved source metadata
+- Versioned workspace migrations with collision-safe import history, advanced-auth/cookie-jar interoperability, and preserved source metadata
 - Atomic persistence in the OS application-data directory
 - Responsive desktop UI with no login, upgrade, or cloud dependency
 

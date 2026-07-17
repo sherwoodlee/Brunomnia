@@ -56,6 +56,11 @@ const authProperty = (auth: UnknownRecord, type: string, key: string) => {
   return asString(items.find((item) => item?.key === key)?.value);
 };
 
+const postmanSignatureMethod = (value: string): ApiRequest['auth']['oauth1SignatureMethod'] => {
+  const normalized = value.toUpperCase().replace(/_/g, '-');
+  return ['HMAC-SHA1', 'HMAC-SHA256', 'RSA-SHA1', 'PLAINTEXT'].includes(normalized) ? normalized as ApiRequest['auth']['oauth1SignatureMethod'] : 'HMAC-SHA1';
+};
+
 const applyPostmanAuth = (request: ApiRequest, rawAuth: unknown, warnings: ImportWarning[]) => {
   const auth = asRecord(rawAuth);
   const type = asString(auth?.type);
@@ -73,6 +78,18 @@ const applyPostmanAuth = (request: ApiRequest, rawAuth: unknown, warnings: Impor
       apiKeyValue: authProperty(auth, type, 'value'),
       apiKeyLocation: location === 'query' || location === 'queryParams' ? 'query' : 'header',
     };
+  } else if (type === 'digest') {
+    request.auth = { ...request.auth, type: 'digest', username: authProperty(auth, type, 'username'), password: authProperty(auth, type, 'password') };
+  } else if (type === 'oauth1') {
+    request.auth = { ...request.auth, type: 'oauth1', consumerKey: authProperty(auth, type, 'consumerKey'), consumerSecret: authProperty(auth, type, 'consumerSecret'), tokenKey: authProperty(auth, type, 'token'), tokenSecret: authProperty(auth, type, 'tokenSecret'), oauth1SignatureMethod: postmanSignatureMethod(authProperty(auth, type, 'signatureMethod')), realm: authProperty(auth, type, 'realm'), version: authProperty(auth, type, 'version') || '1.0', nonce: authProperty(auth, type, 'nonce'), timestamp: authProperty(auth, type, 'timestamp'), verifier: authProperty(auth, type, 'verifier'), callback: authProperty(auth, type, 'callback') };
+  } else if (type === 'oauth2') {
+    request.auth = { ...request.auth, type: 'oauth2', accessToken: authProperty(auth, type, 'accessToken'), tokenPrefix: authProperty(auth, type, 'headerPrefix') || authProperty(auth, type, 'tokenType') || 'Bearer' };
+  } else if (type === 'ntlm') {
+    request.auth = { ...request.auth, type: 'ntlm', username: authProperty(auth, type, 'username'), password: authProperty(auth, type, 'password'), ntlmDomain: authProperty(auth, type, 'domain'), ntlmWorkstation: authProperty(auth, type, 'workstation') || request.auth.ntlmWorkstation };
+  } else if (type === 'hawk') {
+    request.auth = { ...request.auth, type: 'hawk', hawkId: authProperty(auth, type, 'authId'), hawkKey: authProperty(auth, type, 'authKey'), hawkExt: authProperty(auth, type, 'ext'), hawkAlgorithm: authProperty(auth, type, 'algorithm').toLowerCase() === 'sha1' ? 'sha1' : 'sha256' };
+  } else if (type === 'awsv4') {
+    request.auth = { ...request.auth, type: 'iam', awsAccessKeyId: authProperty(auth, type, 'accessKey'), awsSecretAccessKey: authProperty(auth, type, 'secretKey'), awsSessionToken: authProperty(auth, type, 'sessionToken'), awsRegion: authProperty(auth, type, 'region') || 'us-east-1', awsService: authProperty(auth, type, 'service') || 'execute-api' };
   } else {
     request.source = sourceMetadata(postmanFormat, request.source?.sourceId, { authentication: auth });
     warnings.push({ code: 'unsupported-auth', message: `Postman authentication '${type}' was preserved as source metadata.`, resource: request.name });
@@ -104,7 +121,7 @@ const applyPostmanBody = (request: ApiRequest, rawBody: unknown, warnings: Impor
       if (!item) return [];
       const file = item.type === 'file';
       if (file) warnings.push({ code: 'external-file', message: 'Postman file references require re-selecting the local file.', resource: request.name });
-      return [{ id: `${request.id}-part-${index}`, name: asString(item.key), value: asString(item.value), enabled: !asBoolean(item.disabled), kind: file ? 'file' as const : 'text' as const }];
+      return [{ id: `${request.id}-part-${index}`, name: asString(item.key), value: asString(item.value), enabled: !asBoolean(item.disabled), kind: file ? 'file' as const : 'text' as const, fileName: asString(item.src), contentType: asString(item.contentType) }];
     });
     addContentType(request, 'multipart/form-data');
   } else if (mode === 'graphql') {

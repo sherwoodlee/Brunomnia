@@ -31,18 +31,20 @@ export const buildHeaders = (request: ApiRequest, variables: Record<string, stri
     value: resolveTemplate(header.value, variables),
   }));
 
-  if (request.auth.type === 'bearer' && request.auth.token) {
-    headers.push({ id: 'auth-bearer', name: 'Authorization', value: `Bearer ${resolveTemplate(request.auth.token, variables)}`, enabled: true });
+  if (!request.auth.disabled && request.auth.type === 'bearer' && request.auth.token) {
+    const prefix = resolveTemplate(request.auth.prefix, variables) || 'Bearer';
+    headers.push({ id: 'auth-bearer', name: 'Authorization', value: `${prefix} ${resolveTemplate(request.auth.token, variables)}`.trim(), enabled: true });
   }
-  if (request.auth.type === 'basic' && (request.auth.username || request.auth.password)) {
+  if (!request.auth.disabled && request.auth.type === 'basic' && (request.auth.username || request.auth.password)) {
+    const credentials = new TextEncoder().encode(`${resolveTemplate(request.auth.username, variables)}:${resolveTemplate(request.auth.password, variables)}`);
     headers.push({
       id: 'auth-basic',
       name: 'Authorization',
-      value: `Basic ${btoa(`${resolveTemplate(request.auth.username, variables)}:${resolveTemplate(request.auth.password, variables)}`)}`,
+      value: `Basic ${btoa(String.fromCharCode(...credentials))}`,
       enabled: true,
     });
   }
-  if (request.auth.type === 'api-key' && request.auth.apiKeyLocation === 'header' && request.auth.apiKeyName) {
+  if (!request.auth.disabled && request.auth.type === 'api-key' && request.auth.apiKeyLocation === 'header' && request.auth.apiKeyName) {
     headers.push({
       id: 'auth-api-key',
       name: resolveTemplate(request.auth.apiKeyName, variables),

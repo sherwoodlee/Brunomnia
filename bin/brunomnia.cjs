@@ -7378,12 +7378,65 @@ var createRequest = (id, name, method, url) => ({
   multipartBody: [],
   auth: {
     type: "none",
+    disabled: false,
     token: "",
+    prefix: "Bearer",
     username: "",
     password: "",
     apiKeyName: "X-API-Key",
     apiKeyValue: "",
-    apiKeyLocation: "header"
+    apiKeyLocation: "header",
+    oauth1SignatureMethod: "HMAC-SHA1",
+    consumerKey: "",
+    consumerSecret: "",
+    tokenKey: "",
+    tokenSecret: "",
+    privateKey: "",
+    version: "1.0",
+    nonce: "",
+    timestamp: "",
+    callback: "",
+    realm: "",
+    verifier: "",
+    includeBodyHash: false,
+    oauth2GrantType: "authorization_code",
+    accessTokenUrl: "",
+    authorizationUrl: "",
+    clientId: "",
+    clientSecret: "",
+    audience: "",
+    scope: "",
+    resource: "",
+    redirectUrl: "http://localhost/",
+    credentialsInBody: false,
+    state: "",
+    code: "",
+    accessToken: "",
+    refreshToken: "",
+    tokenPrefix: "Bearer",
+    usePkce: false,
+    pkceMethod: "S256",
+    codeVerifier: "",
+    responseType: "code",
+    ntlmDomain: "",
+    ntlmWorkstation: "BRUNOMNIA",
+    awsAccessKeyId: "",
+    awsSecretAccessKey: "",
+    awsSessionToken: "",
+    awsRegion: "us-east-1",
+    awsService: "execute-api",
+    hawkId: "",
+    hawkKey: "",
+    hawkExt: "",
+    hawkAlgorithm: "sha256",
+    hawkValidatePayload: true,
+    asapIssuer: "",
+    asapSubject: "",
+    asapAudience: "",
+    asapAdditionalClaims: "{}",
+    asapPrivateKey: "",
+    asapKeyId: "",
+    netrc: ""
   },
   graphql: {
     query: "query GetViewer {\n  viewer {\n    id\n    name\n  }\n}",
@@ -7414,8 +7467,12 @@ message Order { string id = 1; string status = 2; double total = 3; }`,
     timeoutMs: 6e4,
     validateCertificates: true,
     proxyUrl: "",
+    proxyExclusions: "",
     clientCertificatePem: "",
-    clientKeyPem: ""
+    clientKeyPem: "",
+    clientCertificateDomains: "",
+    sendCookies: true,
+    storeCookies: true
   },
   preRequestScript: "// Runs before the request\n",
   tests: `insomnia.test('Status is successful', () => {
@@ -7444,7 +7501,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 4,
+  version: 5,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -7507,6 +7564,7 @@ var seedWorkspace = {
     {
       id: "orders-api-design",
       name: "Orders API",
+      ruleset: "",
       contents: `openapi: 3.1.0
 info:
   title: Orders API
@@ -7572,7 +7630,9 @@ paths:
     }
   ],
   runnerReports: [],
-  imports: []
+  imports: [],
+  cookies: [],
+  responses: []
 };
 var createBlankRequest = (id) => createRequest(id, "Untitled Request", "GET", "https://");
 
@@ -7580,7 +7640,110 @@ var createBlankRequest = (id) => createRequest(id, "Untitled Request", "GET", "h
 var operationMethods = /* @__PURE__ */ new Set(["get", "post", "put", "patch", "delete", "head", "options", "trace"]);
 var record = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
 var pathLabel = (...parts) => parts.join(".").replace(/\.\[/g, "[");
-var analyzeOpenApi = (contents) => {
+var childNodes = (node) => {
+  if (Array.isArray(node.value)) return node.value.map((value, index) => ({ value, path: `${node.path}[${index}]` }));
+  const object = record(node.value);
+  return object ? Object.entries(object).map(([key, value]) => ({ value, path: `${node.path}.${key}` })) : [];
+};
+var selectRuleNodes = (document, expression) => {
+  const recursive = expression.match(/^\$\.\.([\w-]+)$/);
+  if (recursive) {
+    const output = [];
+    const visit = (node) => {
+      childNodes(node).forEach((child) => {
+        if (child.path.endsWith(`.${recursive[1]}`)) output.push(child);
+        visit(child);
+      });
+    };
+    visit({ value: document, path: "$" });
+    return output;
+  }
+  const normalized = expression.trim().replace(/^\$\.?/, "").replace(/\[['"]([^'"]+)['"]\]/g, ".$1").replace(/\[\*\]/g, ".*").replace(/^\./, "");
+  if (!normalized) return [{ value: document, path: "$" }];
+  return normalized.split(".").filter(Boolean).reduce((nodes, segment) => nodes.flatMap((node) => {
+    if (segment === "*") return childNodes(node);
+    if (Array.isArray(node.value) && /^\d+$/.test(segment)) {
+      const index = Number(segment);
+      return index < node.value.length ? [{ value: node.value[index], path: `${node.path}[${index}]` }] : [];
+    }
+    const object = record(node.value);
+    return object && segment in object ? [{ value: object[segment], path: `${node.path}.${segment}` }] : [];
+  }), [{ value: document, path: "$" }]);
+};
+var fieldNode = (node, field) => {
+  if (!field) return node;
+  let current = node;
+  for (const segment of field.split(".").filter(Boolean)) {
+    const object = record(current.value);
+    current = { value: object?.[segment], path: `${current.path}.${segment}` };
+  }
+  return current;
+};
+var ruleFails = (value, functionName, options) => {
+  if (functionName === "truthy") return !value;
+  if (functionName === "falsy") return Boolean(value);
+  if (functionName === "defined") return value === void 0 || value === null;
+  if (functionName === "enumeration") return !Array.isArray(options.values) || !options.values.some((candidate) => candidate === value);
+  if (functionName === "length") {
+    const length = typeof value === "string" || Array.isArray(value) ? value.length : record(value) ? Object.keys(record(value) ?? {}).length : 0;
+    return typeof options.min === "number" && length < options.min || typeof options.max === "number" && length > options.max;
+  }
+  if (functionName === "pattern") {
+    if (typeof value !== "string") return true;
+    try {
+      if (typeof options.match === "string" && !new RegExp(options.match).test(value)) return true;
+      if (typeof options.notMatch === "string" && new RegExp(options.notMatch).test(value)) return true;
+      return false;
+    } catch {
+      return true;
+    }
+  }
+  if (functionName === "casing") {
+    if (typeof value !== "string") return true;
+    const patterns = { camel: /^[a-z][A-Za-z0-9]*$/, pascal: /^[A-Z][A-Za-z0-9]*$/, kebab: /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, snake: /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/ };
+    return !(patterns[asString(options.type)] ?? patterns.camel).test(value);
+  }
+  return false;
+};
+var asString = (value, fallback = "") => typeof value === "string" ? value : fallback;
+var customRulesetIssues = (document, source) => {
+  if (!source.trim()) return [];
+  let ruleset;
+  try {
+    ruleset = record((0, import_yaml.parse)(source)) ?? {};
+  } catch (error) {
+    return [{ severity: "error", path: "$ruleset", message: error instanceof Error ? error.message : "The custom ruleset is invalid." }];
+  }
+  const rules = record(ruleset.rules) ?? ruleset;
+  const issues = [];
+  if (ruleset.extends) issues.push({ severity: "warning", path: "$ruleset.extends", message: "Remote, package, and inherited Spectral rulesets are not executed by the local safe rules engine." });
+  if (ruleset.functions || ruleset.functionsDir) issues.push({ severity: "warning", path: "$ruleset.functions", message: "Custom JavaScript ruleset functions are not executed by the local safe rules engine." });
+  for (const [ruleName, rawRule] of Object.entries(rules)) {
+    if (rawRule === false || rawRule === "off") continue;
+    const rule = record(rawRule);
+    if (!rule) continue;
+    const severityValue = asString(rule.severity, rule.severity === 0 ? "error" : "warn").toLowerCase();
+    if (severityValue === "off") continue;
+    const severity = severityValue === "error" || severityValue === "0" ? "error" : "warning";
+    const given = Array.isArray(rule.given) ? rule.given.map((value) => asString(value)).filter(Boolean) : [asString(rule.given, "$")];
+    const conditions = Array.isArray(rule.then) ? rule.then : [rule.then];
+    given.flatMap((expression) => selectRuleNodes(document, expression)).forEach((selected) => conditions.forEach((rawCondition) => {
+      const condition = record(rawCondition);
+      if (!condition) return;
+      const target = fieldNode(selected, asString(condition.field));
+      const functionName = asString(condition.function);
+      if (!["truthy", "falsy", "defined", "enumeration", "length", "pattern", "casing"].includes(functionName)) {
+        issues.push({ severity: "warning", path: `$ruleset.rules.${ruleName}`, message: `Ruleset function '${functionName || "(empty)"}' is not supported by the local safe rules engine.` });
+        return;
+      }
+      if (!ruleFails(target.value, functionName, record(condition.functionOptions) ?? {})) return;
+      const message = asString(rule.message) || asString(rule.description) || `Custom rule '${ruleName}' failed ${functionName}.`;
+      issues.push({ severity, path: target.path.replace(/^\$\.?/, "") || "$", message: message.replace(/{{\s*property\s*}}/g, target.path.split(".").at(-1) ?? "").replace(/{{\s*path\s*}}/g, target.path) });
+    }));
+  }
+  return issues;
+};
+var analyzeOpenApi = (contents, ruleset = "") => {
   const issues = [];
   let parsed;
   try {
@@ -7647,6 +7810,7 @@ var analyzeOpenApi = (contents) => {
       });
     }
   }
+  issues.push(...customRulesetIssues(document, ruleset));
   return { document, issues, operations, title, version };
 };
 var schemaExample = (schema) => {
@@ -7662,7 +7826,7 @@ var schemaExample = (schema) => {
   return "";
 };
 var generateCollectionFromOpenApi = (design) => {
-  const analysis = analyzeOpenApi(design.contents);
+  const analysis = analyzeOpenApi(design.contents, design.ruleset);
   if (!analysis.document || analysis.issues.some((issue) => issue.severity === "error")) {
     throw new Error("Resolve OpenAPI errors before generating a collection.");
   }
@@ -7723,18 +7887,20 @@ var buildHeaders = (request, variables) => {
     name: resolveTemplate(header.name, variables),
     value: resolveTemplate(header.value, variables)
   }));
-  if (request.auth.type === "bearer" && request.auth.token) {
-    headers.push({ id: "auth-bearer", name: "Authorization", value: `Bearer ${resolveTemplate(request.auth.token, variables)}`, enabled: true });
+  if (!request.auth.disabled && request.auth.type === "bearer" && request.auth.token) {
+    const prefix = resolveTemplate(request.auth.prefix, variables) || "Bearer";
+    headers.push({ id: "auth-bearer", name: "Authorization", value: `${prefix} ${resolveTemplate(request.auth.token, variables)}`.trim(), enabled: true });
   }
-  if (request.auth.type === "basic" && (request.auth.username || request.auth.password)) {
+  if (!request.auth.disabled && request.auth.type === "basic" && (request.auth.username || request.auth.password)) {
+    const credentials = new TextEncoder().encode(`${resolveTemplate(request.auth.username, variables)}:${resolveTemplate(request.auth.password, variables)}`);
     headers.push({
       id: "auth-basic",
       name: "Authorization",
-      value: `Basic ${btoa(`${resolveTemplate(request.auth.username, variables)}:${resolveTemplate(request.auth.password, variables)}`)}`,
+      value: `Basic ${btoa(String.fromCharCode(...credentials))}`,
       enabled: true
     });
   }
-  if (request.auth.type === "api-key" && request.auth.apiKeyLocation === "header" && request.auth.apiKeyName) {
+  if (!request.auth.disabled && request.auth.type === "api-key" && request.auth.apiKeyLocation === "header" && request.auth.apiKeyName) {
     headers.push({
       id: "auth-api-key",
       name: resolveTemplate(request.auth.apiKeyName, variables),
@@ -7759,7 +7925,8 @@ var runCollection = async (collection2, environment, options, executeRequest, ex
   const iterations = boundedInteger(options.iterations, 1, 1e3);
   const retries = boundedInteger(options.retries, 0, 10);
   outer: for (let iteration = 0; iteration < iterations; iteration += 1) {
-    let variables = { ...environmentMap(environment), ...options.dataRows[iteration % Math.max(1, options.dataRows.length)] ?? {} };
+    const iterationData = options.dataRows[iteration % Math.max(1, options.dataRows.length)] ?? {};
+    let variables = { ...environmentMap(environment), ...iterationData };
     for (const originalRequest of collection2.requests) {
       if (options.shouldCancel?.()) {
         cancelled = true;
@@ -7772,11 +7939,12 @@ var runCollection = async (collection2, environment, options, executeRequest, ex
         let error;
         const started = Date.now();
         try {
-          const preRequest = await executeScript(request.preRequestScript, request, variables);
+          const preRequest = await executeScript(request.preRequestScript, request, variables, void 0, 2e3, {}, iterationData);
           request = preRequest.request;
           variables = preRequest.environment;
-          response = await executeRequest(request, variables);
-          const afterResponse = await executeScript(request.tests, request, variables, response);
+          const localVariables = preRequest.localVariables ?? {};
+          response = await executeRequest(request, { ...variables, ...iterationData, ...localVariables });
+          const afterResponse = await executeScript(request.tests, request, variables, response, 2e3, localVariables, iterationData);
           variables = afterResponse.environment;
           tests = afterResponse.tests;
         } catch (caught) {
@@ -7890,12 +8058,26 @@ var expectApi = (actual) => ({
     if (!(Number(actual) > expected)) throw new Error(`Expected ${actual} to be greater than ${expected}`);
   }
 });
-var runNodeScript = async (source, originalRequest, originalEnvironment, response) => {
+var runNodeScript = async (source, originalRequest, originalEnvironment, response, _timeoutMs = 2e3, originalLocalVariables = {}, iterationData = {}) => {
   const request = structuredClone(originalRequest);
   const environment = { ...originalEnvironment };
+  const localVariables = { ...originalLocalVariables };
   const logs = [];
   const tests = [];
-  if (!source.trim()) return { request, environment, logs, tests };
+  if (!source.trim()) return { request, environment, localVariables, logs, tests };
+  const variableApi = (values) => ({
+    get: (name) => values[name],
+    set: (name, value) => {
+      values[name] = String(value);
+    },
+    unset: (name) => {
+      delete values[name];
+    },
+    has: (name) => Object.hasOwn(values, name),
+    clear: () => Object.keys(values).forEach((name) => delete values[name]),
+    toObject: () => ({ ...values }),
+    replaceIn: (value) => String(value).replace(/{{\s*([^{}]+?)\s*}}/g, (match, name) => values[name] ?? localVariables[name] ?? match)
+  });
   const requestWithHelpers = request;
   requestWithHelpers.addHeader = ({ key, name, value }) => {
     request.headers.push({ id: `cli-script-${Date.now()}-${request.headers.length}`, name: key || name || "", value: String(value), enabled: true });
@@ -7904,16 +8086,12 @@ var runNodeScript = async (source, originalRequest, originalEnvironment, respons
     request.headers = request.headers.filter((header) => header.name.toLowerCase() !== name.toLowerCase());
   };
   const insomnia = {
-    environment: {
-      get: (name) => environment[name],
-      set: (name, value) => {
-        environment[name] = String(value);
-      },
-      unset: (name) => {
-        delete environment[name];
-      },
-      toObject: () => ({ ...environment })
-    },
+    environment: variableApi(environment),
+    baseEnvironment: variableApi(environment),
+    collectionVariables: variableApi(environment),
+    variables: variableApi(localVariables),
+    localVars: variableApi(localVariables),
+    iterationData: variableApi(iterationData),
     request,
     response: response ? {
       status: response.status,
@@ -7958,7 +8136,7 @@ var runNodeScript = async (source, originalRequest, originalEnvironment, respons
     delete requestWithHelpers.addHeader;
     delete requestWithHelpers.removeHeader;
   }
-  return { request, environment, logs, tests };
+  return { request, environment, localVariables, logs, tests };
 };
 var executeHttp = async (request, variables) => {
   if (request.protocol !== "http" && request.protocol !== "graphql") throw new Error(`CLI collection execution does not yet support ${request.protocol}.`);
@@ -7974,7 +8152,7 @@ var executeHttp = async (request, variables) => {
     const form = new FormData();
     request.multipartBody.filter((part) => part.enabled && part.name).forEach((part) => {
       if (part.kind === "file" && part.file) {
-        form.append(part.name, new Blob([Buffer.from(part.file.dataBase64, "base64")], { type: part.file.mimeType }), part.file.fileName);
+        form.append(part.name, new Blob([Buffer.from(part.file.dataBase64, "base64")], { type: part.contentType || part.file.mimeType }), part.fileName || part.file.fileName);
       } else {
         form.append(part.name, resolveTemplate(part.value, variables));
       }
@@ -7994,7 +8172,7 @@ var executeHttp = async (request, variables) => {
 };
 var usage = `Brunomnia CLI
 
-  brunomnia lint spec <openapi-file> [--json]
+  brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
   brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>]
@@ -8008,7 +8186,8 @@ var main = async () => {
   }
   if (command === "lint" && subject === "spec") {
     const path = args[2] ?? fail("Provide an OpenAPI file.");
-    const analysis = analyzeOpenApi(await loadText(path));
+    const rulesetPath = flag("--ruleset");
+    const analysis = analyzeOpenApi(await loadText(path), rulesetPath ? await loadText(rulesetPath) : "");
     if (hasFlag("--json")) console.log(JSON.stringify(analysis.issues, null, 2));
     else analysis.issues.forEach((issue) => console.log(`${issue.severity.toUpperCase()} ${issue.path}: ${issue.message}`));
     console.log(`${analysis.operations.length} operations \xB7 ${analysis.issues.length} issues`);

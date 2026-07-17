@@ -28,7 +28,116 @@ const record = (value: unknown): UnknownRecord | undefined => value && typeof va
 
 const pathLabel = (...parts: string[]) => parts.join('.').replace(/\.\[/g, '[');
 
-export const analyzeOpenApi = (contents: string): OpenApiAnalysis => {
+type RuleNode = { value: unknown; path: string };
+
+const childNodes = (node: RuleNode): RuleNode[] => {
+  if (Array.isArray(node.value)) return node.value.map((value, index) => ({ value, path: `${node.path}[${index}]` }));
+  const object = record(node.value);
+  return object ? Object.entries(object).map(([key, value]) => ({ value, path: `${node.path}.${key}` })) : [];
+};
+
+const selectRuleNodes = (document: UnknownRecord, expression: string): RuleNode[] => {
+  const recursive = expression.match(/^\$\.\.([\w-]+)$/);
+  if (recursive) {
+    const output: RuleNode[] = [];
+    const visit = (node: RuleNode) => {
+      childNodes(node).forEach((child) => {
+        if (child.path.endsWith(`.${recursive[1]}`)) output.push(child);
+        visit(child);
+      });
+    };
+    visit({ value: document, path: '$' });
+    return output;
+  }
+  const normalized = expression.trim().replace(/^\$\.?/, '').replace(/\[['"]([^'"]+)['"]\]/g, '.$1').replace(/\[\*\]/g, '.*').replace(/^\./, '');
+  if (!normalized) return [{ value: document, path: '$' }];
+  return normalized.split('.').filter(Boolean).reduce<RuleNode[]>((nodes, segment) => nodes.flatMap((node) => {
+    if (segment === '*') return childNodes(node);
+    if (Array.isArray(node.value) && /^\d+$/.test(segment)) {
+      const index = Number(segment);
+      return index < node.value.length ? [{ value: node.value[index], path: `${node.path}[${index}]` }] : [];
+    }
+    const object = record(node.value);
+    return object && segment in object ? [{ value: object[segment], path: `${node.path}.${segment}` }] : [];
+  }), [{ value: document, path: '$' }]);
+};
+
+const fieldNode = (node: RuleNode, field: string): RuleNode => {
+  if (!field) return node;
+  let current = node;
+  for (const segment of field.split('.').filter(Boolean)) {
+    const object = record(current.value);
+    current = { value: object?.[segment], path: `${current.path}.${segment}` };
+  }
+  return current;
+};
+
+const ruleFails = (value: unknown, functionName: string, options: UnknownRecord) => {
+  if (functionName === 'truthy') return !value;
+  if (functionName === 'falsy') return Boolean(value);
+  if (functionName === 'defined') return value === undefined || value === null;
+  if (functionName === 'enumeration') return !Array.isArray(options.values) || !options.values.some((candidate) => candidate === value);
+  if (functionName === 'length') {
+    const length = typeof value === 'string' || Array.isArray(value) ? value.length : record(value) ? Object.keys(record(value) ?? {}).length : 0;
+    return (typeof options.min === 'number' && length < options.min) || (typeof options.max === 'number' && length > options.max);
+  }
+  if (functionName === 'pattern') {
+    if (typeof value !== 'string') return true;
+    try {
+      if (typeof options.match === 'string' && !new RegExp(options.match).test(value)) return true;
+      if (typeof options.notMatch === 'string' && new RegExp(options.notMatch).test(value)) return true;
+      return false;
+    } catch { return true; }
+  }
+  if (functionName === 'casing') {
+    if (typeof value !== 'string') return true;
+    const patterns: Record<string, RegExp> = { camel: /^[a-z][A-Za-z0-9]*$/, pascal: /^[A-Z][A-Za-z0-9]*$/, kebab: /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, snake: /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/ };
+    return !(patterns[asString(options.type)] ?? patterns.camel).test(value);
+  }
+  return false;
+};
+
+const asString = (value: unknown, fallback = '') => typeof value === 'string' ? value : fallback;
+
+const customRulesetIssues = (document: UnknownRecord, source: string): OpenApiIssue[] => {
+  if (!source.trim()) return [];
+  let ruleset: UnknownRecord;
+  try {
+    ruleset = record(parse(source)) ?? {};
+  } catch (error) {
+    return [{ severity: 'error', path: '$ruleset', message: error instanceof Error ? error.message : 'The custom ruleset is invalid.' }];
+  }
+  const rules = record(ruleset.rules) ?? ruleset;
+  const issues: OpenApiIssue[] = [];
+  if (ruleset.extends) issues.push({ severity: 'warning', path: '$ruleset.extends', message: 'Remote, package, and inherited Spectral rulesets are not executed by the local safe rules engine.' });
+  if (ruleset.functions || ruleset.functionsDir) issues.push({ severity: 'warning', path: '$ruleset.functions', message: 'Custom JavaScript ruleset functions are not executed by the local safe rules engine.' });
+  for (const [ruleName, rawRule] of Object.entries(rules)) {
+    if (rawRule === false || rawRule === 'off') continue;
+    const rule = record(rawRule);
+    if (!rule) continue;
+    const severityValue = asString(rule.severity, rule.severity === 0 ? 'error' : 'warn').toLowerCase();
+    if (severityValue === 'off') continue;
+    const severity: OpenApiIssue['severity'] = severityValue === 'error' || severityValue === '0' ? 'error' : 'warning';
+    const given = Array.isArray(rule.given) ? rule.given.map((value) => asString(value)).filter(Boolean) : [asString(rule.given, '$')];
+    const conditions = Array.isArray(rule.then) ? rule.then : [rule.then];
+    given.flatMap((expression) => selectRuleNodes(document, expression)).forEach((selected) => conditions.forEach((rawCondition) => {
+      const condition = record(rawCondition);
+      if (!condition) return;
+      const target = fieldNode(selected, asString(condition.field));
+      const functionName = asString(condition.function);
+      if (!['truthy', 'falsy', 'defined', 'enumeration', 'length', 'pattern', 'casing'].includes(functionName)) {
+        issues.push({ severity: 'warning', path: `$ruleset.rules.${ruleName}`, message: `Ruleset function '${functionName || '(empty)'}' is not supported by the local safe rules engine.` });
+        return;
+      }
+      if (!ruleFails(target.value, functionName, record(condition.functionOptions) ?? {})) return;
+      const message = asString(rule.message) || asString(rule.description) || `Custom rule '${ruleName}' failed ${functionName}.`;
+      issues.push({ severity, path: target.path.replace(/^\$\.?/, '') || '$', message: message.replace(/{{\s*property\s*}}/g, target.path.split('.').at(-1) ?? '').replace(/{{\s*path\s*}}/g, target.path) });
+    }));
+  }
+  return issues;
+};
+
+export const analyzeOpenApi = (contents: string, ruleset = ''): OpenApiAnalysis => {
   const issues: OpenApiIssue[] = [];
   let parsed: unknown;
   try {
@@ -102,6 +211,7 @@ export const analyzeOpenApi = (contents: string): OpenApiAnalysis => {
     }
   }
 
+  issues.push(...customRulesetIssues(document, ruleset));
   return { document, issues, operations, title, version };
 };
 
@@ -119,7 +229,7 @@ const schemaExample = (schema: UnknownRecord | undefined): unknown => {
 };
 
 export const generateCollectionFromOpenApi = (design: ApiDesign): Collection => {
-  const analysis = analyzeOpenApi(design.contents);
+  const analysis = analyzeOpenApi(design.contents, design.ruleset);
   if (!analysis.document || analysis.issues.some((issue) => issue.severity === 'error')) {
     throw new Error('Resolve OpenAPI errors before generating a collection.');
   }

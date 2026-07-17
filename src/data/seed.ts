@@ -14,12 +14,21 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
   multipartBody: [],
   auth: {
     type: 'none',
+    disabled: false,
     token: '',
+    prefix: 'Bearer',
     username: '',
     password: '',
     apiKeyName: 'X-API-Key',
     apiKeyValue: '',
     apiKeyLocation: 'header',
+    oauth1SignatureMethod: 'HMAC-SHA1', consumerKey: '', consumerSecret: '', tokenKey: '', tokenSecret: '', privateKey: '', version: '1.0', nonce: '', timestamp: '', callback: '', realm: '', verifier: '', includeBodyHash: false,
+    oauth2GrantType: 'authorization_code', accessTokenUrl: '', authorizationUrl: '', clientId: '', clientSecret: '', audience: '', scope: '', resource: '', redirectUrl: 'http://localhost/', credentialsInBody: false, state: '', code: '', accessToken: '', refreshToken: '', tokenPrefix: 'Bearer', usePkce: false, pkceMethod: 'S256', codeVerifier: '', responseType: 'code',
+    ntlmDomain: '', ntlmWorkstation: 'BRUNOMNIA',
+    awsAccessKeyId: '', awsSecretAccessKey: '', awsSessionToken: '', awsRegion: 'us-east-1', awsService: 'execute-api',
+    hawkId: '', hawkKey: '', hawkExt: '', hawkAlgorithm: 'sha256', hawkValidatePayload: true,
+    asapIssuer: '', asapSubject: '', asapAudience: '', asapAdditionalClaims: '{}', asapPrivateKey: '', asapKeyId: '',
+    netrc: '',
   },
   graphql: {
     query: 'query GetViewer {\n  viewer {\n    id\n    name\n  }\n}',
@@ -50,8 +59,12 @@ message Order { string id = 1; string status = 2; double total = 3; }`,
     timeoutMs: 60000,
     validateCertificates: true,
     proxyUrl: '',
+    proxyExclusions: '',
     clientCertificatePem: '',
     clientKeyPem: '',
+    clientCertificateDomains: '',
+    sendCookies: true,
+    storeCookies: true,
   },
   preRequestScript: '// Runs before the request\n',
   tests: `insomnia.test('Status is successful', () => {
@@ -83,7 +96,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 4,
+  version: 5,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -146,6 +159,7 @@ export const seedWorkspace: Workspace = {
     {
       id: 'orders-api-design',
       name: 'Orders API',
+      ruleset: '',
       contents: `openapi: 3.1.0
 info:
   title: Orders API
@@ -212,6 +226,8 @@ paths:
   ],
   runnerReports: [],
   imports: [],
+  cookies: [],
+  responses: [],
 };
 
 export const cloneSeedWorkspace = (): Workspace => structuredClone(seedWorkspace);

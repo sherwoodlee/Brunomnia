@@ -12,8 +12,10 @@ import type {
 import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
 import { parseRunnerData, runCollection } from '../lib/runner';
 import { runBrowserScript } from '../lib/scriptSandbox';
+import { storeResponseCookies } from '../lib/cookies';
 import { sendRequest } from '../lib/http';
 import { startMockServer, stopMockServer, type RunningMock } from '../lib/mock';
+import { runStreamSample } from '../lib/protocol';
 import { Icon } from './Icon';
 import { CodeEditor } from './ProtocolEditors';
 
@@ -39,9 +41,10 @@ export function AutomationWorkbench(props: AutomationWorkbenchProps) {
 function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection }: AutomationWorkbenchProps) {
   const [activeId, setActiveId] = useState(workspace.apiDesigns[0]?.id ?? '');
   const [message, setMessage] = useState('');
+  const [editorMode, setEditorMode] = useState<'document' | 'ruleset'>('document');
   const design = workspace.apiDesigns.find((candidate) => candidate.id === activeId) ?? workspace.apiDesigns[0];
   const deferredContents = useDeferredValue(design?.contents ?? '');
-  const analysis = useMemo(() => analyzeOpenApi(deferredContents), [deferredContents]);
+  const analysis = useMemo(() => analyzeOpenApi(deferredContents, design?.ruleset), [deferredContents, design?.ruleset]);
 
   const updateDesign = (patch: Partial<ApiDesign>) => {
     if (!design) return;
@@ -70,7 +73,7 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection }: Aut
   };
 
   if (!design) return <AutomationEmpty title="No API designs" action="Create design" onAction={() => {
-    const created = { id: uid('design'), name: 'Untitled API', contents: 'openapi: 3.1.0\ninfo:\n  title: Untitled API\n  version: 1.0.0\npaths: {}\n' };
+    const created = { id: uid('design'), name: 'Untitled API', contents: 'openapi: 3.1.0\ninfo:\n  title: Untitled API\n  version: 1.0.0\npaths: {}\n', ruleset: '' };
     onChangeWorkspace((current) => ({ ...current, apiDesigns: [...current.apiDesigns, created] }));
     setActiveId(created.id);
   }} />;
@@ -82,12 +85,13 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection }: Aut
       <AutomationHeader eyebrow="Design" title="API design document" subtitle="Edit, lint, preview, and turn OpenAPI operations into runnable requests.">
         <select aria-label="API design" value={design.id} onChange={(event) => setActiveId(event.target.value)}>{workspace.apiDesigns.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         <button className="secondary-action" onClick={() => { try { updateDesign({ contents: formatOpenApi(design.contents) }); setMessage('Document formatted.'); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }} type="button">Format</button>
+        <button className="secondary-action" onClick={() => setEditorMode((current) => current === 'document' ? 'ruleset' : 'document')} type="button">{editorMode === 'document' ? 'Custom rules' : 'API document'}</button>
         <button className="primary-action" disabled={errors > 0} onClick={generate} type="button">Generate requests</button>
       </AutomationHeader>
       <div className="design-grid">
         <div className="design-editor-pane">
-          <div className="pane-title"><input aria-label="Design name" value={design.name} onChange={(event) => updateDesign({ name: event.target.value })} /><span>OpenAPI YAML / JSON</span></div>
-          <CodeEditor ariaLabel="OpenAPI document" value={design.contents} onChange={(contents) => updateDesign({ contents })} />
+          <div className="pane-title"><input aria-label="Design name" value={design.name} onChange={(event) => updateDesign({ name: event.target.value })} /><span>{editorMode === 'document' ? 'OpenAPI YAML / JSON' : 'Spectral-style YAML / JSON'}</span></div>
+          {editorMode === 'document' ? <CodeEditor ariaLabel="OpenAPI document" value={design.contents} onChange={(contents) => updateDesign({ contents })} /> : <CodeEditor ariaLabel="Custom lint ruleset" value={design.ruleset ?? ''} onChange={(ruleset) => updateDesign({ ruleset })} />}
         </div>
         <div className="design-preview-pane">
           <div className="api-hero"><small>OpenAPI {String(analysis.document?.openapi ?? '')}</small><h2>{analysis.title}</h2><p>{String((analysis.document?.info as Record<string, unknown> | undefined)?.description ?? 'No description provided.')}</p><span>Version {analysis.version || '—'}</span></div>
@@ -112,6 +116,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, onChangeWorkspace }: Au
   const [iterations, setIterations] = useState(1);
   const [retries, setRetries] = useState(0);
   const [delayMs, setDelayMs] = useState(0);
+  const [streamWindowMs, setStreamWindowMs] = useState(1000);
   const [data, setData] = useState('');
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<RunnerItemResult[]>([]);
@@ -125,14 +130,26 @@ function RunnerWorkbench({ workspace, activeEnvironment, onChangeWorkspace }: Au
     if (!collection || running) return;
     setRunning(true); setResults([]); setError(''); cancelled.current = false;
     try {
+      let runnerCookies = [...workspace.cookies];
+      let runnerResponses = [...workspace.responses];
       const report = await runCollection(collection, environment, {
         iterations, retries, delayMs, dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current,
         onResult: (result) => setResults((current) => [...current, result]),
-      }, async (request, variables) => sendRequest(request, {
-        id: environment.id, name: environment.name,
-        variables: Object.entries(variables).map(([name, value]) => ({ id: `runner-${name}`, name, value, enabled: true })),
-      }), runBrowserScript);
-      onChangeWorkspace((current) => ({ ...current, runnerReports: [report, ...current.runnerReports].slice(0, 30) }));
+      }, async (request, variables) => {
+        const requestEnvironment = {
+          id: environment.id, name: environment.name,
+          variables: Object.entries(variables).map(([name, value]) => ({ id: `runner-${name}`, name, value, enabled: true })),
+        };
+        const result = request.protocol === 'websocket' || request.protocol === 'sse'
+          ? await runStreamSample(request, requestEnvironment, streamWindowMs)
+          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses });
+        const requestUrl = result.requestUrl ?? request.url;
+        if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
+        const stored = { ...result, requestId: request.id, requestName: request.name, requestUrl, receivedAt: new Date().toISOString() };
+        runnerResponses = [stored, ...runnerResponses.filter((candidate) => candidate.requestId !== request.id)].slice(0, 100);
+        return result;
+      }, runBrowserScript);
+      onChangeWorkspace((current) => ({ ...current, cookies: runnerCookies, responses: runnerResponses, runnerReports: [report, ...current.runnerReports].slice(0, 30) }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -154,6 +171,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, onChangeWorkspace }: Au
           <label>Environment<select aria-label="Runner environment" value={environment.id} onChange={(event) => setEnvironmentId(event.target.value)}>{workspace.environments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <div className="runner-number-grid"><label>Iterations<input min="1" max="1000" type="number" value={iterations} onChange={(event) => setIterations(Number(event.target.value))} /></label><label>Retries<input min="0" max="10" type="number" value={retries} onChange={(event) => setRetries(Number(event.target.value))} /></label></div>
           <label>Delay between requests (ms)<input min="0" max="30000" type="number" value={delayMs} onChange={(event) => setDelayMs(Number(event.target.value))} /></label>
+          <label>Stream sample window (ms)<input min="100" max="30000" type="number" value={streamWindowMs} onChange={(event) => setStreamWindowMs(Number(event.target.value))} /></label>
           <label>Iteration data<textarea aria-label="Runner iteration data" placeholder={'JSON array or CSV\norderId,status\nord_1,open'} value={data} onChange={(event) => setData(event.target.value)} /></label>
           <p>Dataset values override environment variables for each iteration.</p>
         </aside>
