@@ -32,7 +32,7 @@ export const generateAiText = async (settings: AiSettings, prompt: string, envir
   request.name = `AI · ${settings.provider}`;
   request.method = 'POST';
   request.bodyMode = 'json';
-  request.transport = { ...request.transport, timeoutMs: 120_000, followRedirects: false, sendCookies: false, storeCookies: false };
+  request.transport = { ...request.transport, timeoutMs: 120_000, followRedirects: false, followRedirectsMode: 'off', sendCookies: false, storeCookies: false };
   request.headers = [{ id: 'ai-content-type', name: 'Content-Type', value: 'application/json', enabled: true }];
   if (settings.provider === 'anthropic') {
     request.url = `${endpoint(settings)}/v1/messages`;

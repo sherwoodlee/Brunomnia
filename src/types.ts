@@ -153,6 +153,7 @@ export type GrpcConfig = {
 
 export type TransportConfig = {
   followRedirects: boolean;
+  followRedirectsMode: 'global' | 'on' | 'off';
   timeoutMs: number;
   validateCertificates: boolean;
   proxyUrl: string;
@@ -313,6 +314,7 @@ export type AppPreferences = {
   fontSize: number;
   preferredHttpVersion: PreferredHttpVersion;
   maxRedirects: number;
+  followRedirects: boolean;
   maxHistoryResponses: number;
   filterResponsesByEnv: boolean;
   requestTimeoutMs: number;

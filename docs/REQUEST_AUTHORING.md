@@ -27,9 +27,11 @@ If an ordinary response body fails specifically during content decoding, Brunomn
 
 ## Redirect policy
 
-Each request keeps a **Follow HTTP redirects** switch in its Transport tab. Preferences adds a device-local **Maximum redirects** ceiling shared by native HTTP, GraphQL, Event Stream, collection-run, script/plugin, artifact-import, OAuth, AI, MCP, Konnect, and Git-AI traffic. `0` rejects the first redirect, positive integers allow that many hops, and `-1` follows without a hop ceiling. Turning the per-request switch off always disables redirects.
+Preferences keeps a device-local **Follow redirects by default** choice. Each request selects **Use Preferences**, **Always**, or **Never** in its Transport tab, so a request can inherit that default or override it in either direction. Existing requests that disabled redirects migrate to Never; other existing requests migrate to Use Preferences. Insomnia v4/v5 imports and exports preserve the same `global`/`on`/`off` states.
 
-Finite and unlimited chains remain subject to an ordinary request's deadline. Event Streams use the request timeout while waiting for response headers—including redirects—then remove the total deadline from the active stream. Browser development mode uses Fetch's own redirect behavior because Fetch does not expose a maximum-hop control.
+Preferences also provides a device-local **Maximum redirects** ceiling shared by native HTTP, GraphQL, Event Stream, collection-run, script/plugin, artifact-import, OAuth, AI, MCP, Konnect, and Git-AI traffic. `0` rejects the first redirect, positive integers allow that many hops, and `-1` follows without a hop ceiling. Never always disables redirects regardless of the ceiling; security-sensitive internal adapter requests deliberately select Never.
+
+Finite and unlimited chains remain subject to an ordinary request's deadline. Event Streams use the request timeout while waiting for response headers—including redirects—then remove the total deadline from the active stream. Browser development mode honors the effective follow/no-follow choice through Fetch, but Fetch does not expose a maximum-hop control.
 
 ## Response history
 

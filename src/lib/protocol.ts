@@ -9,6 +9,7 @@ import type {
   StreamMessage,
 } from '../types';
 import { buildHeaders, environmentMap, resolveTemplate } from './request';
+import { resolveFollowRedirects } from './transport';
 
 type GrpcCallOutput = {
   status: string;
@@ -45,8 +46,9 @@ export const sseConnectConfig = (request: ApiRequest) => ({
   sendLastEventId: request.sse?.sendLastEventId !== false,
 });
 
-export const streamTransportConfig = (request: ApiRequest, preferredHttpVersion: PreferredHttpVersion, maxRedirects = 10) => ({
+export const streamTransportConfig = (request: ApiRequest, preferredHttpVersion: PreferredHttpVersion, maxRedirects = 10, followRedirects = true) => ({
   ...request.transport,
+  followRedirects: resolveFollowRedirects(request.transport, followRedirects),
   preferredHttpVersion,
   maxRedirects,
 });
@@ -58,13 +60,14 @@ export const connectStream = async (
   onEvent: (message: StreamMessage) => void,
   preferredHttpVersion: PreferredHttpVersion = 'default',
   maxRedirects = 10,
+  followRedirects = true,
 ) => {
   const variables = environmentMap(environment);
   const input = {
     sessionId,
     url: resolveTemplate(request.url, variables),
     headers: resolvedHeaders(request, environment),
-    transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects),
+    transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects, followRedirects),
     sse: sseConnectConfig(request),
   };
   if (isTauri()) {
@@ -123,6 +126,7 @@ export const runStreamSample = async (
   windowMs = 1000,
   preferredHttpVersion: PreferredHttpVersion = 'default',
   maxRedirects = 10,
+  followRedirects = true,
 ): Promise<HttpResponse> => {
   if (request.protocol !== 'websocket' && request.protocol !== 'sse') throw new Error('Stream sampling only supports WebSocket and SSE requests.');
   const sessionId = `runner-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -134,7 +138,7 @@ export const runStreamSample = async (
     messages.push(message);
     if (message.direction === 'incoming') resolveIncoming?.();
   };
-  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects);
+  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects);
   try {
     const variables = environmentMap(environment);
     const startupFrame = resolveTemplate(request.body, variables);

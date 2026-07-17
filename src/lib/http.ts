@@ -4,12 +4,14 @@ import { applyAdvancedAuth } from './auth';
 import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
 import { renderTemplate } from './templates';
+import { resolveFollowRedirects } from './transport';
 
 export type SendRequestContext = {
   cookies?: CookieRecord[];
   responses?: StoredResponse[];
   preferredHttpVersion?: PreferredHttpVersion;
   maxRedirects?: number;
+  followRedirects?: boolean;
   filterResponsesByEnv?: boolean;
   vault?: Record<string, string>;
   externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
@@ -110,6 +112,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     ? { ...context, responses: (context.responses ?? []).filter((response) => response.environmentId === environment?.id) }
     : context;
   const prepared = await renderRequest(hooked, variables, renderContext);
+  const followRedirects = resolveFollowRedirects(prepared.transport, context.followRedirects ?? true);
   const finish = async (response: HttpResponse) => context.pluginRuntime
     ? context.pluginRuntime.afterResponse(prepared, response)
     : response;
@@ -160,6 +163,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         binaryBody: prepared.binaryBody,
         transport: {
           ...prepared.transport,
+          followRedirects,
           preferredHttpVersion: context.preferredHttpVersion ?? 'default',
           maxRedirects: context.maxRedirects ?? 10,
         },
@@ -187,7 +191,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     method: prepared.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled).map((header) => [header.name, header.value])),
     body: browserBody(prepared, variables),
-    redirect: prepared.transport.followRedirects ? 'follow' : 'manual',
+    redirect: followRedirects ? 'follow' : 'manual',
     signal: AbortSignal.timeout(prepared.transport.timeoutMs),
     credentials: prepared.transport.sendCookies ? 'include' : 'omit',
   });

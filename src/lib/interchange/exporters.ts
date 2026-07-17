@@ -78,6 +78,7 @@ const v4Request = (request: ApiRequest, parentId: string, index: number, warning
     parameters: request.params.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
     headers: request.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled, description: header.description })),
     authentication: insomniaAuth(request.auth), preRequestScript: request.preRequestScript, afterResponseScript: request.tests, description: request.documentation ?? '',
+    settingFollowRedirects: request.transport.followRedirectsMode,
   };
   if (request.protocol === 'websocket') return { ...base, _type: 'websocket_request' };
   if (request.protocol === 'grpc') return { ...base, _type: 'grpc_request', body: { text: request.grpc.input }, metadata: request.grpc.metadata.map((item) => ({ name: item.name, value: item.value, disabled: !item.enabled })), protoMethodName: [request.grpc.service, request.grpc.method].filter(Boolean).join('/'), reflectionApi: { enabled: request.grpc.descriptorSource === 'reflection', url: request.url } };
@@ -140,14 +141,14 @@ const v5Request = (request: ApiRequest, index: number, warnings: ImportWarning[]
     parameters: request.params.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
     authentication: insomniaAuth(request.auth),
   };
-  if (request.protocol === 'websocket') return { ...common, meta: { ...common.meta, id: `${prefix}-ws-req_${index + 1}` }, settings: { encodeUrl: true, followRedirects: request.transport.followRedirects ? 'on' : 'off', cookies: { send: true, store: true } } };
+  if (request.protocol === 'websocket') return { ...common, meta: { ...common.meta, id: `${prefix}-ws-req_${index + 1}` }, settings: { encodeUrl: true, followRedirects: request.transport.followRedirectsMode, cookies: { send: true, store: true } } };
   if (request.protocol === 'grpc') return { ...common, meta: { ...common.meta, id: `${prefix}-greq_${index + 1}` }, body: { text: request.grpc.input }, metadata: request.grpc.metadata.map((item) => ({ name: item.name, value: item.value, disabled: !item.enabled })), protoMethodName: [request.grpc.service, request.grpc.method].filter(Boolean).join('/'), reflectionApi: { enabled: request.grpc.descriptorSource === 'reflection', url: request.url, apiKey: '', module: '' } };
   return {
     ...common,
     method: request.method,
     body: insomniaBody(request, warnings),
     scripts: { preRequest: request.preRequestScript, afterResponse: request.tests },
-    settings: { renderRequestBody: true, encodeUrl: true, followRedirects: request.transport.followRedirects ? 'on' : 'off', cookies: { send: true, store: true }, rebuildPath: true },
+    settings: { renderRequestBody: true, encodeUrl: true, followRedirects: request.transport.followRedirectsMode, cookies: { send: true, store: true }, rebuildPath: true },
   };
 };
 
