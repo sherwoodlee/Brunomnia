@@ -12,13 +12,24 @@ const scriptText = (event: UnknownRecord) => {
 
 const translatePostmanScript = (source: string) => source
   .replace(/\bpm\.test\s*\(/g, 'insomnia.test(')
-  .replace(/\bpm\.(?:environment|collectionVariables|globals)\./g, 'insomnia.environment.')
+  .replace(/pm\.response\.to\.have\.status\s*\(([^)]+)\)\s*;?/g, 'insomnia.expect(insomnia.response.status).toBe($1);')
+  .replace(/\bpm\.environment\./g, 'insomnia.environment.')
+  .replace(/\bpm\.collectionVariables\./g, 'insomnia.collectionVariables.')
+  .replace(/\bpm\.globals\./g, 'insomnia.globals.')
+  .replace(/\bpm\.variables\./g, 'insomnia.variables.')
+  .replace(/\bpm\.iterationData\./g, 'insomnia.iterationData.')
+  .replace(/\bpm\.vault\./g, 'insomnia.vault.')
+  .replace(/\bpm\.sendRequest\s*\(/g, 'insomnia.sendRequest(')
   .replace(/\bpm\.response\.code\b/g, 'insomnia.response.status')
   .replace(/\bpm\.response\.responseTime\b/g, 'insomnia.response.responseTime')
   .replace(/\bpm\.response\.json\s*\(\s*\)/g, 'insomnia.response.json()')
   .replace(/\bpm\.request\.headers\.add\s*\(/g, 'insomnia.request.addHeader(')
-  .replace(/\bpm\.expect\s*\(/g, 'expect(')
-  .replace(/pm\.response\.to\.have\.status\s*\(([^)]+)\)\s*;?/g, 'expect(insomnia.response.status).toBe($1);');
+  .replace(/\bpm\.request\.headers\.remove\s*\(/g, 'insomnia.request.removeHeader(')
+  .replace(/\bpm\.request\.headers\.get\s*\(/g, 'insomnia.request.getHeader(')
+  .replace(/\bpm\.request\.headers\.has\s*\(/g, 'insomnia.request.hasHeader(')
+  .replace(/\bpm\.response\./g, 'insomnia.response.')
+  .replace(/\bpm\.request\./g, 'insomnia.request.')
+  .replace(/\bpm\.expect\s*\(/g, 'insomnia.expect(');
 
 const eventsScript = (eventSources: unknown[], listen: 'prerequest' | 'test', warnings: ImportWarning[], resource: string) => {
   const scripts = eventSources.flatMap((source) => asArray(source)).map(asRecord)

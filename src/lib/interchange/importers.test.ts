@@ -41,7 +41,10 @@ describe('artifact import adapters', () => {
       variable: [{ key: 'baseUrl', value: 'https://shop.example.com' }],
       item: [{ name: 'Orders', item: [{
         name: 'Create',
-        event: [{ listen: 'test', script: { exec: ["pm.test('created', () => pm.response.to.have.status(201));"] } }],
+        event: [
+          { listen: 'prerequest', script: { exec: ["pm.globals.set('global', 'yes');", "pm.collectionVariables.set('collection', 'yes');", "pm.variables.set('local', pm.iterationData.get('row'));", "pm.sendRequest('https://example.com', () => {});"] } },
+          { listen: 'test', script: { exec: ["pm.test('created', () => pm.response.to.have.status(201));"] } },
+        ],
         request: {
           method: 'POST', url: { raw: '{{baseUrl}}/orders', query: [{ key: 'preview', value: 'true' }] },
           header: [{ key: 'X-Client', value: 'postman' }],
@@ -54,7 +57,12 @@ describe('artifact import adapters', () => {
     expect(result.format).toBe('postman-2');
     expect(result.collections[0].requests[0]).toMatchObject({ name: 'Orders / Create', method: 'POST', bodyMode: 'json' });
     expect(result.collections[0].requests[0].auth).toMatchObject({ type: 'bearer', token: '{{token}}' });
+    expect(result.collections[0].requests[0].preRequestScript).toContain("insomnia.globals.set('global'");
+    expect(result.collections[0].requests[0].preRequestScript).toContain("insomnia.collectionVariables.set('collection'");
+    expect(result.collections[0].requests[0].preRequestScript).toContain("insomnia.variables.set('local', insomnia.iterationData.get('row'))");
+    expect(result.collections[0].requests[0].preRequestScript).toContain("insomnia.sendRequest('https://example.com'");
     expect(result.collections[0].requests[0].tests).toContain("insomnia.test('created'");
+    expect(result.collections[0].requests[0].tests).toContain('insomnia.expect(insomnia.response.status).toBe(201)');
     expect(result.environments[0].variables[0]).toMatchObject({ name: 'baseUrl', value: 'https://shop.example.com' });
   });
 

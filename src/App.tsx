@@ -7,7 +7,7 @@ import { storeResponseCookies } from './lib/cookies';
 import { connectStream, disconnectStream, invokeGrpc, loadGrpcSchema, sendWebSocketMessage } from './lib/protocol';
 import { environmentMap, formatBytes, mockResponse, normalizeHttpMethod, prettyBody } from './lib/request';
 import { loadWorkspace, saveWorkspace } from './lib/storage';
-import { runBrowserScript } from './lib/scriptSandbox';
+import { applyScriptSubresponse, runBrowserScript } from './lib/scriptSandbox';
 import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import { AuthEditor } from './components/AuthEditor';
@@ -91,15 +91,19 @@ const scriptFolderVariables = (folders: RequestFolder[]) => folders.map((folder)
   id: folder.id,
   name: folder.name,
   environment: Object.fromEntries(folder.environment.filter((row) => row.enabled && row.name).map((row) => [row.name, row.value])),
+  disabled: folder.environment.filter((row) => !row.enabled && row.name).map((row) => row.name),
 }));
 
-const mergedScriptVariables = (baseline: Record<string, string>, result: ScriptRunResult): Record<string, string> => ({
-  ...baseline,
-  ...result.environment,
-  ...(result.collectionVariables ?? {}),
-  ...(result.folders ?? []).reduce((values, folder) => ({ ...values, ...folder.environment }), {}),
-  ...(result.localVariables ?? {}),
-});
+const mergedScriptVariables = (baseline: Record<string, string>, result: ScriptRunResult, collectionDisabled: string[]): Record<string, string> => {
+  const values = { ...baseline, ...result.environment };
+  collectionDisabled.forEach((name) => delete values[name]);
+  Object.assign(values, result.collectionVariables ?? {});
+  (result.folders ?? []).forEach((folder) => {
+    (folder.disabled ?? []).forEach((name) => delete values[name]);
+    Object.assign(values, folder.environment);
+  });
+  return { ...values, ...(result.localVariables ?? {}) };
+};
 
 const duplicateRequest = (request: ApiRequest): ApiRequest => {
   const copy = structuredClone(request);
@@ -1071,6 +1075,8 @@ export default function App() {
     setResponseTab('preview');
     setScriptTests([]);
     setScriptLogs([]);
+    let scriptCookies = [...workspace.cookies];
+    let scriptResponses = [...workspace.responses];
     const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const pluginCallbacks: PluginHostCallbacks = {
       network: (pluginRequest) => sendRequest(pluginRequest, executionEnvironment, { cookies: workspace.cookies, responses: workspace.responses }),
@@ -1082,6 +1088,7 @@ export default function App() {
     try {
       let variables = environmentMap(activeEnvironment);
       const initialCollectionVariables = Object.fromEntries((collection.environment ?? []).filter((row) => row.enabled && row.name).map((row) => [row.name, row.value]));
+      const initialCollectionDisabled = (collection.environment ?? []).filter((row) => !row.enabled && row.name).map((row) => row.name);
       const runScript = (
         source: string,
         scriptRequest: ApiRequest,
@@ -1089,24 +1096,31 @@ export default function App() {
         scriptResponse?: HttpResponse,
         localVariables: Record<string, string> = {},
         collectionVariables = initialCollectionVariables,
-        folders = scriptFolderVariables(configured.folders),
+        folders: NonNullable<ScriptRunResult['folders']> = scriptFolderVariables(configured.folders),
       ) => runBrowserScript(source, scriptRequest, scriptVariables, scriptResponse, workspace.preferences.scriptTimeoutMs, localVariables, {}, {
         collectionVariables,
+        collectionDisabled: initialCollectionDisabled,
         folders,
         vault: workspace.preferences.enableVaultInScripts ? unlockedVault : undefined,
-        sendRequest: workspace.preferences.allowScriptRequests ? (subrequest, subrequestVariables) => sendRequest(subrequest, {
-          ...executionEnvironment,
-          variables: Object.entries(subrequestVariables).map(([name, value]) => ({ id: `script-request-${name}`, name, value, enabled: true })),
-        }, {
-          cookies: workspace.cookies,
-          responses: workspace.responses,
-          vault: workspace.preferences.enableVaultInScripts ? unlockedVault : {},
-        }) : undefined,
+        sendRequest: workspace.preferences.allowScriptRequests ? async (subrequest, subrequestVariables) => {
+          const subresponse = await sendRequest(subrequest, {
+            ...executionEnvironment,
+            variables: Object.entries(subrequestVariables).map(([name, value]) => ({ id: `script-request-${name}`, name, value, enabled: true })),
+          }, {
+            cookies: scriptCookies,
+            responses: scriptResponses,
+            vault: workspace.preferences.enableVaultInScripts ? unlockedVault : {},
+          });
+          const state = applyScriptSubresponse(scriptCookies, scriptResponses, subrequest, subresponse);
+          scriptCookies = state.cookies;
+          scriptResponses = state.responses;
+          return subresponse;
+        } : undefined,
       });
       const preRequest = await runScript(request.preRequestScript, request, variables);
       let executableRequest = preRequest.request;
       variables = preRequest.environment;
-      const requestVariables = mergedScriptVariables(environmentMap(executionEnvironment), preRequest);
+      const requestVariables = mergedScriptVariables(environmentMap(executionEnvironment), preRequest, initialCollectionDisabled);
       setScriptLogs(preRequest.logs);
       persistScriptState(collection.id, preRequest);
       let result: HttpResponse;
@@ -1158,17 +1172,17 @@ export default function App() {
       setWorkspace((current) => ({
         ...current,
         history: [historyEntry, ...current.history].slice(0, 100),
-        responses: [storedResponse, ...current.responses.filter((candidate) => candidate.requestId !== active.request.id)].slice(0, 100),
+        responses: [storedResponse, ...scriptResponses.filter((candidate) => candidate.requestId !== active.request.id)].slice(0, 100),
         cookies: executableRequest.transport.storeCookies
-          ? storeResponseCookies(current.cookies, storedResponse.requestUrl, result.setCookies ?? [])
-          : current.cookies,
+          ? storeResponseCookies(scriptCookies, storedResponse.requestUrl, result.setCookies ?? [])
+          : scriptCookies,
         pluginData: pluginState.data,
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setResponse({ status: 0, statusText: 'Request failed', headers: {}, body: message, durationMs: 0, sizeBytes: message.length });
       setScriptLogs((current) => [...current, ...pluginState.notifications.map((notification) => `[plugin] ${notification.title}: ${notification.message}`)]);
-      setWorkspace((current) => ({ ...current, pluginData: pluginState.data }));
+      setWorkspace((current) => ({ ...current, cookies: scriptCookies, responses: scriptResponses, pluginData: pluginState.data }));
     } finally {
       setIsSending(false);
     }

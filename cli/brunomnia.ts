@@ -24,14 +24,33 @@ const loadWorkspace = async (path: string): Promise<Workspace> => {
   return parsed as Workspace;
 };
 
-const expectApi = (actual: unknown) => ({
-  toBe(expected: unknown) { if (actual !== expected) throw new Error(`Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`); },
-  toEqual(expected: unknown) { if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`Expected ${JSON.stringify(actual)} to equal ${JSON.stringify(expected)}`); },
-  toContain(expected: unknown) { if (!(actual as { includes?: (value: unknown) => boolean })?.includes?.(expected)) throw new Error(`Expected value to contain ${JSON.stringify(expected)}`); },
-  toBeTruthy() { if (!actual) throw new Error('Expected value to be truthy'); },
-  toBeLessThan(expected: number) { if (!(Number(actual) < expected)) throw new Error(`Expected ${actual} to be less than ${expected}`); },
-  toBeGreaterThan(expected: number) { if (!(Number(actual) > expected)) throw new Error(`Expected ${actual} to be greater than ${expected}`); },
-});
+const expectApi = (actual: unknown, negated = false) => {
+  let keyMode: 'all' | 'any' = 'all';
+  const verify = (condition: boolean, message: string) => { if (negated ? condition : !condition) throw new Error(message); };
+  const api = {
+    toBe(expected: unknown) { verify(actual === expected, `Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`); },
+    toEqual(expected: unknown) { verify(JSON.stringify(actual) === JSON.stringify(expected), `Expected ${JSON.stringify(actual)} to equal ${JSON.stringify(expected)}`); },
+    toContain(expected: unknown) { verify(Boolean((actual as { includes?: (value: unknown) => boolean })?.includes?.(expected)), `Expected value to contain ${JSON.stringify(expected)}`); },
+    toBeTruthy() { verify(Boolean(actual), 'Expected value to be truthy'); },
+    toBeLessThan(expected: number) { verify(Number(actual) < expected, `Expected ${actual} to be less than ${expected}`); },
+    toBeGreaterThan(expected: number) { verify(Number(actual) > expected, `Expected ${actual} to be greater than ${expected}`); },
+    equal(expected: unknown) { verify(actual === expected, 'Expected values to equal'); },
+    eql(expected: unknown) { verify(JSON.stringify(actual) === JSON.stringify(expected), 'Expected values to deeply equal'); },
+    include(expected: unknown) { verify(Boolean((actual as { includes?: (value: unknown) => boolean })?.includes?.(expected)), 'Expected value to include'); },
+    above(expected: number) { verify(Number(actual) > expected, `Expected ${actual} to be above ${expected}`); },
+    below(expected: number) { verify(Number(actual) < expected, `Expected ${actual} to be below ${expected}`); },
+    a(expected: string) { verify(expected === 'array' ? Array.isArray(actual) : typeof actual === expected, `Expected value to be a ${expected}`); return api; },
+    an(expected: string) { verify(expected === 'array' ? Array.isArray(actual) : typeof actual === expected, `Expected value to be an ${expected}`); return api; },
+    lengthOf(expected: number) { verify((actual as { length?: number })?.length === expected, `Expected length ${expected}`); },
+    oneOf(expected: unknown[]) { verify(expected.includes(actual), `Expected value to be one of ${JSON.stringify(expected)}`); },
+    keys(...expected: unknown[]) { const values = expected.length === 1 && Array.isArray(expected[0]) ? expected[0] : expected; const keys = actual && typeof actual === 'object' ? Object.keys(actual) : []; verify(keyMode === 'any' ? values.some((key) => keys.includes(String(key))) : values.every((key) => keys.includes(String(key))), `Expected value to have ${keyMode} keys`); },
+  };
+  ['to', 'be', 'been', 'is', 'that', 'which', 'and', 'has', 'have', 'with', 'at', 'of', 'same'].forEach((name) => Object.defineProperty(api, name, { get: () => api }));
+  Object.defineProperty(api, 'not', { get: () => expectApi(actual, !negated) });
+  Object.defineProperty(api, 'all', { get: () => { keyMode = 'all'; return api; } });
+  Object.defineProperty(api, 'any', { get: () => { keyMode = 'any'; return api; } });
+  return api;
+};
 
 const runNodeScript = async (
   source: string,
@@ -50,8 +69,15 @@ const runNodeScript = async (
   const localVariables = { ...originalLocalVariables };
   const logs: string[] = [];
   const tests: ScriptRunResult['tests'] = [];
+  const pendingTests: Promise<unknown>[] = [];
   if (!source.trim()) return { request, environment, collectionVariables, folders, localVariables, logs, tests };
-  const mergedVariables = () => ({ ...environment, ...collectionVariables, ...folders.reduce((values, folder) => ({ ...values, ...folder.environment }), {}), ...localVariables, ...iterationData });
+  const mergedVariables = () => {
+    const values = { ...environment };
+    (options.collectionDisabled ?? []).forEach((name) => delete values[name]);
+    Object.assign(values, collectionVariables);
+    folders.forEach((folder) => { (folder.disabled ?? []).forEach((name) => delete values[name]); Object.assign(values, folder.environment); });
+    return { ...values, ...iterationData, ...localVariables };
+  };
   const variableApi = (values: Record<string, string>) => ({
     get: (name: string) => values[name],
     set: (name: string, value: unknown) => { values[name] = String(value); },
@@ -73,8 +99,8 @@ const runNodeScript = async (
     setMethod?: (method: unknown) => void;
     getBody?: () => string;
     setBody?: (body: unknown) => void;
-    proxy?: { update: (proxy: Record<string, unknown>) => void };
-    certificate?: { update: (certificate: Record<string, unknown>) => void };
+    proxy?: { getProxyUrl: () => string; update: (proxy: Record<string, unknown>) => void };
+    certificate?: { key: { src: string }; cert: { src: string }; pfx: { src: string }; passphrase: string; update: (certificate: Record<string, unknown>) => void };
   };
   requestWithHelpers.addHeader = ({ key, name, value }) => {
     request.headers.push({ id: `cli-script-${Date.now()}-${request.headers.length}`, name: key || name || '', value: String(value), enabled: true });
@@ -91,8 +117,10 @@ const runNodeScript = async (
   requestWithHelpers.hasHeader = (name) => request.headers.some((header) => header.enabled && header.name.toLowerCase() === name.toLowerCase());
   let requestUrl = request.url;
   const urlApi = {
-    addQueryParams: (items: Array<{ key?: string; name?: string; value?: unknown }> | Record<string, unknown>) => {
-      const entries = Array.isArray(items) ? items : Object.entries(items ?? {}).map(([name, value]) => ({ name, value }));
+    addQueryParams: (items: string | Array<{ key?: string; name?: string; value?: unknown }> | Record<string, unknown>) => {
+      const entries = typeof items === 'string'
+        ? [...new URLSearchParams(items).entries()].map(([name, value]) => ({ name, value }))
+        : Array.isArray(items) ? items : Object.entries(items ?? {}).map(([name, value]) => ({ name, value }));
       try {
         const parsed = new URL(requestUrl);
         entries.forEach((item) => { const name = item.name ?? item.key; if (name) parsed.searchParams.append(name, String(item.value ?? '')); });
@@ -133,77 +161,99 @@ const runNodeScript = async (
   requestWithHelpers.setMethod = (method) => { request.method = String(method).toUpperCase(); };
   requestWithHelpers.getBody = () => requestBody;
   requestWithHelpers.setBody = (body) => { requestBody = typeof body === 'string' ? body : JSON.stringify(body); request.bodyMode = 'text'; };
-  const authWithUpdate = request.auth as AuthConfig & { update?: (auth: Record<string, unknown>) => void };
-  authWithUpdate.update = (input) => {
-    const type = String(input.type ?? 'none').toLowerCase();
+  const authWithUpdate = request.auth as AuthConfig & { update?: (auth: Record<string, unknown>, requestedType?: string) => void };
+  authWithUpdate.update = (input, requestedType) => {
+    const type = String(requestedType ?? input.type ?? 'none').toLowerCase();
+    const keyed = (name: string, key: string, fallback: unknown) => Array.isArray(input[name]) ? (input[name] as Array<Record<string, unknown>>).find((item) => item.key === key)?.value ?? fallback : fallback;
     request.auth.disabled = false;
-    if (type === 'basic') { request.auth.type = 'basic'; request.auth.username = String(input.username ?? ''); request.auth.password = String(input.password ?? ''); }
-    else if (type === 'bearer') { request.auth.type = 'bearer'; request.auth.token = String(input.token ?? input.accessToken ?? ''); request.auth.prefix = String(input.prefix ?? 'Bearer'); }
-    else if (type === 'apikey' || type === 'api-key') { request.auth.type = 'api-key'; request.auth.apiKeyName = String(input.key ?? input.name ?? ''); request.auth.apiKeyValue = String(input.value ?? ''); request.auth.apiKeyLocation = input.in === 'query' || input.location === 'query' ? 'query' : 'header'; }
+    if (type === 'basic') { request.auth.type = 'basic'; request.auth.username = String(keyed('basic', 'username', input.username ?? '')); request.auth.password = String(keyed('basic', 'password', input.password ?? '')); }
+    else if (type === 'bearer') { request.auth.type = 'bearer'; request.auth.token = String(keyed('bearer', 'token', input.token ?? input.accessToken ?? '')); request.auth.prefix = String(keyed('bearer', 'prefix', input.prefix ?? 'Bearer')); }
+    else if (type === 'apikey' || type === 'api-key') { request.auth.type = 'api-key'; request.auth.apiKeyName = String(keyed('apikey', 'key', input.key ?? input.name ?? '')); request.auth.apiKeyValue = String(keyed('apikey', 'value', input.value ?? '')); const location = keyed('apikey', 'in', input.in ?? input.location); request.auth.apiKeyLocation = location === 'query' ? 'query' : 'header'; }
     else if (type === 'none' || type === 'noauth') { request.auth.type = 'none'; request.auth.disabled = true; }
     else throw new Error(`Request auth type '${type}' is not supported by script mutation yet.`);
   };
-  requestWithHelpers.proxy = { update: (input) => {
+  requestWithHelpers.proxy = { getProxyUrl: () => request.transport.proxyUrl, update: (input) => {
     if (input.url) request.transport.proxyUrl = String(input.url);
     else if (input.host) request.transport.proxyUrl = `${String(input.protocol ?? 'http')}://${String(input.host)}${input.port ? `:${String(input.port)}` : ''}`;
     request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(',') : String(input.exclusions ?? request.transport.proxyExclusions);
   } };
-  requestWithHelpers.certificate = { update: (input) => {
-    if (input.certPath || input.keyPath || input.path) throw new Error('Scripts cannot read certificate file paths. Paste PEM content in Transport settings instead.');
-    request.transport.clientCertificatePem = String(input.cert ?? input.certificate ?? '');
-    request.transport.clientKeyPem = String(input.key ?? '');
+  requestWithHelpers.certificate = { key: { src: '' }, cert: { src: '' }, pfx: { src: '' }, passphrase: '', update: (input) => {
+    if (input.disabled === true) { request.transport.clientCertificatePem = ''; request.transport.clientKeyPem = ''; request.transport.clientCertificateDomains = ''; return; }
+    const key = input.key as Record<string, unknown> | undefined;
+    const cert = input.cert as Record<string, unknown> | undefined;
+    const pfx = input.pfx as Record<string, unknown> | undefined;
+    if (input.certPath || input.keyPath || input.path || key?.src || cert?.src || pfx?.src) throw new Error('Scripts cannot read certificate file paths. Paste PEM content in Transport settings instead.');
+    request.transport.clientCertificatePem = String(cert?.pem ?? input.cert ?? input.certificate ?? '');
+    request.transport.clientKeyPem = String(key?.pem ?? input.key ?? '');
     request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(',') : String(input.domains ?? '');
   } };
-  const environmentApi = variableApi(environment);
+  const globalApi = variableApi(environment);
   const collectionApi = variableApi(collectionVariables);
   const localApi = variableApi(localVariables) as ReturnType<typeof variableApi> & Record<string, unknown>;
   const iterationApi = variableApi(iterationData);
-  localApi.environmentVars = environmentApi;
-  localApi.collectionVariables = collectionApi;
-  localApi.localVars = localApi;
-  localApi.iterationDataVars = iterationApi;
-  const responseHeaders = response ? Object.entries(response.headers).map(([key, value]) => ({ key, value })) as Array<{ key: string; value: string }> & { get?: (name: string) => string | undefined; has?: (name: string) => boolean; toObject?: () => Record<string, string> } : undefined;
-  if (responseHeaders) {
-    responseHeaders.get = (name) => responseHeaders.find((header) => header.key.toLowerCase() === name.toLowerCase())?.value;
-    responseHeaders.has = (name) => responseHeaders.some((header) => header.key.toLowerCase() === name.toLowerCase());
-    responseHeaders.toObject = () => Object.fromEntries(responseHeaders.map(({ key, value }) => [key, value]));
-  }
+  const variablesApi = {
+    get: (name: string) => mergedVariables()[name], set: localApi.set, unset: localApi.unset,
+    has: (name: string) => Object.hasOwn(mergedVariables(), name), clear: localApi.clear, toObject: mergedVariables,
+    replaceIn: localApi.replaceIn, baseGlobalVars: globalApi, globalVars: globalApi, collectionVars: collectionApi,
+    collectionVariables: collectionApi, environmentVars: collectionApi, localVars: localApi, iterationDataVars: iterationApi,
+  };
+  const responseFacade = (candidate: HttpResponse | undefined) => {
+    if (!candidate) return undefined;
+    const headers = Object.entries(candidate.headers).map(([key, value]) => ({ key, value })) as Array<{ key: string; value: string }> & { get: (name: string) => string | undefined; has: (name: string) => boolean; toObject: () => Record<string, string> };
+    headers.get = (name) => headers.find((header) => header.key.toLowerCase() === name.toLowerCase())?.value;
+    headers.has = (name) => headers.some((header) => header.key.toLowerCase() === name.toLowerCase());
+    headers.toObject = () => Object.fromEntries(headers.map(({ key, value }) => [key, value]));
+    const cookieValues = (candidate.setCookies ?? []).map((header) => header.split(';')[0]);
+    return {
+      status: candidate.status,
+      code: candidate.status,
+      statusText: candidate.statusText,
+      responseTime: candidate.durationMs,
+      json: () => JSON.parse(candidate.body),
+      text: () => candidate.body,
+      headers,
+      hasHeader: (name: string) => headers.has(name),
+      getHeader: (name: string) => headers.get(name),
+      cookies: {
+        toObject: () => Object.fromEntries(cookieValues.flatMap((pair) => { const split = pair.indexOf('='); return split > 0 ? [[pair.slice(0, split).trim(), pair.slice(split + 1).trim()]] : []; })),
+        get: (name: string) => { const pair = cookieValues.find((value) => value.slice(0, value.indexOf('=')).trim() === name); return pair ? pair.slice(pair.indexOf('=') + 1).trim() : undefined; },
+      },
+    };
+  };
   const insomnia = {
-    environment: environmentApi,
-    baseEnvironment: environmentApi,
+    baseGlobals: globalApi,
+    globals: globalApi,
+    environment: collectionApi,
+    baseEnvironment: collectionApi,
+    CollectionVariables: collectionApi,
     collectionVariables: collectionApi,
-    variables: localApi,
+    variables: variablesApi,
     localVars: localApi,
     iterationData: iterationApi,
     parentFolders: {
-      get: () => [...folders].reverse().map((folder) => ({ id: folder.id, name: folder.name, environment: variableApi(folder.environment) })),
+      get: (selector: string) => { const folder = [...folders].reverse().find((item) => item.id === selector || item.name === selector); return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment) } : undefined; },
       getById: (id: string) => { const folder = folders.find((item) => item.id === id); return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment) } : undefined; },
       getByName: (name: string) => { const folder = [...folders].reverse().find((item) => item.name === name); return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment) } : undefined; },
+      getEnvironments: () => [...folders].reverse().map((folder) => variableApi(folder.environment)),
     },
     request,
-    response: response ? {
-      status: response.status,
-      code: response.status,
-      statusText: response.statusText,
-      responseTime: response.durationMs,
-      json: () => JSON.parse(response.body),
-      text: () => response.body,
-      headers: responseHeaders,
-    } : undefined,
+    response: responseFacade(response),
     replaceIn: (value: unknown) => String(value).replace(/{{\s*([^{}]+?)\s*}}/g, (match, name: string) => mergedVariables()[name] ?? match),
     vault: { get: (name: string) => { if (!options.vault) throw new Error('Script vault access is disabled.'); return options.vault[name]; } },
-    sendRequest: async (input: unknown, callback?: (error: Error | null, result?: HttpResponse) => void) => {
+    sendRequest: async (input: unknown, callback?: (error: Error | null, result?: ReturnType<typeof responseFacade>) => void) => {
       const run = async () => {
         if (!options.sendRequest) throw new Error('Script-initiated requests are disabled.');
-        return options.sendRequest(normalizeScriptSubrequest(input, request), mergedVariables());
+        return responseFacade(await options.sendRequest(normalizeScriptSubrequest(input, request), mergedVariables()));
       };
       if (callback) { void run().then((result) => callback(null, result), (error) => callback(error instanceof Error ? error : new Error(String(error)))); return undefined; }
       return run();
     },
     expect: expectApi,
-    test: (name: string, callback: () => void) => {
-      try { callback(); tests.push({ name, passed: true }); }
-      catch (error) { tests.push({ name, passed: false, error: error instanceof Error ? error.message : String(error) }); }
+    test: (name: string, callback: () => unknown) => {
+      const result: ScriptRunResult['tests'][number] = { name, passed: true };
+      tests.push(result);
+      try { const outcome = callback(); if (outcome && typeof (outcome as PromiseLike<unknown>).then === 'function') pendingTests.push(Promise.resolve(outcome).catch((error) => { result.passed = false; result.error = error instanceof Error ? error.message : String(error); })); }
+      catch (error) { result.passed = false; result.error = error instanceof Error ? error.message : String(error); }
     },
   };
   const context = vm.createContext({
@@ -250,6 +300,7 @@ const runNodeScript = async (
         timeout = setTimeout(() => reject(new Error(`Script exceeded the ${timeoutMs} ms execution limit.`)), timeoutMs);
       }),
     ]);
+    await Promise.all(pendingTests);
   } finally {
     if (timeout) clearTimeout(timeout);
     delete requestWithHelpers.addHeader;

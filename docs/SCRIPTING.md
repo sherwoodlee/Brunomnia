@@ -8,26 +8,27 @@ Desktop pre-request and after-response JavaScript runs in a disposable browser W
 
 The runtime exposes:
 
-- `insomnia.environment`, `baseEnvironment`, `collectionVariables`, `variables`, `localVars`, and `iterationData` with `get`, `set`, `unset`, `has`, `clear`, `toObject`, and `replaceIn`;
-- `insomnia.parentFolders.get()`, `getById()`, and `getByName()`, with parent folders ordered nearest-first and mutable folder environments;
+- `insomnia.baseGlobals`, `globals`, `environment`, `baseEnvironment`, `CollectionVariables`, `collectionVariables`, `variables`, `localVars`, and `iterationData` with `get`, `set`, `unset`, `has`, `clear`, `toObject`, and `replaceIn`;
+- generic `insomnia.variables` lookup in local → iteration → nearest folder → collection → global priority, with new values written to the request-local scope;
+- `insomnia.parentFolders.get(nameOrId)`, `getById()`, `getByName()`, and `getEnvironments()`, with duplicate names searched nearest-first and mutable folder environments;
 - request method, URL, header, body, authentication, proxy, and certificate mutation helpers;
-- `request.url.addQueryParams()` and `getQueryString()` for ordinary or templated URLs;
+- `request.url.addQueryParams()` with query strings, repeated rows, or objects, plus `getQueryString()` for ordinary or templated URLs;
 - raw, URL-encoded, text-only multipart, and GraphQL `request.body.update()` modes;
-- Basic, Bearer, API-key, and disabled `request.auth.update()` modes;
+- Basic, Bearer, API-key, and disabled `request.auth.update()` modes, including the documented keyed-array shape and explicit second type argument;
 - response status, text/JSON, timing, headers, and response-cookie helpers;
-- captured console output, `insomnia.test`, `insomnia.expect`, global `expect`, and the existing Jest/Chai-style matcher subset;
+- captured console output, ordered sync/async `insomnia.test` results, `insomnia.expect`, global `expect`, and Chai aliases including `lengthOf`, `oneOf`, and all/any object keys;
 - top-level `await`; and
 - selected local `require()` adapters: `assert`, `atob`, `btoa`, `chai`, lightweight `lodash`, `querystring`, `timers`, `url`, `util`, and `uuid`.
 
-Environment changes are persisted to the selected environment without flattening inherited values. Collection and parent-folder script changes are also persisted. Runner iterations carry collection/folder mutations forward in memory. `baseEnvironment` currently aliases the resolved active environment rather than exposing a separately persisted base layer; this remains an explicit compatibility gap.
+`insomnia.globals` changes are persisted to the selected global environment without flattening inherited values. `insomnia.environment` and collection-variable aliases mutate the collection environment; parent-folder script changes are also persisted. Runner iterations carry global/collection/folder mutations forward in memory. Brunomnia currently aliases `baseGlobals` to the selected global environment and `baseEnvironment` to the collection environment because its model does not yet expose separate global-base and collection-sub-environment editors; this remains explicit rather than pretending those stores are distinct.
 
 ## Secondary requests
 
 **Preferences → General → Request scripts → Allow scripts to send secondary HTTP requests** grants `insomnia.sendRequest()` on this device. It is off by default and is neither exported nor accepted from imports, Git projects, or encrypted sync.
 
-The bridge accepts an absolute HTTP(S) URL string or a request object. It supports headers, raw/URL-encoded/text-only multipart/GraphQL bodies, Basic/Bearer/API-key auth, inline proxy configuration, and inline PEM client-certificate material. File paths and non-HTTP schemes are rejected. Each script is limited to five secondary requests, 256 KB of request description data, a 10-second per-request transport deadline, a 5 MB response passed back to the Worker, and the overall script deadline. Responses use the same status/text/JSON/header/cookie facade as after-response scripts.
+The bridge accepts an HTTP(S) URL, a bare hostname that defaults to HTTPS, or a request object. It supports headers, raw/URL-encoded/text-only multipart/GraphQL bodies, Basic/Bearer/API-key auth, inline proxy configuration, and inline PEM client-certificate material. File paths and non-HTTP schemes are rejected. Each script is limited to five secondary requests, 256 KB of request description data, a 10-second per-request transport deadline, a 5 MB response passed back to the Worker, and the overall script deadline. Responses use the same `status`/`code`/text/JSON/header/cookie facade as after-response scripts.
 
-Secondary requests do not run nested request scripts or plugin hooks. They can use the script's resolved environment/collection/folder/local/iteration values. They receive vault values only when the separate vault grant is enabled. Response-cookie persistence from secondary requests is not implemented yet.
+Secondary requests do not run nested request scripts or plugin hooks. They can use the script's resolved global/collection/folder/local/iteration values and receive vault values only when the separate vault grant is enabled. Their responses are retained for request chaining, and their `Set-Cookie` values enter the same request/runner cookie state before later secondary or primary requests.
 
 ## Vault access
 
@@ -47,4 +48,4 @@ Secondary script requests require both `--allow-scripts` and `--allow-script-req
 
 ## Remaining compatibility limits
 
-The runtime does not yet bundle AJV, Cheerio, CryptoJS, CSV Parse, Moment, Postman Collection, TV4, XML2JS, or the complete Node built-in surface. File-backed body/certificate helpers remain editor-only. Advanced auth mutation, async test callbacks, complete Chai/Lodash behavior, separately persisted base-environment mutation, secondary response-cookie storage, and broader Postman-global compatibility remain in the [parity ledger](PARITY.md).
+The runtime does not yet bundle AJV, Cheerio, CryptoJS, CSV Parse, Moment, Postman Collection, TV4, XML2JS, or the complete Node built-in surface. File-backed body/certificate helpers remain editor-only. Complete Chai/Lodash behavior, distinct global-base/selected-global and collection-base/selected-collection persistence, and broader deprecated Postman interfaces remain in the [parity ledger](PARITY.md).

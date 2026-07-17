@@ -12,7 +12,7 @@ import type {
 import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
 import { parseRunnerData, runCollection } from '../lib/runner';
 import { resolveEnvironment } from '../lib/resources';
-import { runBrowserScript } from '../lib/scriptSandbox';
+import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
 import { storeResponseCookies } from '../lib/cookies';
 import { sendRequest } from '../lib/http';
 import { createPluginRuntime, type PluginHostCallbacks, type PluginRunState } from '../lib/plugins';
@@ -165,14 +165,20 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       }, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => runBrowserScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
         ...scriptOptions,
         vault: workspace.preferences.enableVaultInScripts ? vault : undefined,
-        sendRequest: workspace.preferences.allowScriptRequests ? (subrequest, subrequestVariables) => sendRequest(subrequest, {
-          ...environment,
-          variables: Object.entries(subrequestVariables).map(([name, value]) => ({ id: `runner-script-${name}`, name, value, enabled: true })),
-        }, {
-          cookies: runnerCookies,
-          responses: runnerResponses,
-          vault: workspace.preferences.enableVaultInScripts ? vault : {},
-        }) : undefined,
+        sendRequest: workspace.preferences.allowScriptRequests ? async (subrequest, subrequestVariables) => {
+          const subresponse = await sendRequest(subrequest, {
+            ...environment,
+            variables: Object.entries(subrequestVariables).map(([name, value]) => ({ id: `runner-script-${name}`, name, value, enabled: true })),
+          }, {
+            cookies: runnerCookies,
+            responses: runnerResponses,
+            vault: workspace.preferences.enableVaultInScripts ? vault : {},
+          });
+          const state = applyScriptSubresponse(runnerCookies, runnerResponses, subrequest, subresponse);
+          runnerCookies = state.cookies;
+          runnerResponses = state.responses;
+          return subresponse;
+        } : undefined,
       }));
       onChangeWorkspace((current) => ({ ...current, cookies: runnerCookies, responses: runnerResponses, pluginData: pluginState.data, runnerReports: [report, ...current.runnerReports].slice(0, 30) }));
     } catch (caught) {
