@@ -1,6 +1,6 @@
 # Permission-bounded scripting
 
-Milestones 12–18 expand Brunomnia's clean-room compatibility with the current [Insomnia scripting contract](https://developer.konghq.com/insomnia/scripts/) while keeping host capabilities explicit. Every feature in this document is local and free; the controls are safety grants, not account or subscription gates.
+Milestones 12–19 expand Brunomnia's clean-room compatibility with the current [Insomnia scripting contract](https://developer.konghq.com/insomnia/scripts/) while keeping host capabilities explicit. Every feature in this document is local and free; the controls are safety grants, not account or subscription gates.
 
 ## Runtime model
 
@@ -40,20 +40,20 @@ These adapters do not load Chai plugins, expose `should`, support assertion over
 
 ## File-backed bodies and certificates
 
-**Preferences → General → Request scripts → Allow scripts to attach local body and certificate files** grants the documented `insomnia.request.body.update()` file modes and PEM certificate source paths on this device. It is off by default, available only in the Tauri desktop app, omitted from folder/Git projects and encrypted revisions, and reset on workspace import. A script with this capability can name any readable local path and cause its contents to be sent with the primary request, so enable it only for workspaces you trust.
+**Preferences → General → Request scripts → Allow scripts to attach local body and certificate files** grants the documented `insomnia.request.body.update()` and `insomnia.sendRequest()` file modes plus PEM certificate source paths on this device. It is off by default, available only in the Tauri desktop app, omitted from folder/Git projects and encrypted revisions, and reset on workspace import. A script with this capability can name any readable local path and cause its contents to be sent through a primary or secondary request, so enable it only for workspaces you trust.
 
 Supported body inputs are:
 
 - `{ mode: 'file', file: '/path/to/payload.bin' }` for a binary primary-request body; and
 - `{ mode: 'formdata', formdata: [{ key: 'upload', type: 'file', value: '/path/to/payload.csv' }] }` for multipart file parts, including optional `fileName` and `contentType` overrides.
 
-`insomnia.request.certificate.update()` accepts `cert: { src: '/path/to/client.crt' }` and `key: { src: '/path/to/client.key' }`, or the `certPath`/`keyPath` aliases. Certificate files must be UTF-8 PEM text. The Rust host reads each file only after the disposable Worker finishes; the Worker receives no filesystem function or file contents. Paths can use ordinary `{{ variable }}` substitution. Reads are limited to 5 MB per regular file, 20 files, and 20 MB across one script result. PFX/PKCS#12 sources remain unsupported by the current native PEM transport, and script-created secondary requests still reject file-backed bodies and certificate paths.
+`insomnia.request.certificate.update()` accepts `cert: { src: '/path/to/client.crt' }` and `key: { src: '/path/to/client.key' }`, or the `certPath`/`keyPath` aliases. Certificate files must be UTF-8 PEM text. For primary requests, the Rust host reads files after the disposable Worker finishes. For secondary requests, the host reads only while fulfilling that one mediated request. The Worker receives no filesystem function or file contents in either path. Paths can use ordinary `{{ variable }}` substitution. Reads are limited to 5 MB per regular file, 20 files, and 20 MB across all primary and secondary attachments in one script execution. PFX/PKCS#12 sources remain unsupported by the current native PEM transport.
 
 ## Secondary requests
 
 **Preferences → General → Request scripts → Allow scripts to send secondary HTTP requests** grants `insomnia.sendRequest()` on this device. It is off by default and is neither exported nor accepted from imports, Git projects, or encrypted sync.
 
-The bridge accepts an HTTP(S) URL, a bare hostname that defaults to HTTPS, or a request object. It supports headers, raw/URL-encoded/text-only multipart/GraphQL bodies, Basic/Bearer/API-key auth, inline proxy configuration, and inline PEM client-certificate material. File paths and non-HTTP schemes are rejected. Each script is limited to five secondary requests, 256 KB of request description data, a 10-second per-request transport deadline, a 5 MB response passed back to the Worker, and the overall script deadline. Responses use the same `status`/`code`/text/JSON/header/cookie facade as after-response scripts.
+The bridge accepts an HTTP(S) URL, a bare hostname that defaults to HTTPS, or a request object. It supports headers, raw/URL-encoded/GraphQL bodies, text-and-file multipart bodies, binary `file` bodies, Basic/Bearer/API-key auth, inline proxy configuration, and inline or permission-bounded PEM client-certificate material. File-backed inputs additionally require the separate file grant; non-HTTP schemes remain rejected. Each script is limited to five secondary requests, 256 KB of request description data, a 10-second per-request transport deadline, a 5 MB response passed back to the Worker, and the overall script deadline. Responses use the same `status`/`code`/text/JSON/header/cookie facade as after-response scripts.
 
 Secondary requests do not run nested request scripts or plugin hooks. They can use the script's resolved global/collection/folder/local/iteration values and receive vault values only when the separate vault grant is enabled. Their responses are retained for request chaining, and their `Set-Cookie` values enter the same request/runner cookie state before later secondary or primary requests.
 
@@ -71,8 +71,8 @@ The bundled CLI uses Node's `vm` compatibility runtime, which is not a security 
 brunomnia run test workspace.json "Collection" --allow-scripts
 ```
 
-Local attachments additionally require `--allow-script-files`; secondary script requests require `--allow-script-requests`. Both are effective only with `--allow-scripts`. The CLI does not expose the desktop local vault. These invocation flags are intentionally not read from workspace preference data, preventing an imported workspace from granting itself script authority.
+Local attachments additionally require `--allow-script-files`; secondary script requests require `--allow-script-requests`. A file-backed secondary request therefore requires all three flags, including `--allow-scripts`. The CLI does not expose the desktop local vault. These invocation flags are intentionally not read from workspace preference data, preventing an imported workspace from granting itself script authority.
 
 ## Remaining compatibility limits
 
-Every module name currently documented by Insomnia is available, but full npm-package behavioral equivalence remains open. In particular, exact Chai internals, complete Lodash behavior, arbitrary/local-reference JSON Schema behavior, the full Cheerio/XML parsers, additional CryptoJS algorithms, Moment locales/time zones, complete Node built-in semantics, and the complete Postman Collection SDK are not claimed. PFX and secondary-request file sources, external-vault scripts, and stronger portable CLI isolation remain in the [parity ledger](PARITY.md). The official scripts reference says deprecated Postman interfaces are not supported by Insomnia, so they are not treated as an upstream parity requirement.
+Every module name currently documented by Insomnia is available, but full npm-package behavioral equivalence remains open. In particular, exact Chai internals, complete Lodash behavior, arbitrary/local-reference JSON Schema behavior, the full Cheerio/XML parsers, additional CryptoJS algorithms, Moment locales/time zones, complete Node built-in semantics, and the complete Postman Collection SDK are not claimed. PFX, external-vault scripts, and stronger portable CLI isolation remain in the [parity ledger](PARITY.md). The official scripts reference says deprecated Postman interfaces are not supported by Insomnia, so they are not treated as an upstream parity requirement.
