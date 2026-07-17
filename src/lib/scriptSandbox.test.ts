@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runInNewContext } from 'node:vm';
 import { createBlankRequest } from '../data/seed';
-import { applyScriptSubresponse, buildScriptWorkerSource, hydrateScriptFileReferences, normalizeScriptSubrequest, validateScriptSource } from './scriptSandbox';
+import { applyScriptSubresponse, buildScriptWorkerSource, hydrateScriptFileReferences, normalizeScriptSubrequest, normalizeScriptSubrequestWithFiles, prepareScriptSubrequest, resolveScriptFileReferencePaths, validateScriptSource } from './scriptSandbox';
 
 describe('script sandbox source validation', () => {
   const runWorkerSource = async (script: string, stateOverrides: Record<string, unknown> = {}) => {
@@ -78,6 +78,29 @@ describe('script sandbox source validation', () => {
     expect(() => normalizeScriptSubrequest('file:///tmp/token', source)).toThrow(/http:\/\//);
     expect(() => normalizeScriptSubrequest({ url: 'https://example.com', method: 'GET\r\nX-Evil: yes' }, source)).toThrow(/HTTP token/);
     expect(() => normalizeScriptSubrequest({ url: 'https://example.com', body: { mode: 'file', file: '/tmp/secret' } }, source)).toThrow(/cannot read file paths/);
+  });
+
+  it('normalizes inert secondary file references only for host hydration', () => {
+    const source = createBlankRequest('source');
+    const binary = normalizeScriptSubrequestWithFiles({
+      url: 'https://api.example.com/upload',
+      method: 'POST',
+      body: { mode: 'file', file: '{{ fixtures }}/payload.bin' },
+      certificate: { cert: { src: '{{ fixtures }}/client.crt' }, key: { src: '{{ fixtures }}/client.key' }, domains: ['api.example.com'] },
+    }, source);
+    expect(binary.request).toMatchObject({ bodyMode: 'binary', transport: { clientCertificateDomains: 'api.example.com', clientCertificatePem: '', clientKeyPem: '' } });
+    expect(resolveScriptFileReferencePaths(binary.fileReferences, { fixtures: '/tmp/fixtures' })).toEqual([
+      { kind: 'certificate-cert', path: '/tmp/fixtures/client.crt' },
+      { kind: 'certificate-key', path: '/tmp/fixtures/client.key' },
+      { kind: 'body', path: '/tmp/fixtures/payload.bin' },
+    ]);
+
+    const multipart = normalizeScriptSubrequestWithFiles({
+      url: 'https://api.example.com/upload',
+      body: { mode: 'formdata', formdata: [{ key: 'note', value: 'ready' }, { key: 'upload', type: 'file', src: '/tmp/data.csv', fileName: 'renamed.csv', contentType: 'text/csv' }] },
+    }, source);
+    expect(multipart.request.multipartBody).toMatchObject([{ name: 'note', kind: 'text' }, { name: 'upload', kind: 'file', fileName: 'renamed.csv', contentType: 'text/csv' }]);
+    expect(multipart.fileReferences).toEqual([{ kind: 'multipart', path: '/tmp/data.csv', partId: 'script-part-1', fileName: 'renamed.csv', contentType: 'text/csv' }]);
   });
 
   it('executes scoped aliases, exact request helpers, folder lookup, and async Chai tests', async () => {
@@ -183,6 +206,33 @@ describe('script sandbox source validation', () => {
     await expect(hydrateScriptFileReferences(createBlankRequest('too-large'), [{ kind: 'body', path: '/tmp/large.bin' }], async () => ({ fileName: 'large.bin', mimeType: 'application/octet-stream', dataBase64: 'A'.repeat(6_666_672) }))).rejects.toThrow(/5 MB/);
     const aggregatePayload = { fileName: 'aggregate.bin', mimeType: 'application/octet-stream', dataBase64: 'A'.repeat(5_333_336) };
     await expect(hydrateScriptFileReferences(createBlankRequest('aggregate'), references.slice(0, 5), async () => aggregatePayload)).rejects.toThrow(/20 MB aggregate/);
+  });
+
+  it('shares one file count and byte budget across secondary and primary hydration', async () => {
+    const budget = { files: 0, bytes: 0 };
+    const payload = { fileName: 'chunk.bin', mimeType: 'application/octet-stream', dataBase64: btoa('12345') };
+    await hydrateScriptFileReferences(createBlankRequest('secondary'), [{ kind: 'body', path: '/tmp/secondary.bin' }], async () => payload, budget);
+    await hydrateScriptFileReferences(createBlankRequest('primary'), [{ kind: 'body', path: '/tmp/primary.bin' }], async () => payload, budget);
+    expect(budget).toEqual({ files: 2, bytes: 10 });
+    await expect(hydrateScriptFileReferences(createBlankRequest('overflow'), Array.from({ length: 19 }, (_, index) => ({ kind: 'body' as const, path: `/tmp/${index}.bin` })), async () => payload, budget)).rejects.toThrow(/20-file/);
+  });
+
+  it('prepares exact hydrated secondary bodies and PEM identity through the shared path', async () => {
+    const source = createBlankRequest('source');
+    const readFile = async (path: string) => ({
+      fileName: path.split('/').at(-1) ?? 'file',
+      mimeType: path.endsWith('.pem') ? 'application/x-pem-file' : 'application/octet-stream',
+      dataBase64: Buffer.from(path.endsWith('.pem') ? '-----BEGIN TEST-----\nvalue\n-----END TEST-----' : 'secondary-bytes').toString('base64'),
+    });
+    const prepared = await prepareScriptSubrequest({
+      url: 'https://api.example.com/upload',
+      method: 'POST',
+      body: { mode: 'file', file: '{{ root }}/payload.bin' },
+      certificate: { cert: { src: '{{ root }}/client.pem' }, key: { src: '{{ root }}/key.pem' }, domains: ['api.example.com'] },
+    }, source, { root: '/tmp' }, readFile);
+    expect(prepared.binaryBody).toMatchObject({ fileName: 'payload.bin', dataBase64: Buffer.from('secondary-bytes').toString('base64') });
+    expect(prepared.transport).toMatchObject({ clientCertificateDomains: 'api.example.com', clientCertificatePem: expect.stringContaining('BEGIN TEST'), clientKeyPem: expect.stringContaining('BEGIN TEST') });
+    await expect(prepareScriptSubrequest({ url: 'https://api.example.com/upload', body: { mode: 'file', file: '/tmp/denied.bin' } }, source, {})).rejects.toThrow(/file access is disabled/);
   });
 
   it('resolves all seven variable layers and mutates distinct base and selected stores', async () => {

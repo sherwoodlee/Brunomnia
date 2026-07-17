@@ -6,7 +6,7 @@ import { buildHeaders, buildRequestUrl, resolveTemplate } from '../src/lib/reque
 import { parseRunnerData, runCollection } from '../src/lib/runner';
 import type { ApiDesign, ApiRequest, AuthConfig, Environment, HttpResponse, ScriptRunResult, Workspace } from '../src/types';
 import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resources';
-import { hydrateScriptFileReferences, normalizeScriptSubrequest, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
+import { hydrateScriptFileReferences, prepareScriptSubrequest, type ScriptFileBudget, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 import { createScriptExpect } from '../src/lib/scriptExpect';
 import { createScriptModules } from '../src/lib/scriptModules';
 
@@ -64,6 +64,7 @@ const runNodeScript = async (
   const tests: ScriptRunResult['tests'] = [];
   const pendingTests: Promise<unknown>[] = [];
   const fileReferences: ScriptFileReference[] = [];
+  const fileBudget: ScriptFileBudget = { files: 0, bytes: 0 };
   if (!source.trim()) return { request, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
   const mergedVariables = () => {
     const values: Record<string, string> = {};
@@ -270,7 +271,9 @@ const runNodeScript = async (
     sendRequest: async (input: unknown, callback?: (error: Error | null, result?: ReturnType<typeof responseFacade>) => void) => {
       const run = async () => {
         if (!options.sendRequest) throw new Error('Script-initiated requests are disabled.');
-        return responseFacade(await options.sendRequest(normalizeScriptSubrequest(input, request), mergedVariables()));
+        const variables = mergedVariables();
+        const subrequest = await prepareScriptSubrequest(input, request, variables, options.readFile, fileBudget);
+        return responseFacade(await options.sendRequest(subrequest, variables));
       };
       if (callback) { void run().then((result) => callback(null, result), (error) => callback(error instanceof Error ? error : new Error(String(error)))); return undefined; }
       return run();
@@ -347,7 +350,7 @@ const runNodeScript = async (
     delete request.body;
     request.body = requestBody;
   }
-  const hydratedRequest = await hydrateScriptFileReferences(request, fileReferences, options.readFile);
+  const hydratedRequest = await hydrateScriptFileReferences(request, fileReferences, options.readFile, fileBudget);
   return { request: hydratedRequest, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
 };
 

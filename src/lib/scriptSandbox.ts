@@ -14,6 +14,8 @@ export type ScriptFileReference = {
   contentType?: string;
 };
 
+export type ScriptFileBudget = { files: number; bytes: number };
+
 export type ScriptRunOptions = {
   baseGlobals?: Record<string, string>;
   baseGlobalDisabled?: string[];
@@ -86,17 +88,18 @@ export const hydrateScriptFileReferences = async (
   request: ApiRequest,
   references: ScriptFileReference[],
   readFile?: (path: string) => Promise<FilePayload>,
+  budget: ScriptFileBudget = { files: 0, bytes: 0 },
 ): Promise<ApiRequest> => {
   if (!references.length) return request;
   if (!readFile) throw new Error('Script file access is disabled. Enable it in Preferences.');
-  if (references.length > 20) throw new Error('Script request exceeds the 20-file attachment limit.');
-  let totalBytes = 0;
+  if (budget.files + references.length > 20) throw new Error('Script request exceeds the 20-file attachment limit.');
+  budget.files += references.length;
   for (const reference of references) {
     const payload = await readFile(reference.path);
     const bytes = payloadBytes(payload);
     if (bytes < 0 || bytes > 5_000_000) throw new Error(`Script file '${payload.fileName}' exceeds the 5 MB per-file limit.`);
-    totalBytes += bytes;
-    if (totalBytes > 20_000_000) throw new Error('Script request files exceed the 20 MB aggregate limit.');
+    budget.bytes += bytes;
+    if (budget.bytes > 20_000_000) throw new Error('Script request files exceed the 20 MB aggregate limit.');
     if (reference.kind === 'body') {
       request.bodyMode = 'binary';
       request.binaryBody = payload;
@@ -115,6 +118,13 @@ export const hydrateScriptFileReferences = async (
   }
   return request;
 };
+
+export const resolveScriptFileReferencePaths = (references: ScriptFileReference[], variables: Record<string, string>): ScriptFileReference[] => references.map((reference) => {
+  const path = reference.path.replace(/{{\s*([^{}]+?)\s*}}/g, (match, name: string) => variables[name] ?? match).trim();
+  if (!path) throw new Error('Script file path cannot be empty.');
+  if (path.length > 10_000) throw new Error('Script file path exceeds 10,000 characters.');
+  return { ...reference, path };
+});
 
 const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const stringValue = (value: unknown, fallback = '') => typeof value === 'string' ? value : value === undefined || value === null ? fallback : String(value);
@@ -146,13 +156,13 @@ const assertHttpUrl = (value: unknown): string => {
   return parsed.toString();
 };
 
-/** Converts the documented Insomnia sendRequest input into a bounded Brunomnia request. */
-export const normalizeScriptSubrequest = (input: unknown, sourceRequest: ApiRequest): ApiRequest => {
+const normalizeScriptSubrequestInput = (input: unknown, sourceRequest: ApiRequest, allowFileReferences: boolean): { request: ApiRequest; fileReferences: ScriptFileReference[] } => {
   const serialized = JSON.stringify(input);
   if (serialized && new Blob([serialized]).size > 256_000) throw new Error('Script request input exceeds the 256 KB bridge limit.');
   const source = typeof input === 'string' ? { url: input } : record(input);
   if (!source) throw new Error('Script requests must be a URL string or request object.');
   const request = createBlankRequest('Script request');
+  const fileReferences: ScriptFileReference[] = [];
   request.id = `script-request-${crypto.randomUUID()}`;
   request.url = assertHttpUrl(source.url);
   request.method = stringValue(source.method, 'GET').trim().toUpperCase() || 'GET';
@@ -179,9 +189,17 @@ export const normalizeScriptSubrequest = (input: unknown, sourceRequest: ApiRequ
   }
   const certificate = record(source.certificate);
   if (certificate) {
-    if (certificate.certPath || certificate.keyPath || certificate.path) throw new Error('Script requests cannot read certificate file paths. Paste PEM content in Transport settings instead.');
-    request.transport.clientCertificatePem = stringValue(certificate.cert ?? certificate.certificate);
-    request.transport.clientKeyPem = stringValue(certificate.key);
+    const cert = record(certificate.cert);
+    const key = record(certificate.key);
+    const pfx = record(certificate.pfx);
+    if (pfx?.src || certificate.pfxPath || certificate.path) throw new Error('PFX certificate files are not supported by the native PEM transport.');
+    const certPath = certificate.certPath ?? cert?.src;
+    const keyPath = certificate.keyPath ?? key?.src;
+    if ((certPath || keyPath) && !allowFileReferences) throw new Error('Script requests cannot read certificate file paths without script file access.');
+    if (certPath) fileReferences.push({ kind: 'certificate-cert', path: stringValue(certPath) });
+    else request.transport.clientCertificatePem = stringValue(cert?.pem ?? certificate.cert ?? certificate.certificate);
+    if (keyPath) fileReferences.push({ kind: 'certificate-key', path: stringValue(keyPath) });
+    else request.transport.clientKeyPem = stringValue(key?.pem ?? certificate.key);
     request.transport.clientCertificateDomains = Array.isArray(certificate.domains) ? certificate.domains.map(String).join(',') : stringValue(certificate.domains);
   }
 
@@ -207,16 +225,49 @@ export const normalizeScriptSubrequest = (input: unknown, sourceRequest: ApiRequ
       request.graphql.operationName = stringValue(graphql.operationName);
     } else if (mode === 'formdata') {
       const parts = Array.isArray(bodySource.formdata) ? bodySource.formdata : [];
-      if (parts.some((item) => record(item)?.type === 'file' || record(item)?.src !== undefined)) throw new Error('Script requests cannot read file paths. Attach files in the request editor instead.');
       request.bodyMode = 'multipart';
-      request.multipartBody = parts.map((item, index) => scriptRow(item, index, 'script-part')).filter((item): item is KeyValue => Boolean(item)).map((item) => ({ ...item, kind: 'text' as const }));
+      request.multipartBody = parts.flatMap((item, index) => {
+        const part = record(item);
+        if (!part) return [];
+        const row = scriptRow(part, index, 'script-part');
+        if (!row) return [];
+        const isFile = part.type === 'file' || part.src !== undefined;
+        if (!isFile) return [{ ...row, kind: 'text' as const }];
+        if (!allowFileReferences) throw new Error('Script requests cannot read multipart file paths without script file access.');
+        const path = Array.isArray(part.src) ? part.src[0] : part.src ?? part.value;
+        fileReferences.push({ kind: 'multipart', path: stringValue(path), partId: row.id, fileName: stringValue(part.fileName ?? part.filename), contentType: stringValue(part.contentType) });
+        return [{ ...row, value: '', kind: 'file' as const, fileName: stringValue(part.fileName ?? part.filename), contentType: stringValue(part.contentType) }];
+      });
     } else if (mode === 'file') {
-      throw new Error('Script requests cannot read file paths. Attach files in the request editor instead.');
+      if (!allowFileReferences) throw new Error('Script requests cannot read file paths without script file access.');
+      const file = bodySource.file;
+      const path = record(file)?.src ?? file ?? bodySource.src;
+      fileReferences.push({ kind: 'body', path: stringValue(path) });
+      request.bodyMode = 'binary';
     } else {
       throw new Error(`Script request body mode '${mode}' is not supported.`);
     }
   }
-  return request;
+  if (fileReferences.length > 20) throw new Error('Script request exceeds the 20-file attachment limit.');
+  return { request, fileReferences };
+};
+
+/** Converts the documented Insomnia sendRequest input into a bounded request without file authority. */
+export const normalizeScriptSubrequest = (input: unknown, sourceRequest: ApiRequest): ApiRequest => normalizeScriptSubrequestInput(input, sourceRequest, false).request;
+
+/** Converts trusted sendRequest input and returns inert paths for host-side hydration. */
+export const normalizeScriptSubrequestWithFiles = (input: unknown, sourceRequest: ApiRequest): { request: ApiRequest; fileReferences: ScriptFileReference[] } => normalizeScriptSubrequestInput(input, sourceRequest, true);
+
+export const prepareScriptSubrequest = async (
+  input: unknown,
+  sourceRequest: ApiRequest,
+  variables: Record<string, string>,
+  readFile?: (path: string) => Promise<FilePayload>,
+  budget: ScriptFileBudget = { files: 0, bytes: 0 },
+): Promise<ApiRequest> => {
+  const normalized = normalizeScriptSubrequestWithFiles(input, sourceRequest);
+  const references = resolveScriptFileReferencePaths(normalized.fileReferences, variables);
+  return hydrateScriptFileReferences(normalized.request, references, readFile, budget);
 };
 
 const sandboxPrefix = `
@@ -632,6 +683,7 @@ export const runBrowserScript = async (
   const worker = new Worker(workerUrl);
   const maxSubrequests = Math.min(20, Math.max(1, options.maxSubrequests ?? 5));
   const maxSubrequestBytes = Math.min(20_000_000, Math.max(1_024, options.maxSubrequestBytes ?? 5_000_000));
+  const fileBudget: ScriptFileBudget = { files: 0, bytes: 0 };
   try {
     const output = await new Promise<WorkerOutput>((resolve, reject) => {
       const timeout = window.setTimeout(() => reject(new Error(`Script exceeded the ${timeoutMs} ms execution limit.`)), timeoutMs);
@@ -649,8 +701,7 @@ export const runBrowserScript = async (
           return;
         }
         try {
-          const subrequest = normalizeScriptSubrequest(message.input, request);
-          void options.sendRequest(subrequest, message.variables).then((subresponse) => {
+          void prepareScriptSubrequest(message.input, request, message.variables, options.readFile, fileBudget).then((subrequest) => options.sendRequest!(subrequest, message.variables)).then((subresponse) => {
             if (new Blob([subresponse.body]).size > maxSubrequestBytes) throw new Error(`Script response exceeds the ${Math.round(maxSubrequestBytes / 1_000_000)} MB bridge limit.`);
             worker.postMessage({ type: 'subresponse', id: message.id, response: subresponse });
           }).catch((error) => worker.postMessage({ type: 'subresponse', id: message.id, error: error instanceof Error ? error.message : String(error) }));
@@ -682,7 +733,7 @@ export const runBrowserScript = async (
       });
     });
     if (!output.ok) throw new Error(output.error || 'Script execution failed.');
-    const hydratedRequest = await hydrateScriptFileReferences(output.request, output.fileReferences ?? [], options.readFile);
+    const hydratedRequest = await hydrateScriptFileReferences(output.request, output.fileReferences ?? [], options.readFile, fileBudget);
     return { request: hydratedRequest, environment: output.environment, baseGlobals: output.baseGlobals, baseGlobalDisabled: output.baseGlobalDisabled, globalDisabled: output.globalDisabled, collectionVariables: output.collectionVariables, baseEnvironment: output.baseEnvironment, baseEnvironmentDisabled: output.baseEnvironmentDisabled, collectionDisabled: output.collectionDisabled, folders: output.folders, localVariables: output.localVariables, logs: output.logs, tests: output.tests };
   } finally {
     worker.terminate();

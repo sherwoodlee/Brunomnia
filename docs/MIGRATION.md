@@ -270,7 +270,21 @@ Compatibility bounds remain explicit: this is a broad clean-room `assert` baseli
 
 Compatibility bounds remain explicit: this is a broad clean-room BDD surface, not Chai package-internal equivalence. Plugins, `should`, extension/overwrite hooks, exact error metadata, exotic/cyclic deep identity, and every overload nuance remain open alongside other bounded package behavior and non-scripting ledger gaps.
 
-## Milestone 19 — remaining parity closure and release hardening
+## Milestone 19 — permission-bounded secondary request files (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Documented bodies | Complete baseline | `insomnia.sendRequest()` supports the documented binary `file` body and multipart file rows alongside existing text body modes |
+| Shared preparation | Complete | Desktop and trusted CLI use one normalizer/path resolver/host hydrator before invoking their mediated transport |
+| Capability boundary | Complete | Network and file authorities are independent, off by default, device/invocation local, and both are required for a file-backed secondary request |
+| Aggregate limits | Complete | Regular files only, 5 MB per file, 20 files and 20 MB across all secondary plus final primary attachments in one script execution |
+| PEM identity | Complete baseline | Secondary request certificate/key source paths use the existing UTF-8 PEM hydration and domain-scoped native transport; PFX remains unsupported |
+| Verification | Complete | Normalization, template paths, denial without a reader, exact binary/PEM hydration, multipart metadata, and cross-request aggregate budgets are executable |
+| Documentation and evidence | Complete | Updated [permission-bounded scripting guide](SCRIPTING.md) and [Milestone 19 verification](QA_MILESTONE_19.md) |
+
+Compatibility bounds remain explicit: PFX/PKCS#12, encrypted-key passphrases, a live external-network file fixture, external-vault scripts, stronger portable CLI isolation, exact package internals, and non-scripting ledger gaps remain open.
+
+## Milestone 20 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
