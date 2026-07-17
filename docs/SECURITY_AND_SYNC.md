@@ -14,7 +14,7 @@ Use a secret in any normal request field with:
 {{ vault.orders_api_token }}
 ```
 
-Local vault variables resolve in HTTP, GraphQL, gRPC, WebSocket/SSE connection fields, OAuth token requests, and non-streaming collection runs. Pre-request and after-response scripts do not receive the vault map.
+Local vault variables resolve in HTTP, GraphQL, gRPC, WebSocket/SSE connection fields, OAuth token requests, and non-streaming collection runs. Pre-request and after-response scripts receive no vault data by default. A device-local Preferences grant can expose the currently unlocked entries through `insomnia.vault.get`; imports and shared-project/sync reads reset or preserve local grants instead of accepting them from shared data.
 
 ## External vault providers
 
@@ -53,7 +53,7 @@ The encrypted file can live on a self-hosted filesystem share, mounted WebDAV vo
 
 ## Governance and audit boundary
 
-Workspace v11 retains the v7 owner, admin, editor, and viewer actor model. At least one active owner is required. Owner/admin actors can manage members, allowed storage modes, secret policy, external reference approvals, and audit retention. Editors can publish encrypted revisions and operate integrations; viewers cannot. Audit events record governance and sync operations without secret values and are retained up to the configured bound.
+Workspace v12 retains the v7 owner, admin, editor, and viewer actor model. At least one active owner is required. Owner/admin actors can manage members, allowed storage modes, secret policy, external reference approvals, and audit retention. Editors can publish encrypted revisions and operate integrations; viewers cannot. Audit events record governance and sync operations without secret values and are retained up to the configured bound.
 
 Private sub-environment trees stay on the current device and are omitted from encrypted revisions and project/export payloads. They are an omission boundary rather than encrypted storage; use vault or approved external-vault references for protected secret values. Plaintext policy scanning includes inherited collection and folder variables, headers, and authentication.
 

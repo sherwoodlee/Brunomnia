@@ -9,6 +9,7 @@ import type {
 } from '../types';
 import { environmentMap } from './request';
 import { applyCollectionConfiguration } from './resources';
+import type { ScriptRunOptions } from './scriptSandbox';
 
 export type RequestExecutor = (request: ApiRequest, variables: Record<string, string>) => Promise<HttpResponse>;
 export type ScriptExecutor = (
@@ -19,6 +20,7 @@ export type ScriptExecutor = (
   timeoutMs?: number,
   localVariables?: Record<string, string>,
   iterationData?: Record<string, string>,
+  options?: ScriptRunOptions,
 ) => Promise<ScriptRunResult>;
 
 export type RunnerOptions = {
@@ -26,6 +28,7 @@ export type RunnerOptions = {
   retries: number;
   delayMs: number;
   dataRows: Record<string, string>[];
+  scriptTimeoutMs?: number;
   shouldCancel?: () => boolean;
   onResult?: (result: RunnerItemResult) => void;
 };
@@ -50,6 +53,8 @@ export const runCollection = async (
   let cancelled = false;
   const iterations = boundedInteger(options.iterations, 1, 1000);
   const retries = boundedInteger(options.retries, 0, 10);
+  let collectionVariables = Object.fromEntries((collection.environment ?? []).filter((row) => row.enabled && row.name).map((row) => [row.name, row.value]));
+  const folderVariables = new Map((collection.folders ?? []).map((folder) => [folder.id, Object.fromEntries(folder.environment.filter((row) => row.enabled && row.name).map((row) => [row.name, row.value]))]));
 
   outer: for (let iteration = 0; iteration < iterations; iteration += 1) {
     const iterationData = options.dataRows[iteration % Math.max(1, options.dataRows.length)] ?? {};
@@ -65,13 +70,21 @@ export const runCollection = async (
         let error: string | undefined;
         const started = Date.now();
         try {
-          const preRequest = await executeScript(request.preRequestScript, request, variables, undefined, 2000, {}, iterationData);
+          const scriptFolders = configured.folders.map((folder) => ({ id: folder.id, name: folder.name, environment: { ...(folderVariables.get(folder.id) ?? {}) } }));
+          const preRequest = await executeScript(request.preRequestScript, request, variables, undefined, options.scriptTimeoutMs ?? 10_000, {}, iterationData, { collectionVariables, folders: scriptFolders });
           request = preRequest.request;
           variables = preRequest.environment;
+          collectionVariables = preRequest.collectionVariables ?? collectionVariables;
+          preRequest.folders?.forEach((folder) => folderVariables.set(folder.id, folder.environment));
           const localVariables = preRequest.localVariables ?? {};
-          response = await executeRequest(request, { ...variables, ...iterationData, ...localVariables });
-          const afterResponse = await executeScript(request.tests, request, variables, response, 2000, localVariables, iterationData);
+          response = await executeRequest(request, { ...variables, ...collectionVariables, ...Object.fromEntries(scriptFolders.flatMap((folder) => Object.entries(folderVariables.get(folder.id) ?? {}))), ...iterationData, ...localVariables });
+          const afterResponse = await executeScript(request.tests, request, variables, response, options.scriptTimeoutMs ?? 10_000, localVariables, iterationData, {
+            collectionVariables,
+            folders: scriptFolders.map((folder) => ({ ...folder, environment: { ...(folderVariables.get(folder.id) ?? {}) } })),
+          });
           variables = afterResponse.environment;
+          collectionVariables = afterResponse.collectionVariables ?? collectionVariables;
+          afterResponse.folders?.forEach((folder) => folderVariables.set(folder.id, folder.environment));
           tests = afterResponse.tests;
         } catch (caught) {
           error = caught instanceof Error ? caught.message : String(caught);

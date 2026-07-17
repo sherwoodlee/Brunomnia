@@ -147,7 +147,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       };
       const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
       const report = await runCollection(collection, environment, {
-        iterations, retries, delayMs, dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current,
+        iterations, retries, delayMs, scriptTimeoutMs: workspace.preferences.scriptTimeoutMs, dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current,
         onResult: (result) => setResults((current) => [...current, result]),
       }, async (request, variables) => {
         const requestEnvironment = {
@@ -162,7 +162,18 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
         const stored = { ...result, requestId: request.id, requestName: request.name, requestUrl, receivedAt: new Date().toISOString() };
         runnerResponses = [stored, ...runnerResponses.filter((candidate) => candidate.requestId !== request.id)].slice(0, 100);
         return result;
-      }, runBrowserScript);
+      }, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => runBrowserScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
+        ...scriptOptions,
+        vault: workspace.preferences.enableVaultInScripts ? vault : undefined,
+        sendRequest: workspace.preferences.allowScriptRequests ? (subrequest, subrequestVariables) => sendRequest(subrequest, {
+          ...environment,
+          variables: Object.entries(subrequestVariables).map(([name, value]) => ({ id: `runner-script-${name}`, name, value, enabled: true })),
+        }, {
+          cookies: runnerCookies,
+          responses: runnerResponses,
+          vault: workspace.preferences.enableVaultInScripts ? vault : {},
+        }) : undefined,
+      }));
       onChangeWorkspace((current) => ({ ...current, cookies: runnerCookies, responses: runnerResponses, pluginData: pluginState.data, runnerReports: [report, ...current.runnerReports].slice(0, 30) }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));

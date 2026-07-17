@@ -80,7 +80,7 @@ Compatibility bounds remain explicit: nested source folders are represented in f
 | Script/test API | Complete baseline | Environment/base/collection/local/iteration variable APIs, replacement helpers, request getters/setters, response header/cookie helpers, console capture, and Jest/Chai-style expectation aliases |
 | Interoperability and migration | Complete | Workspace v5, advanced Insomnia/Postman auth mapping, Insomnia v4/v5 cookie-jar round trips, and collision-safe cookie import |
 
-Compatibility bounds remain explicit: OAuth 2 authorization uses a copied authorization URL and manual returned code/token rather than an embedded callback listener; Netrc contents are project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, arbitrary Spectral JavaScript/functions/remote `extends`, and script-originated network/module access remain deferred. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. WebSocket custom proxy/client identity and headless CLI streaming/auth parity remain later closure work.
+Compatibility bounds remain explicit: OAuth 2 authorization uses a copied authorization URL and manual returned code/token rather than an embedded callback listener; Netrc contents are project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, and arbitrary Spectral JavaScript/functions/remote `extends` remain deferred. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. WebSocket custom proxy/client identity and headless CLI streaming/auth parity remain later closure work. The later permission-bounded scripting expansion is recorded in Milestone 12.
 
 ## Milestone 6 — Git Sync and extensibility (complete)
 
@@ -109,7 +109,7 @@ Compatibility bounds remain explicit: Git credential setup uses the user's insta
 | Workspace migration | Complete | Versions 1–6 migrate to v7 collaboration/governance fields; malformed roles, policies, actors, audit events, revisions, and allowed storage modes are normalized safely |
 | Documentation and evidence | Complete | [Security and encrypted sync guide](SECURITY_AND_SYNC.md) and [Milestone 7 verification](QA_MILESTONE_7.md) |
 
-Compatibility bounds remain explicit: shared-file encryption uses one team passphrase rather than per-user public-key wrapping; synchronization is pull/push rather than real-time presence; server-mediated comments, per-resource Cloud Sync branches/history, offline merge UI, and automatic device discovery remain. Local roles are policy metadata and action checks, not strong identity authentication. Self-hosted SAML/OIDC login, SCIM provisioning, tamper-evident remote audit storage, provider SDK login flows, script vault access, and headless external-vault parity remain later closure work.
+Compatibility bounds remain explicit: shared-file encryption uses one team passphrase rather than per-user public-key wrapping; synchronization is pull/push rather than real-time presence; server-mediated comments, per-resource Cloud Sync branches/history, offline merge UI, and automatic device discovery remain. Local roles are policy metadata and action checks, not strong identity authentication. Self-hosted SAML/OIDC login, SCIM provisioning, tamper-evident remote audit storage, provider SDK login flows, OS-keychain wrapping, script access to external providers, and headless external-vault parity remain later closure work.
 
 ## Milestone 8 — MCP, AI, and service integrations (complete baseline)
 
@@ -168,9 +168,25 @@ Compatibility bounds remain explicit: drag/drop ordering, bulk folder actions, r
 | Workspace migration | Complete | Versions 1–10 migrate to v11 bounded method tokens, normalized path/query/header/form/metadata rows, descriptions, and the Generate Code shortcut |
 | Documentation and evidence | Complete | [Request authoring and client-code guide](REQUEST_AUTHORING.md) and [Milestone 11 verification](QA_MILESTONE_11.md) |
 
-Compatibility bounds remain explicit: generated snippets do not yet embed multipart or binary bytes, reproduce runtime-specific Digest/OAuth 1/IAM/Hawk/ASAP/NTLM/Netrc signing, validate target-language syntax, or run generated code. Those omissions produce visible warnings. The local XML formatter is intentionally conservative rather than a schema-aware canonicalizer. A full scripting API remains a separate security-reviewed parity phase.
+Compatibility bounds remain explicit: generated snippets do not yet embed multipart or binary bytes, reproduce runtime-specific Digest/OAuth 1/IAM/Hawk/ASAP/NTLM/Netrc signing, validate target-language syntax, or run generated code. Those omissions produce visible warnings. The local XML formatter is intentionally conservative rather than a schema-aware canonicalizer. The scripting expansion is recorded separately in Milestone 12.
 
-## Milestone 12 — remaining parity closure and release hardening
+## Milestone 12 — permission-bounded scripting compatibility (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Script runtime | Complete baseline | Disposable desktop Worker, 1–60 second device-local deadline, top-level await, captured console output, tests, and blocked direct network/DOM/storage/import/eval authority |
+| Variable scopes | Complete baseline | Environment/base alias, collection, local, iteration, and nearest-first parent-folder APIs; environment/collection/folder mutations persist for direct sends and propagate through runs |
+| Request and response API | Complete baseline | URL/query, header, body, Basic/Bearer/API-key auth, proxy, inline-certificate mutation plus status/timing/text/JSON/header/cookie response helpers |
+| Selected modules | Complete baseline | Local adapters for assert, atob/btoa, Chai expect, lightweight Lodash, querystring, timers, URL, util, and UUID without remote package loading |
+| Secondary requests | Complete baseline | Off-by-default device-local grant, mediated HTTP(S) normalization, separate vault capability, five-request/256 KB input/5 MB response/10-second transport bounds, and no nested script/plugin execution |
+| Vault scripts | Complete baseline | Off-by-default device-local grant exposes only current unlocked local entries through `insomnia.vault.get`, with no result/export/project/sync serialization |
+| CLI safety | Complete baseline | Workspace JavaScript requires `--allow-scripts`; secondary requests additionally require `--allow-script-requests`; workspace data cannot self-grant either capability |
+| Workspace migration | Complete | Versions 1–11 migrate to v12 safe script timeout and disabled network/vault grants; imports reset authority and shared reads preserve device-local preferences |
+| Documentation and evidence | Complete | [Permission-bounded scripting guide](SCRIPTING.md) and [Milestone 12 verification](QA_MILESTONE_12.md) |
+
+Compatibility bounds remain explicit: the full upstream library/Node module set, complete Chai/Lodash behavior, advanced auth/body helpers, separately persisted base-environment mutation, async tests, secondary response-cookie persistence, script access to external-vault providers, and broader Postman-global compatibility remain. The browser Worker is the desktop capability boundary; CLI scripts use Node `vm` and therefore require an explicit trusted-workspace flag rather than being represented as hostile-code isolation.
+
+## Milestone 13 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
