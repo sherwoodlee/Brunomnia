@@ -1,0 +1,17 @@
+{
+  "info": {
+    "name": "Postman 2.1 fixture",
+    "_postman_id": "postman-v21-fixture",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create item",
+      "request": {
+        "method": "POST",
+        "url": "https://api.example.com/items",
+        "body": { "mode": "raw", "raw": "{\"name\":\"fixture\"}", "options": { "raw": { "language": "json" } } }
+      }
+    }
+  ]
+}

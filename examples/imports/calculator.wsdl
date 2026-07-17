@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" targetNamespace="urn:calculator">
+  <binding name="CalculatorBinding">
+    <operation name="Add"><soap:operation soapAction="urn:add" /></operation>
+  </binding>
+  <service name="Calculator">
+    <port name="CalculatorPort"><soap:address location="https://soap.example.com/calculator" /></port>
+  </service>
+</definitions>

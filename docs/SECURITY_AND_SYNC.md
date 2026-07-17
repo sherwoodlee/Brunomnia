@@ -1,0 +1,58 @@
+# Secrets, encrypted sync, and local governance
+
+Milestone 7 adds a local security control plane without an account or subscription. It is designed so a later real-time server, identity provider, or cloud-vault login adapter does not require moving plaintext secrets into workspace storage.
+
+## Local encrypted vault
+
+The Tauri desktop app stores `local-vault.enc.json` in its application-data directory. The envelope uses AES-256-GCM with a random 128-bit salt, random 96-bit nonce, and a key derived from the user passphrase using PBKDF2-HMAC-SHA256 at 210,000 iterations. Encrypted files have a 50 MB read limit. Writes use a unique create-only temporary file, flush before replacement, reject symlinks, and use mode `0600` on Unix.
+
+The passphrase and decrypted entries exist only in renderer memory while the vault is unlocked. Locking clears both. Losing the passphrase is intentionally unrecoverable; reset deletes the encrypted file after explicit confirmation.
+
+Use a secret in any normal request field with:
+
+```text
+{{ vault.orders_api_token }}
+```
+
+Local vault variables resolve in HTTP, GraphQL, gRPC, WebSocket/SSE connection fields, OAuth token requests, and non-streaming collection runs. Pre-request and after-response scripts do not receive the vault map.
+
+## External vault providers
+
+Brunomnia supports four providers through their official command-line clients:
+
+| Provider | Executable and credential source |
+| --- | --- |
+| AWS Secrets Manager | `aws`; normal AWS CLI credential chain/profile/SSO |
+| GCP Secret Manager | `gcloud`; active gcloud account or service-account configuration |
+| Azure Key Vault | `az`; active Azure CLI login |
+| HashiCorp Vault | `vault`; normal Vault CLI environment/token/agent configuration |
+
+Brunomnia does not persist provider credentials. It starts the executable directly with an argument array—never a shell—rejects option-shaped references, enforces a 30-second limit and 10 MB output limit, and caches resolved values in memory for up to 30 minutes. The cache is capped at 20 MB and 256 entries; values larger than the cache ceiling are returned without being cached. Clearing the cache does not change the provider login.
+
+Template syntax is:
+
+```text
+{% external 'provider', 'reference', 'scope', 'field', 'version' %}
+```
+
+`scope` means AWS region, GCP project, or Azure vault name. `field` is used for HashiCorp KV responses. `version` is a provider version/stage where supported. Before request rendering can resolve a reference, an owner or admin must approve the exact provider/reference/scope/field/version tuple in **Security & Sync**. Changing any part of that tuple requires a new approval. The explicit **Test without revealing** action can check a reference and reports only its byte length.
+
+External tags currently cover HTTP, GraphQL, OAuth token requests, and non-streaming collection runs. gRPC/stream tags and CLI provider parity remain open.
+
+## Plaintext-secret guardrail
+
+When the vault policy is enabled, Brunomnia scans likely secret-named environment variables (including disabled values), credential-bearing headers and query parameters, embedded URL credentials, authentication, Netrc, client-key and token fields, plus MCP, AI-provider, and Konnect credentials. Managed-folder/Git stage, commit, push, and write operations plus encrypted-sync pushes are blocked until candidates use a complete `vault.*` variable or external-vault tag. Integration execution independently rejects raw credential fields. This is a focused guardrail, not a general-purpose secret scanner; request bodies, arbitrary values, repository history, and files changed outside Brunomnia still require review.
+
+## End-to-end encrypted shared file
+
+Encrypted sync serializes collections, environments, designs, mocks, MCP project configuration, and governance metadata, then encrypts the payload locally before writing a user-selected file. History, response bodies, cookies, runner reports, import history, Git paths/identity, plugins, plugin storage/themes, local vault contents, AI/Konnect configuration, and the shared-file path stay device-local. MCP credential references can be shared, but raw MCP bearer/Basic values and sensitive headers are blocked by the plaintext-secret guardrail.
+
+Each payload contains a monotonically increasing revision. Push compares the encrypted remote revision to the local base revision and refuses a mismatch. Pull applies shareable data while preserving device-local fields and the current local actor. Force push requires an explicit checkbox and creates the next revision rather than reusing a revision number.
+
+The encrypted file can live on a self-hosted filesystem share, mounted WebDAV volume, or other user-controlled file synchronization system. The storage service sees ciphertext and envelope metadata, not workspace contents or the passphrase. A team currently shares one passphrase; per-user public-key wrapping and revocation remain future work.
+
+## Governance and audit boundary
+
+Workspace v9 retains the v7 owner, admin, editor, and viewer actor model. At least one active owner is required. Owner/admin actors can manage members, allowed storage modes, secret policy, external reference approvals, and audit retention. Editors can publish encrypted revisions and operate integrations; viewers cannot. Audit events record governance and sync operations without secret values and are retained up to the configured bound.
+
+These controls are meaningful local policy checks but are not authentication or a tamper-proof log. Anyone who can directly edit the workspace file controls its metadata. Self-hosted SAML/OIDC authentication, SCIM provisioning, organization service, comprehensive RBAC enforcement, signed audit export, real-time presence, and comments are still tracked in [the parity ledger](PARITY.md).

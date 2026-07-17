@@ -1,6 +1,13 @@
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE';
 export type Protocol = 'http' | 'graphql' | 'websocket' | 'sse' | 'grpc';
 export type BodyMode = 'none' | 'json' | 'text' | 'form-urlencoded' | 'multipart' | 'binary';
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+export type SourceMetadata = {
+  format: string;
+  sourceId?: string;
+  unsupported?: Record<string, JsonValue>;
+};
 
 export type KeyValue = {
   id: string;
@@ -10,13 +17,66 @@ export type KeyValue = {
 };
 
 export type AuthConfig = {
-  type: 'none' | 'bearer' | 'basic' | 'api-key';
+  type: 'none' | 'bearer' | 'basic' | 'api-key' | 'digest' | 'oauth1' | 'oauth2' | 'ntlm' | 'iam' | 'hawk' | 'asap' | 'netrc';
+  disabled: boolean;
   token: string;
+  prefix: string;
   username: string;
   password: string;
   apiKeyName: string;
   apiKeyValue: string;
   apiKeyLocation: 'header' | 'query';
+  oauth1SignatureMethod: 'HMAC-SHA1' | 'HMAC-SHA256' | 'RSA-SHA1' | 'PLAINTEXT';
+  consumerKey: string;
+  consumerSecret: string;
+  tokenKey: string;
+  tokenSecret: string;
+  privateKey: string;
+  version: string;
+  nonce: string;
+  timestamp: string;
+  callback: string;
+  realm: string;
+  verifier: string;
+  includeBodyHash: boolean;
+  oauth2GrantType: 'authorization_code' | 'client_credentials' | 'implicit' | 'password' | 'refresh_token';
+  accessTokenUrl: string;
+  authorizationUrl: string;
+  clientId: string;
+  clientSecret: string;
+  audience: string;
+  scope: string;
+  resource: string;
+  redirectUrl: string;
+  credentialsInBody: boolean;
+  state: string;
+  code: string;
+  accessToken: string;
+  refreshToken: string;
+  tokenPrefix: string;
+  usePkce: boolean;
+  pkceMethod: 'S256' | 'plain';
+  codeVerifier: string;
+  responseType: 'code' | 'token' | 'id_token';
+  ntlmDomain: string;
+  ntlmWorkstation: string;
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
+  awsSessionToken: string;
+  awsRegion: string;
+  awsService: string;
+  hawkId: string;
+  hawkKey: string;
+  hawkExt: string;
+  hawkAlgorithm: 'sha1' | 'sha256';
+  hawkValidatePayload: boolean;
+  asapIssuer: string;
+  asapSubject: string;
+  asapAudience: string;
+  asapAdditionalClaims: string;
+  asapPrivateKey: string;
+  asapKeyId: string;
+  netrc: string;
 };
 
 export type FilePayload = {
@@ -28,12 +88,56 @@ export type FilePayload = {
 export type MultipartPart = KeyValue & {
   kind: 'text' | 'file';
   file?: FilePayload;
+  contentType?: string;
+  fileName?: string;
 };
 
 export type GraphqlConfig = {
   query: string;
   variables: string;
   operationName: string;
+  schema?: GraphqlSchema;
+  schemaEndpoint: string;
+  schemaFetchedAt: string;
+};
+
+export type GraphqlTypeRef = {
+  kind: string;
+  name: string;
+  ofType?: GraphqlTypeRef;
+};
+
+export type GraphqlInputValue = {
+  name: string;
+  description: string;
+  defaultValue: string;
+  type: GraphqlTypeRef;
+};
+
+export type GraphqlField = {
+  name: string;
+  description: string;
+  isDeprecated: boolean;
+  deprecationReason: string;
+  args: GraphqlInputValue[];
+  type: GraphqlTypeRef;
+};
+
+export type GraphqlSchemaType = {
+  kind: string;
+  name: string;
+  description: string;
+  fields: GraphqlField[];
+  inputFields: GraphqlInputValue[];
+  enumValues: Array<{ name: string; description: string; isDeprecated: boolean; deprecationReason: string }>;
+  possibleTypes: GraphqlTypeRef[];
+};
+
+export type GraphqlSchema = {
+  queryType: string;
+  mutationType: string;
+  subscriptionType: string;
+  types: GraphqlSchemaType[];
 };
 
 export type GrpcConfig = {
@@ -51,8 +155,33 @@ export type TransportConfig = {
   timeoutMs: number;
   validateCertificates: boolean;
   proxyUrl: string;
+  proxyExclusions: string;
   clientCertificatePem: string;
   clientKeyPem: string;
+  clientCertificateDomains: string;
+  sendCookies: boolean;
+  storeCookies: boolean;
+};
+
+export type CookieRecord = {
+  id: string;
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires?: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite: 'strict' | 'lax' | 'none' | '';
+  hostOnly: boolean;
+  createdAt: string;
+};
+
+export type StoredResponse = HttpResponse & {
+  requestId: string;
+  requestName: string;
+  requestUrl: string;
+  receivedAt: string;
 };
 
 export type ApiRequest = {
@@ -74,6 +203,7 @@ export type ApiRequest = {
   transport: TransportConfig;
   preRequestScript: string;
   tests: string;
+  source?: SourceMetadata;
 };
 
 export type Collection = {
@@ -81,12 +211,14 @@ export type Collection = {
   name: string;
   expanded: boolean;
   requests: ApiRequest[];
+  source?: SourceMetadata;
 };
 
 export type Environment = {
   id: string;
   name: string;
   variables: KeyValue[];
+  source?: SourceMetadata;
 };
 
 export type HistoryEntry = {
@@ -102,7 +234,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 3;
+  version: 9;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -112,6 +244,177 @@ export type Workspace = {
   apiDesigns: ApiDesign[];
   mockServers: MockServer[];
   runnerReports: RunnerReport[];
+  imports: ImportRecord[];
+  cookies: CookieRecord[];
+  responses: StoredResponse[];
+  project: ProjectConfig;
+  plugins: PluginRecord[];
+  pluginData: Record<string, Record<string, string>>;
+  activePluginTheme: string;
+  collaboration: CollaborationConfig;
+  governance: GovernanceConfig;
+  mcpClients: McpClient[];
+  ai: AiSettings;
+  konnect: KonnectConfig;
+  preferences: AppPreferences;
+};
+
+export type ShortcutAction = 'palette' | 'preferences' | 'send' | 'environment' | 'history' | 'toggle-sidebar' | 'new-request' | 'duplicate-request' | 'delete-request' | 'focus-url';
+
+export type AppPreferences = {
+  theme: 'system' | 'dark' | 'light';
+  density: 'comfortable' | 'compact';
+  fontSize: number;
+  requestTimeoutMs: number;
+  autoFetchGraphqlSchema: boolean;
+  confirmDestructive: boolean;
+  shortcuts: Record<ShortcutAction, string>;
+};
+
+export type McpTool = {
+  name: string;
+  description: string;
+  inputSchema: JsonValue;
+};
+
+export type McpPrompt = {
+  name: string;
+  description: string;
+  arguments: Array<{ name: string; description: string; required: boolean }>;
+};
+
+export type McpResource = {
+  uri: string;
+  name: string;
+  description: string;
+  mimeType: string;
+};
+
+export type McpClient = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  transport: 'http' | 'stdio';
+  url: string;
+  command: string;
+  args: string[];
+  headers: KeyValue[];
+  authType: 'none' | 'bearer' | 'basic';
+  token: string;
+  username: string;
+  password: string;
+  roots: string[];
+  tools: McpTool[];
+  prompts: McpPrompt[];
+  resources: McpResource[];
+  resourceTemplates: McpResource[];
+  lastSyncedAt?: string;
+};
+
+export type AiSettings = {
+  enabled: boolean;
+  provider: 'openai' | 'anthropic' | 'gemini' | 'openai-compatible';
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  mockGeneration: boolean;
+  commitSuggestions: boolean;
+};
+
+export type KonnectControlPlane = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+export type KonnectConfig = {
+  enabled: boolean;
+  baseUrl: string;
+  token: string;
+  controlPlaneId: string;
+  controlPlanes: KonnectControlPlane[];
+  lastSyncedAt?: string;
+};
+
+export type CollaborationConfig = {
+  mode: 'off' | 'encrypted-file';
+  path: string;
+  actor: string;
+  revision: number;
+  lastPulledAt?: string;
+  lastPushedAt?: string;
+};
+
+export type GovernanceRole = 'owner' | 'admin' | 'editor' | 'viewer';
+
+export type GovernanceMember = {
+  id: string;
+  name: string;
+  email: string;
+  role: GovernanceRole;
+  active: boolean;
+};
+
+export type GovernancePolicy = {
+  allowedStorage: Array<'local' | 'folder' | 'git' | 'encrypted-file'>;
+  requireEncryptedSync: boolean;
+  requireVaultForSecrets: boolean;
+  externalVaultAllowlist: string[];
+  auditRetention: number;
+};
+
+export type AuditEvent = {
+  id: string;
+  timestamp: string;
+  actorId: string;
+  action: string;
+  detail: string;
+};
+
+export type GovernanceConfig = {
+  currentMemberId: string;
+  members: GovernanceMember[];
+  policy: GovernancePolicy;
+  audit: AuditEvent[];
+};
+
+export type ProjectConfig = {
+  mode: 'local' | 'folder' | 'git';
+  path: string;
+  remoteUrl: string;
+  remoteName: string;
+  authorName: string;
+  authorEmail: string;
+  autoSave: boolean;
+  lastSavedAt?: string;
+};
+
+export type PluginPermission =
+  | 'request:read'
+  | 'request:write'
+  | 'response:read'
+  | 'response:write'
+  | 'store'
+  | 'network'
+  | 'app:prompt'
+  | 'app:clipboard'
+  | 'template'
+  | 'action'
+  | 'theme';
+
+export type PluginRecord = {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  source: string;
+  sourcePath?: string;
+  sourceFormat: 'brunomnia' | 'insomnia-commonjs';
+  enabled: boolean;
+  requestedPermissions: PluginPermission[];
+  grantedPermissions: PluginPermission[];
+  installedAt: string;
+  error?: string;
 };
 
 export type HttpResponse = {
@@ -121,18 +424,22 @@ export type HttpResponse = {
   body: string;
   durationMs: number;
   sizeBytes: number;
+  setCookies?: string[];
+  requestUrl?: string;
 };
 
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests';
 export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline' | 'tests';
 export type SidebarMode = 'collections' | 'history';
-export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks';
+export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins' | 'security' | 'integrations' | 'preferences';
 
 export type ApiDesign = {
   id: string;
   name: string;
   contents: string;
+  ruleset?: string;
   generatedCollectionId?: string;
+  source?: SourceMetadata;
 };
 
 export type OpenApiIssue = {
@@ -159,6 +466,24 @@ export type MockServer = {
   host: '127.0.0.1';
   port: number;
   routes: MockRoute[];
+  source?: SourceMetadata;
+};
+
+export type ImportFormat = 'brunomnia' | 'insomnia-v4' | 'insomnia-v5' | 'postman-2' | 'postman-environment' | 'har' | 'openapi-3' | 'swagger-2' | 'wsdl' | 'curl';
+
+export type ImportWarning = {
+  code: string;
+  message: string;
+  resource?: string;
+};
+
+export type ImportRecord = {
+  id: string;
+  format: ImportFormat;
+  sourceName: string;
+  importedAt: string;
+  warnings: ImportWarning[];
+  metadata: Record<string, string>;
 };
 
 export type ScriptTestResult = {
@@ -172,6 +497,7 @@ export type ScriptRunResult = {
   environment: Record<string, string>;
   logs: string[];
   tests: ScriptTestResult[];
+  localVariables?: Record<string, string>;
 };
 
 export type RunnerItemResult = {

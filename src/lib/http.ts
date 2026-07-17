@@ -1,13 +1,28 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import type { ApiRequest, Environment, HttpResponse } from '../types';
+import type { ApiRequest, CookieRecord, Environment, HttpResponse, StoredResponse } from '../types';
+import { applyAdvancedAuth } from './auth';
+import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
+import { renderTemplate } from './templates';
 
-const graphqlBody = (request: ApiRequest, variables: Record<string, string>) => {
+export type SendRequestContext = {
+  cookies?: CookieRecord[];
+  responses?: StoredResponse[];
+  vault?: Record<string, string>;
+  externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
+  pluginRuntime?: {
+    beforeRequest: (request: ApiRequest) => Promise<ApiRequest>;
+    afterResponse: (request: ApiRequest, response: HttpResponse) => Promise<HttpResponse>;
+    templateTag: (name: string, args: string[], request: ApiRequest) => Promise<string | undefined>;
+  };
+};
+
+export const graphqlBody = (request: ApiRequest, variables: Record<string, string>) => {
   let parsedVariables: unknown = {};
   const resolvedVariables = resolveTemplate(request.graphql.variables, variables).trim();
   if (resolvedVariables) parsedVariables = JSON.parse(resolvedVariables);
   return JSON.stringify({
-    query: resolveTemplate(request.graphql.query, variables),
+    query: request.graphql.query,
     variables: parsedVariables,
     operationName: request.graphql.operationName || undefined,
   });
@@ -26,7 +41,7 @@ const browserBody = (request: ApiRequest, variables: Record<string, string>): Bo
     request.multipartBody.filter((part) => part.enabled && part.name).forEach((part) => {
       if (part.kind === 'file' && part.file) {
         const bytes = Uint8Array.from(atob(part.file.dataBase64), (character) => character.charCodeAt(0));
-        body.append(part.name, new Blob([bytes], { type: part.file.mimeType }), part.file.fileName);
+        body.append(part.name, new Blob([bytes], { type: part.contentType || part.file.mimeType }), part.fileName || part.file.fileName);
       } else {
         body.append(part.name, resolveTemplate(part.value, variables));
       }
@@ -39,66 +54,206 @@ const browserBody = (request: ApiRequest, variables: Record<string, string>): Bo
   return resolveTemplate(request.body, variables);
 };
 
-export const sendRequest = async (request: ApiRequest, environment: Environment | undefined): Promise<HttpResponse> => {
-  const variables = environmentMap(environment);
-  let url = buildRequestUrl(request, variables);
-  let headers = buildHeaders(request, variables);
+const renderRows = async (rows: ApiRequest['headers'], render: (value: string) => Promise<string>) => Promise.all(rows.map(async (row) => ({
+  ...row,
+  name: await render(row.name),
+  value: await render(row.value),
+})));
+
+const renderRequest = async (request: ApiRequest, variables: Record<string, string>, context: SendRequestContext) => {
+  const templateContext = {
+    variables,
+    cookies: context.cookies ?? [],
+    responses: context.responses ?? [],
+    request,
+    customTag: context.pluginRuntime ? (name: string, args: string[]) => context.pluginRuntime!.templateTag(name, args, request) : undefined,
+    externalSecret: context.externalSecret,
+  };
+  const render = (value: string) => renderTemplate(value, templateContext);
+  const authEntries = await Promise.all(Object.entries(request.auth).map(async ([key, value]) => [key, typeof value === 'string' ? await render(value) : value]));
+  return {
+    ...request,
+    name: await render(request.name),
+    url: await render(request.url),
+    params: await renderRows(request.params, render),
+    headers: await renderRows(request.headers, render),
+    body: await render(request.body),
+    formBody: await renderRows(request.formBody, render),
+    multipartBody: await Promise.all(request.multipartBody.map(async (part) => ({ ...part, name: await render(part.name), value: await render(part.value) }))),
+    auth: Object.fromEntries(authEntries) as ApiRequest['auth'],
+    graphql: { ...request.graphql, query: request.graphql.query, variables: await render(request.graphql.variables), operationName: request.graphql.operationName },
+    grpc: { ...request.grpc, service: await render(request.grpc.service), method: await render(request.grpc.method), protoText: await render(request.grpc.protoText), input: await render(request.grpc.input), metadata: await renderRows(request.grpc.metadata, render) },
+    transport: {
+      ...request.transport,
+      proxyUrl: await render(request.transport.proxyUrl),
+      proxyExclusions: await render(request.transport.proxyExclusions),
+      clientCertificateDomains: await render(request.transport.clientCertificateDomains),
+    },
+  };
+};
+
+const signingBody = (request: ApiRequest, variables: Record<string, string>) => {
+  if (request.protocol === 'graphql') return graphqlBody(request, variables);
+  if (request.bodyMode === 'form-urlencoded') return new URLSearchParams(request.formBody.filter((field) => field.enabled && field.name).map((field) => [field.name, field.value])).toString();
+  if (request.bodyMode === 'json' || request.bodyMode === 'text') return request.body;
+  return '';
+};
+
+export const sendRequest = async (request: ApiRequest, environment: Environment | undefined, context: SendRequestContext = {}): Promise<HttpResponse> => {
+  const variables = { ...environmentMap(environment), ...(context.vault ?? {}) };
+  const hooked = context.pluginRuntime ? await context.pluginRuntime.beforeRequest(request) : request;
+  const prepared = await renderRequest(hooked, variables, context);
+  const finish = async (response: HttpResponse) => context.pluginRuntime
+    ? context.pluginRuntime.afterResponse(prepared, response)
+    : response;
+  let url = buildRequestUrl(prepared, variables);
+  let headers = buildHeaders(prepared, variables);
   const contentType = (value: string) => value.toLowerCase() === 'content-type';
-  if (request.protocol === 'graphql' && !headers.some((header) => header.enabled && contentType(header.name))) {
+  if (prepared.protocol === 'graphql' && !headers.some((header) => header.enabled && contentType(header.name))) {
     headers = [...headers, { id: 'graphql-content-type', name: 'Content-Type', value: 'application/json', enabled: true }];
   }
-  if (request.protocol === 'http' && (request.bodyMode === 'multipart' || request.bodyMode === 'form-urlencoded')) {
+  if (prepared.protocol === 'http' && (prepared.bodyMode === 'multipart' || prepared.bodyMode === 'form-urlencoded')) {
     headers = headers.filter((header) => !contentType(header.name));
   }
 
-  if (request.auth.type === 'api-key' && request.auth.apiKeyLocation === 'query' && request.auth.apiKeyName) {
+  if (!prepared.auth.disabled && prepared.auth.type === 'api-key' && prepared.auth.apiKeyLocation === 'query' && prepared.auth.apiKeyName) {
     const parsedUrl = new URL(url);
     parsedUrl.searchParams.set(
-      resolveTemplate(request.auth.apiKeyName, variables),
-      resolveTemplate(request.auth.apiKeyValue, variables),
+      prepared.auth.apiKeyName,
+      prepared.auth.apiKeyValue,
     );
     url = parsedUrl.toString();
   }
+  if (prepared.transport.sendCookies) {
+    const jar = cookieHeaderForUrl(context.cookies ?? [], url);
+    if (jar) {
+      const existing = headers.find((header) => header.enabled && header.name.toLowerCase() === 'cookie');
+      headers = existing
+        ? headers.map((header) => header === existing ? { ...header, value: [header.value, jar].filter(Boolean).join('; ') } : header)
+        : [...headers, { id: 'cookie-jar', name: 'Cookie', value: jar, enabled: true }];
+    }
+  }
+  const authenticated = await applyAdvancedAuth(prepared, variables, { url, headers, body: signingBody(prepared, variables) });
+  url = authenticated.url;
+  headers = authenticated.headers;
 
   if (isTauri()) {
-    const body = request.protocol === 'graphql'
-      ? graphqlBody(request, variables)
-      : resolveTemplate(request.body, variables);
-    return invoke<HttpResponse>('send_http_request', {
+    const body = prepared.protocol === 'graphql'
+      ? graphqlBody(prepared, variables)
+      : prepared.body;
+    const output = await invoke<HttpResponse>('send_http_request', {
       input: {
-        method: request.method,
+        method: prepared.method,
         url,
         headers,
-        bodyMode: request.protocol === 'graphql' ? 'json' : request.bodyMode,
+        bodyMode: prepared.protocol === 'graphql' ? 'json' : prepared.bodyMode,
         body,
-        formBody: request.formBody,
-        multipartBody: request.multipartBody,
-        binaryBody: request.binaryBody,
-        transport: request.transport,
+        formBody: prepared.formBody,
+        multipartBody: prepared.multipartBody,
+        binaryBody: prepared.binaryBody,
+        transport: prepared.transport,
+        auth: {
+          authType: prepared.auth.type,
+          disabled: prepared.auth.disabled,
+          username: prepared.auth.username,
+          password: prepared.auth.password,
+          ntlmDomain: prepared.auth.ntlmDomain,
+          ntlmWorkstation: prepared.auth.ntlmWorkstation,
+          netrc: prepared.auth.netrc,
+        },
       },
     });
+    return finish({ ...output, requestUrl: url });
   }
 
   if (new URL(url).hostname === 'api.acme.dev') {
     await new Promise((resolve) => window.setTimeout(resolve, 380));
-    return mockResponse();
+    return finish(mockResponse());
   }
 
   const startedAt = performance.now();
   const response = await fetch(url, {
-    method: request.method,
+    method: prepared.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled).map((header) => [header.name, header.value])),
-    body: browserBody(request, variables),
-    redirect: request.transport.followRedirects ? 'follow' : 'manual',
-    signal: AbortSignal.timeout(request.transport.timeoutMs),
+    body: browserBody(prepared, variables),
+    redirect: prepared.transport.followRedirects ? 'follow' : 'manual',
+    signal: AbortSignal.timeout(prepared.transport.timeoutMs),
+    credentials: prepared.transport.sendCookies ? 'include' : 'omit',
   });
   const body = await response.text();
-  return {
+  return finish({
     status: response.status,
     statusText: response.statusText,
     headers: Object.fromEntries(response.headers.entries()),
     body,
     durationMs: Math.round(performance.now() - startedAt),
     sizeBytes: new Blob([body]).size,
+    requestUrl: url,
+  });
+};
+
+export type OAuth2TokenResult = {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn?: number;
+};
+
+export const fetchOAuth2Token = async (
+  request: ApiRequest,
+  environment: Environment | undefined,
+  context: SendRequestContext = {},
+): Promise<OAuth2TokenResult> => {
+  const auth = request.auth;
+  if (auth.oauth2GrantType === 'implicit') throw new Error('Implicit grants return through the authorization URL. Copy that URL and paste the resulting access token.');
+  if (!auth.accessTokenUrl.trim()) throw new Error('Enter an access-token URL.');
+  const fields: Array<[string, string]> = [['grant_type', auth.oauth2GrantType]];
+  if (auth.oauth2GrantType === 'authorization_code') {
+    if (!auth.code.trim()) throw new Error('Enter the authorization code returned by the provider.');
+    fields.push(['code', auth.code], ['redirect_uri', auth.redirectUrl]);
+    if (auth.usePkce) fields.push(['code_verifier', auth.codeVerifier]);
+  } else if (auth.oauth2GrantType === 'password') {
+    fields.push(['username', auth.username], ['password', auth.password]);
+  } else if (auth.oauth2GrantType === 'refresh_token') {
+    if (!auth.refreshToken.trim()) throw new Error('Enter a refresh token.');
+    fields.push(['refresh_token', auth.refreshToken]);
+  }
+  if (auth.scope) fields.push(['scope', auth.scope]);
+  if (auth.audience) fields.push(['audience', auth.audience]);
+  if (auth.resource) fields.push(['resource', auth.resource]);
+  if (auth.credentialsInBody) fields.push(['client_id', auth.clientId], ['client_secret', auth.clientSecret]);
+  const tokenRequest: ApiRequest = {
+    ...structuredClone(request),
+    id: `${request.id}-oauth2-token`,
+    name: `${request.name} OAuth 2 token`,
+    protocol: 'http',
+    method: 'POST',
+    url: auth.accessTokenUrl,
+    params: [],
+    headers: [{ id: 'oauth2-accept', name: 'Accept', value: 'application/json', enabled: true }],
+    bodyMode: 'form-urlencoded',
+    body: '',
+    formBody: fields.filter(([, value]) => value !== '').map(([name, value], index) => ({ id: `oauth2-${index}`, name, value, enabled: true })),
+    multipartBody: [],
+    auth: { ...request.auth, type: auth.credentialsInBody ? 'none' : 'basic', username: auth.clientId, password: auth.clientSecret, disabled: false },
+    preRequestScript: '',
+    tests: '',
+  };
+  const response = await sendRequest(tokenRequest, environment, context);
+  let payload: Record<string, unknown>;
+  try { payload = JSON.parse(response.body) as Record<string, unknown>; }
+  catch { payload = Object.fromEntries(new URLSearchParams(response.body).entries()); }
+  if (response.status < 200 || response.status >= 300) {
+    const detail = String(payload.error_description ?? payload.error ?? response.statusText);
+    throw new Error(`OAuth 2 token request failed (${response.status}): ${detail}`);
+  }
+  const accessToken = String(payload.access_token ?? '');
+  if (!accessToken) throw new Error('The OAuth 2 response did not contain an access_token.');
+  const expires = Number(payload.expires_in);
+  return {
+    accessToken,
+    refreshToken: String(payload.refresh_token ?? auth.refreshToken ?? ''),
+    tokenType: String(payload.token_type ?? auth.tokenPrefix ?? 'Bearer'),
+    expiresIn: Number.isFinite(expires) ? expires : undefined,
   };
 };

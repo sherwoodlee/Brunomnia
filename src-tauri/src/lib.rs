@@ -1,7 +1,12 @@
+mod external_vault;
 mod grpc_client;
 mod http_client;
+mod mcp_stdio;
 mod mock_server;
 mod models;
+mod plugin;
+mod project;
+mod secure_store;
 mod streaming;
 
 use models::{HttpRequestInput, HttpResponseOutput};
@@ -16,6 +21,10 @@ fn workspace_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .map_err(|error| error.to_string())?;
     fs::create_dir_all(&app_data).map_err(|error| error.to_string())?;
     Ok(app_data.join("workspace.json"))
+}
+
+fn vault_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(workspace_path(app)?.with_file_name("local-vault.enc.json"))
 }
 
 #[tauri::command]
@@ -46,6 +55,223 @@ async fn send_http_request(input: HttpRequestInput) -> Result<HttpResponseOutput
     http_client::send(input).await
 }
 
+async fn blocking<T, F>(operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|error| format!("Background operation failed: {error}"))?
+}
+
+#[tauri::command]
+async fn project_write(
+    input: project::ProjectWriteInput,
+) -> Result<project::ProjectWriteOutput, String> {
+    blocking(move || project::write_project(input)).await
+}
+
+#[tauri::command]
+async fn project_read(path: String) -> Result<Value, String> {
+    blocking(move || project::read_project(path)).await
+}
+
+#[tauri::command]
+async fn project_git_init(
+    path: String,
+    default_branch: String,
+) -> Result<project::GitStatusOutput, String> {
+    blocking(move || project::git_init(path, default_branch)).await
+}
+
+#[tauri::command]
+async fn project_git_clone(
+    remote: String,
+    path: String,
+) -> Result<project::GitStatusOutput, String> {
+    blocking(move || project::git_clone(remote, path)).await
+}
+
+#[tauri::command]
+async fn project_git_status(path: String) -> Result<project::GitStatusOutput, String> {
+    blocking(move || project::git_status(path)).await
+}
+
+#[tauri::command]
+async fn project_git_stage(
+    path: String,
+    paths: Vec<String>,
+) -> Result<project::GitStatusOutput, String> {
+    blocking(move || project::git_stage(path, paths)).await
+}
+
+#[tauri::command]
+async fn project_git_unstage(
+    path: String,
+    paths: Vec<String>,
+) -> Result<project::GitStatusOutput, String> {
+    blocking(move || project::git_unstage(path, paths)).await
+}
+
+#[tauri::command]
+async fn project_git_diff(path: String, staged: bool) -> Result<String, String> {
+    blocking(move || project::git_diff(path, staged)).await
+}
+
+#[tauri::command]
+async fn project_git_commit(
+    input: project::GitCommitInput,
+) -> Result<project::GitOperationOutput, String> {
+    blocking(move || project::git_commit(input)).await
+}
+
+#[tauri::command]
+async fn project_git_checkout(
+    path: String,
+    branch: String,
+    create: bool,
+) -> Result<project::GitOperationOutput, String> {
+    blocking(move || project::git_checkout(path, branch, create)).await
+}
+
+#[tauri::command]
+async fn project_git_set_remote(
+    path: String,
+    name: String,
+    url: String,
+) -> Result<project::GitStatusOutput, String> {
+    blocking(move || project::git_set_remote(path, name, url)).await
+}
+
+#[tauri::command]
+async fn project_git_pull(
+    input: project::GitPushPullInput,
+) -> Result<project::GitOperationOutput, String> {
+    blocking(move || project::git_pull(input)).await
+}
+
+#[tauri::command]
+async fn project_git_push(
+    input: project::GitPushPullInput,
+) -> Result<project::GitOperationOutput, String> {
+    blocking(move || project::git_push(input)).await
+}
+
+#[tauri::command]
+async fn project_git_merge(
+    path: String,
+    branch: String,
+) -> Result<project::GitOperationOutput, String> {
+    blocking(move || project::git_merge(path, branch)).await
+}
+
+#[tauri::command]
+async fn project_git_abort_merge(path: String) -> Result<project::GitStatusOutput, String> {
+    blocking(move || project::git_abort_merge(path)).await
+}
+
+#[tauri::command]
+async fn project_git_conflicts(path: String) -> Result<Vec<project::GitConflict>, String> {
+    blocking(move || project::git_conflicts(path)).await
+}
+
+#[tauri::command]
+async fn project_git_resolve_conflict(
+    path: String,
+    file: String,
+    contents: String,
+) -> Result<project::GitStatusOutput, String> {
+    blocking(move || project::git_resolve_conflict(path, file, contents)).await
+}
+
+#[tauri::command]
+async fn project_git_resolve_conflict_side(
+    path: String,
+    file: String,
+    side: String,
+) -> Result<project::GitStatusOutput, String> {
+    blocking(move || project::git_resolve_conflict_side(path, file, side)).await
+}
+
+#[tauri::command]
+async fn plugin_read_source(path: String) -> Result<plugin::PluginSourceOutput, String> {
+    blocking(move || plugin::read_plugin_source(path)).await
+}
+
+#[tauri::command]
+async fn secure_vault_status(app: AppHandle) -> Result<secure_store::SecureFileStatus, String> {
+    let path = vault_path(&app)?;
+    blocking(move || secure_store::vault_status(&path)).await
+}
+
+#[tauri::command]
+async fn secure_vault_unlock(
+    app: AppHandle,
+    passphrase: String,
+) -> Result<Vec<secure_store::VaultEntry>, String> {
+    let path = vault_path(&app)?;
+    blocking(move || secure_store::vault_unlock(&path, passphrase)).await
+}
+
+#[tauri::command]
+async fn secure_vault_save(
+    app: AppHandle,
+    input: secure_store::VaultSaveInput,
+) -> Result<secure_store::SecureFileStatus, String> {
+    let path = vault_path(&app)?;
+    blocking(move || secure_store::vault_save(&path, input)).await
+}
+
+#[tauri::command]
+async fn secure_vault_reset(app: AppHandle) -> Result<(), String> {
+    let path = vault_path(&app)?;
+    blocking(move || secure_store::vault_reset(&path)).await
+}
+
+#[tauri::command]
+async fn secure_sync_status(path: String) -> Result<secure_store::SecureFileStatus, String> {
+    blocking(move || secure_store::sync_status(path)).await
+}
+
+#[tauri::command]
+async fn secure_sync_pull(
+    path: String,
+    passphrase: String,
+) -> Result<secure_store::SyncPayload, String> {
+    blocking(move || secure_store::sync_pull(path, passphrase)).await
+}
+
+#[tauri::command]
+async fn secure_sync_push(
+    input: secure_store::SyncPushInput,
+) -> Result<secure_store::SyncPayload, String> {
+    blocking(move || secure_store::sync_push(input)).await
+}
+
+#[tauri::command]
+async fn secure_external_secret(
+    input: external_vault::ExternalSecretInput,
+    state: State<'_, external_vault::ExternalSecretCache>,
+) -> Result<String, String> {
+    let cache = state.inner().clone();
+    blocking(move || cache.resolve(input)).await
+}
+
+#[tauri::command]
+async fn mcp_stdio_call(
+    input: mcp_stdio::McpStdioInput,
+) -> Result<mcp_stdio::McpStdioOutput, String> {
+    blocking(move || mcp_stdio::call(input)).await
+}
+
+#[tauri::command]
+fn secure_external_cache_clear(
+    state: State<'_, external_vault::ExternalSecretCache>,
+) -> Result<(), String> {
+    state.clear()
+}
+
 #[tauri::command]
 async fn connect_websocket(
     input: models::StreamConnectInput,
@@ -59,9 +285,10 @@ async fn connect_websocket(
 async fn send_websocket_message(
     session_id: String,
     message: String,
+    kind: String,
     state: State<'_, streaming::StreamingState>,
 ) -> Result<(), String> {
-    streaming::send_websocket_message(session_id, message, state.inner().clone()).await
+    streaming::send_websocket_message(session_id, message, kind, state.inner().clone()).await
 }
 
 #[tauri::command]
@@ -122,10 +349,40 @@ pub fn run() {
     tauri::Builder::default()
         .manage(streaming::StreamingState::default())
         .manage(mock_server::MockServerState::default())
+        .manage(external_vault::ExternalSecretCache::default())
         .invoke_handler(tauri::generate_handler![
             load_workspace,
             save_workspace,
             send_http_request,
+            project_write,
+            project_read,
+            project_git_init,
+            project_git_clone,
+            project_git_status,
+            project_git_stage,
+            project_git_unstage,
+            project_git_diff,
+            project_git_commit,
+            project_git_checkout,
+            project_git_set_remote,
+            project_git_pull,
+            project_git_push,
+            project_git_merge,
+            project_git_abort_merge,
+            project_git_conflicts,
+            project_git_resolve_conflict,
+            project_git_resolve_conflict_side,
+            plugin_read_source,
+            secure_vault_status,
+            secure_vault_unlock,
+            secure_vault_save,
+            secure_vault_reset,
+            secure_sync_status,
+            secure_sync_pull,
+            secure_sync_push,
+            secure_external_secret,
+            secure_external_cache_clear,
+            mcp_stdio_call,
             connect_websocket,
             send_websocket_message,
             disconnect_websocket,

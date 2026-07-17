@@ -50,45 +50,101 @@ Streaming gRPC currently returns up to 100 messages within the configured deadli
 
 Current compatibility bounds are explicit: linting is not yet Spectral ruleset parity; the script API is a safe compatibility subset; mock templating is not yet Liquid/Faker parity; browser-only mock start/stop is a UI simulation because a browser cannot bind a server; CLI collection execution currently supports HTTP and GraphQL; and streaming runner semantics for WebSocket/SSE are deferred.
 
-## Milestone 4 — import and export interoperability
+## Milestone 4 — import and export interoperability (complete)
 
-- Import Insomnia JSON v4/v5, Postman Collection 2.0/2.1, HAR, OpenAPI 3.0/3.1, Swagger 2, WSDL, and cURL
-- Export stable Brunomnia JSON/YAML plus portable OpenAPI and request snippets
-- Preserve folders, environments, auth, scripts, and unsupported-source metadata with actionable conversion warnings
-- Add round-trip fixtures and compatibility tests for every adapter
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Import sources | Complete baseline | Local file, pasted text, and HTTP(S) URL with a 20 MB local conversion limit and pre-apply analysis |
+| Insomnia import | Complete baseline | JSON v4 and multi-document YAML v5 collections, requests, environments, API designs, mocks, HTTP, GraphQL, WebSocket, and gRPC |
+| Postman import | Complete baseline | Collection 2.0/2.1, nested items, variables, environments, supported auth/body modes, and best-effort script translation |
+| Portable request import | Complete baseline | HAR 1.2 and one or more cURL commands, parsed locally without shell execution |
+| API definition import | Complete baseline | OpenAPI 3.x, Swagger 2, and WSDL-to-SOAP request templates |
+| Export scopes | Complete baseline | All data, selected collection, or selected API design |
+| Export formats | Complete baseline | Brunomnia JSON, Insomnia v4 JSON, Insomnia v5 YAML, HAR 1.2, and raw OpenAPI |
+| Conversion safety | Complete | Warning preview, collision-safe IDs, import records, source IDs, and unsupported-source metadata |
+| Workspace migration | Complete | Versions 1–3 migrate in place to version 4 import records and source metadata |
+| Compatibility fixtures | Complete | Project-owned fixtures for every import adapter plus Insomnia v4/v5 and HAR round-trip tests |
 
-## Milestone 5 — request and authentication fidelity
+Compatibility bounds remain explicit: nested source folders are represented in flattened request names; Postman scripts are translated only for the supported permission-bounded API; local file references must be selected again; WSDL message schemas become editable SOAP placeholders; Socket.IO becomes a WebSocket baseline and MCP becomes an HTTP baseline with source metadata; and binary payload bytes are not embedded in compatibility exports.
 
-- Digest, OAuth 1.0/2.0, NTLM, AWS IAM v4, Hawk, Atlassian ASAP, and Netrc authentication
-- Persistent cookie jar, cookie inspection/editing, request chaining, dynamic variables, and richer template tags
-- Domain-scoped client certificates, proxy exclusions, multipart edge cases, binary WebSocket composition, and stream-aware runner behavior
-- Custom lint rulesets and broader script/test compatibility
+## Milestone 5 — request and authentication fidelity (complete)
 
-## Milestone 6 — Git Sync and extensibility
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Advanced authentication | Complete baseline | Digest, OAuth 1.0/2.0, NTLM, AWS IAM v4, Hawk, Atlassian ASAP, and Netrc editors/execution; Digest, NTLM, and Netrc challenge/file behavior runs in the native transport |
+| Cookie jar | Complete baseline | Persistent workspace jar, RFC-oriented domain/path/secure/expiry matching, Set-Cookie capture, editing/deletion, and per-request send/store controls |
+| Chaining and dynamic values | Complete baseline | Latest-response body/status/header/URL chaining, JSONPath extraction, iteration/request-local/environment variables, UUID/time/Faker/encoding/hash/cookie/prompt/request tags, and actionable missing-dependency errors |
+| Transport fidelity | Complete baseline | Proxy exclusions, exact/wildcard certificate domains, editable multipart filename/content type, duplicate parts, and text/file/binary payloads |
+| WebSocket and runner fidelity | Complete baseline | Text and base64/file binary composition; bounded WebSocket/SSE collection-run samples with optional WebSocket startup frames |
+| Custom lint | Complete baseline | Safe local Spectral-style `rules`/`given`/`then` support for truthy/falsy/defined/enumeration/length/pattern/casing; CLI accepts `--ruleset` |
+| Script/test API | Complete baseline | Environment/base/collection/local/iteration variable APIs, replacement helpers, request getters/setters, response header/cookie helpers, console capture, and Jest/Chai-style expectation aliases |
+| Interoperability and migration | Complete | Workspace v5, advanced Insomnia/Postman auth mapping, Insomnia v4/v5 cookie-jar round trips, and collision-safe cookie import |
 
-- Standard filesystem project representation with Git init/clone/status/diff/commit/branch/pull/push operations
-- Conflict-aware merges and a visual resolver that never discards local changes silently
-- Permissioned plugin runtime with request/response hooks, template tags, themes, actions, and an Insomnia compatibility adapter
-- Documented extension API, local plugin installation, and migration tooling
+Compatibility bounds remain explicit: OAuth 2 authorization uses a copied authorization URL and manual returned code/token rather than an embedded callback listener; Netrc contents are project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, arbitrary Spectral JavaScript/functions/remote `extends`, and script-originated network/module access remain deferred. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. WebSocket custom proxy/client identity and headless CLI streaming/auth parity remain later closure work.
 
-## Milestone 7 — collaboration, secrets, and governance
+## Milestone 6 — Git Sync and extensibility (complete)
 
-- Self-hostable end-to-end encrypted sync and real-time collaboration
-- Project sharing, branches, history, presence, comments, and offline reconciliation
-- Local credential storage plus AWS, GCP, Azure, and HashiCorp external-vault adapters
-- Free self-hosted SSO, RBAC, SCIM, audit, organization, and policy controls
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Filesystem projects | Complete baseline | Stable split YAML for project metadata, collections, environments, designs, and mocks; a manifest limits cleanup to Brunomnia-owned paths and leaves unrelated repository files untouched |
+| Git workflow | Complete baseline | Standard `.git` repositories with init/clone/status, staged and working diffs, stage/unstage, commit author overrides, local branch create/switch, remotes, pull, push, and merge |
+| Conflict resolution | Complete baseline | Base/ours/theirs text views, editable resolutions, binary ours/theirs selection, deleted-side handling, staging, and explicit merge abort |
+| Plugin installation | Complete baseline | Pasted JavaScript or a local dependency-free CommonJS file/package; every install starts disabled and changing source clears grants |
+| Extension API | Complete baseline | Request/response hooks, custom template tags, request/workspace/document actions, themes, local storage, notifications, and mediated network/prompt/clipboard calls |
+| Extension isolation | Complete baseline | Two-second disposable Worker, one-megabyte source limit, blocked ambient network/DOM/module loading, explicit per-capability grants, sanitized theme colors, and import-time authority removal |
+| Workspace migration | Complete | Versions 1–5 migrate to workspace v6 project, plugin, plugin-data, and theme fields; imported plugins are disabled and stripped of grants/data |
+| Documentation and evidence | Complete | [Git project guide](GIT_PROJECTS.md), [plugin guide](PLUGINS.md), and [Milestone 6 verification](QA_MILESTONE_6.md) |
 
-## Milestone 8 — MCP, AI, and service integrations
+Compatibility bounds remain explicit: Git credential setup uses the user's installed Git and credential helper; commit-history browsing, provider-specific onboarding, rebase/cherry-pick, and automatic project discovery remain later work. The plugin adapter intentionally does not install remote packages or arbitrary npm dependencies, and it implements a focused Insomnia-style CommonJS/context subset rather than the entire plugin ecosystem. Streaming request hooks, file watching/hot reload, plugin dependency resolution, and complete hook/context/template-argument compatibility remain in the parity ledger.
 
-- MCP clients over HTTP and STDIO with cached tools, prompts, resources, and project serialization
-- User-selected hosted, custom URL, and local model providers; no required Brunomnia-hosted model
-- Optional local AI mock generation and Git commit grouping
-- Free adapters for Konnect/Gateway workflows and other documented product integrations
+## Milestone 7 — collaboration, secrets, and governance (complete baseline)
 
-## Milestone 9 — parity closure and release hardening
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Local secret vault | Complete baseline | AES-256-GCM envelope, PBKDF2-HMAC-SHA256 with 210,000 iterations, random salt/nonce, 0600 temporary files on Unix, atomic replacement, passphrase never persisted, explicit lock/reset, and `vault.*` request variables |
+| Plaintext-secret policy | Complete baseline | Detects likely environment values (including disabled ones), credential headers/query fields, URL credentials, authentication, Netrc, and client-private-key values; blocks managed-project writes/stage/commit/push and encrypted-sync push until values use local-vault or external-vault references |
+| External vaults | Complete baseline | AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and HashiCorp Vault via installed official CLIs and their existing credential chains; 30-minute memory cache with a 20 MB/256-entry bound, 30-second process limit, 10 MB output limit, no shell, and a per-provider/reference/scope/field/version workspace allowlist |
+| Encrypted collaboration | Complete baseline | Passphrase-derived AES-GCM shared file, filtered shareable scope, monotonic revisions, optimistic base-revision conflict rejection, pull, explicit force push, and compatibility with a user-controlled mounted share/WebDAV/sync folder |
+| Local governance | Complete baseline | Owner/admin/editor/viewer actors, last-owner protection, storage policy controls, encrypted-sync and vault policy metadata, external-reference approval, bounded audit retention, and edit checks on sync/governance actions |
+| Workspace migration | Complete | Versions 1–6 migrate to v7 collaboration/governance fields; malformed roles, policies, actors, audit events, revisions, and allowed storage modes are normalized safely |
+| Documentation and evidence | Complete | [Security and encrypted sync guide](SECURITY_AND_SYNC.md) and [Milestone 7 verification](QA_MILESTONE_7.md) |
+
+Compatibility bounds remain explicit: shared-file encryption uses one team passphrase rather than per-user public-key wrapping; synchronization is pull/push rather than real-time presence; server-mediated comments, per-resource Cloud Sync branches/history, offline merge UI, and automatic device discovery remain. Local roles are policy metadata and action checks, not strong identity authentication. Self-hosted SAML/OIDC login, SCIM provisioning, tamper-evident remote audit storage, provider SDK login flows, private-environment hierarchy, script vault access, and headless external-vault parity remain later closure work.
+
+## Milestone 8 — MCP, AI, and service integrations (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| MCP project model | Complete baseline | Multiple disabled-by-default HTTP or STDIO clients, headers/auth/roots, cached tools/prompts/resources/resource templates, event records, workspace v8 migration, and split-YAML project serialization |
+| MCP HTTP transport | Complete baseline | JSON-RPC initialization, session headers, JSON and JSON-bearing SSE responses, paginated discovery, invocation, loopback HTTP/remote HTTPS confinement, no redirects/cookies, and vault-backed bearer/Basic/custom-sensitive-header execution |
+| MCP STDIO transport | Complete baseline | Direct executable/argument spawning without a shell, initialization, discovery/invocation, roots responses, bounded stdout/stderr/events/parameters, deadline enforcement, and explicit refusal of unreviewed server sampling/elicitation requests |
+| AI providers | Complete baseline | Optional OpenAI, Anthropic, Gemini, and custom/local OpenAI-compatible endpoints; hosted credentials execute only through local-vault or approved external-vault references |
+| AI workflows | Complete baseline | Explicit mock generation from pasted prompt/spec/example input plus bounded, reviewable Git commit grouping/message suggestions; no Brunomnia account or provider is required |
+| Konnect integration | Complete baseline | PAT-authenticated control-plane discovery and pull-only Gateway Service/Route mapping, local-field preservation, generated proxy-host variables, and a Skipped Routes collection for unsupported protocols |
+| Security and migration | Complete | Imported integrations are disabled and credential fields cleared; endpoint/command changes revoke MCP enablement; AI/Konnect settings remain device-local; plaintext integration credentials are detected and blocked from managed publication |
+| Documentation and evidence | Complete | [MCP, AI, and Konnect guide](MCP_AI_KONNECT.md) and [Milestone 8 verification](QA_MILESTONE_8.md) |
+
+Compatibility bounds remain explicit: HTTP MCP OAuth discovery/redirect handling, long-lived streaming sessions, cancellation, interactive elicitation, reviewed sampling, notification response UI, persistent STDIO processes, and a guided resource-template argument editor remain. Custom/local AI means an OpenAI-compatible loopback endpoint; Brunomnia does not yet load `.gguf` files itself. AI response-to-mock/URL fetching is not automatic, and MCP sampling is never silently forwarded. Konnect has a pull-only mapper and no live credential fixture in the repository; SNI/TCP/UDP routes are recorded as unsupported rather than misrepresented.
+
+## Milestone 9 — GraphQL productivity and desktop preferences (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| GraphQL introspection | Complete baseline | Explicit and automatic URL/request-selection introspection through the existing native transport, with redirects/cookie storage disabled and bounded normalized schema caches |
+| GraphQL authoring | Complete baseline | Query/variables composition, operation name, structural checks, cached root-field validation, root-field search/insertion, deprecation display, and type documentation browsing |
+| GraphQL template boundary | Complete | Query template syntax remains literal to match Insomnia; variables retain local/vault/external template support |
+| Request scheduling | Complete baseline | Initial delay, sequential repeat interval, stop-future-runs control, and a 1,000-send local safety bound |
+| Desktop preferences | Complete baseline | System/dark/light appearance, comfortable/compact density, editor font size, new-request timeout, apply-to-existing timeout, GraphQL auto-fetch, and delete confirmation |
+| Keyboard shortcuts | Complete baseline | Ten device-local editable bindings, platform `Mod` abstraction, collision warnings, clearing/reset, URL focus, request create/duplicate/delete, history, sidebar, environment, send, Preferences, and palette actions |
+| Workspace migration | Complete | Versions 1–8 migrate to v9 bounded GraphQL schema cache fields and normalized device-local preferences; imports receive safe defaults and project/encrypted-sync reads preserve local preferences |
+| Documentation and evidence | Complete | [GraphQL and preferences guide](GRAPHQL_AND_PREFERENCES.md) and [Milestone 9 verification](QA_MILESTONE_9.md) |
+
+Compatibility bounds remain explicit: validation is structural plus cached root-field checking rather than a complete GraphQL language server; persisted queries, subscriptions, full nested selection/argument/type validation, and introspection-disabled manual schema import remain open. Scheduled stop cancels future runs but does not abort a request already in flight. Preferences do not yet cover every upstream action, accessibility has not received a full assistive-technology audit, and release packaging remains macOS debug-app evidence rather than signed cross-platform distribution.
+
+## Milestone 10 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
-- Close remaining settings, shortcut, UX, packaging, migration, and compatibility gaps
+- Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
 - Cross-platform installers, signing/notarization guidance, accessibility audit, load/performance testing, and recovery tests
 - Declare parity only after every ledger row has reproducible evidence
 

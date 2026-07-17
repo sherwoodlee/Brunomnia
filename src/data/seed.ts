@@ -1,4 +1,5 @@
 import type { ApiRequest, Collection, HttpMethod, Workspace } from '../types';
+import { defaultPreferences } from '../lib/preferences';
 
 const createRequest = (id: string, name: string, method: HttpMethod, url: string): ApiRequest => ({
   id,
@@ -14,17 +15,28 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
   multipartBody: [],
   auth: {
     type: 'none',
+    disabled: false,
     token: '',
+    prefix: 'Bearer',
     username: '',
     password: '',
     apiKeyName: 'X-API-Key',
     apiKeyValue: '',
     apiKeyLocation: 'header',
+    oauth1SignatureMethod: 'HMAC-SHA1', consumerKey: '', consumerSecret: '', tokenKey: '', tokenSecret: '', privateKey: '', version: '1.0', nonce: '', timestamp: '', callback: '', realm: '', verifier: '', includeBodyHash: false,
+    oauth2GrantType: 'authorization_code', accessTokenUrl: '', authorizationUrl: '', clientId: '', clientSecret: '', audience: '', scope: '', resource: '', redirectUrl: 'http://localhost/', credentialsInBody: false, state: '', code: '', accessToken: '', refreshToken: '', tokenPrefix: 'Bearer', usePkce: false, pkceMethod: 'S256', codeVerifier: '', responseType: 'code',
+    ntlmDomain: '', ntlmWorkstation: 'BRUNOMNIA',
+    awsAccessKeyId: '', awsSecretAccessKey: '', awsSessionToken: '', awsRegion: 'us-east-1', awsService: 'execute-api',
+    hawkId: '', hawkKey: '', hawkExt: '', hawkAlgorithm: 'sha256', hawkValidatePayload: true,
+    asapIssuer: '', asapSubject: '', asapAudience: '', asapAdditionalClaims: '{}', asapPrivateKey: '', asapKeyId: '',
+    netrc: '',
   },
   graphql: {
     query: 'query GetViewer {\n  viewer {\n    id\n    name\n  }\n}',
     variables: '{}',
     operationName: 'GetViewer',
+    schemaEndpoint: '',
+    schemaFetchedAt: '',
   },
   grpc: {
     service: '',
@@ -50,8 +62,12 @@ message Order { string id = 1; string status = 2; double total = 3; }`,
     timeoutMs: 60000,
     validateCertificates: true,
     proxyUrl: '',
+    proxyExclusions: '',
     clientCertificatePem: '',
     clientKeyPem: '',
+    clientCertificateDomains: '',
+    sendCookies: true,
+    storeCookies: true,
   },
   preRequestScript: '// Runs before the request\n',
   tests: `insomnia.test('Status is successful', () => {
@@ -83,7 +99,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 3,
+  version: 9,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -146,6 +162,7 @@ export const seedWorkspace: Workspace = {
     {
       id: 'orders-api-design',
       name: 'Orders API',
+      ruleset: '',
       contents: `openapi: 3.1.0
 info:
   title: Orders API
@@ -211,6 +228,24 @@ paths:
     },
   ],
   runnerReports: [],
+  imports: [],
+  cookies: [],
+  responses: [],
+  project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
+  plugins: [],
+  pluginData: {},
+  activePluginTheme: '',
+  collaboration: { mode: 'off', path: '', actor: 'Local owner', revision: 0 },
+  governance: {
+    currentMemberId: 'local-owner',
+    members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }],
+    policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 },
+    audit: [],
+  },
+  mcpClients: [],
+  ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false },
+  konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] },
+  preferences: structuredClone(defaultPreferences),
 };
 
 export const cloneSeedWorkspace = (): Workspace => structuredClone(seedWorkspace);
