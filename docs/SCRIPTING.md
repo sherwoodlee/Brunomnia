@@ -1,6 +1,6 @@
 # Permission-bounded scripting
 
-Milestones 12–16 expand Brunomnia's clean-room compatibility with the current [Insomnia scripting contract](https://developer.konghq.com/insomnia/scripts/) while keeping host capabilities explicit. Every feature in this document is local and free; the controls are safety grants, not account or subscription gates.
+Milestones 12–17 expand Brunomnia's clean-room compatibility with the current [Insomnia scripting contract](https://developer.konghq.com/insomnia/scripts/) while keeping host capabilities explicit. Every feature in this document is local and free; the controls are safety grants, not account or subscription gates.
 
 ## Runtime model
 
@@ -16,7 +16,7 @@ The runtime exposes:
 - raw, URL-encoded, text-only multipart, and GraphQL `request.body.update()` modes;
 - Basic, Bearer, API-key, and disabled `request.auth.update()` modes, including the documented keyed-array shape and explicit second type argument;
 - response status, text/JSON, timing, headers, and response-cookie helpers;
-- captured console output, ordered sync/async `insomnia.test` results, `insomnia.expect`, global `expect`, and Chai aliases including `lengthOf`, `oneOf`, and all/any object keys;
+- captured console output, ordered sync/async `insomnia.test` results, `insomnia.expect`, global `expect`, and the shared `require('chai').assert` adapter described below;
 - top-level `await`; and
 - local `require()` adapters for every external-library and Node-module name in the current Insomnia scripts reference.
 
@@ -29,6 +29,12 @@ The external-library names are `ajv`, `atob`, `btoa`, `chai`, `cheerio`, `crypto
 Desktop and trusted CLI scripts use the same self-contained adapter factory. It provides common local operations: a bounded JSON Schema subset through AJV/TV4-style APIs; quoted/column CSV parsing; SHA-256 plus CryptoJS WordArray and Hex/UTF-8/Base64 encoders; basic tag, ID, class, attribute, and descendant HTML selection; basic XML object parsing/building; common Moment parsing/format/add/subtract/diff operations; core Postman collection model classes; common Lodash collection/object/case helpers; and finite Buffer, EventEmitter, POSIX path, query-string, stream, string-decoder, URL, timer, util, UUID, and Punycode helpers. Inputs handled by these adapters are capped at 5 MB where text expansion or parsing is involved.
 
 These are clean-room compatibility adapters, not copies of the npm packages. They do not claim every package version, option, locale, parser edge case, cryptographic primitive, JSON Schema draft feature, DOM method, stream behavior, or Postman SDK interface. Unknown modules remain denied and scripts cannot load packages from disk or the network.
+
+## Chai assertion compatibility
+
+`require('chai').assert` comes from the same self-contained factory in desktop Workers and the trusted CLI. Every public method name currently listed in Chai's [`assert` API](https://www.chaijs.com/api/assert/) resolves through the Milestone 17 adapter. The covered families include equality and deep equality; truth, null, `NaN`, existence, and defined checks; JavaScript types, finite numbers, arrays, and instances; ordinary, nested, own, and deep inclusion; regular-expression matching; ordinary, nested, and deep properties; length and size; ordinary/deep/all/any key sets; numeric operators and approximation; ordinary/deep/ordered member sets; getter/property changes, increases, and decreases; thrown-error and no-throw checks; and extensible, sealed, frozen, and empty object state.
+
+The factory also retains the finite chainable `insomnia.expect`/global `expect` compatibility surface used by request tests. It is not the complete Chai [`expect`/BDD API](https://www.chaijs.com/api/bdd/). Brunomnia does not load Chai plugins, expose `should`, support assertion overwrite/extension hooks, or claim Chai's exact error metadata and every overloaded signature. Deep comparison is intended for ordinary script data and remains bounded rather than reproducing Chai's complete treatment of exotic prototypes, accessors, symbols, and cyclic graphs.
 
 ## File-backed bodies and certificates
 
@@ -67,4 +73,4 @@ Local attachments additionally require `--allow-script-files`; secondary script 
 
 ## Remaining compatibility limits
 
-Every module name currently documented by Insomnia is available, but full npm-package behavioral equivalence remains open. In particular, complete Chai/Lodash APIs, arbitrary/local-reference JSON Schema behavior, the full Cheerio/XML parsers, additional CryptoJS algorithms, Moment locales/time zones, complete Node built-in semantics, and the complete Postman Collection SDK are not claimed. PFX and secondary-request file sources, external-vault scripts, and stronger portable CLI isolation remain in the [parity ledger](PARITY.md). The official scripts reference says deprecated Postman interfaces are not supported by Insomnia, so they are not treated as an upstream parity requirement.
+Every module name currently documented by Insomnia is available, but full npm-package behavioral equivalence remains open. In particular, the complete chainable Chai `expect` API, complete Lodash behavior, arbitrary/local-reference JSON Schema behavior, the full Cheerio/XML parsers, additional CryptoJS algorithms, Moment locales/time zones, complete Node built-in semantics, and the complete Postman Collection SDK are not claimed. PFX and secondary-request file sources, external-vault scripts, and stronger portable CLI isolation remain in the [parity ledger](PARITY.md). The official scripts reference says deprecated Postman interfaces are not supported by Insomnia, so they are not treated as an upstream parity requirement.

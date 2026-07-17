@@ -109,6 +109,56 @@ describe('script module adapters', () => {
     expect((bundled.uuid as AnyModule).validate((bundled.uuid as AnyModule).v4())).toBe(true);
   });
 
+  it('covers the public Chai assert families through the shared adapter', () => {
+    const assertion = (modules().chai as AnyModule).assert as AnyModule;
+    const surface = [
+      'fail', 'isOk', 'isNotOk', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual',
+      'isAbove', 'isAtLeast', 'isBelow', 'isAtMost', 'isTrue', 'isNotTrue', 'isFalse', 'isNotFalse',
+      'isNull', 'isNotNull', 'isNaN', 'isNotNaN', 'exists', 'notExists', 'isUndefined', 'isDefined',
+      'isFunction', 'isNotFunction', 'isObject', 'isNotObject', 'isArray', 'isNotArray', 'isString', 'isNotString',
+      'isNumber', 'isNotNumber', 'isFinite', 'isBoolean', 'isNotBoolean', 'typeOf', 'notTypeOf', 'instanceOf', 'notInstanceOf',
+      'include', 'notInclude', 'deepInclude', 'notDeepInclude', 'nestedInclude', 'notNestedInclude', 'deepNestedInclude', 'notDeepNestedInclude',
+      'ownInclude', 'notOwnInclude', 'deepOwnInclude', 'notDeepOwnInclude', 'match', 'notMatch',
+      'property', 'notProperty', 'propertyVal', 'notPropertyVal', 'deepPropertyVal', 'notDeepPropertyVal',
+      'nestedProperty', 'notNestedProperty', 'nestedPropertyVal', 'notNestedPropertyVal', 'deepNestedPropertyVal', 'notDeepNestedPropertyVal', 'lengthOf',
+      'hasAnyKeys', 'hasAllKeys', 'containsAllKeys', 'doesNotHaveAnyKeys', 'doesNotHaveAllKeys',
+      'hasAnyDeepKeys', 'hasAllDeepKeys', 'containsAllDeepKeys', 'doesNotHaveAnyDeepKeys', 'doesNotHaveAllDeepKeys',
+      'throws', 'doesNotThrow', 'operator', 'closeTo', 'approximately',
+      'sameMembers', 'notSameMembers', 'sameDeepMembers', 'notSameDeepMembers', 'sameOrderedMembers', 'notSameOrderedMembers',
+      'sameDeepOrderedMembers', 'notSameDeepOrderedMembers', 'includeMembers', 'notIncludeMembers', 'includeDeepMembers', 'notIncludeDeepMembers',
+      'includeOrderedMembers', 'notIncludeOrderedMembers', 'includeDeepOrderedMembers', 'notIncludeDeepOrderedMembers', 'oneOf',
+      'changes', 'changesBy', 'doesNotChange', 'changesButNotBy', 'increases', 'increasesBy', 'doesNotIncrease', 'increasesButNotBy',
+      'decreases', 'decreasesBy', 'doesNotDecrease', 'doesNotDecreaseBy', 'decreasesButNotBy', 'ifError',
+      'isExtensible', 'isNotExtensible', 'isSealed', 'isNotSealed', 'isFrozen', 'isNotFrozen', 'isEmpty', 'isNotEmpty',
+    ];
+    expect(surface.every((name) => typeof assertion[name] === 'function')).toBe(true);
+
+    assertion.typeOf(/ready/, 'regexp');
+    assertion.deepInclude([{ result: { ok: true } }], { result: { ok: true } });
+    assertion.deepNestedInclude({ response: { body: [{ id: 42 }] } }, { 'response.body[0]': { id: 42 } });
+    assertion.ownInclude(Object.assign(Object.create({ inherited: true }), { own: true }), { own: true });
+    assertion.deepNestedPropertyVal({ response: { body: { id: 42 } } }, 'response.body', { id: 42 });
+    assertion.containsAllKeys({ id: 1, name: 'Ada', role: 'admin' }, ['id', 'role']);
+    assertion.hasAllDeepKeys(new Map([[{ id: 1 }, 'one']]), [{ id: 1 }]);
+    assertion.sameDeepMembers([{ id: 1 }, { id: 2 }], [{ id: 2 }, { id: 1 }]);
+    assertion.includeOrderedMembers(['ready', 'sent', 'received'], ['ready', 'sent']);
+    assertion.closeTo(9.99, 10, 0.02);
+    assertion.operator(201, '>=', 200);
+    const counter = { value: 1 };
+    assertion.increasesBy(() => { counter.value += 2; }, counter, 'value', 2);
+    assertion.doesNotDecrease(() => { counter.value += 1; }, counter, 'value');
+    let getterValue = 2;
+    assertion.changes(() => { getterValue = 3; }, () => getterValue);
+    assertion.increasesBy(() => { getterValue += 4; }, () => getterValue, 4);
+    assertion.throws(() => { throw new TypeError('boom'); }, TypeError, /boom/);
+    assertion.doesNotThrow(() => JSON.parse('{"ok":true}'));
+    assertion.respondTo(Map, 'get');
+    assertion.satisfies(201, (status: number) => status >= 200 && status < 300);
+    assertion.isFrozen(Object.freeze({ ok: true }));
+    assertion.isEmpty(new Set());
+    expect(() => assertion.nestedPropertyVal({ response: { status: 500 } }, 'response.status', 200, 'status mismatch')).toThrow('status mismatch');
+  });
+
   it('caps module input independently of script source limits', () => {
     const bundled = modules();
     expect(() => (bundled['crypto-js'] as AnyModule).SHA256('x'.repeat(5_000_001))).toThrow(/5 MB/);
