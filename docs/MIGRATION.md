@@ -284,7 +284,22 @@ Compatibility bounds remain explicit: this is a broad clean-room BDD surface, no
 
 Compatibility bounds remain explicit: PFX/PKCS#12, encrypted-key passphrases, a live external-network file fixture, external-vault scripts, stronger portable CLI isolation, exact package internals, and non-scripting ledger gaps remain open.
 
-## Milestone 20 — remaining parity closure and release hardening
+## Milestone 20 — collection-runner reports and CI reporters (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Shared formatter | Complete | Desktop and CLI artifacts use one deterministic, side-effect-free report formatter |
+| Desktop export | Complete baseline | The latest saved run for the selected collection can be downloaded as versioned Brunomnia JSON or JUnit XML |
+| Inso reporter names | Complete baseline | `dot`, `list`, `min`, `progress`, `spec`, and TAP reporters are accepted by `run test`, with JSON and JUnit available as additional CI formats |
+| Failure fidelity | Complete baseline | Retry attempts, request status, duration, script assertion errors, runner errors, cancellation, and aggregate counts remain visible |
+| Output safety | Complete | XML metacharacters and invalid control characters are sanitized; TAP diagnostics remain single-line and output is bounded by the already bounded saved report |
+| CLI output | Complete | `--reporter`/`-r` select a format and `--output`/`-o` writes it without changing pass/fail exit codes |
+| Strict typecheck | Complete | Five scripting regressions exposed by a clean non-incremental TypeScript pass were repaired before accepting the release gate |
+| Documentation and evidence | Complete | [Runner reports and CI](RUNNER_REPORTS.md) and [Milestone 20 verification](QA_MILESTONE_20.md) |
+
+Compatibility bounds remain explicit: Brunomnia does not claim byte-identical Mocha reporter cosmetics. Request selection/drag ordering, response bodies in reports, `--bail`, test-name filtering, every Inso command/configuration flag, all protocol semantics, and signed container/install artifacts remain open.
+
+## Milestone 21 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

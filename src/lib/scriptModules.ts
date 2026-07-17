@@ -499,7 +499,7 @@ export const createScriptModules = (runtime: ScriptModuleRuntime): Record<string
     remove(id: string) { const index = this.members.findIndex((item) => item.id === id || item.key === id || item.name === id); return index < 0 ? undefined : this.members.splice(index, 1)[0]; }
     all() { return [...this.members]; }
     each(callback: (item: T, index: number) => void) { this.members.forEach(callback); }
-    toJSON() { return this.members.map((item) => typeof (item as { toJSON?: () => unknown }).toJSON === 'function' ? (item as { toJSON: () => unknown }).toJSON() : item); }
+    toJSON() { return this.members.map((item) => typeof (item as { toJSON?: () => unknown }).toJSON === 'function' ? (item as unknown as { toJSON: () => unknown }).toJSON() : item); }
     get count() { return this.members.length; }
   }
   class Variable { id: string; key: string; value: unknown; type: string; constructor(input: Record<string, unknown> = {}) { this.id = String(input.id ?? runtime.crypto.randomUUID()); this.key = String(input.key ?? input.name ?? ''); this.value = input.value ?? ''; this.type = String(input.type ?? 'any'); } toJSON() { return { id: this.id, key: this.key, value: this.value, type: this.type }; } }
@@ -513,7 +513,18 @@ export const createScriptModules = (runtime: ScriptModuleRuntime): Record<string
   const postmanCollection = { Collection, Item, ItemGroup: Item, Request, Response, Header, HeaderList: PropertyList, Variable, VariableList: PropertyList, PropertyList, Url, RequestBody };
 
   class BufferPolyfill extends Uint8Array {
-    static from(value: string | ArrayLike<number> | ArrayBuffer, encoding = 'utf8') { if (typeof value === 'string') return new BufferPolyfill(encoding === 'base64' ? base64ToBytes(value) : encoding === 'hex' ? hexToBytes(value) : new runtime.TextEncoder().encode(value)); if (value instanceof ArrayBuffer) return new BufferPolyfill(new Uint8Array(value)); return new BufferPolyfill(Array.from(value)); }
+    static from(value: string, encoding?: string): BufferPolyfill;
+    static from(value: ArrayBuffer): BufferPolyfill;
+    static from(arrayLike: ArrayLike<number>): BufferPolyfill;
+    static from<T>(arrayLike: ArrayLike<T>, mapfn: (value: T, index: number) => number, thisArg?: unknown): BufferPolyfill;
+    static from(elements: Iterable<number>): BufferPolyfill;
+    static from<T>(elements: Iterable<T>, mapfn?: (value: T, index: number) => number, thisArg?: unknown): BufferPolyfill;
+    static from(value: string | ArrayBuffer | ArrayLike<unknown> | Iterable<unknown>, encodingOrMap: string | ((value: unknown, index: number) => number) = 'utf8', thisArg?: unknown) {
+      if (typeof value === 'string') return new BufferPolyfill(encodingOrMap === 'base64' ? base64ToBytes(value) : encodingOrMap === 'hex' ? hexToBytes(value) : new runtime.TextEncoder().encode(value));
+      if (value instanceof ArrayBuffer) return new BufferPolyfill(new Uint8Array(value));
+      const values = Array.from(value as ArrayLike<unknown>, typeof encodingOrMap === 'function' ? encodingOrMap : (item) => Number(item), thisArg);
+      return new BufferPolyfill(values);
+    }
     static alloc(length: number, fill = 0) { const buffer = new BufferPolyfill(Math.min(5_000_000, Math.max(0, length))); buffer.fill(typeof fill === 'number' ? fill : 0); return buffer; }
     static concat(values: Uint8Array[]) { return BufferPolyfill.from(values.flatMap((value) => [...value])); }
     static isBuffer(value: unknown) { return value instanceof BufferPolyfill; }

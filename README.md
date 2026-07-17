@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the nineteenth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the twentieth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -22,10 +22,10 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Request history and response body/header/timeline inspection
 - Delayed one-shot sends and sequential repeating sends with explicit cancellation and a 1,000-run safety bound
 - Permission-bounded pre-request scripts and async after-response tests with documented seven-level environment lookup, exact base/selected scope aliases, folder/query/auth helpers, shared Chai `assert` and chainable `expect` surfaces, bounded adapters for every documented bundled module name, opt-in primary/secondary local body and PEM attachment, and mediated HTTP/vault capabilities
-- Ordered collection runs with JSON/CSV iteration data, retries, cancellation, cookie/response chaining, bounded WebSocket/SSE samples, and saved reports
+- Ordered collection runs with JSON/CSV iteration data, retries, cancellation, cookie/response chaining, bounded WebSocket/SSE samples, saved reports, and downloadable JSON/JUnit evidence
 - OpenAPI 3.x YAML/JSON editing, structural and safe Spectral-style custom linting, operation preview, formatting, and request generation
 - Native loopback mock servers with route parameters, delays, headers, CORS, and dynamic response tokens
-- A headless CLI for OpenAPI lint/generation/export and collection/test execution
+- A headless CLI for OpenAPI lint/generation/export and collection/test execution with the documented Inso reporter names plus JSON/JUnit artifacts
 - File, pasted-text, and HTTP(S) URL imports with format detection and a warning preview
 - Insomnia JSON v4/v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports
 - Scoped Brunomnia JSON, Insomnia v4/v5, HAR, and raw OpenAPI exports
@@ -79,9 +79,10 @@ node bin/brunomnia.cjs lint spec examples/orders-api.yaml
 node bin/brunomnia.cjs generate collection examples/orders-api.yaml --output collection.json
 node bin/brunomnia.cjs export spec examples/cli-workspace.json "CLI API" --output api.yaml
 node bin/brunomnia.cjs run test examples/cli-workspace.json "CLI Health" --allow-scripts --allow-script-files
+node bin/brunomnia.cjs run test examples/cli-workspace.json "CLI Health" --allow-scripts --allow-script-files --reporter junit --output report.xml
 ```
 
-The checked-in [CLI workspace fixture](examples/cli-workspace.json) is self-contained and does not make an internet request. CLI JavaScript is disabled unless `--allow-scripts` is present; the fixture's local attachment also requires `--allow-script-files`. Trusted scripts can make secondary HTTP requests only when `--allow-script-requests` is also present.
+The checked-in [CLI workspace fixture](examples/cli-workspace.json) is self-contained and does not make an internet request. CLI JavaScript is disabled unless `--allow-scripts` is present; the fixture's local attachment also requires `--allow-script-files`. Trusted scripts can make secondary HTTP requests only when `--allow-script-requests` is also present. Reporters are `dot`, `list`, `min`, `progress`, `spec`, `tap`, `json`, and `junit`; use `--output` to write the artifact instead of stdout. See [runner reports and CI](docs/RUNNER_REPORTS.md).
 
 ## Verify it
 

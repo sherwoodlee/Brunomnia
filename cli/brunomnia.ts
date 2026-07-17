@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openapi';
 import { buildHeaders, buildRequestUrl, resolveTemplate } from '../src/lib/request';
 import { parseRunnerData, runCollection } from '../src/lib/runner';
+import { createRunnerReportArtifact, parseRunnerReporter } from '../src/lib/runnerReport';
 import type { ApiDesign, ApiRequest, AuthConfig, Environment, HttpResponse, ScriptRunResult, Workspace } from '../src/types';
 import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resources';
 import { hydrateScriptFileReferences, prepareScriptSubrequest, type ScriptFileBudget, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
@@ -393,8 +394,10 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--allow-scripts] [--allow-script-requests] [--allow-script-files]
+  brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files]
   brunomnia run test <workspace> <collection-name-or-id> [same options]
+
+Reporters: dot, list, min, progress, spec, tap, json, junit
 `;
 
 const main = async () => {
@@ -452,7 +455,15 @@ const main = async () => {
         readFile: hasFlag('--allow-script-files') ? readCliScriptFile : undefined,
       });
     });
-    console.log(JSON.stringify(report, null, 2));
+    const reporter = parseRunnerReporter(flag('--reporter') ?? flag('-r'), subject === 'test' ? 'spec' : 'json');
+    const artifact = createRunnerReportArtifact(report, reporter);
+    const output = flag('--output') ?? flag('-o');
+    if (output) {
+      await writeFile(output, artifact.contents);
+      console.log(`Wrote ${reporter} report to ${output}`);
+    } else {
+      process.stdout.write(artifact.contents);
+    }
     if (report.failed > 0) process.exitCode = 1;
     return;
   }

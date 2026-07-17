@@ -1,5 +1,5 @@
 import { createBlankRequest } from '../data/seed';
-import type { ApiRequest, CookieRecord, FilePayload, HttpResponse, KeyValue, ScriptRunResult, StoredResponse } from '../types';
+import type { ApiRequest, CookieRecord, FilePayload, HttpResponse, KeyValue, MultipartPart, ScriptRunResult, StoredResponse } from '../types';
 import { storeResponseCookies } from './cookies';
 import { createScriptExpect } from './scriptExpect';
 import { createScriptModules } from './scriptModules';
@@ -226,7 +226,7 @@ const normalizeScriptSubrequestInput = (input: unknown, sourceRequest: ApiReques
     } else if (mode === 'formdata') {
       const parts = Array.isArray(bodySource.formdata) ? bodySource.formdata : [];
       request.bodyMode = 'multipart';
-      request.multipartBody = parts.flatMap((item, index) => {
+      request.multipartBody = parts.flatMap((item, index): MultipartPart[] => {
         const part = record(item);
         if (!part) return [];
         const row = scriptRow(part, index, 'script-part');
