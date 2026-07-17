@@ -5,6 +5,7 @@ import type {
   GrpcSchema,
   HttpResponse,
   KeyValue,
+  PreferredHttpVersion,
   StreamMessage,
 } from '../types';
 import { buildHeaders, environmentMap, resolveTemplate } from './request';
@@ -44,18 +45,24 @@ export const sseConnectConfig = (request: ApiRequest) => ({
   sendLastEventId: request.sse?.sendLastEventId !== false,
 });
 
+export const streamTransportConfig = (request: ApiRequest, preferredHttpVersion: PreferredHttpVersion) => ({
+  ...request.transport,
+  preferredHttpVersion,
+});
+
 export const connectStream = async (
   request: ApiRequest,
   environment: Environment | undefined,
   sessionId: string,
   onEvent: (message: StreamMessage) => void,
+  preferredHttpVersion: PreferredHttpVersion = 'default',
 ) => {
   const variables = environmentMap(environment);
   const input = {
     sessionId,
     url: resolveTemplate(request.url, variables),
     headers: resolvedHeaders(request, environment),
-    transport: request.transport,
+    transport: streamTransportConfig(request, preferredHttpVersion),
     sse: sseConnectConfig(request),
   };
   if (isTauri()) {
@@ -112,6 +119,7 @@ export const runStreamSample = async (
   request: ApiRequest,
   environment: Environment,
   windowMs = 1000,
+  preferredHttpVersion: PreferredHttpVersion = 'default',
 ): Promise<HttpResponse> => {
   if (request.protocol !== 'websocket' && request.protocol !== 'sse') throw new Error('Stream sampling only supports WebSocket and SSE requests.');
   const sessionId = `runner-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -123,7 +131,7 @@ export const runStreamSample = async (
     messages.push(message);
     if (message.direction === 'incoming') resolveIncoming?.();
   };
-  await connectStream(request, environment, sessionId, onEvent);
+  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion);
   try {
     const variables = environmentMap(environment);
     const startupFrame = resolveTemplate(request.body, variables);

@@ -35,6 +35,7 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - system, dark, or light appearance;
 - comfortable or compact density;
 - 11–20 px editor font size;
+- a preferred native protocol of Default negotiation, HTTP 1.0, HTTP 1.1, HTTP/2, or HTTP/2 Prior Knowledge;
 - a 1–600 second default timeout for new requests, with an explicit apply-to-existing action;
 - a 1–60 second script deadline plus separate off-by-default secondary-request, local-file, and local-vault script authorities;
 - automatic GraphQL introspection;
@@ -44,3 +45,5 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 Click a shortcut field and press a combination. `Mod` maps to Command on macOS and Control elsewhere. Duplicate bindings are shown and only the first matching action runs. Press Backspace to clear a binding or use **Reset defaults**.
 
 Preferences stay on this device. Split-YAML folder/Git projects omit them, encrypted-sync pulls preserve the current device's values, and imported workspace files start with safe defaults. Plugin themes take precedence while active.
+
+The HTTP version preference reaches ordinary HTTP and GraphQL sends, Event Streams, collection runs, secondary script/plugin requests, artifact URL imports, OAuth token calls, and HTTP-backed integrations. Standard HTTP/2 negotiates and can fall back; Prior Knowledge requires an HTTP/2-capable peer. Native responses show the protocol actually used in the response summary and timeline. Browser development mode leaves protocol selection to the browser.

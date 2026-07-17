@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
-import { previewGrpcSchema, sseConnectConfig } from './protocol';
+import { previewGrpcSchema, sseConnectConfig, streamTransportConfig } from './protocol';
 
 describe('previewGrpcSchema', () => {
   it('discovers unary and streaming RPC shapes from proto source', () => {
@@ -51,5 +51,15 @@ describe('sseConnectConfig', () => {
       respectServerRetry: true,
       sendLastEventId: true,
     });
+  });
+});
+
+describe('streamTransportConfig', () => {
+  it('adds the device HTTP preference without mutating request transport', () => {
+    const request = cloneSeedWorkspace().collections[0].requests[0];
+    const transport = streamTransportConfig(request, 'http2-prior-knowledge');
+
+    expect(transport).toMatchObject({ timeoutMs: request.transport.timeoutMs, preferredHttpVersion: 'http2-prior-knowledge' });
+    expect(request.transport).not.toHaveProperty('preferredHttpVersion');
   });
 });

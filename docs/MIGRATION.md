@@ -134,7 +134,7 @@ Compatibility bounds remain explicit: HTTP MCP OAuth discovery/redirect handling
 | GraphQL authoring | Complete baseline | Query/variables composition, operation name, structural checks, cached root-field validation, root-field search/insertion, deprecation display, and type documentation browsing |
 | GraphQL template boundary | Complete | Query template syntax remains literal to match Insomnia; variables retain local/vault/external template support |
 | Request scheduling | Complete baseline | Initial delay, sequential repeat interval, stop-future-runs control, and a 1,000-send local safety bound |
-| Desktop preferences | Complete baseline | System/dark/light appearance, comfortable/compact density, editor font size, new-request timeout, apply-to-existing timeout, GraphQL auto-fetch, and delete confirmation |
+| Desktop preferences | Complete baseline | System/dark/light appearance, comfortable/compact density, editor font size, preferred HTTP version, new-request timeout, apply-to-existing timeout, GraphQL auto-fetch, and delete confirmation |
 | Keyboard shortcuts | Complete baseline | Ten device-local editable bindings, platform `Mod` abstraction, collision warnings, clearing/reset, URL focus, request create/duplicate/delete, history, sidebar, environment, send, Preferences, and palette actions |
 | Workspace migration | Complete | Versions 1–8 migrate to v9 bounded GraphQL schema cache fields and normalized device-local preferences; imports receive safe defaults and project/encrypted-sync reads preserve local preferences |
 | Documentation and evidence | Complete | [GraphQL and preferences guide](GRAPHQL_AND_PREFERENCES.md) and [Milestone 9 verification](QA_MILESTONE_9.md) |
@@ -388,7 +388,22 @@ Compatibility bounds remain explicit: Brunomnia discovers named tests inside req
 
 Compatibility bounds remain explicit: the native transport behavior is source- and unit-tested, but this environment cannot bind the loopback listener needed for a deterministic disconnect/reconnect integration fixture. Browser development mode remains a deterministic stream demo. Event searching/export, streaming plugin hooks, and collection-run reconnect semantics remain open.
 
-## Milestone 27 — remaining parity closure and release hardening
+## Milestone 27 — preferred HTTP versions (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local Default, HTTP 1.0, HTTP 1.1, HTTP/2, and HTTP/2 Prior Knowledge values match the current upstream settings surface |
+| HTTP/1 execution | Complete | HTTP 1.0/1.1 selections constrain the native client and set the corresponding request version across redirects and challenge-auth retries |
+| HTTP/2 execution | Complete baseline | Standard HTTP/2 uses TLS negotiation with HTTP/1 fallback; Prior Knowledge creates an HTTP/2-only native client |
+| Execution breadth | Complete baseline | Main HTTP/GraphQL/SSE, introspection, collection runs, script/plugin secondary calls, imports, OAuth, AI, MCP, Konnect, and Git AI requests inherit the preference |
+| Response evidence | Complete | Native responses serialize their negotiated protocol into live/saved response summaries and the timeline; SSE open/reopen records include it |
+| Device-local safety | Complete | Existing data defaults to negotiation, unknown values normalize to default, project/sync reads preserve the device choice, and workspace imports reset it |
+| Executable coverage | Complete baseline | Frontend tests cover migration, invocation input, stream input, and immutability; native tests cover every mode and HTTP/1 request versions; live negotiation fixtures remain sandbox-limited |
+| Documentation and evidence | Complete | Updated [GraphQL and preferences guide](GRAPHQL_AND_PREFERENCES.md) and [Milestone 27 verification](QA_MILESTONE_27.md) |
+
+Compatibility bounds remain explicit: browser development mode cannot select its network stack's HTTP version. The sandbox cannot bind local HTTP/1 and HTTP/2 peers, so negotiated wire versions are not claimed as live integration-tested here. HTTP/3 is not offered by the current upstream settings UI and is not claimed.
+
+## Milestone 28 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

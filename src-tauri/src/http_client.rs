@@ -3,9 +3,39 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use digest_auth::{AuthContext, HttpMethod as DigestMethod};
 use reqwest::{
     header::{HeaderMap, AUTHORIZATION, SET_COOKIE, WWW_AUTHENTICATE},
-    multipart, Client, Method, RequestBuilder, Response,
+    multipart, Client, Method, RequestBuilder, Response, Version,
 };
 use std::{collections::BTreeMap, time::Instant};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum HttpVersionMode {
+    Automatic,
+    Http10,
+    Http11,
+    Http2,
+    Http2PriorKnowledge,
+}
+
+fn http_version_mode(transport: &TransportConfig) -> HttpVersionMode {
+    match transport.preferred_http_version.as_str() {
+        "http1.0" => HttpVersionMode::Http10,
+        "http1.1" => HttpVersionMode::Http11,
+        "http2" => HttpVersionMode::Http2,
+        "http2-prior-knowledge" => HttpVersionMode::Http2PriorKnowledge,
+        _ => HttpVersionMode::Automatic,
+    }
+}
+
+pub fn apply_preferred_request_version(
+    request: RequestBuilder,
+    transport: &TransportConfig,
+) -> RequestBuilder {
+    match http_version_mode(transport) {
+        HttpVersionMode::Http10 => request.version(Version::HTTP_10),
+        HttpVersionMode::Http11 => request.version(Version::HTTP_11),
+        _ => request,
+    }
+}
 
 fn domain_matches(pattern: &str, hostname: &str) -> bool {
     let pattern = pattern.trim().to_ascii_lowercase();
@@ -69,6 +99,12 @@ fn build_client_with_timeout(
             transport.timeout_ms.clamp(100, 600_000),
         ));
     }
+    builder = match http_version_mode(transport) {
+        HttpVersionMode::Http10 | HttpVersionMode::Http11 => builder.http1_only(),
+        HttpVersionMode::Http2PriorKnowledge => builder.http2_prior_knowledge(),
+        // The all-protocol client advertises h2 through TLS ALPN and retains HTTP/1 fallback.
+        HttpVersionMode::Automatic | HttpVersionMode::Http2 => builder,
+    };
 
     if !transport.proxy_url.trim().is_empty() {
         let proxy = reqwest::Proxy::all(transport.proxy_url.trim())
@@ -110,7 +146,8 @@ fn build_request(
 ) -> Result<RequestBuilder, String> {
     let method = Method::from_bytes(input.method.as_bytes())
         .map_err(|_| format!("Unsupported HTTP method: {}", input.method))?;
-    let mut request = client.request(method, url);
+    let mut request =
+        apply_preferred_request_version(client.request(method, url), &input.transport);
 
     for header in input.headers.iter().filter(|header| header.enabled) {
         request = request.header(&header.name, &header.value);
@@ -398,6 +435,7 @@ pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String>
     let started = Instant::now();
     let response = send_with_auth(&client, &input, url).await?;
     let status = response.status();
+    let http_version = format!("{:?}", response.version());
     let set_cookies = response
         .headers()
         .get_all(SET_COOKIE)
@@ -416,6 +454,7 @@ pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String>
         body,
         duration_ms: started.elapsed().as_millis(),
         set_cookies,
+        http_version,
     })
 }
 
@@ -457,5 +496,48 @@ mod tests {
         assert!(domain_matches("*.example.com", "api.example.com"));
         assert!(!domain_matches("*.example.com", "example.com"));
         assert!(!domain_matches("api.example.com", "other.example.com"));
+    }
+
+    #[test]
+    fn normalizes_preferred_http_version_modes() {
+        let mode = |value: &str| {
+            http_version_mode(&TransportConfig {
+                preferred_http_version: value.into(),
+                ..TransportConfig::default()
+            })
+        };
+        assert_eq!(mode("default"), HttpVersionMode::Automatic);
+        assert_eq!(mode("unknown"), HttpVersionMode::Automatic);
+        assert_eq!(mode("http1.0"), HttpVersionMode::Http10);
+        assert_eq!(mode("http1.1"), HttpVersionMode::Http11);
+        assert_eq!(mode("http2"), HttpVersionMode::Http2);
+        assert_eq!(
+            mode("http2-prior-knowledge"),
+            HttpVersionMode::Http2PriorKnowledge
+        );
+
+        for value in [
+            "default",
+            "http1.0",
+            "http1.1",
+            "http2",
+            "http2-prior-knowledge",
+        ] {
+            let transport = TransportConfig {
+                preferred_http_version: value.into(),
+                ..TransportConfig::default()
+            };
+            let client = build_client(&transport, Some("https://example.test")).unwrap();
+            let request =
+                apply_preferred_request_version(client.get("https://example.test"), &transport)
+                    .build()
+                    .unwrap();
+            let expected = match value {
+                "http1.0" => Version::HTTP_10,
+                "http1.1" => Version::HTTP_11,
+                _ => Version::HTTP_11,
+            };
+            assert_eq!(request.version(), expected);
+        }
     }
 }
