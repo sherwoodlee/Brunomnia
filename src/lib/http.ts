@@ -169,7 +169,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
 
   if (new URL(url).hostname === 'api.acme.dev') {
     await new Promise((resolve) => window.setTimeout(resolve, 380));
-    return finish(mockResponse());
+    return finish({ ...mockResponse(), requestUrl: url });
   }
 
   const startedAt = performance.now();
