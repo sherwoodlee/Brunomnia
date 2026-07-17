@@ -13,6 +13,7 @@ import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '..
 import { parseRunnerData, runCollection } from '../lib/runner';
 import { resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
 import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
+import { readDesktopScriptFile } from '../lib/scriptFiles';
 import { storeResponseCookies } from '../lib/cookies';
 import { sendRequest } from '../lib/http';
 import { createPluginRuntime, type PluginHostCallbacks, type PluginRunState } from '../lib/plugins';
@@ -164,6 +165,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
         return result;
       }, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => runBrowserScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
         ...scriptOptions,
+        readFile: workspace.preferences.allowScriptFileAccess ? readDesktopScriptFile : undefined,
         vault: workspace.preferences.enableVaultInScripts ? vault : undefined,
         sendRequest: workspace.preferences.allowScriptRequests ? async (subrequest, subrequestVariables) => {
           const subresponse = await sendRequest(subrequest, {

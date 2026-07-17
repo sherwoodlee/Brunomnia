@@ -1,9 +1,17 @@
 import { createBlankRequest } from '../data/seed';
-import type { ApiRequest, CookieRecord, HttpResponse, KeyValue, ScriptRunResult, StoredResponse } from '../types';
+import type { ApiRequest, CookieRecord, FilePayload, HttpResponse, KeyValue, ScriptRunResult, StoredResponse } from '../types';
 import { storeResponseCookies } from './cookies';
 import { createScriptModules } from './scriptModules';
 
 export type ScriptFolderState = { id: string; name: string; environment: Record<string, string>; disabled?: string[] };
+
+export type ScriptFileReference = {
+  kind: 'body' | 'multipart' | 'certificate-cert' | 'certificate-key';
+  path: string;
+  partId?: string;
+  fileName?: string;
+  contentType?: string;
+};
 
 export type ScriptRunOptions = {
   baseGlobals?: Record<string, string>;
@@ -20,6 +28,7 @@ export type ScriptRunOptions = {
   sendRequest?: (request: ApiRequest, variables: Record<string, string>) => Promise<HttpResponse>;
   maxSubrequests?: number;
   maxSubrequestBytes?: number;
+  readFile?: (path: string) => Promise<FilePayload>;
 };
 
 type WorkerOutput = {
@@ -39,6 +48,7 @@ type WorkerOutput = {
   logs: string[];
   tests: ScriptRunResult['tests'];
   localVariables: Record<string, string>;
+  fileReferences: ScriptFileReference[];
 };
 
 type WorkerSubrequest = {
@@ -59,6 +69,50 @@ export const applyScriptSubresponse = (
   const nextCookies = request.transport.storeCookies ? storeResponseCookies(cookies, requestUrl, response.setCookies ?? []) : cookies;
   const stored: StoredResponse = { ...response, requestId: request.id, requestName: request.name, requestUrl, receivedAt };
   return { cookies: nextCookies, responses: [stored, ...responses].slice(0, 100) };
+};
+
+const payloadBytes = (payload: FilePayload) => Math.floor(payload.dataBase64.length * 3 / 4) - (payload.dataBase64.endsWith('==') ? 2 : payload.dataBase64.endsWith('=') ? 1 : 0);
+const payloadText = (payload: FilePayload) => {
+  try {
+    const bytes = Uint8Array.from(atob(payload.dataBase64), (character) => character.charCodeAt(0));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(`Script certificate file '${payload.fileName}' is not valid UTF-8 PEM text.`);
+  }
+};
+
+export const hydrateScriptFileReferences = async (
+  request: ApiRequest,
+  references: ScriptFileReference[],
+  readFile?: (path: string) => Promise<FilePayload>,
+): Promise<ApiRequest> => {
+  if (!references.length) return request;
+  if (!readFile) throw new Error('Script file access is disabled. Enable it in Preferences.');
+  if (references.length > 20) throw new Error('Script request exceeds the 20-file attachment limit.');
+  let totalBytes = 0;
+  for (const reference of references) {
+    const payload = await readFile(reference.path);
+    const bytes = payloadBytes(payload);
+    if (bytes < 0 || bytes > 5_000_000) throw new Error(`Script file '${payload.fileName}' exceeds the 5 MB per-file limit.`);
+    totalBytes += bytes;
+    if (totalBytes > 20_000_000) throw new Error('Script request files exceed the 20 MB aggregate limit.');
+    if (reference.kind === 'body') {
+      request.bodyMode = 'binary';
+      request.binaryBody = payload;
+    } else if (reference.kind === 'multipart') {
+      const part = request.multipartBody.find((candidate) => candidate.id === reference.partId);
+      if (!part) throw new Error(`Script multipart file target '${reference.partId}' was not found.`);
+      part.kind = 'file';
+      part.file = payload;
+      part.fileName = reference.fileName || payload.fileName;
+      part.contentType = reference.contentType || payload.mimeType;
+    } else if (reference.kind === 'certificate-cert') {
+      request.transport.clientCertificatePem = payloadText(payload);
+    } else {
+      request.transport.clientKeyPem = payloadText(payload);
+    }
+  }
+  return request;
 };
 
 const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -181,6 +235,7 @@ self.onmessage = async ({ data }) => {
   const logs = [];
   const tests = [];
   const pendingTests = [];
+  const fileReferences = [];
   let subrequestCount = 0;
   const constructors = [Function, (async () => {}).constructor, (function* () {}).constructor, (async function* () {}).constructor];
   constructors.forEach((constructor) => {
@@ -227,6 +282,18 @@ self.onmessage = async ({ data }) => {
     return Object.assign(values, state.iterationData, state.localVariables);
   };
   const replaceIn = (value) => String(value).replace(/{{\\s*([^{}]+?)\\s*}}/g, (match, name) => mergedVariables()[name] ?? match);
+  const removeFileReferences = (...kinds) => {
+    for (let index = fileReferences.length - 1; index >= 0; index -= 1) if (kinds.includes(fileReferences[index].kind)) fileReferences.splice(index, 1);
+  };
+  const addFileReference = (reference) => {
+    if (!state.permissions.files) throw new Error('Script file access is disabled. Enable it in Preferences.');
+    const path = replaceIn(reference.path ?? '').trim();
+    if (!path) throw new Error('Script file path cannot be empty.');
+    if (path.length > 10000) throw new Error('Script file path exceeds 10,000 characters.');
+    if (fileReferences.length >= 20) throw new Error('Script request exceeds the 20-file attachment limit.');
+    fileReferences.push({ ...reference, path });
+    return path;
+  };
   const variableApi = (values, disabled = []) => ({
     get: (name) => values[name],
     set: (name, value) => {
@@ -344,11 +411,20 @@ self.onmessage = async ({ data }) => {
     update: (body) => {
       const input = typeof body === 'string' ? { mode: 'raw', raw: body } : body || {};
       const mode = String(input.mode || 'raw').toLowerCase();
-      if (mode === 'raw') { const next = String(input.raw ?? ''); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); state.request.bodyMode = 'text'; requestBody = next; }
-      else if (mode === 'urlencoded') { state.request.bodyMode = 'form-urlencoded'; state.request.formBody = (input.urlencoded || []).map((item, index) => ({ id: 'script-form-' + index, name: String(item.key ?? item.name ?? ''), value: String(item.value ?? ''), enabled: item.enabled !== false, description: String(item.description ?? '') })).filter((item) => item.name); }
-      else if (mode === 'graphql') { const graphql = input.graphql || input; state.request.protocol = 'graphql'; state.request.method = 'POST'; state.request.graphql.query = String(graphql.query ?? ''); state.request.graphql.variables = typeof graphql.variables === 'string' ? graphql.variables : JSON.stringify(graphql.variables || {}, null, 2); state.request.graphql.operationName = String(graphql.operationName ?? ''); }
-      else if (mode === 'formdata') { if ((input.formdata || []).some((item) => item.type === 'file' || item.src !== undefined)) throw new Error('Scripts cannot read file paths.'); state.request.bodyMode = 'multipart'; state.request.multipartBody = (input.formdata || []).map((item, index) => ({ id: 'script-part-' + index, name: String(item.key ?? item.name ?? ''), value: String(item.value ?? ''), enabled: item.enabled !== false, description: String(item.description ?? ''), kind: 'text' })).filter((item) => item.name); }
-      else if (mode === 'file') throw new Error('Scripts cannot read file paths.');
+      if (mode === 'raw') { removeFileReferences('body', 'multipart'); delete state.request.binaryBody; const next = String(input.raw ?? ''); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); state.request.bodyMode = 'text'; requestBody = next; }
+      else if (mode === 'urlencoded') { removeFileReferences('body', 'multipart'); delete state.request.binaryBody; state.request.bodyMode = 'form-urlencoded'; state.request.formBody = (input.urlencoded || []).map((item, index) => ({ id: 'script-form-' + index, name: String(item.key ?? item.name ?? ''), value: String(item.value ?? ''), enabled: item.enabled !== false, description: String(item.description ?? '') })).filter((item) => item.name); }
+      else if (mode === 'graphql') { removeFileReferences('body', 'multipart'); delete state.request.binaryBody; const graphql = input.graphql || input; state.request.protocol = 'graphql'; state.request.method = 'POST'; state.request.graphql.query = String(graphql.query ?? ''); state.request.graphql.variables = typeof graphql.variables === 'string' ? graphql.variables : JSON.stringify(graphql.variables || {}, null, 2); state.request.graphql.operationName = String(graphql.operationName ?? ''); }
+      else if (mode === 'formdata') {
+        removeFileReferences('body', 'multipart'); delete state.request.binaryBody; state.request.bodyMode = 'multipart';
+        const parts = Array.isArray(input.formdata) ? input.formdata : [];
+        state.request.multipartBody = parts.slice(0, 1000).map((item, index) => {
+          const id = 'script-part-' + index; const name = String(item.key ?? item.name ?? ''); const isFile = item.type === 'file' || item.src !== undefined;
+          if (!name) return { id, name: '', value: '', enabled: false, kind: 'text' };
+          if (isFile) { addFileReference({ kind: 'multipart', path: item.src ?? item.value, partId: id, fileName: String(item.fileName ?? item.filename ?? ''), contentType: String(item.contentType ?? '') }); return { id, name, value: '', enabled: item.enabled !== false, description: String(item.description ?? ''), kind: 'file', fileName: String(item.fileName ?? item.filename ?? ''), contentType: String(item.contentType ?? '') }; }
+          return { id, name, value: String(item.value ?? ''), enabled: item.enabled !== false, description: String(item.description ?? ''), kind: 'text' };
+        }).filter((item) => item.name);
+      }
+      else if (mode === 'file') { removeFileReferences('body', 'multipart'); const path = input.file?.src ?? input.file ?? input.src; addFileReference({ kind: 'body', path }); state.request.bodyMode = 'binary'; delete state.request.binaryBody; requestBody = ''; }
       else throw new Error("Request body mode '" + mode + "' is not supported.");
       return bodyApi;
     },
@@ -357,7 +433,7 @@ self.onmessage = async ({ data }) => {
     [Symbol.toPrimitive]: () => requestBody,
   };
   Object.defineProperty(state.request, 'url', { configurable: true, enumerable: true, get: () => urlApi, set: (value) => { const next = String(value); if (next.length > 100000) throw new Error('Script request URL exceeds 100 KB.'); requestUrl = next; } });
-  Object.defineProperty(state.request, 'body', { configurable: true, enumerable: true, get: () => bodyApi, set: (value) => { const next = typeof value === 'string' ? value : JSON.stringify(value); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); requestBody = next; state.request.bodyMode = 'text'; } });
+  Object.defineProperty(state.request, 'body', { configurable: true, enumerable: true, get: () => bodyApi, set: (value) => { removeFileReferences('body', 'multipart'); delete state.request.binaryBody; const next = typeof value === 'string' ? value : JSON.stringify(value); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); requestBody = next; state.request.bodyMode = 'text'; } });
   state.request.auth.update = (auth, requestedType) => {
     const input = auth || {};
     const type = String(requestedType || input.type || 'none').toLowerCase();
@@ -378,17 +454,21 @@ self.onmessage = async ({ data }) => {
       state.request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(',') : String(input.exclusions ?? state.request.transport.proxyExclusions);
     },
   };
-  state.request.certificate = {
+  const certificateApi = state.request.certificate = {
     key: { src: '' },
     cert: { src: '' },
     pfx: { src: '' },
     passphrase: '',
     update: (certificate) => {
       const input = certificate || {};
-      if (input.disabled === true) { state.request.transport.clientCertificatePem = ''; state.request.transport.clientKeyPem = ''; state.request.transport.clientCertificateDomains = ''; return; }
-      if (input.certPath || input.keyPath || input.path || input.cert?.src || input.key?.src || input.pfx?.src) throw new Error('Scripts cannot read certificate file paths. Paste PEM content in Transport settings instead.');
-      state.request.transport.clientCertificatePem = String(input.cert?.pem ?? input.cert ?? input.certificate ?? '');
-      state.request.transport.clientKeyPem = String(input.key?.pem ?? input.key ?? '');
+      removeFileReferences('certificate-cert', 'certificate-key');
+      if (input.disabled === true) { state.request.transport.clientCertificatePem = ''; state.request.transport.clientKeyPem = ''; state.request.transport.clientCertificateDomains = ''; certificateApi.key.src = ''; certificateApi.cert.src = ''; certificateApi.pfx.src = ''; return; }
+      if (input.pfx?.src || input.pfxPath) throw new Error('PFX certificate files are not supported by the native PEM transport.');
+      const certPath = input.certPath ?? input.cert?.src; const keyPath = input.keyPath ?? input.key?.src;
+      if (certPath) { certificateApi.cert.src = addFileReference({ kind: 'certificate-cert', path: certPath }); state.request.transport.clientCertificatePem = ''; }
+      else state.request.transport.clientCertificatePem = String(input.cert?.pem ?? input.cert ?? input.certificate ?? '');
+      if (keyPath) { certificateApi.key.src = addFileReference({ kind: 'certificate-key', path: keyPath }); state.request.transport.clientKeyPem = ''; }
+      else state.request.transport.clientKeyPem = String(input.key?.pem ?? input.key ?? '');
       state.request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(',') : String(input.domains ?? '');
     },
   };
@@ -496,7 +576,7 @@ self.onmessage = async ({ data }) => {
   insomnia.request.getMethod = () => insomnia.request.method;
   insomnia.request.setMethod = (method) => { insomnia.request.method = String(method).toUpperCase(); };
   insomnia.request.getBody = () => requestBody;
-  insomnia.request.setBody = (body) => { const next = typeof body === 'string' ? body : JSON.stringify(body); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); requestBody = next; insomnia.request.bodyMode = 'text'; };
+  insomnia.request.setBody = (body) => { removeFileReferences('body', 'multipart'); delete insomnia.request.binaryBody; const next = typeof body === 'string' ? body : JSON.stringify(body); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); requestBody = next; insomnia.request.bodyMode = 'text'; };
   const cleanupRequest = () => {
     delete state.request.headersApi;
     delete state.request.addHeader;
@@ -534,6 +614,7 @@ self.onmessage = async ({ data }) => {
       const logs = undefined;
       const tests = undefined;
       const pendingTests = undefined;
+      const fileReferences = undefined;
       const Function = undefined;
       const WebAssembly = undefined;
       const WebTransport = undefined;
@@ -549,12 +630,12 @@ const sandboxSuffix = `
     await runUserScript();
     await Promise.all(pendingTests);
     cleanupRequest();
-    const output = { type: 'result', ok: true, request: state.request, environment: state.environment, baseGlobals: state.baseGlobals, baseGlobalDisabled: state.baseGlobalDisabled, globalDisabled: state.globalDisabled, collectionVariables: state.collectionVariables, baseEnvironment: state.baseEnvironment, baseEnvironmentDisabled: state.baseEnvironmentDisabled, collectionDisabled: state.collectionDisabled, folders: state.folders, localVariables: state.localVariables, logs, tests };
+    const output = { type: 'result', ok: true, request: state.request, environment: state.environment, baseGlobals: state.baseGlobals, baseGlobalDisabled: state.baseGlobalDisabled, globalDisabled: state.globalDisabled, collectionVariables: state.collectionVariables, baseEnvironment: state.baseEnvironment, baseEnvironmentDisabled: state.baseEnvironmentDisabled, collectionDisabled: state.collectionDisabled, folders: state.folders, localVariables: state.localVariables, fileReferences, logs, tests };
     if (JSON.stringify(output).length > 20000000) hostPostMessage({ type: 'result', ok: false, error: 'Script result exceeds the 20 MB bridge limit.' });
     else hostPostMessage(output);
   } catch (error) {
     cleanupRequest();
-    const output = { type: 'result', ok: false, error: error instanceof Error ? error.message : String(error), request: state.request, environment: state.environment, baseGlobals: state.baseGlobals, baseGlobalDisabled: state.baseGlobalDisabled, globalDisabled: state.globalDisabled, collectionVariables: state.collectionVariables, baseEnvironment: state.baseEnvironment, baseEnvironmentDisabled: state.baseEnvironmentDisabled, collectionDisabled: state.collectionDisabled, folders: state.folders, localVariables: state.localVariables, logs, tests };
+    const output = { type: 'result', ok: false, error: error instanceof Error ? error.message : String(error), request: state.request, environment: state.environment, baseGlobals: state.baseGlobals, baseGlobalDisabled: state.baseGlobalDisabled, globalDisabled: state.globalDisabled, collectionVariables: state.collectionVariables, baseEnvironment: state.baseEnvironment, baseEnvironmentDisabled: state.baseEnvironmentDisabled, collectionDisabled: state.collectionDisabled, folders: state.folders, localVariables: state.localVariables, fileReferences, logs, tests };
     if (JSON.stringify(output).length > 20000000) hostPostMessage({ type: 'result', ok: false, error: 'Script result exceeds the 20 MB bridge limit.' });
     else hostPostMessage(output);
   }
@@ -637,12 +718,13 @@ export const runBrowserScript = async (
           localVariables,
           iterationData,
           vault: options.vault ?? {},
-          permissions: { network: Boolean(options.sendRequest), vault: Boolean(options.vault), maxSubrequests },
+          permissions: { network: Boolean(options.sendRequest), files: Boolean(options.readFile), vault: Boolean(options.vault), maxSubrequests },
         },
       });
     });
     if (!output.ok) throw new Error(output.error || 'Script execution failed.');
-    return { request: output.request, environment: output.environment, baseGlobals: output.baseGlobals, baseGlobalDisabled: output.baseGlobalDisabled, globalDisabled: output.globalDisabled, collectionVariables: output.collectionVariables, baseEnvironment: output.baseEnvironment, baseEnvironmentDisabled: output.baseEnvironmentDisabled, collectionDisabled: output.collectionDisabled, folders: output.folders, localVariables: output.localVariables, logs: output.logs, tests: output.tests };
+    const hydratedRequest = await hydrateScriptFileReferences(output.request, output.fileReferences ?? [], options.readFile);
+    return { request: hydratedRequest, environment: output.environment, baseGlobals: output.baseGlobals, baseGlobalDisabled: output.baseGlobalDisabled, globalDisabled: output.globalDisabled, collectionVariables: output.collectionVariables, baseEnvironment: output.baseEnvironment, baseEnvironmentDisabled: output.baseEnvironmentDisabled, collectionDisabled: output.collectionDisabled, folders: output.folders, localVariables: output.localVariables, logs: output.logs, tests: output.tests };
   } finally {
     worker.terminate();
     URL.revokeObjectURL(workerUrl);

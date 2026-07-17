@@ -36,9 +36,10 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - comfortable or compact density;
 - 11–20 px editor font size;
 - a 1–600 second default timeout for new requests, with an explicit apply-to-existing action;
+- a 1–60 second script deadline plus separate off-by-default secondary-request, local-file, and local-vault script authorities;
 - automatic GraphQL introspection;
 - request-deletion confirmation; and
-- ten editable keyboard bindings.
+- eleven editable keyboard bindings.
 
 Click a shortcut field and press a combination. `Mod` maps to Command on macOS and Control elsewhere. Duplicate bindings are shown and only the first matching action runs. Press Backspace to clear a binding or use **Reset defaults**.
 

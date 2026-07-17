@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runInNewContext } from 'node:vm';
 import { createBlankRequest } from '../data/seed';
-import { applyScriptSubresponse, buildScriptWorkerSource, normalizeScriptSubrequest, validateScriptSource } from './scriptSandbox';
+import { applyScriptSubresponse, buildScriptWorkerSource, hydrateScriptFileReferences, normalizeScriptSubrequest, validateScriptSource } from './scriptSandbox';
 
 describe('script sandbox source validation', () => {
   const runWorkerSource = async (script: string, stateOverrides: Record<string, unknown> = {}) => {
@@ -128,6 +128,55 @@ describe('script sandbox source validation', () => {
     const output = await runWorkerSource("require('node:fs');");
     expect(output.ok).toBe(false);
     expect(output.error).toContain("Module 'node:fs' is not bundled");
+  });
+
+  it('keeps local file references behind an explicit Worker capability', async () => {
+    const denied = await runWorkerSource("insomnia.request.body.update({ mode: 'file', file: '/tmp/payload.bin' });");
+    expect(denied.ok).toBe(false);
+    expect(denied.error).toContain('Script file access is disabled');
+
+    const binary = await runWorkerSource("insomnia.request.body.update({ mode: 'file', file: '{{ folder }}/payload.bin' });", { permissions: { network: false, files: true, vault: false, maxSubrequests: 5 }, folders: [{ id: 'root', name: 'Root', environment: { folder: '/tmp' } }] });
+    expect(binary).toMatchObject({ ok: true, request: { bodyMode: 'binary' }, fileReferences: [{ kind: 'body', path: '/tmp/payload.bin' }] });
+
+    const output = await runWorkerSource(`
+      insomnia.request.body.update({ mode: 'formdata', formdata: [
+        { key: 'label', type: 'text', value: 'ready' },
+        { key: 'upload', type: 'file', value: '{{ folder }}/payload.csv', fileName: 'renamed.csv', contentType: 'text/csv' },
+      ] });
+      insomnia.request.certificate.update({ cert: { src: '/tmp/client.crt' }, key: { src: '/tmp/client.key' }, domains: ['api.example.com'] });
+    `, { permissions: { network: false, files: true, vault: false, maxSubrequests: 5 }, folders: [{ id: 'root', name: 'Root', environment: { folder: '/tmp' } }] });
+    expect(output.ok).toBe(true);
+    expect(output.request).toMatchObject({ bodyMode: 'multipart', multipartBody: [{ kind: 'text', value: 'ready' }, { kind: 'file', fileName: 'renamed.csv', contentType: 'text/csv' }], transport: { clientCertificateDomains: 'api.example.com' } });
+    expect(output.fileReferences).toEqual([
+      { kind: 'multipart', path: '/tmp/payload.csv', partId: 'script-part-1', fileName: 'renamed.csv', contentType: 'text/csv' },
+      { kind: 'certificate-cert', path: '/tmp/client.crt' },
+      { kind: 'certificate-key', path: '/tmp/client.key' },
+    ]);
+  });
+
+  it('hydrates bounded body, multipart, and PEM references outside the Worker', async () => {
+    const body = createBlankRequest('binary');
+    const readFile = async (path: string) => ({ fileName: path.split('/').at(-1) ?? 'file', mimeType: path.endsWith('.pem') ? 'application/x-pem-file' : 'application/octet-stream', dataBase64: Buffer.from(path.endsWith('.pem') ? '-----BEGIN TEST-----\nvalue\n-----END TEST-----' : 'payload').toString('base64') });
+    await hydrateScriptFileReferences(body, [{ kind: 'body', path: '/tmp/payload.bin' }], readFile);
+    expect(body).toMatchObject({ bodyMode: 'binary', binaryBody: { fileName: 'payload.bin', dataBase64: 'cGF5bG9hZA==' } });
+
+    const multipart = createBlankRequest('multipart');
+    multipart.bodyMode = 'multipart';
+    multipart.multipartBody = [{ id: 'file-part', name: 'upload', value: '', enabled: true, kind: 'file' }];
+    await hydrateScriptFileReferences(multipart, [
+      { kind: 'multipart', path: '/tmp/payload.bin', partId: 'file-part', fileName: 'renamed.bin' },
+      { kind: 'certificate-cert', path: '/tmp/client.pem' },
+      { kind: 'certificate-key', path: '/tmp/key.pem' },
+    ], readFile);
+    expect(multipart.multipartBody[0]).toMatchObject({ fileName: 'renamed.bin', file: { fileName: 'payload.bin' } });
+    expect(multipart.transport.clientCertificatePem).toContain('BEGIN TEST');
+    expect(multipart.transport.clientKeyPem).toContain('BEGIN TEST');
+
+    const references = Array.from({ length: 21 }, (_, index) => ({ kind: 'body' as const, path: `/tmp/${index}.bin` }));
+    await expect(hydrateScriptFileReferences(createBlankRequest('too-many'), references, readFile)).rejects.toThrow(/20-file/);
+    await expect(hydrateScriptFileReferences(createBlankRequest('too-large'), [{ kind: 'body', path: '/tmp/large.bin' }], async () => ({ fileName: 'large.bin', mimeType: 'application/octet-stream', dataBase64: 'A'.repeat(6_666_672) }))).rejects.toThrow(/5 MB/);
+    const aggregatePayload = { fileName: 'aggregate.bin', mimeType: 'application/octet-stream', dataBase64: 'A'.repeat(5_333_336) };
+    await expect(hydrateScriptFileReferences(createBlankRequest('aggregate'), references.slice(0, 5), async () => aggregatePayload)).rejects.toThrow(/20 MB aggregate/);
   });
 
   it('resolves all seven variable layers and mutates distinct base and selected stores', async () => {

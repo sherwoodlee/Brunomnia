@@ -9,7 +9,7 @@ pub struct KeyValue {
     pub enabled: bool,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FilePayload {
     pub file_name: String,
