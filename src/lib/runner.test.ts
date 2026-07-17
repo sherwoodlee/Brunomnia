@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, parseRunnerData, runCollection } from './runner';
+import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, parseRunnerData, runCollection, validateTestNamePattern } from './runner';
 
 describe('collection runner', () => {
   it('parses JSON and quoted CSV iteration data', () => {
@@ -36,6 +36,59 @@ describe('collection runner', () => {
     expect(report.iterations).toBe(1);
     expect(report.retries).toBe(0);
     expect(report.total).toBe(1);
+  });
+
+  it('validates test-name regexes before execution', async () => {
+    const request = createBlankRequest('one');
+    let calls = 0;
+    await expect(runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], testNamePattern: '[' },
+      async () => { calls += 1; return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    )).rejects.toThrow(/Invalid test name pattern/);
+    expect(calls).toBe(0);
+    expect(validateTestNamePattern('^status (?:2|3)\\d\\d$')).toBe('^status (?:2|3)\\d\\d$');
+    expect(() => validateTestNamePattern('x'.repeat(1_001))).toThrow(/1,000 characters/);
+  });
+
+  it('propagates a test-name pattern and omits clean attempts with no matches', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    const seenRequests: string[] = [];
+    const seenPatterns: Array<string | undefined> = [];
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], testNamePattern: '^keep:' },
+      async (request) => { seenRequests.push(request.id); return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, request, environment, response, _timeout, _local, _iteration, options) => {
+        seenPatterns.push(options?.testNamePattern);
+        const candidates = request.id === 'first'
+          ? [{ name: 'keep: status', passed: true }, { name: 'skip: body', passed: false, error: 'must not count' }]
+          : [{ name: 'skip: only', passed: false, error: 'must not count' }];
+        const pattern = options?.testNamePattern === undefined ? undefined : new RegExp(options.testNamePattern);
+        return { request, environment, logs: [], tests: response ? candidates.filter((test) => !pattern || pattern.test(test.name)) : [] };
+      },
+    );
+
+    expect(seenRequests).toEqual(['first', 'second']);
+    expect(seenPatterns).toEqual([undefined, '^keep:', undefined, '^keep:']);
+    expect(report).toMatchObject({ testNamePattern: '^keep:', matchedTests: 1, total: 1, passed: 1, failed: 0 });
+    expect(report.results[0]).toMatchObject({ requestId: 'first', tests: [{ name: 'keep: status', passed: true }] });
+  });
+
+  it('retains transport failures even when no test name matches', async () => {
+    const request = createBlankRequest('failed');
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], testNamePattern: '^missing$' },
+      async () => ({ status: 500, statusText: 'Failed', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }),
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    );
+    expect(report).toMatchObject({ total: 1, failed: 1, matchedTests: 0 });
   });
 
   it('runs a de-duplicated selected request plan in the requested order', async () => {

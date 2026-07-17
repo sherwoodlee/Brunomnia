@@ -33,6 +33,7 @@ export type RunnerOptions = {
   scriptTimeoutMs?: number;
   environmentScopes?: ScriptEnvironmentScopes;
   requestIds?: string[];
+  testNamePattern?: string;
   bail?: boolean;
   shouldCancel?: () => boolean;
   onResult?: (result: RunnerItemResult) => void;
@@ -44,6 +45,17 @@ const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resol
 const boundedInteger = (value: number, minimum: number, maximum: number) => {
   if (!Number.isFinite(value)) return minimum;
   return Math.max(minimum, Math.min(maximum, Math.floor(value)));
+};
+
+export const validateTestNamePattern = (value: string | undefined): string | undefined => {
+  if (value === undefined) return undefined;
+  if (value.length > 1_000) throw new Error('Test name pattern exceeds 1,000 characters.');
+  try {
+    new RegExp(value);
+  } catch (error) {
+    throw new Error(`Invalid test name pattern: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return value;
 };
 
 export const RUNNER_RESPONSE_PER_RESULT_BYTES = 32_000;
@@ -195,6 +207,7 @@ export const runCollection = async (
   const requestSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_REQUEST_REPORT_BYTES };
   const iterations = boundedInteger(options.iterations, 1, 1000);
   const retries = boundedInteger(options.retries, 0, 10);
+  const testNamePattern = validateTestNamePattern(options.testNamePattern);
   const requestsById = new Map(collection.requests.map((request) => [request.id, request]));
   const plannedRequests = options.requestIds === undefined
     ? collection.requests
@@ -275,6 +288,7 @@ export const runCollection = async (
             collectionDisabled,
             collectionVariablesAreBase,
             folders: scriptFolders.map((folder) => ({ ...folder, environment: { ...(folderVariables.get(folder.id) ?? {}) }, disabled: [...(folderDisabled.get(folder.id) ?? [])] })),
+            testNamePattern,
           });
           baseGlobalVariables = afterResponse.baseGlobals ?? (globalsAreBase ? afterResponse.environment : baseGlobalVariables);
           globalVariables = afterResponse.environment;
@@ -290,6 +304,7 @@ export const runCollection = async (
           error = caught instanceof Error ? caught.message : String(caught);
         }
         const passed = !error && response !== undefined && response.status > 0 && response.status < 400 && tests.every((test) => test.passed);
+        const retainResult = testNamePattern === undefined || tests.length > 0 || !passed;
         const result: RunnerItemResult = {
           id: runId(),
           requestId: request.id,
@@ -301,11 +316,13 @@ export const runCollection = async (
           passed,
           error,
           tests,
-          request: captureRunnerRequest(request, requestVariables, response?.requestUrl, requestSnapshotBudget),
-          response: response ? captureRunnerResponse(response, responseSnapshotBudget) : undefined,
+          request: retainResult ? captureRunnerRequest(request, requestVariables, response?.requestUrl, requestSnapshotBudget) : undefined,
+          response: retainResult && response ? captureRunnerResponse(response, responseSnapshotBudget) : undefined,
         };
-        results.push(result);
-        options.onResult?.(result);
+        if (retainResult) {
+          results.push(result);
+          options.onResult?.(result);
+        }
         if (passed || attempt > retries) {
           if (!passed && options.bail) { bailed = true; break outer; }
           break;
@@ -325,6 +342,8 @@ export const runCollection = async (
     finishedAt: new Date().toISOString(),
     iterations,
     retries,
+    testNamePattern,
+    matchedTests: results.reduce((total, result) => total + result.tests.length, 0),
     total: results.length,
     passed: results.filter((result) => result.passed).length,
     failed: results.filter((result) => !result.passed).length,

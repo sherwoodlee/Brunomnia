@@ -49,6 +49,15 @@ describe('script sandbox source validation', () => {
     expect(boundary).toContain('Script result exceeds the 20 MB bridge limit');
   });
 
+  it('skips unmatched test callbacks inside the disposable Worker', async () => {
+    const output = await runWorkerSource(`
+      insomnia.test('skip: dangerous', () => { throw new Error('unmatched callback executed'); });
+      insomnia.test('keep: status', () => insomnia.expect(insomnia.response.status).to.equal(201));
+    `, { testNamePattern: '^keep:' });
+    expect(output.ok).toBe(true);
+    expect(output.tests).toEqual([{ name: 'keep: status', passed: true }]);
+  });
+
   it('rejects dynamic module imports, including comment-separated calls', () => {
     expect(() => validateScriptSource("import('https://example.com/module.js')")).toThrow(/Module imports/);
     expect(() => validateScriptSource("import /* hidden */ ('https://example.com/module.js')")).toThrow(/Module imports/);

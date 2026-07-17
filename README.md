@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the twenty-fourth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the twenty-fifth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -25,7 +25,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Selectable drag/keyboard-ordered collection runs with JSON/CSV iteration data, retries, bail/cancellation, cookie/response chaining, bounded WebSocket/SSE samples, redacted request metadata, size-limited response inspection, saved reports, and downloadable JSON/JUnit evidence
 - OpenAPI 3.x YAML/JSON editing, structural and safe Spectral-style custom linting, operation preview, formatting, and request generation
 - Native loopback mock servers with route parameters, delays, headers, CORS, and dynamic response tokens
-- A headless CLI for OpenAPI lint/generation/export and collection/test execution with the documented Inso reporter names plus JSON/JUnit artifacts
+- A headless CLI for OpenAPI lint/generation/export and collection/test execution with regex test-name filtering, the documented Inso reporter names, and JSON/JUnit artifacts
 - File, pasted-text, and HTTP(S) URL imports with format detection and a warning preview
 - Insomnia JSON v4/v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports
 - Scoped Brunomnia JSON, Insomnia v4/v5, HAR, and raw OpenAPI exports

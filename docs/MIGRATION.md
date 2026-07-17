@@ -358,7 +358,22 @@ Compatibility bounds remain explicit: configured headers do not include every tr
 
 Compatibility bounds remain explicit: the sidebar currently depends on native pointer drag/drop. Keyboard-equivalent reordering, multi-select/bulk resource actions, environment-tree ordering, and compatibility-format guarantees for arbitrary mixed sibling order remain open.
 
-## Milestone 25 — remaining parity closure and release hardening
+## Milestone 25 — headless test-name filtering (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Inso flag compatibility | Complete baseline | `run test` accepts the current documented `-t` and `--testNamePattern <regex>` spellings plus a kebab-case convenience alias |
+| Validation boundary | Complete | Invalid or over-1,000-character regexes fail before request execution, script evaluation, or report writes |
+| Callback filtering | Complete baseline | Unmatched dynamically registered `insomnia.test` callbacks are not invoked in trusted CLI scripts or disposable desktop Workers |
+| Result confinement | Complete | Clean request attempts with zero matched tests are omitted; transport, HTTP, and script failures remain visible even without a name match |
+| Portable evidence | Complete | Reports retain the exact pattern and matched-test execution count; text reporters include the count and JSON retains both fields |
+| Retry/bail compatibility | Complete | Matching assertion failures retain existing retry and retry-aware bail semantics; clean unmatched attempts do not create failures |
+| Executable coverage | Complete | Shared tests cover pre-network validation, pattern propagation, omission, failure retention, Worker callback skipping, and report metadata; an offline CLI smoke covers both a single match and zero matches |
+| Documentation and evidence | Complete | Updated [runner reports and CI guide](RUNNER_REPORTS.md) and [Milestone 25 verification](QA_MILESTONE_25.md) |
+
+Compatibility bounds remain explicit: Brunomnia discovers named tests inside request after-response scripts, so the request and top-level script execute before dynamic registrations can be filtered. This is not the same persistence model as Insomnia's standalone unit-test-suite resources. Suite identity/selection, configuration-file discovery, `--keepFile`, proxy/data-folder flags, and the remaining command surface remain open.
+
+## Milestone 26 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

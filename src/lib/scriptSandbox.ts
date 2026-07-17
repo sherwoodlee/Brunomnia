@@ -32,6 +32,7 @@ export type ScriptRunOptions = {
   maxSubrequests?: number;
   maxSubrequestBytes?: number;
   readFile?: (path: string) => Promise<FilePayload>;
+  testNamePattern?: string;
 };
 
 type WorkerOutput = {
@@ -283,6 +284,8 @@ self.addEventListener('message', ({ data }) => {
 self.onmessage = async ({ data }) => {
   if (data?.type !== 'run') return;
   const state = structuredClone(data.state);
+  const testNamePattern = state.testNamePattern === undefined ? undefined : new RegExp(state.testNamePattern);
+  let registeredTests = 0;
   const hostPostMessage = self.postMessage.bind(self);
   const logs = [];
   const tests = [];
@@ -565,8 +568,11 @@ self.onmessage = async ({ data }) => {
     vault: { get: (name) => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); return state.vault[String(name)]; } },
     expect,
     test: (name, callback) => {
-      if (tests.length >= 1000) throw new Error('Script exceeds 1,000 test results.');
-      const result = { name, passed: true };
+      registeredTests += 1;
+      if (registeredTests > 1000) throw new Error('Script exceeds 1,000 test registrations.');
+      const testName = String(name);
+      if (testNamePattern && !testNamePattern.test(testName)) return;
+      const result = { name: testName, passed: true };
       tests.push(result);
       try {
         const outcome = callback();
@@ -623,6 +629,8 @@ self.onmessage = async ({ data }) => {
       const requestBody = undefined;
       const logs = undefined;
       const tests = undefined;
+      const registeredTests = undefined;
+      const testNamePattern = undefined;
       const pendingTests = undefined;
       const fileReferences = undefined;
       const Function = undefined;
@@ -727,6 +735,7 @@ export const runBrowserScript = async (
           response,
           localVariables,
           iterationData,
+          testNamePattern: options.testNamePattern,
           vault: options.vault ?? {},
           permissions: { network: Boolean(options.sendRequest), files: Boolean(options.readFile), vault: Boolean(options.vault), maxSubrequests },
         },
