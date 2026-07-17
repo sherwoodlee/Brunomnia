@@ -10,7 +10,7 @@ Scope: persistent per-request SSE reconnect controls, long-running native respon
 | --- | --- |
 | Clean non-incremental TypeScript typecheck | Pass |
 | Vitest | Pass — 24 files, 139 tests |
-| Vite production build | Pass — 153 modules; 477.85 KB main JavaScript chunk; no chunk-size warning |
+| Vite production build | Pass — 153 modules; 477.96 KB main JavaScript chunk; no chunk-size warning |
 | Bundled CLI build | Pass — 482,242-byte CommonJS executable |
 | `cargo fmt --check` | Pass |
 | `cargo check --all-targets` | Pass |
@@ -32,6 +32,7 @@ The sandbox result is 22/23: only the existing mock-server integration that open
 - Zero reconnects means unlimited retries; a positive limit stops exactly after that many attempts; disabling automatic reconnect prevents the first retry.
 - Reconnect delays and connection attempts are cancellable, and resumed connections optionally send the latest non-empty valid `Last-Event-ID`.
 - Reconnect attempts, errors, successful reopens, and terminal close are distinguishable in the ordered event log and application status.
+- Initial handshakes hold the send action in a non-reentrant connecting state; later reconnects expose **Stop reconnecting** and cancel the existing session instead of starting another one.
 
 ## Manual/rendered QA
 
