@@ -115,18 +115,24 @@ async fn collect_stream(
     timeout_ms: u64,
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut messages = Vec::new();
-    let deadline = tokio::time::Instant::now()
-        + std::time::Duration::from_millis(timeout_ms.clamp(100, 600_000));
+    let deadline = (timeout_ms > 0)
+        .then(|| tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms));
     while messages.len() < 100 {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            return Err("The gRPC stream exceeded the request timeout.".into());
-        }
-        match tokio::time::timeout(remaining, stream.message()).await {
-            Ok(Ok(Some(message))) => messages.push(dynamic_to_json(message)?),
-            Ok(Ok(None)) => break,
-            Ok(Err(status)) => return Err(format_status(status)),
-            Err(_) => return Err("The gRPC stream exceeded the request timeout.".into()),
+        let next = if let Some(deadline) = deadline {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err("The gRPC stream exceeded the request timeout.".into());
+            }
+            tokio::time::timeout(remaining, stream.message())
+                .await
+                .map_err(|_| "The gRPC stream exceeded the request timeout.".to_string())?
+        } else {
+            stream.message().await
+        };
+        match next {
+            Ok(Some(message)) => messages.push(dynamic_to_json(message)?),
+            Ok(None) => break,
+            Err(status) => return Err(format_status(status)),
         }
     }
     Ok(messages)
@@ -180,13 +186,11 @@ fn apply_metadata<T>(request: &mut Request<T>, metadata: &[KeyValue]) -> Result<
 
 async fn connect_channel(endpoint: &str, transport: &TransportConfig) -> Result<Channel, String> {
     let mut builder = Endpoint::from_shared(endpoint.to_string())
-        .map_err(|error| format!("Invalid gRPC endpoint: {error}"))?
-        .connect_timeout(std::time::Duration::from_millis(
-            transport.timeout_ms.clamp(100, 600_000),
-        ))
-        .timeout(std::time::Duration::from_millis(
-            transport.timeout_ms.clamp(100, 600_000),
-        ));
+        .map_err(|error| format!("Invalid gRPC endpoint: {error}"))?;
+    if transport.timeout_ms > 0 {
+        let timeout = std::time::Duration::from_millis(transport.timeout_ms);
+        builder = builder.connect_timeout(timeout).timeout(timeout);
+    }
     if !transport.client_certificate_pem.trim().is_empty()
         || !transport.client_key_pem.trim().is_empty()
     {

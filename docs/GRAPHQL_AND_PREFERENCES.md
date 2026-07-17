@@ -41,7 +41,7 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - a maximum outgoing timeline chunk size in KiB, defaulting to 10;
 - a per-request response history limit, where `0` keeps only the live result and `-1` retains all saved responses;
 - optional response-history filtering by active environment;
-- a 1–600 second default timeout for new requests, with an explicit apply-to-existing action;
+- a request timeout applied at execution time, defaulting to 30 seconds, with `0` disabling deadlines;
 - a 1–60 second script deadline plus separate off-by-default secondary-request, local-file, and local-vault script authorities;
 - automatic GraphQL introspection;
 - request-deletion confirmation; and
@@ -51,9 +51,9 @@ Click a shortcut field and press a combination. `Mod` maps to Command on macOS a
 
 Preferences stay on this device. Split-YAML folder/Git projects omit them, encrypted-sync pulls preserve the current device's values, and imported workspace files start with safe defaults. Plugin themes take precedence while active.
 
-The HTTP version, follow-redirect default, and maximum-redirect preferences reach ordinary HTTP and GraphQL sends, Event Streams, collection runs, secondary script/plugin requests, artifact URL imports, OAuth token calls, and HTTP-backed integrations. Each request chooses **Use Preferences**, **Always**, or **Never** in its Transport tab. Always and Never take precedence over the device default; Never also wins over the numeric maximum. Security-sensitive internal requests such as GraphQL introspection, AI provider calls, MCP, and Konnect deliberately use Never.
+The HTTP version, follow-redirect default, maximum redirects, and request timeout reach ordinary HTTP and GraphQL sends, Event Streams, gRPC, collection runs, the CLI, secondary script/plugin requests, artifact URL imports, OAuth token calls, and HTTP-backed integrations. Each request can use the timeout preference or retain a custom deadline; redirect choices remain **Use Preferences**, **Always**, or **Never**. New requests inherit both defaults. Workspace v14 and earlier requests keep their saved timeouts as custom overrides until explicitly switched to inheritance. Security-sensitive internal requests such as GraphQL introspection, AI provider calls, MCP, and Konnect retain bounded custom deadlines and Never redirect policies.
 
-Standard HTTP/2 negotiates and can fall back; Prior Knowledge requires an HTTP/2-capable peer. Native responses show the protocol actually used in the response summary and timeline. Browser development mode honors Use Preferences/Always/Never through Fetch, but leaves protocol selection and the redirect count ceiling to the browser.
+Standard HTTP/2 negotiates and can fall back; Prior Knowledge requires an HTTP/2-capable peer. Native responses show the protocol actually used in the response summary and timeline. Browser development mode honors the effective redirect and timeout choices through Fetch, including no AbortSignal when timeouts are disabled, but leaves protocol selection and the redirect count ceiling to the browser.
 
 Saved responses remain device-local and are selectable from the response summary. The default keeps 20 per request. When environment filtering is enabled, the selector and response template tags see only results from the active global environment, and the retention limit applies independently to each request/environment pair. Changing a limit does not erase data immediately; the relevant scope is pruned the next time that request stores a response.
 

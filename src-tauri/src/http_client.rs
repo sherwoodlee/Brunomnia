@@ -115,14 +115,13 @@ fn build_client_with_options(
     };
     let mut builder = Client::builder()
         .redirect(redirect)
-        .danger_accept_invalid_certs(!transport.validate_certificates)
-        .connect_timeout(std::time::Duration::from_millis(
-            transport.timeout_ms.clamp(100, 600_000),
-        ));
-    if total_timeout {
-        builder = builder.timeout(std::time::Duration::from_millis(
-            transport.timeout_ms.clamp(100, 600_000),
-        ));
+        .danger_accept_invalid_certs(!transport.validate_certificates);
+    if transport.timeout_ms > 0 {
+        let timeout = std::time::Duration::from_millis(transport.timeout_ms);
+        builder = builder.connect_timeout(timeout);
+        if total_timeout {
+            builder = builder.timeout(timeout);
+        }
     }
     builder = match http_version_mode(transport) {
         HttpVersionMode::Http10 | HttpVersionMode::Http11 => builder.http1_only(),

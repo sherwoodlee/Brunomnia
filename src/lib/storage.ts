@@ -213,7 +213,9 @@ const normalizePreferences = (value: unknown): AppPreferences => {
       ? Math.max(-1, Math.trunc(source.maxHistoryResponses))
       : defaultPreferences.maxHistoryResponses,
     filterResponsesByEnv: source?.filterResponsesByEnv === true,
-    requestTimeoutMs: Math.min(600_000, Math.max(1_000, Number(source?.requestTimeoutMs) || defaultPreferences.requestTimeoutMs)),
+    requestTimeoutMs: typeof source?.requestTimeoutMs === 'number' && Number.isFinite(source.requestTimeoutMs)
+      ? Math.min(2_147_483_647, Math.max(0, Math.trunc(source.requestTimeoutMs)))
+      : defaultPreferences.requestTimeoutMs,
     scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
     allowScriptRequests: source?.allowScriptRequests === true,
     allowScriptFileAccess: source?.allowScriptFileAccess === true,
@@ -367,6 +369,9 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         || request.transport?.followRedirectsMode === 'off'
         ? request.transport.followRedirectsMode
         : request.transport?.followRedirects === false ? 'off' : 'global';
+      const timeoutMode = request.transport?.timeoutMode === 'global' || request.transport?.timeoutMode === 'custom'
+        ? request.transport.timeoutMode
+        : typeof request.transport?.timeoutMs === 'number' ? 'custom' : 'global';
       return {
         ...defaults,
         ...request,
@@ -393,6 +398,10 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           ...request.transport,
           followRedirects: followRedirectsMode !== 'off',
           followRedirectsMode,
+          timeoutMode,
+          timeoutMs: typeof request.transport?.timeoutMs === 'number' && Number.isFinite(request.transport.timeoutMs)
+            ? Math.min(2_147_483_647, Math.max(0, Math.trunc(request.transport.timeoutMs)))
+            : defaults.transport.timeoutMs,
         },
         sse: {
           ...defaults.sse,
@@ -432,7 +441,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 14,
+    version: 15,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

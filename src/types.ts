@@ -154,6 +154,7 @@ export type GrpcConfig = {
 export type TransportConfig = {
   followRedirects: boolean;
   followRedirectsMode: 'global' | 'on' | 'off';
+  timeoutMode: 'global' | 'custom';
   timeoutMs: number;
   validateCertificates: boolean;
   proxyUrl: string;
@@ -286,7 +287,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 14;
+  version: 15;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

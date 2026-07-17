@@ -20,7 +20,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(14);
+    expect(migrated.version).toBe(15);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
@@ -40,7 +40,7 @@ describe('workspace migrations', () => {
     expect(migrated.ai.enabled).toBe(false);
     expect(migrated.konnect.baseUrl).toBe('https://us.api.konghq.com');
     expect(migrated.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, autoFetchGraphqlSchema: true });
-    expect(migrated.collections[0].requests[0].transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global' });
+    expect(migrated.collections[0].requests[0].transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global', timeoutMode: 'global' });
     expect(migrated.preferences).toMatchObject({ scriptTimeoutMs: 10_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
     expect(migrated.preferences.shortcuts['generate-code']).toBe('Mod+Shift+G');
     expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaEndpoint: '', schemaFetchedAt: '' });
@@ -101,7 +101,7 @@ describe('workspace migrations', () => {
     collection.subEnvironments = [{ id: 'staging', name: 'Staging', variables: [{ name: 'host', value: 'staging.example', enabled: true }] }, null];
     collection.activeSubEnvironmentId = 'missing';
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(14);
+    expect(migrated.version).toBe(15);
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });
@@ -170,7 +170,7 @@ describe('workspace migrations', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
     workspace.preferences = { theme: 'unknown', density: 'compact', fontSize: 99, preferredHttpVersion: 'http3', maxRedirects: -99.8, followRedirects: 'sometimes', maxTimelineDataSizeKB: -400.2, maxHistoryResponses: -400.2, filterResponsesByEnv: 'yes', requestTimeoutMs: 1, scriptTimeoutMs: 999_999, allowScriptRequests: 'yes', allowScriptFileAccess: 'yes', enableVaultInScripts: 1, shortcuts: { palette: ' mod + shift + p ', send: 42 } };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 20, preferredHttpVersion: 'default', maxRedirects: -1, followRedirects: true, maxTimelineDataSizeKB: 0, maxHistoryResponses: -1, filterResponsesByEnv: false, requestTimeoutMs: 1_000, scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
+    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 20, preferredHttpVersion: 'default', maxRedirects: -1, followRedirects: true, maxTimelineDataSizeKB: 0, maxHistoryResponses: -1, filterResponsesByEnv: false, requestTimeoutMs: 1, scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
     expect(migrated.preferences.shortcuts.palette).toBe('Mod+Shift+P');
     expect(migrated.preferences.shortcuts.send).toBe('Mod+Enter');
   });
@@ -199,6 +199,18 @@ describe('workspace migrations', () => {
     expect(migrated.collections[0].requests[0].transport).toMatchObject({ followRedirects: false, followRedirectsMode: 'off' });
     expect(migrated.collections[0].requests[1].transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'on' });
     expect(migrated.collections[0].requests[2].transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global' });
+  });
+
+  it('preserves legacy saved timeouts as custom overrides and keeps explicit inheritance', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    const requests = (workspace.collections as Array<{ requests: Array<{ transport: Record<string, unknown> }> }>)[0].requests;
+    delete requests[0].transport.timeoutMode;
+    requests[0].transport.timeoutMs = 12_345;
+    requests[1].transport.timeoutMode = 'global';
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.collections[0].requests[0].transport).toMatchObject({ timeoutMode: 'custom', timeoutMs: 12_345 });
+    expect(migrated.collections[0].requests[1].transport.timeoutMode).toBe('global');
   });
 
   it('adds stable local identity fields to legacy stored responses', () => {

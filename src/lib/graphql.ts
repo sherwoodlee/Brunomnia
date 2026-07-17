@@ -100,7 +100,7 @@ export const fetchGraphqlSchema = async (request: ApiRequest, environment: Envir
   schemaRequest.graphql = { ...schemaRequest.graphql, query: introspectionQuery, variables: '{}', operationName: 'BrunomniaIntrospection' };
   schemaRequest.preRequestScript = '';
   schemaRequest.tests = '';
-  schemaRequest.transport = { ...schemaRequest.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMs: Math.min(120_000, Math.max(1_000, schemaRequest.transport.timeoutMs)), storeCookies: false };
+  schemaRequest.transport = { ...schemaRequest.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMode: 'custom', timeoutMs: Math.min(120_000, Math.max(1_000, schemaRequest.transport.timeoutMs)), storeCookies: false };
   const response = await sendRequest(schemaRequest, environment, context);
   if (response.status < 200 || response.status >= 300) throw new Error(`GraphQL introspection failed (${response.status}): ${response.body.slice(0, 2_000)}`);
   if (response.body.length > 20_000_000) throw new Error('GraphQL introspection exceeded the 20 MB parsed-response limit.');

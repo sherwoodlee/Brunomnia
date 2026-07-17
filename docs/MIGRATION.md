@@ -7,7 +7,7 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | Capability | Status | Notes |
 | --- | --- | --- |
 | Tauri 2 desktop shell | Complete | Native bundle configuration and app icons included |
-| REST/HTTP transport | Complete | Rust `reqwest`, redirects, 60-second timeout, arbitrary headers/body |
+| REST/HTTP transport | Complete | Rust `reqwest`, redirects, inherited/custom execution-time timeout with `0` disabled, arbitrary headers/body |
 | Local persistence | Complete | Versioned JSON, atomic write to OS app-data directory |
 | Collections and requests | Complete | Create, select, edit, search, and group requests |
 | Environments | Complete | Local variables and template resolution |
@@ -27,7 +27,7 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | gRPC schema discovery | Complete | Server Reflection v1 and pasted `.proto` compilation into a local descriptor pool |
 | gRPC execution | Complete | Dynamic protobuf JSON mapping; unary, client-streaming, server-streaming and bidirectional calls |
 | Rich HTTP bodies | Complete | None, JSON, text, URL-encoded, multipart text/files and binary files |
-| Transport configuration | Complete for HTTP/SSE | Redirect policy, bounded connect/HTTP timeout, unlimited active SSE duration, certificate validation, HTTP proxy and PEM client identity |
+| Transport configuration | Complete for HTTP/SSE | Redirect policy, inherited/custom connect/HTTP timeout with `0` disabled, unlimited active SSE duration, certificate validation, HTTP proxy and PEM client identity |
 | gRPC TLS | Complete | System trust roots, timeout and PEM client identity |
 | WebSocket TLS | Baseline | System trust roots and arbitrary handshake headers; custom proxy/client identity is deferred |
 | Workspace migration | Complete | Version 1 workspaces migrate in place to the version 2 protocol schema |
@@ -134,7 +134,7 @@ Compatibility bounds remain explicit: HTTP MCP OAuth discovery/redirect handling
 | GraphQL authoring | Complete baseline | Query/variables composition, operation name, structural checks, cached root-field validation, root-field search/insertion, deprecation display, and type documentation browsing |
 | GraphQL template boundary | Complete | Query template syntax remains literal to match Insomnia; variables retain local/vault/external template support |
 | Request scheduling | Complete baseline | Initial delay, sequential repeat interval, stop-future-runs control, and a 1,000-send local safety bound |
-| Desktop preferences | Complete baseline | System/dark/light appearance, comfortable/compact density, editor font size, preferred HTTP version, new-request timeout, apply-to-existing timeout, GraphQL auto-fetch, and delete confirmation |
+| Desktop preferences | Complete baseline | System/dark/light appearance, comfortable/compact density, editor font size, preferred HTTP version, execution-time timeout with inherited/custom request modes and no-deadline support, GraphQL auto-fetch, and delete confirmation |
 | Keyboard shortcuts | Complete baseline | Ten device-local editable bindings, platform `Mod` abstraction, collision warnings, clearing/reset, URL focus, request create/duplicate/delete, history, sidebar, environment, send, Preferences, and palette actions |
 | Workspace migration | Complete | Versions 1–8 migrate to v9 bounded GraphQL schema cache fields and normalized device-local preferences; imports receive safe defaults and project/encrypted-sync reads preserve local preferences |
 | Documentation and evidence | Complete | [GraphQL and preferences guide](GRAPHQL_AND_PREFERENCES.md) and [Milestone 9 verification](QA_MILESTONE_9.md) |
@@ -181,7 +181,7 @@ Compatibility bounds remain explicit: generated snippets do not yet embed multip
 | Secondary requests | Complete baseline | Off-by-default device-local grant, mediated HTTP(S) normalization, separate vault capability, five-request/256 KB input/5 MB response/10-second transport bounds, and no nested script/plugin execution |
 | Vault scripts | Complete baseline | Off-by-default device-local grant exposes only current unlocked local entries through `insomnia.vault.get`, with no result/export/project/sync serialization |
 | CLI safety | Complete baseline | Workspace JavaScript requires `--allow-scripts`; secondary requests additionally require `--allow-script-requests`; workspace data cannot self-grant either capability |
-| Workspace migration | Complete | Versions 1–11 migrate to v12 safe script timeout and disabled network/vault grants; imports reset authority and shared reads preserve device-local preferences |
+| Workspace migration | Complete | Versions 1–14 migrate to v15 with legacy-safe custom timeouts, safe script timeout and disabled network/vault grants; imports reset authority and shared reads preserve device-local preferences |
 | Documentation and evidence | Complete | [Permission-bounded scripting guide](SCRIPTING.md) and [Milestone 12 verification](QA_MILESTONE_12.md) |
 
 Compatibility bounds remain explicit: the full upstream library/Node module set, complete Chai/Lodash behavior, advanced auth/body helpers, separately persisted base-environment mutation, script access to external-vault providers, and broader Postman compatibility remain. The browser Worker is the desktop capability boundary; CLI scripts use Node `vm` and therefore require an explicit trusted-workspace flag rather than being represented as hostile-code isolation. Exact scope/helper/async/state-continuity work follows in Milestone 13.
@@ -377,7 +377,7 @@ Compatibility bounds remain explicit: Brunomnia discovers named tests inside req
 
 | Capability | Status | Notes |
 | --- | --- | --- |
-| Long-running native sessions | Complete baseline | SSE uses the configured timeout for connection establishment without applying a total deadline to an active response stream |
+| Long-running native sessions | Complete baseline | SSE uses the effective positive timeout for connection establishment, or no header deadline at zero, without applying a total deadline to an active response stream |
 | Reconnect policy | Complete baseline | Per-request automatic reconnect toggle, 100–60,000 ms delay, and 0–1,000 retry limit; zero means retry until explicit disconnect |
 | Protocol resume | Complete baseline | Valid `id:` values are retained and sent as `Last-Event-ID`; numeric `retry:` values can replace the local delay within the same bounds |
 | Cancellation | Complete | Explicit disconnect cancels an active read, reconnect delay, or reconnect attempt and removes the session |
@@ -424,7 +424,7 @@ Compatibility bounds remain explicit: the sandbox cannot bind deterministic comp
 | Current preference surface | Complete baseline | Device-local maximum redirects defaults to 10, accepts zero and positive integer ceilings, and uses `-1` for unlimited redirects as documented by the current upstream setting |
 | Request precedence | Complete | A request with Follow HTTP redirects disabled always uses a no-follow native policy regardless of the device maximum |
 | Finite execution | Complete | Zero rejects the first redirect; positive values configure reqwest's explicit hop limit and return a transport error when reached |
-| Unlimited execution | Complete baseline | `-1` uses a custom follow policy without a hop ceiling; ordinary requests retain their total deadline and SSE header establishment is explicitly bounded by the request timeout |
+| Unlimited execution | Complete baseline | `-1` uses a custom follow policy without a hop ceiling; ordinary requests retain a positive total deadline and SSE header establishment follows the effective timeout, including disabled zero |
 | Execution breadth | Complete baseline | HTTP, GraphQL, SSE/reconnect, introspection, collection runs, scripts/plugins, imports, OAuth, AI, MCP, Konnect, and Git AI inherit the device preference |
 | Device-local safety | Complete | Existing data defaults to 10, malformed values normalize safely, project/sync reads preserve the device value, and workspace imports reset it |
 | Executable coverage | Complete baseline | Frontend tests cover migration, invocation/stream input, and request immutability; native tests cover disabled, zero, finite, and unlimited policy selection; live redirect chains remain sandbox-limited |
@@ -479,7 +479,23 @@ Compatibility bounds remain explicit: redirect-hop timeline entries, per-request
 
 Compatibility bounds remain explicit: reqwest and browser Fetch do not expose libcurl debug callback chunks, so Brunomnia records one prepared outgoing payload and one decoded aggregate response summary. Raw transport-added headers, TLS/connect diagnostics, redirect hops, exact multipart wire framing, compressed wire-byte accounting, and Event Stream handshake timeline files remain open.
 
-## Milestone 33 — remaining parity closure and release hardening
+## Milestone 33 — global request timeout and per-request inheritance (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local Request timeout defaults to 30,000 ms, is read at execution time, accepts nonnegative integers, and uses `0` to disable deadlines like current upstream |
+| Request inheritance | Complete | New requests persist Use Preferences; Custom retains a per-request deadline and takes precedence over the device value |
+| Legacy safety | Complete | Workspace v14 and earlier requests with saved timeouts migrate to Custom, while requests without a saved transport timeout adopt inheritance |
+| Execution breadth | Complete baseline | Primary HTTP/GraphQL, Event Streams, gRPC, collection runs, CLI, script/plugin calls, URL imports, OAuth, and HTTP-backed integrations receive the effective timeout |
+| Disabled deadlines | Complete baseline | Browser Fetch omits its AbortSignal; native HTTP omits client connect/total deadlines; SSE omits the response-header timer; gRPC omits channel/RPC and response-stream deadlines |
+| Internal safety | Complete | GraphQL introspection, AI, MCP, Konnect, and bounded script subrequests retain deliberate custom deadlines instead of inheriting an unlimited preference |
+| Import behavior | Complete baseline | Ordinary cURL imports inherit the preference; explicit `--max-time`, including zero, becomes a custom request timeout |
+| Executable coverage | Complete baseline | Frontend tests cover inheritance, zero, explicit overrides, legacy migration, native invocation, stream configuration, and cURL defaults; native compile/lint passes and rendered/live timeout fixtures remain intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 33 verification](QA_MILESTONE_33.md) |
+
+Compatibility bounds remain explicit: WebSocket connection APIs do not expose the same total request timer as HTTP, an active SSE response intentionally has no lifetime deadline after headers, and no rendered or live slow-server fixture is claimed in this phase. Brunomnia's per-request Custom mode is an additional local capability; current Insomnia exposes the device preference globally.
+
+## Milestone 34 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
