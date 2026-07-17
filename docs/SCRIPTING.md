@@ -1,6 +1,6 @@
 # Permission-bounded scripting
 
-Milestones 12–14 expand Brunomnia's clean-room compatibility with the current [Insomnia scripting contract](https://developer.konghq.com/insomnia/scripts/) while keeping host capabilities explicit. Every feature in this document is local and free; the controls are safety grants, not account or subscription gates.
+Milestones 12–15 expand Brunomnia's clean-room compatibility with the current [Insomnia scripting contract](https://developer.konghq.com/insomnia/scripts/) while keeping host capabilities explicit. Every feature in this document is local and free; the controls are safety grants, not account or subscription gates.
 
 ## Runtime model
 
@@ -18,9 +18,17 @@ The runtime exposes:
 - response status, text/JSON, timing, headers, and response-cookie helpers;
 - captured console output, ordered sync/async `insomnia.test` results, `insomnia.expect`, global `expect`, and Chai aliases including `lengthOf`, `oneOf`, and all/any object keys;
 - top-level `await`; and
-- selected local `require()` adapters: `assert`, `atob`, `btoa`, `chai`, lightweight `lodash`, `querystring`, `timers`, `url`, `util`, and `uuid`.
+- local `require()` adapters for every external-library and Node-module name in the current Insomnia scripts reference.
 
 `insomnia.baseGlobals` changes persist to the root global environment, while `insomnia.globals` changes persist to the selected global sub-environment without flattening inherited enabled values. `insomnia.baseEnvironment`, `CollectionVariables`, lowercase `collectionVariables`, and `variables.collectionVars` mutate the collection base. `insomnia.environment` and `variables.environmentVars` mutate the selected collection sub-environment. When no sub-environment is selected, the selected API aliases the corresponding base store. Parent-folder changes also persist. Direct sends, runner iterations, and trusted CLI runs keep all stores separate and carry mutations forward in memory; disabled rows mask lower scopes until a script explicitly sets or unsets that name in the owning store.
+
+## Bundled module adapters
+
+The external-library names are `ajv`, `atob`, `btoa`, `chai`, `cheerio`, `crypto-js`, `csv-parse`, `lodash`, `moment`, `postman-collection`, `tv4`, `uuid`, and `xml2js`. The Node-module names are `assert`, `buffer`, `events`, `path`, `querystring`, `punycode`, `stream`, `string-decoder`, `timers`, `url`, and `util`. Compatibility aliases for the synchronous CSV parser are also available.
+
+Desktop and trusted CLI scripts use the same self-contained adapter factory. It provides common local operations: a bounded JSON Schema subset through AJV/TV4-style APIs; quoted/column CSV parsing; SHA-256 plus CryptoJS WordArray and Hex/UTF-8/Base64 encoders; basic tag, ID, class, attribute, and descendant HTML selection; basic XML object parsing/building; common Moment parsing/format/add/subtract/diff operations; core Postman collection model classes; common Lodash collection/object/case helpers; and finite Buffer, EventEmitter, POSIX path, query-string, stream, string-decoder, URL, timer, util, UUID, and Punycode helpers. Inputs handled by these adapters are capped at 5 MB where text expansion or parsing is involved.
+
+These are clean-room compatibility adapters, not copies of the npm packages. They do not claim every package version, option, locale, parser edge case, cryptographic primitive, JSON Schema draft feature, DOM method, stream behavior, or Postman SDK interface. Unknown modules remain denied and scripts cannot load packages from disk or the network.
 
 ## Secondary requests
 
@@ -48,4 +56,4 @@ Secondary script requests require both `--allow-scripts` and `--allow-script-req
 
 ## Remaining compatibility limits
 
-The runtime does not yet bundle AJV, Cheerio, CryptoJS, CSV Parse, Moment, Postman Collection, TV4, XML2JS, or the complete Node built-in surface. File-backed body/certificate helpers remain editor-only. Complete Chai/Lodash behavior and broader deprecated Postman interfaces remain in the [parity ledger](PARITY.md).
+Every module name currently documented by Insomnia is available, but full npm-package behavioral equivalence remains open. In particular, complete Chai/Lodash APIs, arbitrary/local-reference JSON Schema behavior, the full Cheerio/XML parsers, additional CryptoJS algorithms, Moment locales/time zones, complete Node built-in semantics, and the complete Postman Collection SDK are not claimed. File-backed body/certificate helpers remain editor-only; external-vault scripts, broader deprecated Postman interfaces, and stronger portable CLI isolation remain in the [parity ledger](PARITY.md).
