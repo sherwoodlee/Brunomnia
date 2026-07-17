@@ -30,6 +30,8 @@ export type RunnerOptions = {
   dataRows: Record<string, string>[];
   scriptTimeoutMs?: number;
   environmentScopes?: ScriptEnvironmentScopes;
+  requestIds?: string[];
+  bail?: boolean;
   shouldCancel?: () => boolean;
   onResult?: (result: RunnerItemResult) => void;
 };
@@ -52,8 +54,13 @@ export const runCollection = async (
   const startedAt = new Date().toISOString();
   const results: RunnerItemResult[] = [];
   let cancelled = false;
+  let bailed = false;
   const iterations = boundedInteger(options.iterations, 1, 1000);
   const retries = boundedInteger(options.retries, 0, 10);
+  const requestsById = new Map(collection.requests.map((request) => [request.id, request]));
+  const plannedRequests = options.requestIds === undefined
+    ? collection.requests
+    : [...new Set(options.requestIds)].flatMap((id) => requestsById.get(id) ?? []);
   const configuredGlobalScopes = options.environmentScopes;
   const globalsAreBase = configuredGlobalScopes?.globalsAreBase ?? true;
   let baseGlobalVariables = { ...(configuredGlobalScopes?.baseGlobals.values ?? environmentMap(environment)) };
@@ -71,7 +78,7 @@ export const runCollection = async (
 
   outer: for (let iteration = 0; iteration < iterations; iteration += 1) {
     const iterationData = options.dataRows[iteration % Math.max(1, options.dataRows.length)] ?? {};
-    for (const originalRequest of collection.requests) {
+    for (const originalRequest of plannedRequests) {
       if (options.shouldCancel?.()) { cancelled = true; break outer; }
       for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
         const configured = applyCollectionConfiguration(collection, originalRequest, environment);
@@ -158,7 +165,10 @@ export const runCollection = async (
         };
         results.push(result);
         options.onResult?.(result);
-        if (passed || attempt > retries) break;
+        if (passed || attempt > retries) {
+          if (!passed && options.bail) { bailed = true; break outer; }
+          break;
+        }
         if (options.delayMs > 0) await wait(options.delayMs);
       }
       if (options.delayMs > 0) await wait(options.delayMs);
@@ -178,6 +188,7 @@ export const runCollection = async (
     passed: results.filter((result) => result.passed).length,
     failed: results.filter((result) => !result.passed).length,
     cancelled,
+    bailed,
     results,
   };
 };

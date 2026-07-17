@@ -299,7 +299,21 @@ Compatibility bounds remain explicit: PFX/PKCS#12, encrypted-key passphrases, a 
 
 Compatibility bounds remain explicit: Brunomnia does not claim byte-identical Mocha reporter cosmetics. Request selection/drag ordering, response bodies in reports, `--bail`, test-name filtering, every Inso command/configuration flag, all protocol semantics, and signed container/install artifacts remain open.
 
-## Milestone 21 — remaining parity closure and release hardening
+## Milestone 21 — collection-run request plans and bail (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Request selection | Complete baseline | Every collection request can be included or excluded from the next run without mutating collection membership |
+| Run ordering | Complete baseline | A transient runner plan can be reordered by drag/drop or labeled up/down buttons and is passed explicitly to the shared engine |
+| Plan confinement | Complete | Unknown IDs are ignored, duplicates run once, newly created requests enter enabled, and removed requests leave the plan |
+| Bail | Complete baseline | Desktop and CLI can stop after the first failure only after configured retries are exhausted; reports distinguish bail from cancellation |
+| CLI compatibility | Complete baseline | The current documented `--bail` flag is accepted without changing default full-run behavior or failure exit codes |
+| Executable coverage | Complete | Tests prove selected order, de-duplication, unknown-ID confinement, retry exhaustion, skipped later requests/iterations, and report state |
+| Documentation and evidence | Complete | Updated [runner reports and CI guide](RUNNER_REPORTS.md) and [Milestone 21 verification](QA_MILESTONE_21.md) |
+
+Compatibility bounds remain explicit: the request plan is device-session state rather than a named saved preset. Per-request iteration counts, response-body report export, test-name filtering, all protocol runner semantics, and the rest of the Inso flag/command surface remain open.
+
+## Milestone 22 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

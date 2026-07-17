@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ApiDesign,
   Collection,
@@ -122,17 +122,51 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const [environmentId, setEnvironmentId] = useState(activeEnvironment.id);
   const [iterations, setIterations] = useState(1);
   const [retries, setRetries] = useState(0);
+  const [bail, setBail] = useState(false);
   const [delayMs, setDelayMs] = useState(0);
   const [streamWindowMs, setStreamWindowMs] = useState(1000);
   const [data, setData] = useState('');
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<RunnerItemResult[]>([]);
   const [error, setError] = useState('');
+  const [requestPlan, setRequestPlan] = useState<Array<{ id: string; enabled: boolean }>>(() => (workspace.collections[0]?.requests ?? []).map((request) => ({ id: request.id, enabled: true })));
   const cancelled = useRef(false);
+  const draggedRequestId = useRef('');
   const collection = workspace.collections.find((candidate) => candidate.id === collectionId) ?? workspace.collections[0];
   const selectedEnvironment = workspace.environments.find((candidate) => candidate.id === environmentId) ?? activeEnvironment;
   const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
   const latestReport = workspace.runnerReports.find((report) => report.collectionId === collection?.id);
+
+  useEffect(() => {
+    const ids = new Set((collection?.requests ?? []).map((request) => request.id));
+    setRequestPlan((current) => {
+      const retained = current.filter((item) => ids.has(item.id));
+      const retainedIds = new Set(retained.map((item) => item.id));
+      const added = (collection?.requests ?? []).filter((request) => !retainedIds.has(request.id)).map((request) => ({ id: request.id, enabled: true }));
+      return [...retained, ...added];
+    });
+  }, [collection]);
+
+  const moveRequest = (id: string, offset: number) => setRequestPlan((current) => {
+    const from = current.findIndex((item) => item.id === id);
+    const to = Math.max(0, Math.min(current.length - 1, from + offset));
+    if (from < 0 || from === to) return current;
+    const next = [...current];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    return next;
+  });
+
+  const dropRequest = (targetId: string) => setRequestPlan((current) => {
+    const from = current.findIndex((item) => item.id === draggedRequestId.current);
+    const to = current.findIndex((item) => item.id === targetId);
+    draggedRequestId.current = '';
+    if (from < 0 || to < 0 || from === to) return current;
+    const next = [...current];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    return next;
+  });
 
   const downloadReport = (reporter: Extract<RunnerReporter, 'json' | 'junit'>) => {
     if (!latestReport) return;
@@ -147,6 +181,8 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
 
   const start = async () => {
     if (!collection || running) return;
+    const requestIds = requestPlan.filter((item) => item.enabled).map((item) => item.id);
+    if (!requestIds.length) { setError('Select at least one request for this run.'); return; }
     setRunning(true); setResults([]); setError(''); cancelled.current = false;
     try {
       let runnerCookies = [...workspace.cookies];
@@ -160,7 +196,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       };
       const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
       const report = await runCollection(collection, environment, {
-        iterations, retries, delayMs, scriptTimeoutMs: workspace.preferences.scriptTimeoutMs, environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id), dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current,
+        iterations, retries, bail, requestIds, delayMs, scriptTimeoutMs: workspace.preferences.scriptTimeoutMs, environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id), dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current,
         onResult: (result) => setResults((current) => [...current, result]),
       }, async (request, variables) => {
         const requestEnvironment = {
@@ -216,7 +252,13 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
         <aside className="runner-config">
           <label>Collection<select aria-label="Runner collection" value={collection?.id ?? ''} onChange={(event) => setCollectionId(event.target.value)}>{workspace.collections.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.requests.length}</option>)}</select></label>
           <label>Environment<select aria-label="Runner environment" value={environment.id} onChange={(event) => setEnvironmentId(event.target.value)}>{workspace.environments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <fieldset className="runner-plan"><legend>Request order</legend>{requestPlan.map((item, index) => {
+            const request = collection?.requests.find((candidate) => candidate.id === item.id);
+            if (!request) return null;
+            return <div draggable key={item.id} onDragEnd={() => { draggedRequestId.current = ''; }} onDragOver={(event) => event.preventDefault()} onDragStart={() => { draggedRequestId.current = item.id; }} onDrop={() => dropRequest(item.id)}><input aria-label={`Include ${request.name}`} checked={item.enabled} onChange={(event) => setRequestPlan((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, enabled: event.target.checked } : candidate))} type="checkbox" /><span title={request.name}>{request.name}</span><div><button aria-label={`Move ${request.name} up`} disabled={index === 0} onClick={() => moveRequest(item.id, -1)} type="button">↑</button><button aria-label={`Move ${request.name} down`} disabled={index === requestPlan.length - 1} onClick={() => moveRequest(item.id, 1)} type="button">↓</button></div></div>;
+          })}</fieldset>
           <div className="runner-number-grid"><label>Iterations<input min="1" max="1000" type="number" value={iterations} onChange={(event) => setIterations(Number(event.target.value))} /></label><label>Retries<input min="0" max="10" type="number" value={retries} onChange={(event) => setRetries(Number(event.target.value))} /></label></div>
+          <label className="runner-toggle"><input checked={bail} onChange={(event) => setBail(event.target.checked)} type="checkbox" /><span>Stop after first exhausted failure</span></label>
           <label>Delay between requests (ms)<input min="0" max="30000" type="number" value={delayMs} onChange={(event) => setDelayMs(Number(event.target.value))} /></label>
           <label>Stream sample window (ms)<input min="100" max="30000" type="number" value={streamWindowMs} onChange={(event) => setStreamWindowMs(Number(event.target.value))} /></label>
           <label>Iteration data<textarea aria-label="Runner iteration data" placeholder={'JSON array or CSV\norderId,status\nord_1,open'} value={data} onChange={(event) => setData(event.target.value)} /></label>

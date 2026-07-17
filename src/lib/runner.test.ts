@@ -38,6 +38,60 @@ describe('collection runner', () => {
     expect(report.total).toBe(1);
   });
 
+  it('runs a de-duplicated selected request plan in the requested order', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    const third = createBlankRequest('third');
+    const seen: string[] = [];
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second, third] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], requestIds: ['third', 'first', 'third', 'missing'] },
+      async (request) => { seen.push(request.id); return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    );
+
+    expect(seen).toEqual(['third', 'first']);
+    expect(report.results.map((result) => result.requestId)).toEqual(['third', 'first']);
+    expect(report.total).toBe(2);
+  });
+
+  it('bails only after retries are exhausted', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    const seen: string[] = [];
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 2, retries: 1, delayMs: 0, dataRows: [], bail: true },
+      async (request) => { seen.push(request.id); return { status: 500, statusText: 'Failed', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    );
+
+    expect(seen).toEqual(['first', 'first']);
+    expect(report.total).toBe(2);
+    expect(report.failed).toBe(2);
+    expect(report.bailed).toBe(true);
+    expect(report.cancelled).toBe(false);
+  });
+
+  it('continues when a retry recovers under bail mode', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    let calls = 0;
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 1, delayMs: 0, dataRows: [], bail: true },
+      async () => ({ status: ++calls === 1 ? 500 : 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }),
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    );
+
+    expect(report.results.map((result) => result.status)).toEqual([500, 200, 200]);
+    expect(report.bailed).toBe(false);
+    expect(report.total).toBe(3);
+  });
+
   it('passes iteration data and request-local variables through scripts and request rendering', async () => {
     const request = createBlankRequest('one');
     const scriptCalls: Array<{ local: Record<string, string>; iteration: Record<string, string> }> = [];
