@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
-import type { AiSettings, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ShortcutAction, StoredResponse, Workspace } from '../types';
+import type { AiSettings, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ShortcutAction, StoredResponse, Workspace } from '../types';
 import { normalizeGraphqlSchema } from './graphql';
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 import { normalizeHttpMethod } from './request';
@@ -206,6 +206,9 @@ const normalizePreferences = (value: unknown): AppPreferences => {
       ? Math.max(-1, Math.trunc(source.maxRedirects))
       : defaultPreferences.maxRedirects,
     followRedirects: source?.followRedirects !== false,
+    maxTimelineDataSizeKB: typeof source?.maxTimelineDataSizeKB === 'number' && Number.isFinite(source.maxTimelineDataSizeKB)
+      ? Math.max(0, Math.trunc(source.maxTimelineDataSizeKB))
+      : defaultPreferences.maxTimelineDataSizeKB,
     maxHistoryResponses: typeof source?.maxHistoryResponses === 'number' && Number.isFinite(source.maxHistoryResponses)
       ? Math.max(-1, Math.trunc(source.maxHistoryResponses))
       : defaultPreferences.maxHistoryResponses,
@@ -221,6 +224,19 @@ const normalizePreferences = (value: unknown): AppPreferences => {
   };
 };
 
+const normalizeResponseTimeline = (value: unknown): ResponseTimelineEntry[] => !Array.isArray(value) ? [] : value.slice(0, 1_000).flatMap((entry): ResponseTimelineEntry[] => {
+  const source = record(entry);
+  if (!source) return [];
+  const name = source.name === 'DataOut' ? 'DataOut' : 'Text';
+  const elapsedMs = Number(source.elapsedMs);
+  return [{
+    name,
+    value: stringValue(source.value),
+    elapsedMs: Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0,
+    ...(source.hidden === true ? { hidden: true } : {}),
+  }];
+});
+
 const normalizeStoredResponses = (value: unknown): StoredResponse[] => Array.isArray(value) ? value.flatMap((entry, index) => {
   const source = record(entry);
   if (!source) return [];
@@ -232,6 +248,7 @@ const normalizeStoredResponses = (value: unknown): StoredResponse[] => Array.isA
     requestUrl: stringValue(source.requestUrl),
     environmentId: stringValue(source.environmentId),
     receivedAt: stringValue(source.receivedAt, new Date(0).toISOString()),
+    timeline: normalizeResponseTimeline(source.timeline),
   } as StoredResponse];
 }) : [];
 

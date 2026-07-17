@@ -109,6 +109,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace }: PluginWorkbenc
       preferredHttpVersion: workspace.preferences.preferredHttpVersion,
       maxRedirects: workspace.preferences.maxRedirects,
       followRedirects: workspace.preferences.followRedirects,
+      maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
       filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
     }),
     prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',

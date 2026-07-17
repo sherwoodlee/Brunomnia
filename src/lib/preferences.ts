@@ -35,6 +35,7 @@ export const defaultPreferences: AppPreferences = {
   preferredHttpVersion: 'default',
   maxRedirects: 10,
   followRedirects: true,
+  maxTimelineDataSizeKB: 10,
   maxHistoryResponses: 20,
   filterResponsesByEnv: false,
   requestTimeoutMs: 30_000,
