@@ -92,6 +92,9 @@ describe('script sandbox source validation', () => {
         await Promise.resolve();
         insomnia.expect({ id: 'one', ok: true }).to.be.an('object').that.has.all.keys('id', 'ok');
         insomnia.expect(201).to.be.oneOf([200, 201]);
+        insomnia.expect({ response: { body: [{ id: 42 }] } }).to.deep.nested.include({ 'response.body[0]': { id: 42 } });
+        insomnia.expect(['ready', 'sent', 'received']).to.include.ordered.members(['ready', 'sent']);
+        insomnia.expect('ready').to.have.lengthOf.above(4);
       });
     `);
     expect(output.ok).toBe(true);

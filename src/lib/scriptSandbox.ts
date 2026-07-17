@@ -1,6 +1,7 @@
 import { createBlankRequest } from '../data/seed';
 import type { ApiRequest, CookieRecord, FilePayload, HttpResponse, KeyValue, ScriptRunResult, StoredResponse } from '../types';
 import { storeResponseCookies } from './cookies';
+import { createScriptExpect } from './scriptExpect';
 import { createScriptModules } from './scriptModules';
 
 export type ScriptFolderState = { id: string; name: string; environment: Record<string, string>; disabled?: string[] };
@@ -311,49 +312,7 @@ self.onmessage = async ({ data }) => {
     toObject: () => ({ ...values }),
     replaceIn,
   });
-  const expect = (actual, negated = false) => {
-    let keyMode = 'all';
-    const verify = (condition, message) => { if (negated ? condition : !condition) throw new Error(message); };
-    const api = {
-      toBe: (expected) => verify(actual === expected, 'Expected ' + JSON.stringify(actual) + ' to be ' + JSON.stringify(expected)),
-      toEqual: (expected) => verify(same(actual, expected), 'Expected ' + JSON.stringify(actual) + ' to equal ' + JSON.stringify(expected)),
-      toContain: (expected) => verify(Boolean(actual?.includes?.(expected)), 'Expected value to contain ' + JSON.stringify(expected)),
-      toBeTruthy: () => verify(Boolean(actual), 'Expected value to be truthy'),
-      toBeLessThan: (expected) => verify(actual < expected, 'Expected ' + actual + ' to be less than ' + expected),
-      toBeGreaterThan: (expected) => verify(actual > expected, 'Expected ' + actual + ' to be greater than ' + expected),
-      equal: (expected) => verify(actual === expected, 'Expected ' + JSON.stringify(actual) + ' to equal ' + JSON.stringify(expected)),
-      eql: (expected) => verify(same(actual, expected), 'Expected values to deeply equal'),
-      include: (expected) => verify(Boolean(actual?.includes?.(expected)), 'Expected value to include ' + JSON.stringify(expected)),
-      match: (expected) => verify(expected instanceof RegExp && expected.test(String(actual)), 'Expected value to match ' + expected),
-      above: (expected) => verify(actual > expected, 'Expected ' + actual + ' to be above ' + expected),
-      below: (expected) => verify(actual < expected, 'Expected ' + actual + ' to be below ' + expected),
-      a: (expected) => { verify(expected === 'array' ? Array.isArray(actual) : typeof actual === expected, 'Expected value to be a ' + expected); return api; },
-      an: (expected) => { verify(expected === 'array' ? Array.isArray(actual) : typeof actual === expected, 'Expected value to be an ' + expected); return api; },
-      property(name, expected) {
-        const exists = actual !== null && actual !== undefined && Object.prototype.hasOwnProperty.call(Object(actual), name);
-        verify(exists && (arguments.length < 2 || same(actual[name], expected)), 'Expected value to have property ' + name);
-        return expect(actual?.[name], negated);
-      },
-      length: (expected) => verify(actual?.length === expected, 'Expected length ' + expected + ' but got ' + actual?.length),
-      lengthOf: (expected) => verify(actual?.length === expected, 'Expected length ' + expected + ' but got ' + actual?.length),
-      oneOf: (expected) => verify(Array.isArray(expected) && expected.includes(actual), 'Expected value to be one of ' + JSON.stringify(expected)),
-      keys: (...expected) => {
-        const values = expected.length === 1 && Array.isArray(expected[0]) ? expected[0] : expected;
-        const actualKeys = actual && typeof actual === 'object' ? Object.keys(actual) : [];
-        const condition = keyMode === 'any' ? values.some((key) => actualKeys.includes(String(key))) : values.every((key) => actualKeys.includes(String(key)));
-        verify(condition, 'Expected value to have ' + keyMode + ' keys ' + values.join(', '));
-      },
-    };
-    ['to', 'be', 'been', 'is', 'that', 'which', 'and', 'has', 'have', 'with', 'at', 'of', 'same'].forEach((name) => Object.defineProperty(api, name, { get: () => api }));
-    Object.defineProperty(api, 'all', { get: () => { keyMode = 'all'; return api; } });
-    Object.defineProperty(api, 'any', { get: () => { keyMode = 'any'; return api; } });
-    Object.defineProperty(api, 'not', { get: () => expect(actual, !negated) });
-    Object.defineProperty(api, 'ok', { get: () => { verify(Boolean(actual), 'Expected value to be truthy'); return api; } });
-    Object.defineProperty(api, 'true', { get: () => { verify(actual === true, 'Expected value to be true'); return api; } });
-    Object.defineProperty(api, 'false', { get: () => { verify(actual === false, 'Expected value to be false'); return api; } });
-    Object.defineProperty(api, 'empty', { get: () => { verify(actual?.length === 0 || Object.keys(actual || {}).length === 0, 'Expected value to be empty'); return api; } });
-    return api;
-  };
+  const expect = (${createScriptExpect.toString()})();
   const modules = (${createScriptModules.toString()})({
     atob,
     btoa,
