@@ -111,6 +111,9 @@ describe('script sandbox source validation', () => {
       const csv = require('csv-parse').sync('id,name\\n1,Ada', { columns: true });
       const digest = require('crypto-js').SHA256('abc').toString();
       const xml = await require('xml2js').parseStringPromise('<root><id>1</id></root>', { explicitArray: false });
+      const assert = require('chai').assert;
+      assert.deepNestedPropertyVal({ response: { body: { id: 1 } } }, 'response.body', { id: 1 });
+      assert.sameDeepMembers([{ id: 1 }, { id: 2 }], [{ id: 2 }, { id: 1 }]);
       insomnia.test('documented modules', () => {
         expect(new Ajv().validate({ required: ['id'] }, csv[0])).to.be.true;
         expect(digest).to.equal('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
