@@ -20,6 +20,19 @@ describe('encrypted collaboration boundaries', () => {
     expect(shared.collections).toHaveLength(workspace.collections.length);
   });
 
+  it('removes private environment trees and repairs the shared active environment', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.environments.push(
+      { id: 'private-child', name: 'Private child', parentId: 'base-environment', private: true, variables: [] },
+      { id: 'private-descendant', name: 'Private descendant', parentId: 'private-child', variables: [] },
+    );
+    workspace.activeEnvironmentId = 'private-descendant';
+    const shared = shareableWorkspace(workspace);
+    expect(shared.environments.map((environment) => environment.id)).not.toContain('private-child');
+    expect(shared.environments.map((environment) => environment.id)).not.toContain('private-descendant');
+    expect(shared.environments.some((environment) => environment.id === shared.activeEnvironmentId)).toBe(true);
+  });
+
   it('preserves device-local data and the current actor while applying a pulled revision', () => {
     const current = cloneSeedWorkspace();
     current.history = [{ id: 'history', requestId: 'request', name: 'Keep', method: 'GET', url: 'https://local.example', status: 200, durationMs: 1, createdAt: new Date().toISOString() }];
@@ -64,6 +77,22 @@ describe('encrypted collaboration boundaries', () => {
     workspace.konnect.token = "{% external 'aws', 'konnect-token' %}";
     workspace.mcpClients[0].token = '{{ vault.mcp_token }}';
     expect(plaintextSecretCandidates(workspace)).toEqual([]);
+  });
+
+  it('checks inherited collection and folder configuration for plaintext credentials', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.collections[0].environment = [{ id: 'collection-token', name: 'clientSecret', value: 'plaintext', enabled: true }];
+    workspace.collections[0].folders = [{
+      id: 'folder', name: 'Secured', parentId: '', expanded: true,
+      headers: [{ id: 'folder-auth', name: 'Authorization', value: 'Bearer plaintext', enabled: true }],
+      environment: [], auth: { ...workspace.collections[0].requests[0].auth, type: 'bearer', token: 'plaintext-folder' },
+      preRequestScript: '', tests: '', documentation: '',
+    }];
+    expect(plaintextSecretCandidates(workspace)).toEqual([
+      'Orders: variable clientSecret',
+      'Orders / Secured: auth.token',
+      'Orders / Secured: header Authorization',
+    ]);
   });
 
   it('accepts only complete protected references for credential fields', () => {

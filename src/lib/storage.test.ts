@@ -19,7 +19,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(9);
+    expect(migrated.version).toBe(10);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
     expect(migrated.apiDesigns[0].name).toBe('Orders API');
@@ -105,5 +105,27 @@ describe('workspace migrations', () => {
     expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 20, requestTimeoutMs: 1_000 });
     expect(migrated.preferences.shortcuts.palette).toBe('Mod+Shift+P');
     expect(migrated.preferences.shortcuts.send).toBe('Mod+Enter');
+  });
+
+  it('breaks malformed resource cycles and keeps private descendants device-local', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.collections[0].folders = [
+      { id: 'folder-a', name: 'A', parentId: 'folder-b', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+      { id: 'folder-b', name: 'B', parentId: 'folder-a', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+    ];
+    workspace.environments.push(
+      { id: 'private', name: 'Private', parentId: 'base-environment', private: true, variables: [] },
+      { id: 'descendant', name: 'Descendant', parentId: 'private', variables: [] },
+      { id: 'cycle-a', name: 'Cycle A', parentId: 'cycle-b', variables: [] },
+      { id: 'cycle-b', name: 'Cycle B', parentId: 'cycle-a', variables: [] },
+    );
+    const migrated = migrateWorkspace(workspace);
+    const folderA = migrated.collections[0].folders?.find((folder) => folder.id === 'folder-a');
+    const folderB = migrated.collections[0].folders?.find((folder) => folder.id === 'folder-b');
+    expect(folderA?.parentId === 'folder-b' && folderB?.parentId === 'folder-a').toBe(false);
+    const cycleA = migrated.environments.find((environment) => environment.id === 'cycle-a');
+    const cycleB = migrated.environments.find((environment) => environment.id === 'cycle-b');
+    expect(cycleA?.parentId === 'cycle-b' && cycleB?.parentId === 'cycle-a').toBe(false);
+    expect(migrated.environments.find((environment) => environment.id === 'descendant')?.private).toBe(true);
   });
 });

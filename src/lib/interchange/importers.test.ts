@@ -143,7 +143,9 @@ paths:
       { _id: 'env_1', parentId: 'wrk_1', name: 'Base', data: { token: 'abc' }, _type: 'environment' },
     ] }), 'insomnia-v4.json');
     expect(v4.format).toBe('insomnia-v4');
-    expect(v4.collections[0].requests[0].name).toBe('Folder / Get one');
+    expect(v4.collections[0].requests[0].name).toBe('Get one');
+    expect(v4.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
+    expect(v4.collections[0].requests[0].folderId).toBe(v4.collections[0].folders?.[0].id);
     expect(v4.environments[0].variables[0]).toMatchObject({ name: 'token', value: 'abc' });
 
     const v5 = importArtifact(`type: collection.insomnia.rest/5.0
@@ -164,7 +166,13 @@ environments:
   data: { baseUrl: https://api.example.com }
 `, 'insomnia-v5.yaml');
     expect(v5.format).toBe('insomnia-v5');
-    expect(v5.collections[0].requests[0]).toMatchObject({ name: 'Folder / Create', bodyMode: 'json' });
+    expect(v5.collections[0].requests[0]).toMatchObject({ name: 'Create', bodyMode: 'json' });
+    expect(v5.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
+    expect(v5.collections[0].requests[0].folderId).toBe(v5.collections[0].folders?.[0].id);
+    const applied = applyArtifactImport(cloneSeedWorkspace(), v5);
+    const appliedCollection = applied.collections.at(-1)!;
+    expect(appliedCollection.requests[0].folderId).toBe(appliedCollection.folders?.[0].id);
+    expect(appliedCollection.folders?.[0].id).not.toBe(v5.collections[0].folders?.[0].id);
   });
 
   it('preserves unsupported Insomnia real-time request details with explicit warnings', () => {
@@ -194,7 +202,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(9);
+    expect(second.version).toBe(10);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

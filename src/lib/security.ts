@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { AuditEvent, Workspace } from '../types';
 import { migrateWorkspace } from './storage';
 import { defaultPreferences } from './preferences';
+import { publicEnvironments } from './resources';
 
 export type VaultEntry = { id: string; name: string; value: string; updatedAt: string };
 export type VaultSession = { unlocked: boolean; passphrase: string; entries: VaultEntry[] };
@@ -82,21 +83,35 @@ const embeddedUrlCredential = /^[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s]+@/i;
 const sensitiveAuthFields = ['token', 'password', 'apiKeyValue', 'consumerSecret', 'tokenSecret', 'privateKey', 'clientSecret', 'accessToken', 'refreshToken', 'awsSecretAccessKey', 'awsSessionToken', 'hawkKey', 'asapPrivateKey', 'netrc'] as const;
 
 export const plaintextSecretCandidates = (workspace: Workspace): string[] => {
-  const candidates = workspace.environments.flatMap((environment) => environment.variables
+  const candidates = publicEnvironments(workspace.environments).flatMap((environment) => environment.variables
     .filter((variable) => variable.value && sensitiveVariable.test(variable.name) && !isProtectedSecretReference(variable.value))
     .map((variable) => `Environment ${environment.name}: ${variable.name}`));
-  workspace.collections.forEach((collection) => collection.requests.forEach((request) => {
-    sensitiveAuthFields.forEach((field) => {
-      const value = request.auth[field];
-      if (typeof value === 'string' && value && !isProtectedSecretReference(value)) candidates.push(`${collection.name} / ${request.name}: auth.${field}`);
+  const scanAuth = (label: string, auth: Workspace['collections'][number]['requests'][number]['auth']) => sensitiveAuthFields.forEach((field) => {
+    const value = auth[field];
+    if (typeof value === 'string' && value && !isProtectedSecretReference(value)) candidates.push(`${label}: auth.${field}`);
+  });
+  const scanRows = (label: string, kind: string, rows: Workspace['environments'][number]['variables']) => rows
+    .filter((row) => row.value && (kind === 'variable' ? sensitiveVariable.test(row.name) : isSensitiveSecretName(row.name)) && !isProtectedSecretReference(row.value))
+    .forEach((row) => candidates.push(`${label}: ${kind} ${row.name}`));
+  workspace.collections.forEach((collection) => {
+    scanRows(collection.name, 'variable', collection.environment ?? []);
+    (collection.folders ?? []).forEach((folder) => {
+      const label = `${collection.name} / ${folder.name}`;
+      if (folder.auth) scanAuth(label, folder.auth);
+      scanRows(label, 'header', folder.headers);
+      scanRows(label, 'variable', folder.environment);
     });
-    request.headers.filter((header) => header.value && isSensitiveSecretName(header.name) && !isProtectedSecretReference(header.value))
-      .forEach((header) => candidates.push(`${collection.name} / ${request.name}: header ${header.name}`));
-    request.params.filter((parameter) => parameter.value && isSensitiveSecretName(parameter.name) && !isProtectedSecretReference(parameter.value))
-      .forEach((parameter) => candidates.push(`${collection.name} / ${request.name}: query ${parameter.name}`));
-    if (embeddedUrlCredential.test(request.url) && !isProtectedSecretReference(request.url)) candidates.push(`${collection.name} / ${request.name}: URL credentials`);
-    if (request.transport.clientKeyPem && !isProtectedSecretReference(request.transport.clientKeyPem)) candidates.push(`${collection.name} / ${request.name}: client private key`);
-  }));
+    collection.requests.forEach((request) => {
+      const label = `${collection.name} / ${request.name}`;
+      scanAuth(label, request.auth);
+      request.headers.filter((header) => header.value && isSensitiveSecretName(header.name) && !isProtectedSecretReference(header.value))
+        .forEach((header) => candidates.push(`${label}: header ${header.name}`));
+      request.params.filter((parameter) => parameter.value && isSensitiveSecretName(parameter.name) && !isProtectedSecretReference(parameter.value))
+        .forEach((parameter) => candidates.push(`${label}: query ${parameter.name}`));
+      if (embeddedUrlCredential.test(request.url) && !isProtectedSecretReference(request.url)) candidates.push(`${label}: URL credentials`);
+      if (request.transport.clientKeyPem && !isProtectedSecretReference(request.transport.clientKeyPem)) candidates.push(`${label}: client private key`);
+    });
+  });
   workspace.mcpClients.forEach((client) => {
     if (client.token && !isProtectedSecretReference(client.token)) candidates.push(`MCP ${client.name}: bearer token`);
     if (client.password && !isProtectedSecretReference(client.password)) candidates.push(`MCP ${client.name}: password`);
@@ -108,30 +123,41 @@ export const plaintextSecretCandidates = (workspace: Workspace): string[] => {
   return candidates;
 };
 
-export const shareableWorkspace = (workspace: Workspace): Workspace => ({
-  ...structuredClone(workspace),
-  history: [],
-  runnerReports: [],
-  imports: [],
-  cookies: [],
-  responses: [],
-  project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
-  plugins: [],
-  pluginData: {},
-  activePluginTheme: '',
-  ai: { ...workspace.ai, enabled: false, apiKey: '' },
-  konnect: { ...workspace.konnect, enabled: false, token: '', controlPlanes: [], controlPlaneId: '' },
-  preferences: structuredClone(defaultPreferences),
-  collaboration: { ...workspace.collaboration, path: '' },
-});
+export const shareableWorkspace = (workspace: Workspace): Workspace => {
+  const environments = publicEnvironments(workspace.environments);
+  return {
+    ...structuredClone(workspace),
+    environments,
+    activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',
+    history: [],
+    runnerReports: [],
+    imports: [],
+    cookies: [],
+    responses: [],
+    project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
+    plugins: [],
+    pluginData: {},
+    activePluginTheme: '',
+    ai: { ...workspace.ai, enabled: false, apiKey: '' },
+    konnect: { ...workspace.konnect, enabled: false, token: '', controlPlanes: [], controlPlaneId: '' },
+    preferences: structuredClone(defaultPreferences),
+    collaboration: { ...workspace.collaboration, path: '' },
+  };
+};
 
 export const mergeSyncedWorkspace = (current: Workspace, payload: SyncPayload): Workspace => {
   const shared = migrateWorkspace(payload.workspace);
+  const currentPublicIds = new Set(publicEnvironments(current.environments).map((environment) => environment.id));
+  const privateEnvironments = current.environments.filter((environment) => !currentPublicIds.has(environment.id));
+  const privateIds = new Set(privateEnvironments.map((environment) => environment.id));
+  const sharedEnvironments = publicEnvironments(shared.environments).filter((environment) => !privateIds.has(environment.id));
   const currentMemberId = shared.governance.members.some((member) => member.id === current.governance.currentMemberId)
     ? current.governance.currentMemberId
     : shared.governance.currentMemberId;
   return {
     ...shared,
+    environments: [...sharedEnvironments, ...privateEnvironments],
+    activeEnvironmentId: privateEnvironments.some((environment) => environment.id === current.activeEnvironmentId) ? current.activeEnvironmentId : sharedEnvironments.some((environment) => environment.id === shared.activeEnvironmentId) ? shared.activeEnvironmentId : sharedEnvironments[0]?.id ?? privateEnvironments[0]?.id ?? '',
     history: current.history,
     runnerReports: current.runnerReports,
     imports: current.imports,

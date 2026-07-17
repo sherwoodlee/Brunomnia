@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
-import type { AiSettings, AppPreferences, AuditEvent, CollaborationConfig, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, ShortcutAction, Workspace } from '../types';
+import type { AiSettings, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ShortcutAction, Workspace } from '../types';
 import { normalizeGraphqlSchema } from './graphql';
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 
@@ -202,6 +202,86 @@ const normalizePreferences = (value: unknown): AppPreferences => {
   };
 };
 
+const normalizeFolders = (value: unknown, defaultAuth: AuthConfig): RequestFolder[] => {
+  const source = !Array.isArray(value) ? [] : value.slice(0, 1_000);
+  const folders = source.flatMap((item, index): RequestFolder[] => {
+    const folder = record(item);
+    if (!folder) return [];
+    const id = stringValue(folder.id, `migrated-folder-${index}`);
+    return [{
+      id,
+      name: stringValue(folder.name, `Folder ${index + 1}`),
+      parentId: stringValue(folder.parentId),
+      expanded: folder.expanded !== false,
+      headers: normalizeRows(folder.headers, `${id}-header`),
+      environment: normalizeRows(folder.environment, `${id}-environment`),
+      auth: folder.auth ? { ...defaultAuth, ...record(folder.auth) } as AuthConfig : undefined,
+      preRequestScript: stringValue(folder.preRequestScript),
+      tests: stringValue(folder.tests),
+      documentation: stringValue(folder.documentation),
+    }];
+  });
+  const ids = new Set(folders.map((folder) => folder.id));
+  const normalized = folders.map((folder) => ({ ...folder, parentId: folder.parentId !== folder.id && ids.has(folder.parentId) ? folder.parentId : '' }));
+  const byId = new Map(normalized.map((folder) => [folder.id, folder]));
+  normalized.forEach((folder) => {
+    const visited = new Set([folder.id]);
+    let current = folder;
+    while (current.parentId) {
+      if (visited.has(current.parentId)) {
+        folder.parentId = '';
+        break;
+      }
+      visited.add(current.parentId);
+      const parent = byId.get(current.parentId);
+      if (!parent) break;
+      current = parent;
+    }
+  });
+  return normalized;
+};
+
+const normalizeEnvironments = (value: unknown, fallback: Environment[]): Environment[] => {
+  if (!Array.isArray(value) || !value.length) return fallback;
+  const environments = value.slice(0, 500).flatMap((item, index): Environment[] => {
+    const environment = record(item);
+    if (!environment) return [];
+    const id = stringValue(environment.id, `migrated-environment-${index}`);
+    const color = stringValue(environment.color);
+    return [{ id, name: stringValue(environment.name, `Environment ${index + 1}`), variables: normalizeRows(environment.variables, `${id}-variable`), parentId: stringValue(environment.parentId), private: environment.private === true, color: /^#[0-9a-f]{6}$/i.test(color) ? color : '', source: environment.source as Environment['source'] }];
+  });
+  if (!environments.length) return fallback;
+  const ids = new Set(environments.map((environment) => environment.id));
+  const normalized = environments.map((environment) => ({ ...environment, parentId: environment.parentId !== environment.id && ids.has(environment.parentId ?? '') ? environment.parentId : '' }));
+  const byId = new Map(normalized.map((environment) => [environment.id, environment]));
+  normalized.forEach((environment) => {
+    const visited = new Set([environment.id]);
+    let current = environment;
+    while (current.parentId) {
+      if (visited.has(current.parentId)) {
+        environment.parentId = '';
+        break;
+      }
+      visited.add(current.parentId);
+      const parent = byId.get(current.parentId);
+      if (!parent) break;
+      current = parent;
+    }
+  });
+  for (let pass = 0; pass < normalized.length; pass += 1) {
+    let changed = false;
+    normalized.forEach((environment) => {
+      const parent = environment.parentId ? byId.get(environment.parentId) : undefined;
+      if (parent?.private && !environment.private) {
+        environment.private = true;
+        changed = true;
+      }
+    });
+    if (!changed) break;
+  }
+  return normalized;
+};
+
 export const migrateWorkspace = (value: unknown): Workspace => {
   if (!isWorkspaceEnvelope(value)) throw new Error('This is not a Brunomnia workspace export.');
   const seed = cloneSeedWorkspace();
@@ -212,11 +292,17 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const defaults = requestDefaults();
   const importedCollections = workspace.collections.map((collection) => ({
     ...collection,
+    folders: normalizeFolders(collection.folders, defaults.auth),
+    environment: normalizeRows(collection.environment, `${collection.id}-environment`),
+    documentation: stringValue(collection.documentation),
     requests: collection.requests.map((request) => {
       const graphql = record(request.graphql);
       return {
         ...defaults,
         ...request,
+        folderId: stringValue(request.folderId),
+        inheritFolderAuth: request.inheritFolderAuth === true,
+        documentation: stringValue(request.documentation),
         bodyMode: request.bodyMode ?? (request.method === 'GET' || request.method === 'HEAD' ? 'none' : 'json'),
         auth: { ...defaults.auth, ...request.auth },
         graphql: {
@@ -233,14 +319,17 @@ export const migrateWorkspace = (value: unknown): Workspace => {
       };
     }),
   }));
-  const collections = importedCollections.length ? importedCollections : seed.collections;
-  const environments = Array.isArray(workspace.environments) && workspace.environments.length ? workspace.environments : seed.environments;
+  const collections = (importedCollections.length ? importedCollections : seed.collections).map((collection) => {
+    const folderIds = new Set((collection.folders ?? []).map((folder) => folder.id));
+    return { ...collection, requests: collection.requests.map((request) => ({ ...request, folderId: request.folderId && folderIds.has(request.folderId) ? request.folderId : '' })) };
+  });
+  const environments = normalizeEnvironments(workspace.environments, seed.environments);
   const requestIds = new Set(collections.flatMap((collection) => collection.requests.map((request) => request.id)));
   const environmentIds = new Set(environments.map((environment) => environment.id));
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 9,
+    version: 10,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

@@ -109,7 +109,7 @@ Compatibility bounds remain explicit: Git credential setup uses the user's insta
 | Workspace migration | Complete | Versions 1–6 migrate to v7 collaboration/governance fields; malformed roles, policies, actors, audit events, revisions, and allowed storage modes are normalized safely |
 | Documentation and evidence | Complete | [Security and encrypted sync guide](SECURITY_AND_SYNC.md) and [Milestone 7 verification](QA_MILESTONE_7.md) |
 
-Compatibility bounds remain explicit: shared-file encryption uses one team passphrase rather than per-user public-key wrapping; synchronization is pull/push rather than real-time presence; server-mediated comments, per-resource Cloud Sync branches/history, offline merge UI, and automatic device discovery remain. Local roles are policy metadata and action checks, not strong identity authentication. Self-hosted SAML/OIDC login, SCIM provisioning, tamper-evident remote audit storage, provider SDK login flows, private-environment hierarchy, script vault access, and headless external-vault parity remain later closure work.
+Compatibility bounds remain explicit: shared-file encryption uses one team passphrase rather than per-user public-key wrapping; synchronization is pull/push rather than real-time presence; server-mediated comments, per-resource Cloud Sync branches/history, offline merge UI, and automatic device discovery remain. Local roles are policy metadata and action checks, not strong identity authentication. Self-hosted SAML/OIDC login, SCIM provisioning, tamper-evident remote audit storage, provider SDK login flows, script vault access, and headless external-vault parity remain later closure work.
 
 ## Milestone 8 — MCP, AI, and service integrations (complete baseline)
 
@@ -141,7 +141,22 @@ Compatibility bounds remain explicit: HTTP MCP OAuth discovery/redirect handling
 
 Compatibility bounds remain explicit: validation is structural plus cached root-field checking rather than a complete GraphQL language server; persisted queries, subscriptions, full nested selection/argument/type validation, and introspection-disabled manual schema import remain open. Scheduled stop cancels future runs but does not abort a request already in flight. Preferences do not yet cover every upstream action, accessibility has not received a full assistive-technology audit, and release packaging remains macOS debug-app evidence rather than signed cross-platform distribution.
 
-## Milestone 10 — remaining parity closure and release hardening
+## Milestone 10 — resource hierarchy and environments (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Nested request resources | Complete baseline | Arbitrarily nested folders with collapse/search/counting, request placement, safe parent changes, and delete-to-parent behavior |
+| Inherited folder configuration | Complete baseline | Root-to-leaf variables/headers/pre-request scripts, nearest optional authentication, and request-to-root after-response scripts across direct sends, GraphQL introspection, runner, and CLI |
+| Resource documentation | Complete baseline | Editable collection, folder, and request Markdown source with a local plain-text preview |
+| Environment hierarchy | Complete baseline | Base/sub-environment inheritance with child overrides, colors, parent changes, add/delete/reparent behavior, and resolved execution in desktop runner and CLI |
+| Private environments | Complete baseline | Device-local private sub-environment trees omitted from Brunomnia/Insomnia exports, split-YAML projects, and encrypted collaboration; active IDs are repaired and inherited folder secrets remain policy-scanned |
+| Interchange | Complete baseline | Insomnia v4/v5 nested folders and environment ancestry import/export without flattening request names; folder headers/auth/variables/scripts/docs round-trip within the supported compatibility model |
+| Workspace migration | Complete | Versions 1–9 migrate to v10 normalized folder/environment fields, bounded ancestry, cycle repair, private-descendant propagation, and collision-safe imported references |
+| Documentation and evidence | Complete | [Resource hierarchy guide](RESOURCE_HIERARCHY.md) and [Milestone 10 verification](QA_MILESTONE_10.md) |
+
+Compatibility bounds remain explicit: drag/drop ordering, bulk folder actions, rendered Markdown, environment-tree reordering, richer collected-data UI, and a full template-tag builder remain open. Private values are omitted rather than encrypted by private-environment storage itself; vault references remain the encrypted-secret path. Insomnia compatibility export cannot represent every Brunomnia hierarchy variant or unsupported protocol without the warnings already recorded by the interchange layer.
+
+## Milestone 11 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

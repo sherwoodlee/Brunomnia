@@ -203,7 +203,23 @@ export type ApiRequest = {
   transport: TransportConfig;
   preRequestScript: string;
   tests: string;
+  folderId?: string;
+  inheritFolderAuth?: boolean;
+  documentation?: string;
   source?: SourceMetadata;
+};
+
+export type RequestFolder = {
+  id: string;
+  name: string;
+  parentId: string;
+  expanded: boolean;
+  headers: KeyValue[];
+  environment: KeyValue[];
+  auth?: AuthConfig;
+  preRequestScript: string;
+  tests: string;
+  documentation: string;
 };
 
 export type Collection = {
@@ -211,6 +227,9 @@ export type Collection = {
   name: string;
   expanded: boolean;
   requests: ApiRequest[];
+  folders?: RequestFolder[];
+  environment?: KeyValue[];
+  documentation?: string;
   source?: SourceMetadata;
 };
 
@@ -218,6 +237,9 @@ export type Environment = {
   id: string;
   name: string;
   variables: KeyValue[];
+  parentId?: string;
+  private?: boolean;
+  color?: string;
   source?: SourceMetadata;
 };
 
@@ -234,7 +256,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 9;
+  version: 10;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -428,7 +450,7 @@ export type HttpResponse = {
   requestUrl?: string;
 };
 
-export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests';
+export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests' | 'docs';
 export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline' | 'tests';
 export type SidebarMode = 'collections' | 'history';
 export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins' | 'security' | 'integrations' | 'preferences';

@@ -4,6 +4,7 @@ import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openap
 import { buildHeaders, buildRequestUrl, resolveTemplate } from '../src/lib/request';
 import { parseRunnerData, runCollection } from '../src/lib/runner';
 import type { ApiDesign, ApiRequest, Environment, HttpResponse, ScriptRunResult, Workspace } from '../src/types';
+import { resolveEnvironment } from '../src/lib/resources';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -196,7 +197,8 @@ const main = async () => {
     const identifier = args[3] ?? fail('Provide a collection name or ID.');
     const collection = workspace.collections.find((candidate) => candidate.id === identifier || candidate.name === identifier) ?? fail(`Collection '${identifier}' was not found.`);
     const environmentIdentifier = flag('--env');
-    const environment: Environment = workspace.environments.find((candidate) => candidate.id === environmentIdentifier || candidate.name === environmentIdentifier) ?? workspace.environments[0] ?? fail('The workspace has no environment.');
+    const selectedEnvironment: Environment = workspace.environments.find((candidate) => candidate.id === environmentIdentifier || candidate.name === environmentIdentifier) ?? workspace.environments[0] ?? fail('The workspace has no environment.');
+    const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
     const dataPath = flag('--data');
     const report = await runCollection(collection, environment, {
       iterations: Number(flag('--iterations') ?? 1), retries: Number(flag('--retries') ?? 0), delayMs: 0,

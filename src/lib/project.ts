@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { Workspace } from '../types';
 import { migrateWorkspace } from './storage';
+import { publicEnvironments } from './resources';
 
 export type ProjectWriteResult = { path: string; filesWritten: number; filesUnchanged: number; filesRemoved: number };
 export type GitFileStatus = { path: string; indexStatus: string; worktreeStatus: string; staged: boolean; conflicted: boolean };
@@ -26,17 +27,22 @@ const nativeOnly = () => {
 
 export const writeProject = async (path: string, workspace: Workspace) => {
   nativeOnly();
-  return invoke<ProjectWriteResult>('project_write', { input: { path, workspace } });
+  const environments = publicEnvironments(workspace.environments);
+  return invoke<ProjectWriteResult>('project_write', { input: { path, workspace: { ...workspace, environments, activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '' } } });
 };
 
 export const readProject = async (path: string, current: Workspace): Promise<Workspace> => {
   nativeOnly();
   const project = await invoke<Partial<Workspace>>('project_read', { path });
+  const currentPublicIds = new Set(publicEnvironments(current.environments).map((environment) => environment.id));
+  const privateEnvironments = current.environments.filter((environment) => !currentPublicIds.has(environment.id));
+  const privateIds = new Set(privateEnvironments.map((environment) => environment.id));
+  const projectEnvironments = publicEnvironments(project.environments ?? []).filter((environment) => !privateIds.has(environment.id));
   return migrateWorkspace({
     ...current,
     ...project,
     format: 'brunomnia',
-    version: 9,
+    version: 10,
     history: current.history,
     runnerReports: current.runnerReports,
     imports: current.imports,
@@ -45,6 +51,8 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     plugins: current.plugins,
     pluginData: current.pluginData,
     activePluginTheme: current.activePluginTheme,
+    environments: [...projectEnvironments, ...privateEnvironments],
+    activeEnvironmentId: privateEnvironments.some((environment) => environment.id === current.activeEnvironmentId) ? current.activeEnvironmentId : project.activeEnvironmentId ?? current.activeEnvironmentId,
     project: { ...current.project, mode: current.project.mode === 'git' ? 'git' : 'folder', path },
   });
 };

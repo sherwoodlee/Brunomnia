@@ -7363,6 +7363,29 @@ var import_node_vm = __toESM(require("node:vm"), 1);
 // src/lib/openapi.ts
 var import_yaml = __toESM(require_dist(), 1);
 
+// src/lib/preferences.ts
+var defaultShortcuts = {
+  palette: "Mod+K",
+  preferences: "Mod+,",
+  send: "Mod+Enter",
+  environment: "Mod+E",
+  history: "Mod+Shift+H",
+  "toggle-sidebar": "Mod+\\",
+  "new-request": "Mod+N",
+  "duplicate-request": "Mod+D",
+  "delete-request": "Mod+Shift+Backspace",
+  "focus-url": "Mod+L"
+};
+var defaultPreferences = {
+  theme: "system",
+  density: "comfortable",
+  fontSize: 13,
+  requestTimeoutMs: 3e4,
+  autoFetchGraphqlSchema: true,
+  confirmDestructive: true,
+  shortcuts: { ...defaultShortcuts }
+};
+
 // src/data/seed.ts
 var createRequest = (id, name, method, url) => ({
   id,
@@ -7441,7 +7464,9 @@ var createRequest = (id, name, method, url) => ({
   graphql: {
     query: "query GetViewer {\n  viewer {\n    id\n    name\n  }\n}",
     variables: "{}",
-    operationName: "GetViewer"
+    operationName: "GetViewer",
+    schemaEndpoint: "",
+    schemaFetchedAt: ""
   },
   grpc: {
     service: "",
@@ -7497,11 +7522,14 @@ var collection = (id, name, requests) => ({
   id,
   name,
   expanded: true,
-  requests
+  requests,
+  folders: [],
+  environment: [],
+  documentation: ""
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 8,
+  version: 10,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -7545,18 +7573,31 @@ var seedWorkspace = {
   ],
   environments: [
     {
+      id: "base-environment",
+      name: "Base Environment",
+      variables: [
+        { id: "base-order-id", name: "orderId", value: "ord_abc123", enabled: true },
+        { id: "base-product-id", name: "productId", value: "prod_98765", enabled: true }
+      ],
+      parentId: "",
+      private: false,
+      color: "#7e8a91"
+    },
+    {
       id: "development",
       name: "Development",
-      variables: [
-        { id: "dev-base-url", name: "baseUrl", value: "https://api.acme.dev", enabled: true },
-        { id: "dev-order-id", name: "orderId", value: "ord_abc123", enabled: true },
-        { id: "dev-product-id", name: "productId", value: "prod_98765", enabled: true }
-      ]
+      variables: [{ id: "dev-base-url", name: "baseUrl", value: "https://api.acme.dev", enabled: true }],
+      parentId: "base-environment",
+      private: false,
+      color: "#66c68d"
     },
     {
       id: "production",
       name: "Production",
-      variables: [{ id: "prod-base-url", name: "baseUrl", value: "https://api.acme.com", enabled: true }]
+      variables: [{ id: "prod-base-url", name: "baseUrl", value: "https://api.acme.com", enabled: true }],
+      parentId: "base-environment",
+      private: false,
+      color: "#ff9d4a"
     }
   ],
   history: [],
@@ -7646,7 +7687,8 @@ paths:
   },
   mcpClients: [],
   ai: { enabled: false, provider: "openai-compatible", baseUrl: "http://127.0.0.1:11434/v1", model: "", apiKey: "", mockGeneration: false, commitSuggestions: false },
-  konnect: { enabled: false, baseUrl: "https://us.api.konghq.com", token: "", controlPlaneId: "", controlPlanes: [] }
+  konnect: { enabled: false, baseUrl: "https://us.api.konghq.com", token: "", controlPlaneId: "", controlPlanes: [] },
+  preferences: structuredClone(defaultPreferences)
 };
 var createBlankRequest = (id) => createRequest(id, "Untitled Request", "GET", "https://");
 
@@ -7925,6 +7967,65 @@ var buildHeaders = (request, variables) => {
   return headers;
 };
 
+// src/lib/resources.ts
+var rowMap = (rows, caseInsensitive) => {
+  const output = /* @__PURE__ */ new Map();
+  rows.forEach((row) => {
+    const name = row.name.trim();
+    if (!name) return;
+    output.set(caseInsensitive ? name.toLowerCase() : name, row);
+  });
+  return output;
+};
+var mergeRows = (layers, caseInsensitive = false) => {
+  const merged = /* @__PURE__ */ new Map();
+  layers.forEach((rows) => rowMap(rows, caseInsensitive).forEach((row, name) => merged.set(name, row)));
+  return [...merged.values()];
+};
+var resolveEnvironment = (environments, activeId) => {
+  const selected = environments.find((environment) => environment.id === activeId) ?? environments[0];
+  if (!selected) return void 0;
+  const byId = new Map(environments.map((environment) => [environment.id, environment]));
+  const chain = [];
+  const visited = /* @__PURE__ */ new Set();
+  let current = selected;
+  while (current && !visited.has(current.id) && chain.length < 20) {
+    visited.add(current.id);
+    chain.unshift(current);
+    current = current.parentId ? byId.get(current.parentId) : void 0;
+  }
+  return { ...selected, variables: mergeRows(chain.map((environment) => environment.variables)) };
+};
+var folderAncestors = (collection2, folderId) => {
+  if (!folderId) return [];
+  const byId = new Map((collection2.folders ?? []).map((folder) => [folder.id, folder]));
+  const chain = [];
+  const visited = /* @__PURE__ */ new Set();
+  let current = byId.get(folderId);
+  while (current && !visited.has(current.id) && chain.length < 20) {
+    visited.add(current.id);
+    chain.unshift(current);
+    current = current.parentId ? byId.get(current.parentId) : void 0;
+  }
+  return chain;
+};
+var joinedScripts = (scripts) => scripts.map((script) => script.trim()).filter(Boolean).join("\n\n");
+var applyCollectionConfiguration = (collection2, request, environment) => {
+  const folders = folderAncestors(collection2, request.folderId);
+  const nearestAuth = [...folders].reverse().find((folder) => folder.auth)?.auth;
+  return {
+    folders,
+    environment: { ...environment, variables: mergeRows([environment.variables, collection2.environment ?? [], ...folders.map((folder) => folder.environment)]) },
+    request: {
+      ...request,
+      headers: mergeRows([...folders.map((folder) => folder.headers), request.headers], true),
+      auth: request.inheritFolderAuth && nearestAuth ? structuredClone(nearestAuth) : request.auth,
+      preRequestScript: joinedScripts([...folders.map((folder) => folder.preRequestScript), request.preRequestScript]),
+      tests: joinedScripts([request.tests, ...[...folders].reverse().map((folder) => folder.tests)])
+    }
+  };
+};
+
 // src/lib/runner.ts
 var runId = () => `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 var wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -7947,7 +8048,9 @@ var runCollection = async (collection2, environment, options, executeRequest, ex
         break outer;
       }
       for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
-        let request = structuredClone(originalRequest);
+        const configured = applyCollectionConfiguration(collection2, originalRequest, environment);
+        variables = { ...variables, ...environmentMap(configured.environment), ...iterationData };
+        let request = structuredClone(configured.request);
         let response;
         let tests = [];
         let error;
@@ -8233,7 +8336,8 @@ var main = async () => {
     const identifier = args[3] ?? fail("Provide a collection name or ID.");
     const collection2 = workspace.collections.find((candidate) => candidate.id === identifier || candidate.name === identifier) ?? fail(`Collection '${identifier}' was not found.`);
     const environmentIdentifier = flag("--env");
-    const environment = workspace.environments.find((candidate) => candidate.id === environmentIdentifier || candidate.name === environmentIdentifier) ?? workspace.environments[0] ?? fail("The workspace has no environment.");
+    const selectedEnvironment = workspace.environments.find((candidate) => candidate.id === environmentIdentifier || candidate.name === environmentIdentifier) ?? workspace.environments[0] ?? fail("The workspace has no environment.");
+    const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
     const dataPath = flag("--data");
     const report = await runCollection(collection2, environment, {
       iterations: Number(flag("--iterations") ?? 1),

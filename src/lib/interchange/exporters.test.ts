@@ -8,13 +8,20 @@ describe('artifact export adapters', () => {
   it('round-trips Insomnia v4 and v5 compatibility exports', () => {
     const workspace = cloneSeedWorkspace();
     workspace.collections[0].requests[0].auth = { ...workspace.collections[0].requests[0].auth, type: 'hawk', hawkId: 'client', hawkKey: 'secret', hawkAlgorithm: 'sha256' };
+    workspace.collections[0].requests[0].documentation = 'Request docs';
+    workspace.collections[0].folders = [{ id: 'orders-folder', name: 'Secured orders', parentId: '', expanded: true, headers: [{ id: 'folder-header', name: 'X-Team', value: 'orders', enabled: true }], environment: [{ id: 'folder-variable', name: 'scope', value: 'orders', enabled: true }], auth: { ...workspace.collections[0].requests[0].auth, type: 'bearer', token: '{{ vault.orders }}' }, preRequestScript: 'folderPre();', tests: 'folderAfter();', documentation: 'Folder docs' }];
+    workspace.collections[0].requests[0].folderId = 'orders-folder';
     workspace.cookies = [{ id: 'cookie-session', name: 'session', value: 'abc', domain: 'api.acme.dev', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-16T12:00:00.000Z' }];
     const v4Export = exportArtifact(workspace, { format: 'insomnia-v4', scope: 'all' });
     const v4Import = importArtifact(v4Export.contents, v4Export.fileName);
     expect(v4Import.format).toBe('insomnia-v4');
     expect(v4Import.collections).toHaveLength(workspace.collections.length);
     expect(v4Import.collections.reduce((total, collection) => total + collection.requests.length, 0)).toBe(14);
+    expect(new Set(v4Import.collections.flatMap((collection) => collection.requests.map((request) => request.id))).size).toBe(14);
     expect(v4Import.collections[0].requests[0].auth).toMatchObject({ type: 'hawk', hawkId: 'client' });
+    expect(v4Import.collections[0].requests[0].documentation).toBe('Request docs');
+    expect(v4Import.collections[0].folders?.[0]).toMatchObject({ name: 'Secured orders', documentation: 'Folder docs' });
+    expect(v4Import.collections[0].requests[0].folderId).toBe(v4Import.collections[0].folders?.[0].id);
     expect(v4Import.cookies[0]).toMatchObject({ name: 'session', sameSite: 'lax' });
     expect(v4Import.cookies).toHaveLength(1);
 
@@ -22,8 +29,13 @@ describe('artifact export adapters', () => {
     const v5Import = importArtifact(v5Export.contents, v5Export.fileName);
     expect(v5Import.format).toBe('insomnia-v5');
     expect(v5Import.collections.length).toBeGreaterThanOrEqual(workspace.collections.length);
+    const v5RequestIds = v5Import.collections.flatMap((collection) => collection.requests.map((request) => request.id));
+    expect(new Set(v5RequestIds).size).toBe(v5RequestIds.length);
     expect(v5Import.mockServers[0].routes[0].status).toBe(200);
     expect(v5Import.collections[0].requests[0].auth).toMatchObject({ type: 'hawk', hawkId: 'client' });
+    expect(v5Import.collections[0].requests[0].documentation).toBe('Request docs');
+    expect(v5Import.collections[0].folders?.[0]).toMatchObject({ name: 'Secured orders', documentation: 'Folder docs' });
+    expect(v5Import.collections[0].requests[0].folderId).toBe(v5Import.collections[0].folders?.[0].id);
     expect(v5Import.cookies[0]).toMatchObject({ name: 'session', sameSite: 'lax' });
   });
 
@@ -43,7 +55,7 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(9);
+    expect(parsed.version).toBe(10);
 
     const design = workspace.apiDesigns[0];
     const spec = exportArtifact(workspace, { format: 'openapi', scope: 'design', designId: design.id });
