@@ -686,7 +686,23 @@ Compatibility bounds remain explicit: persisted responses contain decoded aggreg
 
 Compatibility bounds remain explicit: the dependency-free JSONPath baseline does not yet implement predicates, unions, slices, or script expressions. XPath execution depends on the standards-based desktop/browser DOM rather than the Node-only test runner. Response filter metadata is bounded but remains part of the local workspace store. The pinned current Insomnia history component has no response-comparison action, so the earlier generic comparison gap is removed rather than implemented without source evidence. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 47 — remaining parity closure and release hardening
+## Milestone 47 — large-response preview safety (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Source-matched thresholds | Complete | Strict greater-than checks use the pinned upstream 5 MiB large and 100 MiB huge constants, with finite/non-negative normalization |
+| Large response guard | Complete baseline | Responses over 5 MiB avoid preview prettification, filter evaluation, line splitting, and DOM row construction until explicitly shown |
+| Session reveal | Complete baseline | Show anyway reveals only the current response; Always show applies to subsequent 5–100 MiB responses for the current renderer session |
+| Huge response guard | Complete baseline | Responses over 100 MiB remain hidden and cannot reach the filtered/pretty preview surface |
+| Download escape hatch | Complete baseline | Both guards expose the established raw UTF-8 response artifact without forcing a preview render |
+| Non-preview isolation | Complete | Status, headers, cookies, timeline, tests, history selection, and explicit export actions remain available while Preview is blocked |
+| Bundle boundary | Complete | Threshold and guarded-preview logic stays in the lazy response-preview chunk; the main production bundle remains below the warning threshold |
+| Executable coverage | Complete baseline | Focused tests pin both byte constants, exact-boundary behavior, strict greater-than transitions, and invalid/negative normalization |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 47 verification](QA_MILESTONE_47.md) |
+
+Compatibility bounds remain explicit: Brunomnia currently loads decoded UTF-8 response text into its workspace state before the preview component receives it. This phase prevents expensive renderer transformations and rows but does not implement Insomnia's filesystem-backed body buffer, deferred body read, compressed/raw byte preservation, or byte-exact binary export. The 100 MiB guard remains absolute even after Always show. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 48 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

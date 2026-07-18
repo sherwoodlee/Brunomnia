@@ -611,6 +611,10 @@ kbd {
 .response-filter-bar button { background: transparent; border: 0; color: var(--muted); font: 10px var(--font-mono); }
 .response-filter-bar small { color: var(--muted); font: 10px var(--font-mono); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .response-filter-bar small.bad { color: var(--red); }
+.response-size-warning { align-items: center; align-self: center; background: var(--panel-soft); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 9px; margin: auto; max-width: 560px; padding: 22px; text-align: center; }
+.response-size-warning > span { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.response-size-warning > div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.response-size-warning button { background: var(--button); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 7px 10px; }
 .footer-spacer { flex: 1; }
 
 .test-results { padding: 16px; }
