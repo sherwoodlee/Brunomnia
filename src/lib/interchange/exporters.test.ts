@@ -9,6 +9,7 @@ describe('artifact export adapters', () => {
     const workspace = cloneSeedWorkspace();
     workspace.collections[0].requests[0].auth = { ...workspace.collections[0].requests[0].auth, type: 'hawk', hawkId: 'client', hawkKey: 'secret', hawkAlgorithm: 'sha256' };
     workspace.collections[0].requests[0].documentation = 'Request docs';
+    workspace.collections[0].requests[0].transport = { ...workspace.collections[0].requests[0].transport, followRedirects: false, followRedirectsMode: 'off' };
     workspace.collections[0].requests[0].method = 'PROPFIND';
     workspace.collections[0].requests[0].url = 'https://api.acme.dev/v1/orders/{orderId}';
     workspace.collections[0].requests[0].pathParams = [{ id: 'order-id', name: 'orderId', value: 'ord/one', enabled: true, description: 'Order identifier' }];
@@ -27,6 +28,7 @@ describe('artifact export adapters', () => {
     expect(new Set(v4Import.collections.flatMap((collection) => collection.requests.map((request) => request.id))).size).toBe(14);
     expect(v4Import.collections[0].requests[0].auth).toMatchObject({ type: 'hawk', hawkId: 'client' });
     expect(v4Import.collections[0].requests[0].documentation).toBe('Request docs');
+    expect(v4Import.collections[0].requests[0].transport.followRedirectsMode).toBe('off');
     expect(v4Import.collections[0].requests[0]).toMatchObject({ method: 'PROPFIND', url: 'https://api.acme.dev/v1/orders/{orderId}' });
     expect(v4Import.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'orderId', value: 'ord/one', description: 'Order identifier' });
     expect(v4Import.collections[0].requests[0].headers[0].description).toBe('Payload type');
@@ -46,6 +48,7 @@ describe('artifact export adapters', () => {
     expect(v5Import.mockServers[0].routes[0].status).toBe(200);
     expect(v5Import.collections[0].requests[0].auth).toMatchObject({ type: 'hawk', hawkId: 'client' });
     expect(v5Import.collections[0].requests[0].documentation).toBe('Request docs');
+    expect(v5Import.collections[0].requests[0].transport.followRedirectsMode).toBe('off');
     expect(v5Import.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'orderId', value: 'ord/one', description: 'Order identifier' });
     expect(v5Import.collections[0].folders?.[0]).toMatchObject({ name: 'Secured orders', documentation: 'Folder docs' });
     expect(v5Import.collections[0].requests[0].folderId).toBe(v5Import.collections[0].folders?.[0].id);

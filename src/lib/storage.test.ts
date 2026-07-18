@@ -39,7 +39,8 @@ describe('workspace migrations', () => {
     expect(migrated.mcpClients).toEqual([]);
     expect(migrated.ai.enabled).toBe(false);
     expect(migrated.konnect.baseUrl).toBe('https://us.api.konghq.com');
-    expect(migrated.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, autoFetchGraphqlSchema: true });
+    expect(migrated.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, autoFetchGraphqlSchema: true });
+    expect(migrated.collections[0].requests[0].transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global' });
     expect(migrated.preferences).toMatchObject({ scriptTimeoutMs: 10_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
     expect(migrated.preferences.shortcuts['generate-code']).toBe('Mod+Shift+G');
     expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaEndpoint: '', schemaFetchedAt: '' });
@@ -153,7 +154,7 @@ describe('workspace migrations', () => {
     }];
     exported.ai = { ...exported.ai, enabled: true, apiKey: 'raw-ai-key', mockGeneration: true, commitSuggestions: true };
     exported.konnect = { ...exported.konnect, enabled: true, token: 'raw-konnect-token' };
-    exported.preferences = { ...exported.preferences, theme: 'light', preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, maxHistoryResponses: -1, filterResponsesByEnv: true, requestTimeoutMs: 123_000, allowScriptRequests: true, allowScriptFileAccess: true, enableVaultInScripts: true };
+    exported.preferences = { ...exported.preferences, theme: 'light', preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 99, maxHistoryResponses: -1, filterResponsesByEnv: true, requestTimeoutMs: 123_000, allowScriptRequests: true, allowScriptFileAccess: true, enableVaultInScripts: true };
 
     const imported = parseWorkspaceImport(JSON.stringify(exported));
     expect(imported.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
@@ -162,14 +163,14 @@ describe('workspace migrations', () => {
     expect(imported.mcpClients[0]).toMatchObject({ enabled: false, token: '', password: '' });
     expect(imported.ai).toMatchObject({ enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false });
     expect(imported.konnect).toMatchObject({ enabled: false, token: '' });
-    expect(imported.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
+    expect(imported.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
   });
 
   it('normalizes preference bounds and shortcut values', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
-    workspace.preferences = { theme: 'unknown', density: 'compact', fontSize: 99, preferredHttpVersion: 'http3', maxRedirects: -99.8, maxHistoryResponses: -400.2, filterResponsesByEnv: 'yes', requestTimeoutMs: 1, scriptTimeoutMs: 999_999, allowScriptRequests: 'yes', allowScriptFileAccess: 'yes', enableVaultInScripts: 1, shortcuts: { palette: ' mod + shift + p ', send: 42 } };
+    workspace.preferences = { theme: 'unknown', density: 'compact', fontSize: 99, preferredHttpVersion: 'http3', maxRedirects: -99.8, followRedirects: 'sometimes', maxTimelineDataSizeKB: -400.2, maxHistoryResponses: -400.2, filterResponsesByEnv: 'yes', requestTimeoutMs: 1, scriptTimeoutMs: 999_999, allowScriptRequests: 'yes', allowScriptFileAccess: 'yes', enableVaultInScripts: 1, shortcuts: { palette: ' mod + shift + p ', send: 42 } };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 20, preferredHttpVersion: 'default', maxRedirects: -1, maxHistoryResponses: -1, filterResponsesByEnv: false, requestTimeoutMs: 1_000, scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
+    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 20, preferredHttpVersion: 'default', maxRedirects: -1, followRedirects: true, maxTimelineDataSizeKB: 0, maxHistoryResponses: -1, filterResponsesByEnv: false, requestTimeoutMs: 1_000, scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
     expect(migrated.preferences.shortcuts.palette).toBe('Mod+Shift+P');
     expect(migrated.preferences.shortcuts.send).toBe('Mod+Enter');
   });
@@ -178,16 +179,33 @@ describe('workspace migrations', () => {
     const workspace = cloneSeedWorkspace();
     workspace.preferences.preferredHttpVersion = 'http2-prior-knowledge';
     workspace.preferences.maxRedirects = -1;
+    workspace.preferences.followRedirects = false;
+    workspace.preferences.maxTimelineDataSizeKB = 77;
     workspace.preferences.maxHistoryResponses = -1;
     workspace.preferences.filterResponsesByEnv = true;
-    expect(migrateWorkspace(workspace).preferences).toMatchObject({ preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, maxHistoryResponses: -1, filterResponsesByEnv: true });
+    expect(migrateWorkspace(workspace).preferences).toMatchObject({ preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 77, maxHistoryResponses: -1, filterResponsesByEnv: true });
+  });
+
+  it('migrates legacy redirect booleans and preserves supported three-state overrides', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    const requests = (workspace.collections as Array<{ requests: Array<{ transport: Record<string, unknown> }> }>)[0].requests;
+    delete requests[0].transport.followRedirectsMode;
+    requests[0].transport.followRedirects = false;
+    requests[1].transport.followRedirectsMode = 'on';
+    requests[1].transport.followRedirects = false;
+    requests[2].transport.followRedirectsMode = 'global';
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.collections[0].requests[0].transport).toMatchObject({ followRedirects: false, followRedirectsMode: 'off' });
+    expect(migrated.collections[0].requests[1].transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'on' });
+    expect(migrated.collections[0].requests[2].transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global' });
   });
 
   it('adds stable local identity fields to legacy stored responses', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
-    workspace.responses = [{ requestId: 'request', requestName: 'Legacy', requestUrl: 'https://example.test', receivedAt: '2026-07-17T00:00:00.000Z', status: 200, statusText: 'OK', headers: {}, body: '', durationMs: 1, sizeBytes: 0 }];
+    workspace.responses = [{ requestId: 'request', requestName: 'Legacy', requestUrl: 'https://example.test', receivedAt: '2026-07-17T00:00:00.000Z', status: 200, statusText: 'OK', headers: {}, body: '', durationMs: 1, sizeBytes: 0, timeline: [{ name: 'DataOut', value: '(12 KiB hidden)', elapsedMs: -3, hidden: true }, null] }];
 
-    expect(migrateWorkspace(workspace).responses[0]).toMatchObject({ id: 'legacy-response-0', environmentId: '', requestId: 'request' });
+    expect(migrateWorkspace(workspace).responses[0]).toMatchObject({ id: 'legacy-response-0', environmentId: '', requestId: 'request', timeline: [{ name: 'DataOut', value: '(12 KiB hidden)', elapsedMs: 0, hidden: true }] });
   });
 
   it('breaks malformed resource cycles and keeps private descendants device-local', () => {

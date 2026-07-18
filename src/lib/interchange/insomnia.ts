@@ -139,7 +139,11 @@ const mapInsomniaRequest = (
   request.preRequestScript = joinScripts(inherited.preRequestScript, raw.preRequestScript, scripts?.preRequest);
   request.tests = joinScripts(inherited.tests, raw.afterResponseScript, scripts?.afterResponse);
   const settings = asRecord(raw.settings);
-  if (settings?.followRedirects === 'off') request.transport.followRedirects = false;
+  const followRedirectsMode = raw.settingFollowRedirects ?? settings?.followRedirects;
+  if (followRedirectsMode === 'global' || followRedirectsMode === 'on' || followRedirectsMode === 'off') {
+    request.transport.followRedirectsMode = followRedirectsMode;
+    request.transport.followRedirects = followRedirectsMode !== 'off';
+  }
   const unsupported: Record<string, JsonValue> = { ...(request.source?.unsupported ?? {}) };
   if (isSocketIo) {
     unsupported.socketIo = toJsonValue({ eventListeners: raw.eventListeners, pathParameters: raw.pathParameters, settings: raw.settings });

@@ -60,6 +60,7 @@ message Order { string id = 1; string status = 2; double total = 3; }`,
   },
   transport: {
     followRedirects: true,
+    followRedirectsMode: 'global',
     timeoutMs: 60000,
     validateCertificates: true,
     proxyUrl: '',

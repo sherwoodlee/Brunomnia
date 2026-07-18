@@ -27,15 +27,25 @@ If an ordinary response body fails specifically during content decoding, Brunomn
 
 ## Redirect policy
 
-Each request keeps a **Follow HTTP redirects** switch in its Transport tab. Preferences adds a device-local **Maximum redirects** ceiling shared by native HTTP, GraphQL, Event Stream, collection-run, script/plugin, artifact-import, OAuth, AI, MCP, Konnect, and Git-AI traffic. `0` rejects the first redirect, positive integers allow that many hops, and `-1` follows without a hop ceiling. Turning the per-request switch off always disables redirects.
+Preferences keeps a device-local **Follow redirects by default** choice. Each request selects **Use Preferences**, **Always**, or **Never** in its Transport tab, so a request can inherit that default or override it in either direction. Existing requests that disabled redirects migrate to Never; other existing requests migrate to Use Preferences. Insomnia v4/v5 imports and exports preserve the same `global`/`on`/`off` states.
 
-Finite and unlimited chains remain subject to an ordinary request's deadline. Event Streams use the request timeout while waiting for response headers—including redirects—then remove the total deadline from the active stream. Browser development mode uses Fetch's own redirect behavior because Fetch does not expose a maximum-hop control.
+Preferences also provides a device-local **Maximum redirects** ceiling shared by native HTTP, GraphQL, Event Stream, collection-run, script/plugin, artifact-import, OAuth, AI, MCP, Konnect, and Git-AI traffic. `0` rejects the first redirect, positive integers allow that many hops, and `-1` follows without a hop ceiling. Never always disables redirects regardless of the ceiling; security-sensitive internal adapter requests deliberately select Never.
+
+Finite and unlimited chains remain subject to an ordinary request's deadline. Event Streams use the request timeout while waiting for response headers—including redirects—then remove the total deadline from the active stream. Browser development mode honors the effective follow/no-follow choice through Fetch, but Fetch does not expose a maximum-hop control.
 
 ## Response history
 
 After a request completes, use the history selector in the response summary to reopen an earlier saved result. Saved entries retain the response body, headers, status, timing, negotiated protocol, request URL, request identity, active environment identity, and receipt time. Selecting another request restores its newest eligible response instead of leaving the previous request's result on screen.
 
 Preferences defaults to 20 saved responses per request. Positive numbers keep that many, `0` keeps the just-completed result live without saving it, and `-1` retains all. **Filter response history by active environment** restricts both the selector and response template tags to the active global environment; future pruning then applies per request/environment pair. Existing entries are pruned only when that request next stores a response. Response history is omitted from project sharing and encrypted-sync payloads.
+
+## Timeline evidence
+
+The Timeline tab persists prepared request and aggregate response evidence with each saved response. It records the resolved method and URL, eligible outgoing data, status and decoded response size, negotiated native protocol when available, and completion timing.
+
+**Max timeline chunk size (KiB)** defaults to 10. Outgoing data whose UTF-8 or decoded payload size is below the threshold is shown; data exactly at or above it is replaced by a size-only hidden marker. A zero value follows current Insomnia's 1 KiB fallback. Text, JSON, GraphQL, and repeated URL-encoded fields retain inspectable content. Binary data remains filename/size-only. Multipart entries list configured part names, values, filenames, and logical size but explicitly exclude generated wire framing.
+
+Brunomnia's Rust and Fetch transports do not expose libcurl-style debug callback boundaries, so response transfer evidence is one decoded aggregate-size record rather than a row per raw network chunk. Full response content stays in Preview and saved response history. Raw transport-added headers, TLS diagnostics, redirect hops, exact multipart framing, and raw compressed-byte accounting remain parity gaps.
 
 ## Generate client code
 

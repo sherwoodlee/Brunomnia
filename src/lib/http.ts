@@ -4,12 +4,16 @@ import { applyAdvancedAuth } from './auth';
 import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
 import { renderTemplate } from './templates';
+import { buildResponseTimeline } from './timeline';
+import { resolveFollowRedirects } from './transport';
 
 export type SendRequestContext = {
   cookies?: CookieRecord[];
   responses?: StoredResponse[];
   preferredHttpVersion?: PreferredHttpVersion;
   maxRedirects?: number;
+  followRedirects?: boolean;
+  maxTimelineDataSizeKB?: number;
   filterResponsesByEnv?: boolean;
   vault?: Record<string, string>;
   externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
@@ -35,9 +39,9 @@ const browserBody = (request: ApiRequest, variables: Record<string, string>): Bo
   if (request.method === 'GET' || request.method === 'HEAD' || request.bodyMode === 'none') return undefined;
   if (request.protocol === 'graphql') return graphqlBody(request, variables);
   if (request.bodyMode === 'form-urlencoded') {
-    return new URLSearchParams(Object.fromEntries(request.formBody
+    return new URLSearchParams(request.formBody
       .filter((row) => row.enabled && row.name)
-      .map((row) => [resolveTemplate(row.name, variables), resolveTemplate(row.value, variables)])));
+      .map((row) => [resolveTemplate(row.name, variables), resolveTemplate(row.value, variables)]));
   }
   if (request.bodyMode === 'multipart') {
     const body = new FormData();
@@ -110,6 +114,8 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     ? { ...context, responses: (context.responses ?? []).filter((response) => response.environmentId === environment?.id) }
     : context;
   const prepared = await renderRequest(hooked, variables, renderContext);
+  const followRedirects = resolveFollowRedirects(prepared.transport, context.followRedirects ?? true);
+  const graphqlPayload = prepared.protocol === 'graphql' ? graphqlBody(prepared, variables) : undefined;
   const finish = async (response: HttpResponse) => context.pluginRuntime
     ? context.pluginRuntime.afterResponse(prepared, response)
     : response;
@@ -143,10 +149,14 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
   const authenticated = await applyAdvancedAuth(prepared, variables, { url, headers, body: signingBody(prepared, variables) });
   url = authenticated.url;
   headers = authenticated.headers;
+  const withTimeline = (response: HttpResponse): HttpResponse => {
+    const output = { ...response, requestUrl: url };
+    return { ...output, timeline: buildResponseTimeline(prepared, url, output, context.maxTimelineDataSizeKB ?? 10, graphqlPayload) };
+  };
 
   if (isTauri()) {
     const body = prepared.protocol === 'graphql'
-      ? graphqlBody(prepared, variables)
+      ? graphqlPayload!
       : prepared.body;
     const output = await invoke<HttpResponse>('send_http_request', {
       input: {
@@ -160,6 +170,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         binaryBody: prepared.binaryBody,
         transport: {
           ...prepared.transport,
+          followRedirects,
           preferredHttpVersion: context.preferredHttpVersion ?? 'default',
           maxRedirects: context.maxRedirects ?? 10,
         },
@@ -174,12 +185,12 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         },
       },
     });
-    return finish({ ...output, requestUrl: url });
+    return finish(withTimeline(output));
   }
 
   if (new URL(url).hostname === 'api.acme.dev') {
     await new Promise((resolve) => window.setTimeout(resolve, 380));
-    return finish({ ...mockResponse(), requestUrl: url });
+    return finish(withTimeline(mockResponse()));
   }
 
   const startedAt = performance.now();
@@ -187,20 +198,19 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     method: prepared.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled).map((header) => [header.name, header.value])),
     body: browserBody(prepared, variables),
-    redirect: prepared.transport.followRedirects ? 'follow' : 'manual',
+    redirect: followRedirects ? 'follow' : 'manual',
     signal: AbortSignal.timeout(prepared.transport.timeoutMs),
     credentials: prepared.transport.sendCookies ? 'include' : 'omit',
   });
   const body = await response.text();
-  return finish({
+  return finish(withTimeline({
     status: response.status,
     statusText: response.statusText,
     headers: Object.fromEntries(response.headers.entries()),
     body,
     durationMs: Math.round(performance.now() - startedAt),
     sizeBytes: new Blob([body]).size,
-    requestUrl: url,
-  });
+  }));
 };
 
 export type OAuth2TokenResult = {

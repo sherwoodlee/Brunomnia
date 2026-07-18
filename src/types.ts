@@ -153,6 +153,7 @@ export type GrpcConfig = {
 
 export type TransportConfig = {
   followRedirects: boolean;
+  followRedirectsMode: 'global' | 'on' | 'off';
   timeoutMs: number;
   validateCertificates: boolean;
   proxyUrl: string;
@@ -193,6 +194,13 @@ export type StoredResponse = HttpResponse & {
   requestUrl: string;
   environmentId: string;
   receivedAt: string;
+};
+
+export type ResponseTimelineEntry = {
+  name: 'Text' | 'DataOut';
+  value: string;
+  elapsedMs: number;
+  hidden?: boolean;
 };
 
 export type ApiRequest = {
@@ -313,6 +321,8 @@ export type AppPreferences = {
   fontSize: number;
   preferredHttpVersion: PreferredHttpVersion;
   maxRedirects: number;
+  followRedirects: boolean;
+  maxTimelineDataSizeKB: number;
   maxHistoryResponses: number;
   filterResponsesByEnv: boolean;
   requestTimeoutMs: number;
@@ -481,6 +491,7 @@ export type HttpResponse = {
   setCookies?: string[];
   requestUrl?: string;
   httpVersion?: string;
+  timeline?: ResponseTimelineEntry[];
 };
 
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests' | 'docs';
