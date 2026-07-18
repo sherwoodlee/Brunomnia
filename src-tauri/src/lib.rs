@@ -327,6 +327,11 @@ async fn project_git_push(
 }
 
 #[tauri::command]
+async fn project_git_validate_remote_access(path: String, remote: String) -> Result<(), String> {
+    blocking(move || project::git_validate_remote_access(path, remote)).await
+}
+
+#[tauri::command]
 async fn project_git_merge(
     path: String,
     branch: String,
@@ -544,6 +549,7 @@ pub fn run() {
             project_git_set_remote,
             project_git_pull,
             project_git_push,
+            project_git_validate_remote_access,
             project_git_merge,
             project_git_abort_merge,
             project_git_conflicts,

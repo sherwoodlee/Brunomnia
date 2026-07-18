@@ -1029,7 +1029,22 @@ Compatibility bounds remain explicit: commit-and-push is a two-step local/networ
 
 Compatibility bounds remain explicit: Brunomnia intentionally requires a completely clean tracked/untracked working state before branch merge even where native Git could merge non-overlapping local edits. This does not add stash, autostash, rebase, cherry-pick, hunk staging, force operations, or automatic conflict cleanup. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 68 — remaining parity closure and release hardening
+## Milestone 68 — commit-and-push remote access preflight (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` validates repository credentials before creating commits requested with the push option |
+| Native preflight | Complete baseline | A dedicated read-only command validates the configured remote name and runs `git ls-remote --heads` through the installed Git credential helper/SSH path |
+| Commit ordering | Complete | Commit-and-push awaits remote access before invoking commit, preventing clear connectivity/read-auth failures from creating an avoidable local commit |
+| Repository preservation | Complete | Validation changes no files, index entries, refs, or `HEAD`; it returns the native Git failure through the shared workbench error path |
+| Later push failure | Complete | Write authorization, branch policy, non-fast-forward races, and post-preflight outages can still reject push; the already-created local commit remains explicit and retryable |
+| Executable coverage | Complete baseline | A local bare-remote fixture proves successful access leaves `HEAD` and status unchanged and an unknown configured remote is refused before Git execution |
+| Bundle boundary | Complete | The renderer remains below the 500 kB warning line and remote access runs in a blocking native task rather than the UI thread |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 68 verification](QA_MILESTONE_68.md) |
+
+Compatibility bounds remain explicit: `ls-remote` proves reachability and read authentication, not write permission or branch acceptance. There remains an unavoidable race between preflight, local commit, and push; Brunomnia preserves the commit and reports any later push failure rather than attempting history rewriting. The installed Git client owns credential prompts/helpers, and no provider token or hosted Brunomnia account is introduced. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 69 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
