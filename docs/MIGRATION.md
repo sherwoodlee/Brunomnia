@@ -717,7 +717,7 @@ Compatibility bounds at this milestone were explicit: Brunomnia loaded decoded U
 | Executable coverage | Complete baseline | Storage tests cover valid raw persistence, invalid/legacy fallback to source, bounded filters, and stale-key removal; the clean TypeScript and app builds verify every mode branch |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 48 verification](QA_MILESTONE_48.md) |
 
-Compatibility bounds at this milestone were explicit: Visual Preview did not yet implement byte-backed image, PDF, audio, CSV-table, multipart, or charset-aware viewers. CSV and decoded-text multipart arrive in Milestones 49–50; Milestone 51 preserves underlying decoded entity bytes while Raw/Copy remain UTF-8 inspection surfaces. HTML visual mode intentionally blocks scripts, forms, privileged navigation, and remote resources; it is safer but less interactive than upstream's optional JavaScript WebView. Image/PDF/audio, charset-aware text, and byte-backed multipart viewers remain open. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: Visual Preview did not yet implement byte-backed image, PDF, audio, CSV-table, multipart, or charset-aware viewers. CSV and decoded-text multipart arrive in Milestones 49–50; Milestone 51 preserves underlying decoded entity bytes; and Milestone 52 adds image/PDF/audio viewers while Raw/Copy remain UTF-8 inspection surfaces. HTML visual mode intentionally blocks scripts, forms, privileged navigation, and remote resources; it is safer but less interactive than upstream's optional JavaScript WebView. Charset-aware text and byte-backed multipart viewers remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
 ## Milestone 49 — CSV response preview (complete baseline)
 
@@ -768,7 +768,24 @@ Compatibility bounds remain explicit: parsing operates on Brunomnia's decoded UT
 
 Compatibility bounds remain explicit: preserved bytes are the HTTP entity after reqwest/browser content decoding, not compressed wire bytes. Brunomnia still buffers bodies before applying preview limits and persists them in the device-local workspace instead of Insomnia's filesystem-backed/deferred body paths. Charset-aware text decoding, byte-backed multipart parsing, image/PDF/audio viewers, native save dialogs, and raw transport/header timelines remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 52 — remaining parity closure and release hardening
+## Milestone 52 — byte-backed media response previews (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Media routing | Complete baseline | Visual Preview recognizes normalized declared `image/*`, `application/pdf`, and `audio/*` media types while Source and Raw retain textual inspection behavior |
+| Exact byte artifacts | Complete | Every viewer receives a correctly typed Blob built from the Phase 51 decoded entity bytes, including responses whose UTF-8 inspection text is lossy |
+| Image viewer | Complete baseline | Images scale within a centered scrollable surface without HTML insertion or a remote request |
+| PDF viewer | Complete baseline | PDFs render in a titled full-surface iframe backed by a local Blob URL |
+| Audio viewer | Complete baseline | Audio uses accessible native WebView controls in a bounded centered layout |
+| Lifecycle and errors | Complete | Media URLs are created only after the large-response guard, revoked on unmount/change, and paired with explicit preparing, empty-body, creation, and decoder-error states |
+| Export continuity | Complete baseline | Raw export remains byte-exact and now derives common PDF/image/audio plus octet-stream filename extensions without a new dependency |
+| Bundle boundary | Complete | Media parsing/artifact/UI code stays in the lazy response-preview/download chunks; the 497,345-byte main bundle is unchanged and below the warning threshold |
+| Executable coverage | Complete baseline | Focused tests cover case/parameter normalization, invalid media types, exact invalid-UTF-8 byte recovery, Blob type/content, and binary extension behavior; complete frontend/native/CLI/app gates remain green within the recorded sandbox limit |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 52 verification](QA_MILESTONE_52.md) |
+
+Compatibility bounds remain explicit: routing trusts the declared Content-Type rather than sniffing media signatures. Actual image/audio codecs and embedded PDF controls depend on the operating-system WebView, and corrupt-media load events vary by engine. Viewers still require the complete body in memory and do not implement zoom/waveform/transcript tooling. Charset-aware text, byte-backed/recursive multipart parsing, filesystem-backed response bodies, and interactive HTML remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 53 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
