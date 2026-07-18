@@ -3,7 +3,7 @@ use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, Output},
 };
@@ -905,6 +905,55 @@ pub fn git_diff(path: String, staged: bool) -> Result<String, String> {
     Ok(output_text(&output.stdout))
 }
 
+pub fn git_file_diff(path: String, staged: bool, file: String) -> Result<String, String> {
+    let root = project_root(&path, false)?;
+    let relative = safe_relative(&file)?;
+    let status = git_status(root.to_string_lossy().into_owned())?;
+    let Some(changed) = status.files.iter().find(|changed| changed.path == file) else {
+        return Err(format!("'{file}' is not a current Git change."));
+    };
+    if staged && !changed.staged {
+        return Err(format!("'{file}' has no staged Git change."));
+    }
+    if !staged && changed.worktree_status == " " {
+        return Err(format!("'{file}' has no unstaged Git change."));
+    }
+    if changed.index_status == "?" && changed.worktree_status == "?" {
+        let target = confined_existing(&root.join(relative), &root)?;
+        let prefix = format!("Untracked file: {file}\n\n");
+        let available = MAX_TEXT_OUTPUT.saturating_sub(prefix.len());
+        let mut bytes = Vec::new();
+        fs::File::open(&target)
+            .map_err(|error| format!("Unable to preview {file}: {error}"))?
+            .take((available + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("Unable to preview {file}: {error}"))?;
+        if bytes.len() > available {
+            return Ok(format!(
+                "Untracked file: {file}\n\nPreview unavailable because this file exceeds the 2 MB Git text limit."
+            ));
+        }
+        let source = String::from_utf8(bytes).map_err(|_| {
+            format!("Untracked file '{file}' is binary and cannot be previewed as text.")
+        })?;
+        return Ok(format!("{prefix}{source}"));
+    }
+    let args = if staged {
+        vec![
+            "diff",
+            "--cached",
+            "--no-ext-diff",
+            "--unified=3",
+            "--",
+            &file,
+        ]
+    } else {
+        vec!["diff", "--no-ext-diff", "--unified=3", "--", &file]
+    };
+    let output = require_success(git_output(&root, &args)?, "Git file diff")?;
+    Ok(output_text(&output.stdout))
+}
+
 fn parse_git_history(bytes: &[u8]) -> Vec<GitCommitSummary> {
     String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_TEXT_OUTPUT)])
         .split('\u{001e}')
@@ -1660,6 +1709,67 @@ mod tests {
         assert!(git_discard(
             root.to_string_lossy().into_owned(),
             vec!["../outside.yaml".into()],
+        )
+        .unwrap_err()
+        .contains("Unsafe project-relative path"));
+    }
+
+    #[test]
+    fn returns_confined_per_file_diffs_including_untracked_text() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Diff Test"]);
+        git(root, &["config", "user.email", "diff@example.com"]);
+        fs::write(root.join("request.yaml"), "value: base\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "base request"]);
+
+        fs::write(root.join("request.yaml"), "value: working\n").unwrap();
+        fs::write(root.join("new.yaml"), "value: new\n").unwrap();
+        fs::write(root.join("binary.bin"), [0xff, 0x00]).unwrap();
+        let working = git_file_diff(
+            root.to_string_lossy().into_owned(),
+            false,
+            "request.yaml".into(),
+        )
+        .unwrap();
+        assert!(working.contains("-value: base"));
+        assert!(working.contains("+value: working"));
+        let untracked = git_file_diff(
+            root.to_string_lossy().into_owned(),
+            false,
+            "new.yaml".into(),
+        )
+        .unwrap();
+        assert!(untracked.starts_with("Untracked file: new.yaml"));
+        assert!(untracked.contains("value: new"));
+        assert!(git_file_diff(
+            root.to_string_lossy().into_owned(),
+            false,
+            "binary.bin".into(),
+        )
+        .unwrap_err()
+        .contains("binary"));
+
+        git(root, &["add", "request.yaml"]);
+        let staged = git_file_diff(
+            root.to_string_lossy().into_owned(),
+            true,
+            "request.yaml".into(),
+        )
+        .unwrap();
+        assert!(staged.contains("-value: base"));
+        assert!(staged.contains("+value: working"));
+        assert!(
+            git_file_diff(root.to_string_lossy().into_owned(), true, "new.yaml".into(),)
+                .unwrap_err()
+                .contains("no staged Git change")
+        );
+        assert!(git_file_diff(
+            root.to_string_lossy().into_owned(),
+            false,
+            "../outside.yaml".into(),
         )
         .unwrap_err()
         .contains("Unsafe project-relative path"));

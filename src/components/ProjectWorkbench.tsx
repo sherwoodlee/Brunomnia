@@ -12,6 +12,7 @@ import {
   getGitConflicts,
   getGitCommitPatch,
   getGitDiff,
+  getGitFileDiff,
   getGitHistory,
   getGitStatus,
   fetchGitRemote,
@@ -51,6 +52,7 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
   const [selected, setSelected] = useState<string[]>([]);
   const [diff, setDiff] = useState('');
   const [showStagedDiff, setShowStagedDiff] = useState(false);
+  const [diffPath, setDiffPath] = useState('');
   const [reviewMode, setReviewMode] = useState<'changes' | 'history'>('changes');
   const [history, setHistory] = useState<GitCommitSummary[]>([]);
   const [activeCommitOid, setActiveCommitOid] = useState('');
@@ -74,6 +76,8 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
   const remoteOnlyBranches = status.remoteBranches.filter((remoteBranch) => !status.branches.includes(remoteBranch.branch));
   const unstaged = status.files.filter((file) => !file.staged || file.worktreeStatus !== ' ');
   const staged = status.files.filter((file) => file.staged);
+  const diffCandidates = showStagedDiff ? staged : unstaged;
+  const effectiveDiffPath = diffCandidates.some((file) => file.path === diffPath) ? diffPath : '';
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const discardableFiles = unstaged.filter((file) => !file.conflicted).map((file) => file.path);
   const discardableSelected = selected.filter((path) => discardableFiles.includes(path));
@@ -169,9 +173,10 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
   useEffect(() => {
     if (!native || workspace.project.mode !== 'git' || !path) { setDiff(''); return; }
     let cancelled = false;
-    void getGitDiff(path, showStagedDiff).then((value) => { if (!cancelled) setDiff(value); }).catch(() => { if (!cancelled) setDiff(''); });
+    const operation = effectiveDiffPath ? getGitFileDiff(path, showStagedDiff, effectiveDiffPath) : getGitDiff(path, showStagedDiff);
+    void operation.then((value) => { if (!cancelled) setDiff(value); }).catch(() => { if (!cancelled) setDiff(''); });
     return () => { cancelled = true; };
-  }, [native, path, showStagedDiff, status]);
+  }, [effectiveDiffPath, native, path, showStagedDiff, status]);
 
   const connectFolder = (mode: 'folder' | 'git') => run(mode === 'git' ? 'Initializing Git' : 'Creating project', async () => {
     if (!allowedStorage.includes(mode)) throw new Error(`Workspace policy does not allow ${mode} storage.`);
@@ -260,7 +265,7 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
         <div className="git-main">
           {conflicts.length ? <div className="conflict-workbench"><header><div><small>Merge conflict</small><h2>{activeConflict?.path}</h2></div><select value={activeConflict?.path ?? ''} onChange={(event) => { const conflict = conflicts.find((candidate) => candidate.path === event.target.value); setActiveConflictPath(event.target.value); setResolution(conflict?.working ?? ''); }}>{conflicts.map((conflict) => <option key={conflict.path}>{conflict.path}</option>)}</select><button onClick={() => run('Aborting merge', async () => setNextStatus(await abortGitMerge(path)))} type="button">Abort merge</button></header>{activeConflict?.binary ? <div className="empty-state"><strong>Binary conflict</strong><span>Choose and stage one complete binary version.</span><div className="git-row-actions"><button disabled={!activeConflict || Boolean(busy)} onClick={() => run('Choosing ours', async () => { const next = await resolveGitConflictSide(path, activeConflict!.path, 'ours'); await setNextStatus(next); await reloadGitWorkspace(next); })} type="button">Use ours</button><button disabled={!activeConflict || Boolean(busy)} onClick={() => run('Choosing theirs', async () => { const next = await resolveGitConflictSide(path, activeConflict!.path, 'theirs'); await setNextStatus(next); await reloadGitWorkspace(next); })} type="button">Use theirs</button></div></div> : <><div className="conflict-columns"><ConflictPane title="Base" value={activeConflict?.base ?? ''} /><ConflictPane title="Ours" value={activeConflict?.ours ?? ''} /><ConflictPane title="Theirs" value={activeConflict?.theirs ?? ''} /></div><div className="resolution-editor"><header><strong>Resolution</strong><div><button onClick={() => setResolution(activeConflict?.ours ?? '')} type="button">Use ours</button><button onClick={() => setResolution(activeConflict?.theirs ?? '')} type="button">Use theirs</button><button onClick={() => setResolution(`${activeConflict?.ours ?? ''}\n${activeConflict?.theirs ?? ''}`)} type="button">Keep both</button></div></header><textarea value={resolution} onChange={(event) => setResolution(event.target.value)} /></div><button className="resolve-button" disabled={!activeConflict || Boolean(busy)} onClick={() => run('Resolving conflict', async () => { const next = await resolveGitConflict(path, activeConflict!.path, resolution); await setNextStatus(next); await reloadGitWorkspace(next); })} type="button">Mark resolved and stage</button></>}</div>
             : reviewMode === 'history' ? <div className="git-history-workbench"><header><div><small>Repository</small><h2>Commit history</h2></div><div className="git-history-actions"><button disabled={Boolean(busy)} onClick={openHistory} type="button">Refresh history</button><button onClick={() => setReviewMode('changes')} type="button">Review changes</button></div></header><div className="git-history-layout"><nav aria-label="Recent commits" className="git-history-list">{history.map((commit) => <button aria-current={activeCommit?.oid === commit.oid ? 'true' : undefined} className={activeCommit?.oid === commit.oid ? 'active' : ''} key={commit.oid} onClick={() => void selectCommit(commit.oid)} type="button"><span className="git-history-node" /><span><strong>{commit.message || '(no subject)'}</strong><small>{commit.shortOid} · {formatCommitTime(commit.authoredAt)}</small><em title={commit.authorEmail}>{commit.authorName || commit.authorEmail || 'Unknown author'}</em>{commit.refs.length ? <span className="git-ref-list">{commit.refs.map((reference) => <code key={reference}>{reference}</code>)}</span> : null}</span></button>)}{!history.length ? <p>No history available. The first commit will appear here.</p> : null}</nav><section className="git-commit-detail">{activeCommit ? <><header><div><small>{activeCommit.shortOid}</small><h3>{activeCommit.message || '(no subject)'}</h3></div><dl><div><dt>Author</dt><dd>{activeCommit.authorName} &lt;{activeCommit.authorEmail}&gt;</dd></div><div><dt>Authored</dt><dd>{formatCommitTime(activeCommit.authoredAt)}</dd></div><div><dt>Parents</dt><dd>{activeCommit.parents.map((parent) => parent.slice(0, 8)).join(' · ') || 'Root commit'}</dd></div></dl></header><pre>{commitPatch || 'Loading commit patch…'}</pre></> : <div className="empty-state"><strong>No commit selected</strong><span>Create a commit or refresh this repository’s history.</span></div>}</section></div></div>
-            : <div className="diff-workbench"><header><div><small>Review</small><h2>{showStagedDiff ? 'Staged diff' : 'Working tree diff'}</h2></div><div className="segmented-control"><button className={!showStagedDiff ? 'active' : ''} onClick={() => setShowStagedDiff(false)} type="button">Unstaged {unstaged.length}</button><button className={showStagedDiff ? 'active' : ''} onClick={() => setShowStagedDiff(true)} type="button">Staged {staged.length}</button></div></header><pre>{diff || (showStagedDiff ? 'No staged diff.' : 'No unstaged diff.')}</pre></div>}
+            : <div className="diff-workbench"><header><div><small>Review</small><h2>{showStagedDiff ? 'Staged diff' : 'Working tree diff'}</h2></div><div className="git-diff-controls"><select aria-label="Diff file" value={effectiveDiffPath} onChange={(event) => setDiffPath(event.target.value)}><option value="">All {showStagedDiff ? 'staged' : 'unstaged'} changes</option>{diffCandidates.map((file) => <option key={file.path} value={file.path}>{file.path}</option>)}</select><div className="segmented-control"><button className={!showStagedDiff ? 'active' : ''} onClick={() => { setDiffPath(''); setShowStagedDiff(false); }} type="button">Unstaged {unstaged.length}</button><button className={showStagedDiff ? 'active' : ''} onClick={() => { setDiffPath(''); setShowStagedDiff(true); }} type="button">Staged {staged.length}</button></div></div></header><pre>{diff || (showStagedDiff ? 'No staged diff.' : 'No unstaged diff.')}</pre></div>}
         </div>
       </div>
       {busy ? <div className="automation-message">{busy}…</div> : null}{error ? <div className="automation-message error">{error}</div> : null}{message ? <div className="automation-message">{message}</div> : null}
