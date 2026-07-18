@@ -719,7 +719,23 @@ Compatibility bounds remain explicit: Brunomnia currently loads decoded UTF-8 re
 
 Compatibility bounds remain explicit: Visual Preview does not yet implement byte-backed image, PDF, audio, CSV-table, multipart, or charset-aware viewers. HTML visual mode intentionally blocks scripts, forms, privileged navigation, and remote resources; it is safer but less interactive than upstream's optional JavaScript WebView. Raw mode is exact only for Brunomnia's stored decoded UTF-8 string, not original response bytes. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 49 — remaining parity closure and release hardening
+## Milestone 49 — CSV response preview (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Friendly CSV routing | Complete baseline | Visual Preview routes CSV media types into a scrollable selectable table while Source and Raw retain their established textual paths |
+| CSV quoting | Complete baseline | The parser preserves quoted delimiters, doubled quotes, quoted CRLF/newlines, empty fields, and ordinary UTF-8 text |
+| Delimiter detection | Complete baseline | Comma, tab, semicolon, and pipe candidates are counted outside quoted content on the first record with deterministic comma tie-breaking |
+| Empty/error handling | Complete | Empty lines are skipped, empty cells remain, no-row input gets a visible state, and unterminated quoted fields produce a bounded error instead of partial data |
+| Render limits | Complete | Tables cap at 10,000 rows, 200 columns, and 250,000 cells with a visible truncation notice, composing with the existing 5 MiB preview guard |
+| Safe cell rendering | Complete | React text nodes escape cell values; no CSV content is inserted as HTML or executed |
+| Bundle boundary | Complete | CSV parsing and table rendering stay in the lazy response-preview chunk; the main production bundle is unchanged and remains below the warning threshold |
+| Executable coverage | Complete baseline | Focused tests cover quoting, escaped quotes, multiline fields, CRLF, delimiter detection, empty rows/cells, malformed quotes, and every safety limit |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 49 verification](QA_MILESTONE_49.md) |
+
+Compatibility bounds remain explicit: delimiter inference is a deterministic four-candidate baseline rather than Papa Parse's complete dialect inference. The viewer does not infer headers, column types, encodings, or formulas and does not virtualize table rows. The upstream keyboard-select-all behavior is left to ordinary browser/table selection because rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 50 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

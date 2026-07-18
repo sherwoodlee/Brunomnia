@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { applyResponseBodyFilter, responseFilterLanguage } from '../lib/responseFilter';
+import { parseCsvPreview } from '../lib/csvPreview';
 import { prettyBody } from '../lib/request';
 import { responseSizeBand } from '../lib/responseSize';
 import type { HttpResponse, ResponsePreviewMode } from '../types';
@@ -17,6 +18,16 @@ type ResponseBodyPreviewProps = {
 
 let alwaysShowLargeResponses = false;
 
+function CsvResponsePreview({ body }: { body: string }) {
+  const preview = useMemo(() => parseCsvPreview(body), [body]);
+  if (preview.error) return <div className="response-csv-message bad">{preview.error}</div>;
+  return <div className="response-csv-preview">
+    <table><tbody>{preview.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`}>{cell}</td>)}</tr>)}</tbody></table>
+    {preview.truncated ? <div className="response-csv-message">Preview truncated at the local row, column, or cell safety limit.</div> : null}
+    {!preview.rows.length ? <div className="response-csv-message">No CSV rows to display.</div> : null}
+  </div>;
+}
+
 function FilteredResponseBody({ response, filter, filterHistory, onApplyFilter, previewMode }: Pick<ResponseBodyPreviewProps, 'response' | 'filter' | 'filterHistory' | 'onApplyFilter' | 'previewMode'>) {
   const language = responseFilterLanguage(response);
   const result = useMemo(() => previewMode === 'raw'
@@ -31,6 +42,7 @@ function FilteredResponseBody({ response, filter, filterHistory, onApplyFilter, 
     const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
     return <iframe className="response-html-preview" sandbox="" srcDoc={`${policy}${response.body}`} title="Response visual preview" />;
   }
+  if (previewMode === 'friendly' && contentType.includes('csv')) return <CsvResponsePreview body={response.body} />;
 
   return <>
     <div className={`code-viewer${previewMode === 'raw' ? ' raw-response' : ''}`}>
