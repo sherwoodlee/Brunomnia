@@ -22,6 +22,33 @@ export const deleteSavedResponse = (responses: StoredResponse[], responseId: str
 export const clearSavedResponseHistory = (responses: StoredResponse[], requestId: string, environmentId: string) => responses
   .filter((response) => response.requestId !== requestId || response.environmentId !== environmentId);
 
+export type ResponseHistorySection = { label: string; responses: StoredResponse[] };
+
+export const responseHistorySections = (responses: StoredResponse[], now = new Date()): ResponseHistorySection[] => {
+  const sections: ResponseHistorySection[] = [
+    { label: 'Just Now', responses: [] },
+    { label: 'Less Than Two Hours Ago', responses: [] },
+    { label: 'Today', responses: [] },
+    { label: 'This Week', responses: [] },
+    { label: 'Older Than This Week', responses: [] },
+  ];
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+  responses.forEach((response) => {
+    const receivedAt = new Date(response.receivedAt);
+    const elapsed = now.getTime() - receivedAt.getTime();
+    const section = Number.isNaN(receivedAt.getTime()) ? sections[4]
+      : elapsed < 5 * 60_000 ? sections[0]
+        : elapsed < 2 * 60 * 60_000 ? sections[1]
+          : receivedAt >= startOfToday ? sections[2]
+            : receivedAt >= startOfWeek ? sections[3]
+              : sections[4];
+    section.responses.push(response);
+  });
+  return sections.filter((section) => section.responses.length);
+};
+
 export const retainResponseHistory = (
   responses: StoredResponse[],
   response: StoredResponse,
