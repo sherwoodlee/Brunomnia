@@ -642,7 +642,21 @@ Compatibility bounds remain explicit: selecting an older response does not resto
 
 Compatibility bounds remain explicit: legacy response entries cannot reconstruct request versions they never stored. Restoring a request version does not restore its historical collection/folder placement, selected environment, cookies, plugin state, or vault contents. Response comparison/export/search and persistent streaming histories remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 44 — remaining parity closure and release hardening
+## Milestone 44 — response body downloads (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Raw response export | Complete baseline | Every non-streaming response can download the displayed UTF-8 body without mutation through the local browser/WebView download path |
+| Prettified JSON export | Complete baseline | JSON content types expose a separate action that formats valid JSON with two spaces and preserves invalid JSON verbatim |
+| Filename and media evidence | Complete baseline | Artifacts use a bounded filesystem-safe request name, timestamp, content-type-derived extension, and normalized media type |
+| Historical breadth | Complete | The action operates on the currently selected live or persisted historical response rather than only the latest send |
+| Bundle boundary | Complete | Response artifact/download code is lazy-loaded in a sub-1 KB chunk, and the existing code-generation dialog moves to its own 7,616-byte chunk; the main bundle falls to the recorded no-warning size |
+| Executable coverage | Complete baseline | Focused tests cover raw fidelity, JSON formatting, invalid-JSON fallback, case-insensitive content types, safe filenames, and unknown-type fallback |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 44 verification](QA_MILESTONE_44.md) |
+
+Compatibility bounds remain explicit: Brunomnia's response model currently stores decoded UTF-8 text, not the upstream byte buffer, so byte-exact binary download is not claimed. Native save dialogs, HAR/debug exports for the selected response, response comparison/search, and persistent streaming history remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 45 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

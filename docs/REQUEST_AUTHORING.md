@@ -77,6 +77,8 @@ After a request completes, use the history selector in the response summary to r
 
 Preferences defaults to 20 saved responses per request. Positive numbers keep that many, `0` keeps the just-completed result live without saving it, and `-1` retains all. **Filter response history by active environment** restricts both the selector and response template tags to the active global environment; future pruning then applies per request/environment pair. Existing entries are pruned only when that request next stores a response. Response history is omitted from project sharing and encrypted-sync payloads.
 
+Use **Export raw** in the response footer to download the displayed response body without modification. JSON responses also expose **Export pretty**, which uses two-space formatting when the body parses and preserves the raw text when it does not. Filenames combine a filesystem-safe request name, timestamp, and content-type extension. Brunomnia's current response contract is UTF-8 text, so this milestone does not claim byte-exact binary response export.
+
 ## Timeline evidence
 
 The Timeline tab persists prepared request and aggregate response evidence with each saved response. It records the resolved method and URL, eligible outgoing data, status and decoded response size, negotiated native protocol when available, and completion timing.
