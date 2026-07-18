@@ -224,6 +224,11 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     noProxy: stringValue(source?.noProxy).slice(0, 20_000),
     useBulkHeaderEditor: source?.useBulkHeaderEditor === true,
     useBulkParametersEditor: source?.useBulkParametersEditor === true,
+    forceVerticalLayout: source?.forceVerticalLayout === true,
+    editorIndentWithTabs: source?.editorIndentWithTabs !== false,
+    editorIndentSize: Math.min(16, Math.max(1, Math.trunc(Number(source?.editorIndentSize) || defaultPreferences.editorIndentSize))),
+    editorLineWrapping: source?.editorLineWrapping !== false,
+    fontVariantLigatures: source?.fontVariantLigatures === true,
     scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
     allowScriptRequests: source?.allowScriptRequests === true,
     allowScriptFileAccess: source?.allowScriptFileAccess === true,
@@ -466,7 +471,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 18,
+    version: 19,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
