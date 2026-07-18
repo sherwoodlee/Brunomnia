@@ -599,7 +599,21 @@ Compatibility bounds remain explicit: Brunomnia's desktop grant is read-only and
 
 Compatibility bounds remain explicit: this milestone covers saved request and folder authentication secrets. Integration credential fields remain independently masked, ordinary headers/environment values are not reclassified as passwords, and rendered/browser interaction QA remains omitted by standing direction. Current Insomnia's exact CodeMirror masking/copy affordances are not claimed.
 
-## Milestone 41 — remaining parity closure and release hardening
+## Milestone 41 — integration credential visibility (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference extension | Complete baseline | The existing device-local false-default `showPasswords` choice now covers stored integration credentials as well as request/folder authentication |
+| Integration breadth | Complete baseline | MCP bearer tokens and Basic passwords, AI-provider keys/references, and Konnect token references are masked by default and share the global reveal choice |
+| Per-field inspection | Complete baseline | Every integration credential exposes an accessible Show/Hide control while the global preference is off |
+| Disclosure lifecycle | Complete | Enabling the global choice clears temporary local disclosure; switching MCP clients remounts its panel so revealed state cannot carry to another client |
+| Sensitive boundary | Complete | Visibility remains presentation-only; storage, vault resolution, policy checks, execution, exports, logs, and independent vault/sync passphrase controls are unchanged |
+| Executable coverage | Complete baseline | Focused tests cover default masking, global reveal, and one-field reveal; the complete frontend, native, CLI, and macOS app gates remain green within the recorded sandbox limit |
+| Documentation and evidence | Complete | Updated [MCP/AI/Konnect](MCP_AI_KONNECT.md), [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 41 verification](QA_MILESTONE_41.md) |
+
+Compatibility bounds remain explicit: arbitrary MCP headers and ordinary request headers/environment values are not reclassified as credential fields. Local-vault value disclosure and vault/encrypted-sync passphrases retain independent controls. Rendered/browser interaction, password-manager behavior, and exact upstream randomized mask/copy presentation remain outside this source-verified milestone by standing direction.
+
+## Milestone 42 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
