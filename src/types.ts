@@ -303,7 +303,7 @@ export type Workspace = {
   imports: ImportRecord[];
   cookies: CookieRecord[];
   responses: StoredResponse[];
-  responseFilters?: Record<string, { filter: string; history: string[] }>;
+  responseFilters?: Record<string, { filter: string; history: string[]; previewMode: ResponsePreviewMode }>;
   project: ProjectConfig;
   plugins: PluginRecord[];
   pluginData: Record<string, Record<string, string>>;
@@ -519,6 +519,7 @@ export type HttpResponse = {
 
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests' | 'docs';
 export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline' | 'tests';
+export type ResponsePreviewMode = 'friendly' | 'source' | 'raw';
 export type SidebarMode = 'collections' | 'history';
 export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins' | 'security' | 'integrations' | 'preferences';
 

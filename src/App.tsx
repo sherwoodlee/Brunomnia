@@ -5,7 +5,7 @@ import { createBlankRequest } from './data/seed';
 import { sendRequest, type SendRequestContext } from './lib/http';
 import { storeResponseCookies } from './lib/cookies';
 import { connectStream, disconnectStream, invokeGrpc, loadGrpcSchema, sendWebSocketMessage } from './lib/protocol';
-import { environmentMap, formatBytes, mockResponse, normalizeHttpMethod, prettyBody } from './lib/request';
+import { environmentMap, formatBytes, mockResponse, normalizeHttpMethod } from './lib/request';
 import { loadWorkspace, saveWorkspace } from './lib/storage';
 import { applyScriptSubresponse, runBrowserScript, type ScriptRunOptions } from './lib/scriptSandbox';
 import { readDesktopScriptFile } from './lib/scriptFiles';
@@ -44,6 +44,7 @@ import type {
   Protocol,
   RequestFolder,
   RequestTab,
+  ResponsePreviewMode,
   ResponseTab,
   ScriptRunResult,
   SidebarMode,
@@ -682,6 +683,7 @@ type ResponsePanelProps = {
   responseHistory: StoredResponse[];
   responseFilter: string;
   responseFilterHistory: string[];
+  responsePreviewMode: ResponsePreviewMode;
   selectedResponseId: string;
   activeEnvironmentHistoryCount: number;
   protocol: Protocol;
@@ -701,6 +703,7 @@ type ResponsePanelProps = {
   onDownloadResponse: (prettify: boolean) => void;
   onExportResponseDiagnostic: (kind: 'debug' | 'har') => void;
   onApplyResponseFilter: (filter: string, remember: boolean) => void;
+  onChangeResponsePreviewMode: (mode: ResponsePreviewMode) => void;
   onSelectResponse: (id: string) => void;
   onTabChange: (tab: ResponseTab) => void;
   onStreamDraftChange: (value: string) => void;
@@ -740,6 +743,7 @@ function ResponsePanel({
   responseHistory,
   responseFilter,
   responseFilterHistory,
+  responsePreviewMode,
   selectedResponseId,
   activeEnvironmentHistoryCount,
   protocol,
@@ -759,6 +763,7 @@ function ResponsePanel({
   onDownloadResponse,
   onExportResponseDiagnostic,
   onApplyResponseFilter,
+  onChangeResponsePreviewMode,
   onSelectResponse,
   onTabChange,
   onStreamDraftChange,
@@ -775,7 +780,7 @@ function ResponsePanel({
     ...(response.httpVersion ? [{ name: 'Text' as const, value: `Negotiated ${response.httpVersion}`, elapsedMs: response.durationMs }] : []),
     { name: 'Text' as const, value: 'Response body decoded', elapsedMs: response.durationMs },
   ];
-  const copyResponse = () => void navigator.clipboard.writeText(prettyBody(response.body));
+  const copyResponse = () => void navigator.clipboard.writeText(response.body);
   return (
     <section className="response-panel">
       <div className="response-document-spacer" />
@@ -799,7 +804,7 @@ function ResponsePanel({
           <StreamConsole connected={streamStatus === 'connected'} draft={streamDraft} frameKind={streamFrameKind} messages={streamMessages} onDraftChange={onStreamDraftChange} onFrameKindChange={onStreamFrameKindChange} onSend={onSendStreamMessage} protocol={protocol} />
         ) : null}
         {activeTab === 'preview' && !streaming ? (
-          <Suspense fallback={<div className="dialog-loading">Loading response preview…</div>}><ResponseBodyPreview filter={responseFilter} filterHistory={responseFilterHistory} onApplyFilter={onApplyResponseFilter} onDownload={() => onDownloadResponse(false)} response={response} responseKey={selectedResponseId || `${response.status}:${response.durationMs}:${response.sizeBytes}:${response.requestUrl ?? requestUrl}`} /></Suspense>
+          <Suspense fallback={<div className="dialog-loading">Loading response preview…</div>}><ResponseBodyPreview filter={responseFilter} filterHistory={responseFilterHistory} onApplyFilter={onApplyResponseFilter} onDownload={() => onDownloadResponse(false)} onModeChange={onChangeResponsePreviewMode} previewMode={responsePreviewMode} response={response} responseKey={selectedResponseId || `${response.status}:${response.durationMs}:${response.sizeBytes}:${response.requestUrl ?? requestUrl}`} /></Suspense>
         ) : null}
         {activeTab === 'headers' ? (
           <div className="response-table">{Object.entries(response.headers).map(([name, value]) => <div key={name}><strong>{name}</strong><span>{value}</span></div>)}</div>
@@ -1130,14 +1135,22 @@ export default function App() {
     const requestId = active.request.id;
     const value = filter.trim().slice(0, 2_000);
     setWorkspace((current) => {
-      const previous = current.responseFilters?.[requestId] ?? { filter: '', history: [] };
+      const previous = current.responseFilters?.[requestId] ?? { filter: '', history: [], previewMode: 'source' as const };
       return {
         ...current,
         responseFilters: {
           ...current.responseFilters,
-          [requestId]: { filter: value, history: remember ? rememberResponseFilter(previous.history, value) : previous.history },
+          [requestId]: { ...previous, filter: value, history: remember ? rememberResponseFilter(previous.history, value) : previous.history },
         },
       };
+    });
+  };
+  const changeResponsePreviewMode = (previewMode: ResponsePreviewMode) => {
+    if (!active) return;
+    const requestId = active.request.id;
+    setWorkspace((current) => {
+      const previous = current.responseFilters?.[requestId] ?? { filter: '', history: [], previewMode: 'source' as const };
+      return { ...current, responseFilters: { ...current.responseFilters, [requestId]: { ...previous, previewMode } } };
     });
   };
   const unlockedVault = useMemo(() => vaultVariables(vaultSession), [vaultSession]);
@@ -1804,6 +1817,7 @@ export default function App() {
             onDownloadResponse={downloadResponseBody}
             onExportResponseDiagnostic={exportResponseDiagnostic}
             onApplyResponseFilter={applyResponseFilter}
+            onChangeResponsePreviewMode={changeResponsePreviewMode}
             onSelectResponse={(id) => { const saved = activeResponseHistory.find((candidate) => candidate.id === id); if (saved) selectSavedResponse(saved); }}
             onSendStreamMessage={() => void sendStreamMessage()}
             onStreamDraftChange={setStreamDraft}
@@ -1813,6 +1827,7 @@ export default function App() {
             response={response}
             responseFilter={workspace.responseFilters?.[active.request.id]?.filter ?? ''}
             responseFilterHistory={workspace.responseFilters?.[active.request.id]?.history ?? []}
+            responsePreviewMode={workspace.responseFilters?.[active.request.id]?.previewMode ?? 'source'}
             responseHistory={activeResponseHistory}
             requestUrl={response.requestUrl ?? active.request.url}
             selectedResponseId={selectedResponseId}
