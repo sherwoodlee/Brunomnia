@@ -6,6 +6,7 @@ import { publicEnvironments } from './resources';
 export type ProjectWriteResult = { path: string; filesWritten: number; filesUnchanged: number; filesRemoved: number };
 export type GitFileStatus = { path: string; indexStatus: string; worktreeStatus: string; staged: boolean; conflicted: boolean };
 export type GitRemote = { name: string; fetchUrl: string; pushUrl: string };
+export type GitRemoteBranch = { remote: string; branch: string; trackingRef: string };
 export type GitStatus = {
   branch: string;
   upstream: string;
@@ -13,6 +14,7 @@ export type GitStatus = {
   behind: number;
   files: GitFileStatus[];
   branches: string[];
+  remoteBranches: GitRemoteBranch[];
   remotes: GitRemote[];
   mergeInProgress: boolean;
   rebaseInProgress: boolean;
@@ -78,6 +80,8 @@ export const getGitHistory = async (path: string, limit = 35) => invoke<GitCommi
 export const getGitCommitPatch = async (path: string, oid: string) => invoke<GitCommitPatch>('project_git_commit_patch', { path, oid });
 export const commitGitChanges = async (path: string, message: string, authorName: string, authorEmail: string) => invoke<GitOperation>('project_git_commit', { input: { path, message, authorName, authorEmail } });
 export const checkoutGitBranch = async (path: string, branch: string, create = false) => invoke<GitOperation>('project_git_checkout', { path, branch, create });
+export const fetchGitRemote = async (path: string, remote: string) => invoke<GitOperation>('project_git_fetch', { path, remote });
+export const checkoutGitRemoteBranch = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_checkout_remote', { path, remote, branch });
 export const setGitRemote = async (path: string, name: string, url: string) => invoke<GitStatus>('project_git_set_remote', { path, name, url });
 export const pullGitProject = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_pull', { input: { path, remote, branch } });
 export const pushGitProject = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_push', { input: { path, remote, branch } });
