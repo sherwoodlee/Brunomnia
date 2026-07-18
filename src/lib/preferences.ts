@@ -35,6 +35,7 @@ export const defaultPreferences: AppPreferences = {
   interfaceFontSize: 13,
   fontInterface: '',
   fontMonospace: '',
+  showPasswords: false,
   preferredHttpVersion: 'default',
   maxRedirects: 10,
   followRedirects: true,

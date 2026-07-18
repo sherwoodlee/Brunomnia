@@ -585,7 +585,21 @@ Compatibility bounds remain explicit: font family fields depend on fonts install
 
 Compatibility bounds remain explicit: Brunomnia's desktop grant is read-only and applies to mediated script attachments; it does not implement upstream's described folder writes or automatically allow the OS temporary/application-data directories. Roots are typed rather than selected through a folder picker. The trusted CLI retains its separate invocation flag and does not consume the device list. Canonical checks close ordinary traversal and symlink escapes but do not claim a capability-secure directory handle against adversarial filesystem races.
 
-## Milestone 40 — remaining parity closure and release hardening
+## Milestone 40 — authentication password visibility (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | A device-local Reveal saved authentication passwords setting defaults off and strictly normalizes, matching current Insomnia's `showPasswords` default |
+| Authentication breadth | Complete baseline | Request and inherited-folder editors apply the choice to Bearer, Basic/Digest/NTLM, API key, OAuth 1/2, AWS IAM, and Hawk secret fields |
+| Per-field inspection | Complete baseline | When the global preference is off, every marked secret exposes an accessible Show/Hide control without changing the underlying value |
+| Sensitive boundary | Complete | Vault unlock/entry disclosure and encrypted-sync passphrases remain independently masked; display choices do not affect execution, storage, exports, logs, or clipboard behavior |
+| Device-local safety | Complete | Managed projects and encrypted-sync pulls preserve the local choice, workspace imports reset it off, and malformed truthy values cannot enable it |
+| Executable coverage | Complete baseline | Focused tests cover default masking, global reveal, per-field reveal, strict normalization, import reset, explicit preservation, and workspace v22 interchange |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 40 verification](QA_MILESTONE_40.md) |
+
+Compatibility bounds remain explicit: this milestone covers saved request and folder authentication secrets. Integration credential fields remain independently masked, ordinary headers/environment values are not reclassified as passwords, and rendered/browser interaction QA remains omitted by standing direction. Current Insomnia's exact CodeMirror masking/copy affordances are not claimed.
+
+## Milestone 41 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

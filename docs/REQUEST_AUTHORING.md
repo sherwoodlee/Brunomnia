@@ -29,6 +29,12 @@ Press Tab in a code surface to insert a literal tab when **Indent with tabs** is
 
 Interface and editor typography are independent. Each accepts an optional comma-separated CSS font-family list and an 8–24 px size; blank family fields restore Brunomnia's built-in sans-serif or monospace stack. New/imported data defaults to 13 px interface and 11 px editor text. Existing editor-size values remain editor sizes during workspace v20 migration.
 
+## Authentication password visibility
+
+Authentication tokens, passwords, API-key values, client secrets, authorization codes, refresh/access tokens, AWS secret/session values, and Hawk keys are masked by default in request and folder editors. Each secret has a Show/Hide control for temporary inspection. The device-local **Reveal saved authentication passwords** preference reveals all of these editor fields together and defaults off, matching current Insomnia's `showPasswords` setting.
+
+The preference changes presentation only. It does not alter stored values, logs, exports, request execution, or clipboard behavior, and it does not reveal local-vault or encrypted-sync passphrases. Managed projects and encrypted-sync pulls preserve the current device choice; workspace imports reset it off.
+
 ## Body formatting
 
 For JSON or text bodies, choose **Beautify** in the body toolbar. Valid JSON receives two-space indentation. XML-looking text, or text with an XML content type, receives conservative structural indentation. Invalid JSON and unrecognized plain text are left unchanged; the formatter does not send content anywhere.

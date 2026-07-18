@@ -34,6 +34,7 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 
 - system, dark, or light appearance;
 - comfortable or compact density;
+- an off-by-default device-wide reveal choice for saved request/folder authentication passwords;
 - separate 8–24 px interface and editor sizes plus optional interface/monospace font-family lists;
 - responsive or forced-vertical request/response layout;
 - text wrapping, tab/space indentation, a 1–16 indent width, and font ligatures;
@@ -55,6 +56,8 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 Click a shortcut field and press a combination. `Mod` maps to Command on macOS and Control elsewhere. Duplicate bindings are shown and only the first matching action runs. Press Backspace to clear a binding or use **Reset defaults**.
 
 Preferences stay on this device. Split-YAML folder/Git projects omit them, encrypted-sync pulls preserve the current device's values, and imported workspace files start with safe defaults. Plugin themes take precedence while active.
+
+Authentication secret inputs are masked by default. Use the adjacent Show/Hide control for a single field, or enable **Reveal saved authentication passwords** to reveal request and folder authentication secrets together on this device. The preference does not expose values outside the existing editor, change stored bytes, or reveal local-vault and encrypted-sync passphrases; those keep their own controls.
 
 Desktop script file attachments require both the off-by-default file authority and at least one allowed data folder. Enter one absolute root per line; the value is normalized when the field loses focus. The native host canonicalizes roots and requested files before reading and rejects traversal or symlink resolution outside every root. The grant covers read-only script body, multipart, and PEM attachment hydration, not ordinary user-selected payloads or file writes. The CLI keeps its separate explicit `--allow-script-files` trust flag and does not inherit this device list.
 
