@@ -4,6 +4,7 @@ import { parseCsvPreview } from '../lib/csvPreview';
 import { createMultipartPartArtifact, MAX_MULTIPART_PREVIEW_DEPTH, multipartNestedPreviewBlock, parseMultipartPreview, type MultipartPreviewPart } from '../lib/multipartPreview';
 import { prettyBody } from '../lib/request';
 import { responseBodyBytes } from '../lib/responseBytes';
+import { detectedResponseContentType } from '../lib/responseContentType';
 import { createResponseMediaArtifact, responseMedia, type ResponseMedia } from '../lib/responseMedia';
 import { responseSizeBand } from '../lib/responseSize';
 import type { HttpResponse, ResponsePreviewMode } from '../types';
@@ -68,8 +69,9 @@ const downloadMultipartPart = (part: MultipartPreviewPart) => {
 };
 
 function MultipartPartBody({ depth, part }: { depth: number; part: MultipartPreviewPart }) {
-  const normalizedContentType = part.contentType.toLowerCase();
-  const media = responseMedia(part.contentType);
+  const contentType = detectedResponseContentType(part.contentType, part.bodyBytes);
+  const normalizedContentType = contentType.toLowerCase();
+  const media = responseMedia(contentType);
   if (media) return <ResponseMediaPreview media={media} source={part.bodyBytes} />;
   if (normalizedContentType.includes('html')) {
     const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
@@ -79,7 +81,7 @@ function MultipartPartBody({ depth, part }: { depth: number; part: MultipartPrev
     const block = multipartNestedPreviewBlock(depth, part.bodyBytes.byteLength);
     if (block === 'depth') return <div className="response-multipart-message">Nested multipart preview stopped at {MAX_MULTIPART_PREVIEW_DEPTH} levels. Save the section to inspect its complete original bytes.</div>;
     if (block === 'size') return <div className="response-multipart-message">Nested multipart section over 5 MB is not expanded to avoid multiplying parser memory. Save the section to inspect its complete original bytes.</div>;
-    return <MultipartResponsePreview bytes={part.bodyBytes} contentType={part.contentType} depth={depth + 1} />;
+    return <MultipartResponsePreview bytes={part.bodyBytes} contentType={contentType} depth={depth + 1} />;
   }
   if (normalizedContentType.includes('csv')) return <CsvResponsePreview body={part.body} />;
 
@@ -115,7 +117,9 @@ function FilteredResponseBody({ response, filter, filterHistory, onApplyFilter, 
   const lines = (previewMode === 'raw' ? result.contents : prettyBody(result.contents)).split('\n');
   const [draft, setDraft] = useState(filter);
   useEffect(() => setDraft(filter), [filter]);
-  const contentType = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1] ?? '';
+  const originalContentType = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1] ?? '';
+  const bytes = useMemo(() => responseBodyBytes(response), [response.body, response.bodyBase64]);
+  const contentType = useMemo(() => detectedResponseContentType(originalContentType, bytes), [bytes, originalContentType]);
   const normalizedContentType = contentType.toLowerCase();
   const media = responseMedia(contentType);
 
@@ -124,7 +128,7 @@ function FilteredResponseBody({ response, filter, filterHistory, onApplyFilter, 
     const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
     return <iframe className="response-html-preview" sandbox="" srcDoc={`${policy}${response.body}`} title="Response visual preview" />;
   }
-  if (previewMode === 'friendly' && normalizedContentType.includes('multipart/')) return <MultipartResponsePreview bytes={responseBodyBytes(response)} contentType={contentType} />;
+  if (previewMode === 'friendly' && normalizedContentType.includes('multipart/')) return <MultipartResponsePreview bytes={bytes} contentType={contentType} />;
   if (previewMode === 'friendly' && normalizedContentType.includes('csv')) return <CsvResponsePreview body={response.body} />;
 
   return <>

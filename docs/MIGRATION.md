@@ -832,9 +832,25 @@ Compatibility bounds at this milestone were explicit: the dependency-free parser
 | Executable coverage | Complete baseline | Focused tests cover direct media byte slices, nested case-sensitive boundaries, recursive parsing, and exact depth/byte guard thresholds alongside the prior multipart/media suite |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 55 verification](QA_MILESTONE_55.md) |
 
-Compatibility bounds remain explicit: recursive routing still trusts declared Content-Type instead of sniffing content, and safe HTML remains script/form/network disabled. Recursion beyond five levels and nested multipart sections above 5 MiB require exact Save part inspection outside the viewer. The parser still buffers each expanded selected aggregate and materializes its byte-index string. MIME RFC 2047 and filename RFC 5987/2231 decoding, Content-ID attachment resolution, a native save dialog, and rendered interaction QA remain open.
+Compatibility bounds at this milestone were explicit: recursive routing still trusted declared Content-Type instead of sniffing content, and safe HTML remained script/form/network disabled. Milestone 56 later adds the pinned JSON and leading-doctype detection order. Recursion beyond five levels and nested multipart sections above 5 MiB require exact Save part inspection outside the viewer. The parser still buffers each expanded selected aggregate and materializes its byte-index string. MIME RFC 2047 and filename RFC 5987/2231 decoding, Content-ID attachment resolution, a native save dialog, and rendered interaction QA remain open.
 
-## Milestone 56 — remaining parity closure and release hardening
+## Milestone 56 — response content detection (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Upstream routing order | Complete baseline | Friendly routing first tries valid JSON, then a leading HTML doctype, then the original Content-Type, matching the pinned Insomnia viewer precedence |
+| Misleading-header JSON | Complete | Any complete entity that parses as UTF-8 JSON routes as `application/json` before declared image/media/text/binary handling |
+| Common HTML errors | Complete baseline | A case-insensitive HTML doctype in the trimmed first 100 entity bytes routes to the existing safe HTML viewer when the header is not already `text/html` |
+| Recursive continuity | Complete | The same detection runs for selected multipart parts before their JSON/HTML/media/CSV/nested routing decision |
+| MIME parameter fidelity | Complete | Empty, malformed, or unmatched bodies return the original Content-Type verbatim so case-sensitive multipart boundary values remain intact |
+| Safety continuity | Complete | Detection remains behind the established outer response gate; HTML work is prefix-bounded, parse failures are swallowed, and the body/header evidence is never mutated |
+| Bundle boundary | Complete | Detection stays in the lazy response-preview graph; the main renderer remains byte-identical at 498,231 bytes without a chunk warning |
+| Executable coverage | Complete baseline | Focused tests cover misleading image/text types, JSON scalars, doctype position, non-doctype markup, empty bodies, and exact boundary-parameter preservation |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 56 verification](QA_MILESTONE_56.md) |
+
+Compatibility bounds remain explicit: JSON detection decodes the complete entity as UTF-8 and parses it, matching upstream rather than performing streaming or charset-statistical detection. HTML detection requires a doctype inside the first 100 bytes; bare markup, XML, media signatures, and other file formats are not sniffed. Safe HTML remains non-interactive. Detection changes only the viewer route and never rewrites stored Content-Type evidence.
+
+## Milestone 57 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
