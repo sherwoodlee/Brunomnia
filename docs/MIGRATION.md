@@ -937,7 +937,23 @@ Compatibility bounds remain explicit: this is an explicit two-grant CSP/sandbox 
 
 Compatibility bounds remain explicit: the history follows local `HEAD`, not every local/remote branch, and does not fetch. Commit-message bodies, signatures, graph lanes, searching, pagination beyond the bounded request, checkout/revert/reset actions, and binary patch rendering remain outside this baseline. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 62 — remaining parity closure and release hardening
+## Milestone 62 — remote Git branch workflows (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` separates local and remote-only branches, refreshes remote refs, and exposes **Fetch and checkout** for a selected remote branch |
+| Remote discovery | Complete baseline | Git status includes sorted remote/branch/tracking-ref records from configured remote-tracking refs and excludes symbolic remote `HEAD` pointers |
+| Explicit refresh | Complete baseline | **Fetch and prune branches** updates the selected configured remote, prunes deleted refs, skips tags, and reports native Git credential/network failures in the workbench |
+| Tracking checkout | Complete baseline | **Fetch + checkout** refreshes the exact branch, verifies its full remote-tracking ref, rejects a duplicate local name, creates the same-named local tracking branch, and reloads project YAML |
+| Argument safety | Complete | Branches pass `git check-ref-format`; remotes must already exist and cannot be option-shaped; all Git calls use argument arrays and exact refs without a shell |
+| Credential boundary | Complete | Fetch uses the installed Git credential helper or SSH agent; Brunomnia stores no provider token and introduces no account or entitlement check |
+| Executable coverage | Complete baseline | A local bare-repository fixture covers fetch, slash-containing branch discovery, symbolic-ref filtering, upstream tracking, duplicate rejection, and malicious remote-option rejection |
+| Bundle boundary | Complete | Remote workflows stay in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 62 verification](QA_MILESTONE_62.md) |
+
+Compatibility bounds remain explicit: this phase reads configured remote-tracking refs and fetches through the installed Git client. It does not discover repositories from provider accounts, store provider credentials, delete or rename remote branches, browse un-checked-out remote history, fetch tags, or add force/advanced refspec controls. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 63 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

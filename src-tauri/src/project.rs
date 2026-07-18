@@ -58,6 +58,14 @@ pub struct GitRemote {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitRemoteBranch {
+    pub remote: String,
+    pub branch: String,
+    pub tracking_ref: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitStatusOutput {
     pub branch: String,
     pub upstream: String,
@@ -65,6 +73,7 @@ pub struct GitStatusOutput {
     pub behind: usize,
     pub files: Vec<GitFileStatus>,
     pub branches: Vec<String>,
+    pub remote_branches: Vec<GitRemoteBranch>,
     pub remotes: Vec<GitRemote>,
     pub merge_in_progress: bool,
     pub rebase_in_progress: bool,
@@ -655,6 +664,49 @@ fn list_remotes(root: &Path) -> Vec<GitRemote> {
     remotes.into_values().collect()
 }
 
+fn list_remote_branches(root: &Path, remotes: &[GitRemote]) -> Vec<GitRemoteBranch> {
+    let output = git_output(
+        root,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)%00%(symref)",
+            "refs/remotes",
+        ],
+    )
+    .ok();
+    let mut remote_names = remotes
+        .iter()
+        .map(|remote| remote.name.as_str())
+        .collect::<Vec<_>>();
+    remote_names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+    let mut branches = BTreeSet::new();
+    if let Some(output) = output.filter(|output| output.status.success()) {
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let (tracking_ref, symbolic_target) = line.split_once('\0').unwrap_or((line, ""));
+            if !symbolic_target.is_empty() {
+                continue;
+            }
+            let Some(remote) = remote_names.iter().find(|remote| {
+                tracking_ref
+                    .strip_prefix(**remote)
+                    .is_some_and(|tail| tail.starts_with('/') && tail.len() > 1)
+            }) else {
+                continue;
+            };
+            let branch = tracking_ref[remote.len() + 1..].to_string();
+            branches.insert(((*remote).to_string(), branch, tracking_ref.to_string()));
+        }
+    }
+    branches
+        .into_iter()
+        .map(|(remote, branch, tracking_ref)| GitRemoteBranch {
+            remote,
+            branch,
+            tracking_ref,
+        })
+        .collect()
+}
+
 pub fn git_status(path: String) -> Result<GitStatusOutput, String> {
     let root = project_root(&path, false)?;
     let output = require_success(
@@ -698,6 +750,8 @@ pub fn git_status(path: String) -> Result<GitStatusOutput, String> {
         })
         .collect();
     let git = git_dir(&root);
+    let remotes = list_remotes(&root);
+    let remote_branches = list_remote_branches(&root, &remotes);
     Ok(GitStatusOutput {
         branch,
         upstream,
@@ -705,7 +759,8 @@ pub fn git_status(path: String) -> Result<GitStatusOutput, String> {
         behind,
         files,
         branches: list_branches(&root),
-        remotes: list_remotes(&root),
+        remote_branches,
+        remotes,
         merge_in_progress: git.join("MERGE_HEAD").exists(),
         rebase_in_progress: git.join("rebase-merge").exists() || git.join("rebase-apply").exists(),
     })
@@ -940,6 +995,65 @@ pub fn git_checkout(
         },
         false,
     )
+}
+
+fn require_remote(root: &Path, name: &str) -> Result<String, String> {
+    let name = if name.trim().is_empty() {
+        "origin"
+    } else {
+        name.trim()
+    };
+    if name.starts_with('-') || !list_remotes(root).iter().any(|remote| remote.name == name) {
+        return Err(format!("Git remote '{name}' does not exist."));
+    }
+    Ok(name.to_string())
+}
+
+pub fn git_fetch(path: String, remote: String) -> Result<GitOperationOutput, String> {
+    let root = project_root(&path, false)?;
+    let remote = require_remote(&root, &remote)?;
+    let output = git_output(&root, &["fetch", "--prune", "--no-tags", "--", &remote])?;
+    operation(&root, output, "Fetch", false)
+}
+
+pub fn git_checkout_remote(
+    path: String,
+    remote: String,
+    branch: String,
+) -> Result<GitOperationOutput, String> {
+    if branch.trim().is_empty() {
+        return Err("Choose a remote branch to check out.".into());
+    }
+    let root = project_root(&path, false)?;
+    let remote = require_remote(&root, &remote)?;
+    let branch = branch.trim();
+    require_success(
+        git_output(&root, &["check-ref-format", "--branch", branch])?,
+        "Validate branch name",
+    )?;
+    if list_branches(&root)
+        .iter()
+        .any(|candidate| candidate == branch)
+    {
+        return Err(format!(
+            "Local branch '{branch}' already exists. Switch to it from Local Branches."
+        ));
+    }
+    require_success(
+        git_output(&root, &["fetch", "--no-tags", "--", &remote, branch])?,
+        "Fetch remote branch",
+    )?;
+    let tracking_ref = format!("{remote}/{branch}");
+    let full_tracking_ref = format!("refs/remotes/{tracking_ref}");
+    require_success(
+        git_output(
+            &root,
+            &["show-ref", "--verify", "--quiet", &full_tracking_ref],
+        )?,
+        "Resolve remote branch",
+    )?;
+    let output = git_output(&root, &["checkout", "--track", "-b", branch, &tracking_ref])?;
+    operation(&root, output, "Fetch and checkout remote branch", false)
 }
 
 pub fn git_set_remote(path: String, name: String, url: String) -> Result<GitStatusOutput, String> {
@@ -1301,5 +1415,84 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn fetches_remote_branches_and_checks_out_an_explicit_tracking_branch() {
+        let remote = tempfile::tempdir().unwrap();
+        git(remote.path(), &["init", "--bare", "-b", "main"]);
+
+        let source = tempfile::tempdir().unwrap();
+        git(source.path(), &["init", "-b", "main"]);
+        git(source.path(), &["config", "user.name", "Remote Test"]);
+        git(
+            source.path(),
+            &["config", "user.email", "remote@example.com"],
+        );
+        fs::write(source.path().join("request.yaml"), "value: main\n").unwrap();
+        git(source.path(), &["add", "request.yaml"]);
+        git(source.path(), &["commit", "-m", "main request"]);
+        let remote_path = remote.path().to_string_lossy().into_owned();
+        git(source.path(), &["remote", "add", "origin", &remote_path]);
+        git(source.path(), &["push", "-u", "origin", "main"]);
+
+        let clone_parent = tempfile::tempdir().unwrap();
+        let clone_path = clone_parent.path().join("project");
+        git_clone(remote_path, clone_path.to_string_lossy().into_owned()).unwrap();
+
+        git(source.path(), &["checkout", "-b", "feature/remote"]);
+        fs::write(source.path().join("request.yaml"), "value: remote\n").unwrap();
+        git(source.path(), &["commit", "-am", "remote request"]);
+        git(source.path(), &["push", "-u", "origin", "feature/remote"]);
+        git(source.path(), &["checkout", "-b", "stale"]);
+        git(source.path(), &["push", "-u", "origin", "stale"]);
+        git(source.path(), &["checkout", "feature/remote"]);
+
+        let mut fetched = git_fetch(clone_path.to_string_lossy().into_owned(), "origin".into())
+            .unwrap()
+            .status;
+        assert!(fetched.remote_branches.iter().any(|branch| {
+            branch.remote == "origin"
+                && branch.branch == "feature/remote"
+                && branch.tracking_ref == "origin/feature/remote"
+        }));
+        assert!(fetched
+            .remote_branches
+            .iter()
+            .all(|branch| branch.branch != "HEAD"));
+        assert!(fetched
+            .remote_branches
+            .iter()
+            .any(|branch| branch.branch == "stale"));
+        git(source.path(), &["push", "origin", "--delete", "stale"]);
+        fetched = git_fetch(clone_path.to_string_lossy().into_owned(), "origin".into())
+            .unwrap()
+            .status;
+        assert!(fetched
+            .remote_branches
+            .iter()
+            .all(|branch| branch.branch != "stale"));
+
+        let checked_out = git_checkout_remote(
+            clone_path.to_string_lossy().into_owned(),
+            "origin".into(),
+            "feature/remote".into(),
+        )
+        .unwrap();
+        assert_eq!(checked_out.status.branch, "feature/remote");
+        assert_eq!(checked_out.status.upstream, "origin/feature/remote");
+        assert!(git_checkout_remote(
+            clone_path.to_string_lossy().into_owned(),
+            "origin".into(),
+            "feature/remote".into(),
+        )
+        .unwrap_err()
+        .contains("already exists"));
+        assert!(git_fetch(
+            clone_path.to_string_lossy().into_owned(),
+            "--upload-pack=unsafe".into(),
+        )
+        .unwrap_err()
+        .contains("does not exist"));
     }
 }

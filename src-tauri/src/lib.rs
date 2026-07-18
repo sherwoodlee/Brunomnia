@@ -266,6 +266,23 @@ async fn project_git_checkout(
 }
 
 #[tauri::command]
+async fn project_git_fetch(
+    path: String,
+    remote: String,
+) -> Result<project::GitOperationOutput, String> {
+    blocking(move || project::git_fetch(path, remote)).await
+}
+
+#[tauri::command]
+async fn project_git_checkout_remote(
+    path: String,
+    remote: String,
+    branch: String,
+) -> Result<project::GitOperationOutput, String> {
+    blocking(move || project::git_checkout_remote(path, remote, branch)).await
+}
+
+#[tauri::command]
 async fn project_git_set_remote(
     path: String,
     name: String,
@@ -498,6 +515,8 @@ pub fn run() {
             project_git_commit_patch,
             project_git_commit,
             project_git_checkout,
+            project_git_fetch,
+            project_git_checkout_remote,
             project_git_set_remote,
             project_git_pull,
             project_git_push,
