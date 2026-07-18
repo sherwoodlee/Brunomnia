@@ -1276,6 +1276,18 @@ pub fn git_merge(path: String, branch: String) -> Result<GitOperationOutput, Str
     {
         return Err("Choose an existing local branch to merge.".into());
     }
+    let status = git_status(path.clone())?;
+    if status.merge_in_progress || status.rebase_in_progress {
+        return Err(
+            "Finish or abort the current merge or rebase before starting another merge.".into(),
+        );
+    }
+    if !status.files.is_empty() {
+        return Err(
+            "Commit or discard all staged and unstaged changes before merging another branch."
+                .into(),
+        );
+    }
     let output = git_output(&root, &["merge", "--no-commit", "--no-ff", branch.trim()])?;
     operation(&root, output, "Merge", true)
 }
@@ -1491,6 +1503,42 @@ mod tests {
         )
         .unwrap();
         assert!(status.files.iter().all(|file| !file.conflicted));
+    }
+
+    #[test]
+    fn refuses_branch_merges_with_staged_or_unstaged_work() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Merge Guard Test"]);
+        git(root, &["config", "user.email", "merge-guard@example.com"]);
+        fs::write(root.join("request.yaml"), "value: base\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "base request"]);
+        git(root, &["checkout", "-b", "feature"]);
+        fs::write(root.join("feature.yaml"), "feature: true\n").unwrap();
+        git(root, &["add", "feature.yaml"]);
+        git(root, &["commit", "-m", "feature request"]);
+        git(root, &["checkout", "main"]);
+
+        fs::write(root.join("request.yaml"), "value: local\n").unwrap();
+        let unstaged_error =
+            git_merge(root.to_string_lossy().into_owned(), "feature".into()).unwrap_err();
+        assert!(unstaged_error.contains("Commit or discard"));
+        assert_eq!(
+            fs::read_to_string(root.join("request.yaml")).unwrap(),
+            "value: local\n"
+        );
+        assert!(!root.join(".git/MERGE_HEAD").exists());
+
+        git(root, &["add", "request.yaml"]);
+        let staged_error =
+            git_merge(root.to_string_lossy().into_owned(), "feature".into()).unwrap_err();
+        assert!(staged_error.contains("Commit or discard"));
+        assert!(git_diff(root.to_string_lossy().into_owned(), true)
+            .unwrap()
+            .contains("+value: local"));
+        assert!(!root.join(".git/MERGE_HEAD").exists());
     }
 
     #[test]
