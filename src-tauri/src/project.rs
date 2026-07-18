@@ -1265,6 +1265,26 @@ pub fn git_push(input: GitPushPullInput) -> Result<GitOperationOutput, String> {
     operation(&root, output, "Push", false)
 }
 
+pub fn git_validate_remote_access(path: String, remote: String) -> Result<(), String> {
+    let root = project_root(&path, false)?;
+    let remote = if remote.trim().is_empty() {
+        "origin"
+    } else {
+        remote.trim()
+    };
+    if !list_remotes(&root)
+        .iter()
+        .any(|candidate| candidate.name == remote)
+    {
+        return Err(format!("Git remote '{remote}' does not exist."));
+    }
+    require_success(
+        git_output(&root, &["ls-remote", "--heads", "--", remote])?,
+        "Validate Git remote access",
+    )?;
+    Ok(())
+}
+
 pub fn git_merge(path: String, branch: String) -> Result<GitOperationOutput, String> {
     if branch.trim().is_empty() {
         return Err("Choose a branch to merge.".into());
@@ -1667,6 +1687,47 @@ mod tests {
         )
         .unwrap_err()
         .contains("does not exist"));
+    }
+
+    #[test]
+    fn validates_configured_remote_access_without_mutating_the_repository() {
+        let remote = tempfile::tempdir().unwrap();
+        git(remote.path(), &["init", "--bare", "-b", "main"]);
+
+        let local = tempfile::tempdir().unwrap();
+        let root = local.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Remote Validation Test"]);
+        git(
+            root,
+            &["config", "user.email", "remote-validation@example.com"],
+        );
+        fs::write(root.join("request.yaml"), "value: local\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "local request"]);
+        let remote_path = remote.path().to_string_lossy().into_owned();
+        git(root, &["remote", "add", "origin", &remote_path]);
+
+        let head_before =
+            require_success(git_output(root, &["rev-parse", "HEAD"]).unwrap(), "HEAD")
+                .map(|output| output_text(&output.stdout))
+                .unwrap();
+        git_validate_remote_access(root.to_string_lossy().into_owned(), "origin".into()).unwrap();
+        assert_eq!(
+            require_success(git_output(root, &["rev-parse", "HEAD"]).unwrap(), "HEAD")
+                .map(|output| output_text(&output.stdout))
+                .unwrap(),
+            head_before
+        );
+        assert!(git_status(root.to_string_lossy().into_owned())
+            .unwrap()
+            .files
+            .is_empty());
+        assert!(
+            git_validate_remote_access(root.to_string_lossy().into_owned(), "missing".into(),)
+                .unwrap_err()
+                .contains("does not exist")
+        );
     }
 
     #[test]

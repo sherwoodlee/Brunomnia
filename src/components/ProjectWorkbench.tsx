@@ -26,6 +26,7 @@ import {
   setGitRemote,
   stageGitFiles,
   unstageGitFiles,
+  validateGitRemoteAccess,
   writeProject,
   type GitConflict,
   type GitCommitSummary,
@@ -149,6 +150,8 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
   const createCommit = (pushAfter: boolean) => {
     void run(pushAfter ? 'Committing and pushing' : 'Committing', async () => {
       requireShareableSafety();
+      const pushRemote = configuredRemote?.name ?? workspace.project.remoteName;
+      if (pushAfter) await validateGitRemoteAccess(path, pushRemote);
       const committed = await commitGitChanges(path, commitMessage, workspace.project.authorName, workspace.project.authorEmail);
       setCommitMessage('');
       setAiGroups([]);
@@ -159,7 +162,7 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
         return;
       }
       try {
-        const pushed = await pushGitProject(path, configuredRemote?.name ?? workspace.project.remoteName, committed.status.branch || status.branch);
+        const pushed = await pushGitProject(path, pushRemote, committed.status.branch || status.branch);
         await setNextStatus(pushed.status);
         setMessage(pushed.stderr || pushed.stdout || 'Commit created and pushed.');
       } catch (caught) {

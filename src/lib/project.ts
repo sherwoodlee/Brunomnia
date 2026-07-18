@@ -87,6 +87,7 @@ export const fetchGitRemote = async (path: string, remote: string) => invoke<Git
 export const checkoutGitRemoteBranch = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_checkout_remote', { path, remote, branch });
 export const setGitRemote = async (path: string, name: string, url: string) => invoke<GitStatus>('project_git_set_remote', { path, name, url });
 export const pullGitProject = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_pull', { input: { path, remote, branch } });
+export const validateGitRemoteAccess = async (path: string, remote: string) => invoke<void>('project_git_validate_remote_access', { path, remote });
 export const pushGitProject = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_push', { input: { path, remote, branch } });
 export const mergeGitBranch = async (path: string, branch: string) => invoke<GitOperation>('project_git_merge', { path, branch });
 export const abortGitMerge = async (path: string) => invoke<GitStatus>('project_git_abort_merge', { path });
