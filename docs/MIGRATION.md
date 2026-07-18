@@ -882,9 +882,28 @@ Compatibility bounds at this milestone were explicit: this was a safer iframe co
 | Bundle boundary | Complete | Base composition remains in the lazy response-preview graph; the main renderer is 497,469 bytes without a chunk warning |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 58 verification](QA_MILESTONE_58.md) |
 
-Compatibility bounds remain explicit: this is still a Tauri iframe rather than Electron's response WebView. A followed page stays opaque and sandboxed but uses its own CSP; with `allow-scripts` active, that destination may execute its own scripts and network requests. Brunomnia does not yet auto-load response-document remote subresources or expose upstream's response-link disable preference. The Reset action is a Brunomnia recovery affordance. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: this remained a Tauri iframe rather than Electron's response WebView. A followed page stayed opaque and sandboxed but used its own CSP; with `allow-scripts` active, that destination could execute its own scripts and network requests. Brunomnia did not yet auto-load response-document remote subresources or expose upstream's response-link disable preference. Milestone 59 later adds the preference to textual response viewers. The Reset action is a Brunomnia recovery affordance. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 59 — remaining parity closure and release hardening
+## Milestone 59 — response viewer links (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` defaults `disableResponsePreviewLinks` false and applies it to JSON/source CodeEditor link callbacks, not HTML WebView navigation |
+| User-visible preference | Complete | Preferences exposes **Disable links in response viewer** with the same false default and no account or entitlement requirement |
+| Text-viewer coverage | Complete baseline | Friendly JSON and Source Code render bounded clickable HTTP(S) targets; Raw Data and disabled mode retain plain text |
+| XML compatibility | Complete baseline | The four upstream XML entities are decoded for the external target without rewriting displayed or copied response text |
+| Native external open | Complete baseline | A dedicated Tauri command validates and caps the URL, then invokes the platform opener with an argument vector and no command shell |
+| Browser-development fallback | Complete | Browser mode opens a normalized target with `noopener,noreferrer`; browser popup policy remains authoritative |
+| Bounded detection | Complete | Detection caps each URL at 8 KiB and each line at 100 clickable targets while preserving unmatched text and trailing punctuation |
+| Device boundary | Complete | Strict boolean normalization, import reset, folder/Git omission, encrypted-pull preservation, defaults reset, and the loading workspace keep the preference device-local |
+| Failure visibility | Complete | Native validation/spawn errors appear below the response viewer instead of navigating the Brunomnia WebView |
+| Executable coverage | Complete baseline | Focused tests cover text segmentation, punctuation, XML decoding, scheme/length rejection, default/import/normalization/persistence behavior, and native URL validation |
+| Bundle boundary | Complete | Link logic remains in the lazy response-preview graph; the main renderer is 497,677 bytes without a chunk warning |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [preferences](GRAPHQL_AND_PREFERENCES.md), [parity ledger](PARITY.md), and [Milestone 59 verification](QA_MILESTONE_59.md) |
+
+Compatibility bounds remain explicit: Brunomnia's dependency-free tokenizer is not CodeMirror's link extension and does not claim every URL grammar or editor gesture. It recognizes absolute HTTP(S) text only, opens links in the default browser, and intentionally leaves Raw Data inert. The native opener has compile/test coverage on macOS; Windows `rundll32` and Linux `xdg-open` branches still need release-host integration fixtures. Rendered link interaction QA remains omitted by standing direction.
+
+## Milestone 60 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

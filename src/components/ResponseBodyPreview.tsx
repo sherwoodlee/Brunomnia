@@ -6,12 +6,14 @@ import { prettyBody } from '../lib/request';
 import { responseBodyBytes } from '../lib/responseBytes';
 import { detectedResponseContentType } from '../lib/responseContentType';
 import { responseHtmlPreview } from '../lib/responseHtml';
+import { openResponseLink, responseLineSegments } from '../lib/responseLinks';
 import { createResponseMediaArtifact, responseMedia, type ResponseMedia } from '../lib/responseMedia';
 import { responseSizeBand } from '../lib/responseSize';
 import type { HttpResponse, ResponsePreviewMode } from '../types';
 
 type ResponseBodyPreviewProps = {
   allowHtmlPreviewScripts: boolean;
+  disableResponsePreviewLinks: boolean;
   response: HttpResponse;
   responseUrl: string;
   filter: string;
@@ -121,14 +123,23 @@ function MultipartResponsePreview({ allowHtmlPreviewScripts, bytes, contentType,
   </div>;
 }
 
-function FilteredResponseBody({ allowHtmlPreviewScripts, response, responseUrl, filter, filterHistory, onApplyFilter, previewMode }: Pick<ResponseBodyPreviewProps, 'allowHtmlPreviewScripts' | 'response' | 'responseUrl' | 'filter' | 'filterHistory' | 'onApplyFilter' | 'previewMode'>) {
+function ResponseCodeLine({ index, line, linksEnabled, xml, onLinkError }: { index: number; line: string; linksEnabled: boolean; xml: boolean; onLinkError: (error: string) => void }) {
+  const segments = useMemo(() => linksEnabled ? responseLineSegments(line, xml) : [{ kind: 'text' as const, value: line }], [line, linksEnabled, xml]);
+  return <div className="code-line"><span>{index + 1}</span><code>{segments.map((segment, segmentIndex) => segment.kind === 'text'
+    ? <span key={`${segmentIndex}-${segment.value}`}>{segment.value || ' '}</span>
+    : <button className="response-viewer-link" key={`${segmentIndex}-${segment.url}`} onClick={() => { onLinkError(''); void openResponseLink(segment.url).catch((error) => onLinkError(error instanceof Error ? error.message : String(error))); }} title={`Open ${segment.url} in the default browser`} type="button">{segment.value}</button>)}</code></div>;
+}
+
+function FilteredResponseBody({ allowHtmlPreviewScripts, disableResponsePreviewLinks, response, responseUrl, filter, filterHistory, onApplyFilter, previewMode }: Pick<ResponseBodyPreviewProps, 'allowHtmlPreviewScripts' | 'disableResponsePreviewLinks' | 'response' | 'responseUrl' | 'filter' | 'filterHistory' | 'onApplyFilter' | 'previewMode'>) {
   const language = responseFilterLanguage(response);
   const result = useMemo(() => previewMode === 'raw'
     ? { contents: response.body, error: '', matchCount: null }
     : applyResponseBodyFilter(response, filter), [filter, previewMode, response]);
   const lines = (previewMode === 'raw' ? result.contents : prettyBody(result.contents)).split('\n');
   const [draft, setDraft] = useState(filter);
+  const [linkError, setLinkError] = useState('');
   useEffect(() => setDraft(filter), [filter]);
+  useEffect(() => setLinkError(''), [previewMode, response.body, response.bodyBase64]);
   const originalContentType = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1] ?? '';
   const bytes = useMemo(() => responseBodyBytes(response), [response.body, response.bodyBase64]);
   const contentType = useMemo(() => detectedResponseContentType(originalContentType, bytes), [bytes, originalContentType]);
@@ -144,8 +155,9 @@ function FilteredResponseBody({ allowHtmlPreviewScripts, response, responseUrl, 
 
   return <>
     <div className={`code-viewer${previewMode === 'raw' ? ' raw-response' : ''}`}>
-      {lines.map((line, index) => <div className="code-line" key={`${index}-${line}`}><span>{index + 1}</span><code>{line || ' '}</code></div>)}
+      {lines.map((line, index) => <ResponseCodeLine index={index} key={`${index}-${line}`} line={line} linksEnabled={previewMode !== 'raw' && !disableResponsePreviewLinks} onLinkError={setLinkError} xml={language === 'xml'} />)}
     </div>
+    {linkError ? <div className="response-link-error" role="status">{linkError}</div> : null}
     {previewMode !== 'raw' && language ? <div className="response-filter-bar">
       <span>{language === 'json' ? 'JSONPath' : 'XPath'}</span>
       <input aria-label="Filter response body" onChange={(event) => { const value = event.target.value; setDraft(value); if (!value) onApplyFilter('', false); }} onKeyDown={(event) => { if (event.key === 'Enter') onApplyFilter(draft, true); }} placeholder={language === 'json' ? '$.store.books[*].author' : '/store/books/author'} value={draft} />
@@ -156,7 +168,7 @@ function FilteredResponseBody({ allowHtmlPreviewScripts, response, responseUrl, 
   </>;
 }
 
-export default function ResponseBodyPreview({ allowHtmlPreviewScripts, response, responseUrl, filter, filterHistory, onApplyFilter, onDownload, onModeChange, previewMode, responseKey }: ResponseBodyPreviewProps) {
+export default function ResponseBodyPreview({ allowHtmlPreviewScripts, disableResponsePreviewLinks, response, responseUrl, filter, filterHistory, onApplyFilter, onDownload, onModeChange, previewMode, responseKey }: ResponseBodyPreviewProps) {
   const band = responseSizeBand(response.sizeBytes);
   const [revealedKey, setRevealedKey] = useState('');
   const blocked = band === 'huge' || (band === 'large' && !alwaysShowLargeResponses && revealedKey !== responseKey);
@@ -167,6 +179,6 @@ export default function ResponseBodyPreview({ allowHtmlPreviewScripts, response,
       <strong>{band === 'huge' ? 'Response over 100 MB cannot be shown' : 'Response over 5 MB hidden for performance'}</strong>
       <span>{band === 'huge' ? 'Download the stored response bytes to inspect them outside Brunomnia.' : 'Show this response once, always show large responses for this app session, or download the stored body.'}</span>
       <div><button onClick={onDownload} type="button">Save response to file</button>{band === 'large' ? <><button onClick={() => setRevealedKey(responseKey)} type="button">Show anyway</button><button onClick={() => { alwaysShowLargeResponses = true; setRevealedKey(responseKey); }} type="button">Always show this session</button></> : null}</div>
-    </div> : <FilteredResponseBody allowHtmlPreviewScripts={allowHtmlPreviewScripts} filter={filter} filterHistory={filterHistory} key={responseKey} onApplyFilter={onApplyFilter} previewMode={previewMode} response={response} responseUrl={responseUrl} />}
+    </div> : <FilteredResponseBody allowHtmlPreviewScripts={allowHtmlPreviewScripts} disableResponsePreviewLinks={disableResponsePreviewLinks} filter={filter} filterHistory={filterHistory} key={responseKey} onApplyFilter={onApplyFilter} previewMode={previewMode} response={response} responseUrl={responseUrl} />}
   </div>;
 }
