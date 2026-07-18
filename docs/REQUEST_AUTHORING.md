@@ -33,6 +33,12 @@ Preferences also provides a device-local **Maximum redirects** ceiling shared by
 
 Finite and unlimited chains remain subject to an ordinary request's deadline. Event Streams use the request timeout while waiting for response headers—including redirects—then remove the total deadline from the active stream. Browser development mode honors the effective follow/no-follow choice through Fetch, but Fetch does not expose a maximum-hop control.
 
+## Timeout policy
+
+Preferences keeps a device-local **Request timeout (ms)** value that defaults to `30000` and is resolved when a request executes. Enter `0` to disable the deadline. New HTTP, GraphQL, Event Stream, and gRPC requests use the preference; the Transport tab can retain a custom value for a request that must not follow device changes.
+
+Workspace v14 and earlier requests migrate their saved timeout to **Custom** so an upgrade never changes a working deadline. Choosing **Make every request inherit timeout** opts all requests into the live preference. The effective value reaches primary requests, collection runs, the CLI, scripts/plugins, URL imports, OAuth, and integrations. Internal GraphQL introspection, AI, MCP, Konnect, and bounded script requests deliberately retain custom safety deadlines.
+
 ## Response history
 
 After a request completes, use the history selector in the response summary to reopen an earlier saved result. Saved entries retain the response body, headers, status, timing, negotiated protocol, request URL, request identity, active environment identity, and receipt time. Selecting another request restores its newest eligible response instead of leaving the previous request's result on screen.

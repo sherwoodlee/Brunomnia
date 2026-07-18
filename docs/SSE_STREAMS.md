@@ -1,6 +1,6 @@
 # Server-Sent Events streams
 
-Brunomnia runs Event Stream requests through its native Rust transport. An active response has no total request-duration deadline, while initial and reconnect handshakes still use the request's bounded transport timeout.
+Brunomnia runs Event Stream requests through its native Rust transport. An active response has no total request-duration deadline. Initial and reconnect handshakes use the effective inherited/custom request timeout when it is positive; `0` leaves response-header establishment without a deadline.
 
 ## Reconnect settings
 

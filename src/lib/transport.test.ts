@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { resolveFollowRedirects } from './transport';
+import { resolveFollowRedirects, resolveRequestTimeout } from './transport';
 
 describe('resolveFollowRedirects', () => {
   it('inherits the device default in global mode', () => {
@@ -15,5 +15,21 @@ describe('resolveFollowRedirects', () => {
     expect(resolveFollowRedirects(transport, false)).toBe(true);
     transport.followRedirectsMode = 'off';
     expect(resolveFollowRedirects(transport, true)).toBe(false);
+  });
+});
+
+describe('resolveRequestTimeout', () => {
+  it('inherits the device timeout, including disabled timeouts', () => {
+    const transport = createBlankRequest('global-timeout').transport;
+    expect(resolveRequestTimeout(transport, 12_345)).toBe(12_345);
+    expect(resolveRequestTimeout(transport, 0)).toBe(0);
+  });
+
+  it('gives an explicit request timeout precedence without mutating it', () => {
+    const transport = createBlankRequest('custom-timeout').transport;
+    transport.timeoutMode = 'custom';
+    transport.timeoutMs = 4_321;
+    expect(resolveRequestTimeout(transport, 30_000)).toBe(4_321);
+    expect(transport.timeoutMs).toBe(4_321);
   });
 });

@@ -10,6 +10,7 @@ import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resource
 import { hydrateScriptFileReferences, prepareScriptSubrequest, type ScriptFileBudget, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 import { createScriptExpect } from '../src/lib/scriptExpect';
 import { createScriptModules } from '../src/lib/scriptModules';
+import { resolveRequestTimeout } from '../src/lib/transport';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -361,7 +362,7 @@ const runNodeScript = async (
   return { request: hydratedRequest, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
 };
 
-const executeHttp = async (request: ApiRequest, variables: Record<string, string>): Promise<HttpResponse> => {
+const executeHttp = async (request: ApiRequest, variables: Record<string, string>, requestTimeoutMs = 30_000): Promise<HttpResponse> => {
   if (request.protocol !== 'http' && request.protocol !== 'graphql') throw new Error(`CLI collection execution does not yet support ${request.protocol}.`);
   const url = buildRequestUrl(request, variables);
   const headers = buildHeaders(request, variables);
@@ -384,12 +385,13 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
   }
   else if (request.bodyMode === 'binary' && request.binaryBody) body = Buffer.from(request.binaryBody.dataBase64, 'base64');
   const started = performance.now();
+  const timeoutMs = resolveRequestTimeout(request.transport, requestTimeoutMs);
   const response = await fetch(url, {
     method: request.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled && header.name).map((header) => [header.name, header.value])),
     body: request.method === 'GET' || request.method === 'HEAD' ? undefined : body,
     redirect: request.transport.followRedirects ? 'follow' : 'manual',
-    signal: AbortSignal.timeout(request.transport.timeoutMs),
+    signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
   });
   const responseBody = await response.text();
   return { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url };
@@ -451,17 +453,18 @@ const main = async () => {
     const requestedTestNamePattern = flag('--testNamePattern') ?? flag('-t') ?? flag('--test-name-pattern');
     if (subject === 'collection' && requestedTestNamePattern !== undefined) fail('--testNamePattern is only available for run test.');
     const testNamePattern = subject === 'test' ? validateTestNamePattern(requestedTestNamePattern) : undefined;
+    const executeWorkspaceHttp = (request: ApiRequest, variables: Record<string, string>) => executeHttp(request, variables, workspace.preferences?.requestTimeoutMs ?? 30_000);
     const report = await runCollection(collection, environment, {
       iterations: Number(flag('--iterations') ?? 1), retries: Number(flag('--retries') ?? 0), bail: hasFlag('--bail'), delayMs: 0,
       testNamePattern,
       scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(flag('--script-timeout') ?? 10_000))),
       environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
       dataRows: dataPath ? parseRunnerData(await loadText(dataPath)) : [],
-    }, executeHttp, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => {
+    }, executeWorkspaceHttp, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => {
       if (source.trim() && !hasFlag('--allow-scripts')) throw new Error('CLI script execution is disabled. Re-run trusted workspaces with --allow-scripts.');
       return runNodeScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
         ...scriptOptions,
-        sendRequest: hasFlag('--allow-script-requests') ? executeHttp : undefined,
+        sendRequest: hasFlag('--allow-script-requests') ? executeWorkspaceHttp : undefined,
         readFile: hasFlag('--allow-script-files') ? readCliScriptFile : undefined,
       });
     });

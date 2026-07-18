@@ -258,13 +258,14 @@ export function StreamSetup({ request, onChange }: { request: ApiRequest; onChan
   );
 }
 
-export function TransportEditor({ request, onChange }: { request: ApiRequest; onChange: ChangeRequest }) {
+export function TransportEditor({ request, globalTimeoutMs, onChange }: { request: ApiRequest; globalTimeoutMs: number; onChange: ChangeRequest }) {
   const transport = request.transport;
   const update = (patch: Partial<ApiRequest['transport']>) => onChange({ transport: { ...transport, ...patch } });
   return (
     <div className="transport-editor">
       <div className="transport-grid">
-        <label>Request timeout (ms)<input min="100" max="600000" type="number" value={transport.timeoutMs} onChange={(event) => update({ timeoutMs: Number(event.target.value) })} /></label>
+        <label>Request timeout<select value={transport.timeoutMode} onChange={(event) => update({ timeoutMode: event.target.value as typeof transport.timeoutMode })}><option value="global">Use Preferences ({globalTimeoutMs.toLocaleString()} ms)</option><option value="custom">Custom</option></select></label>
+        <label>Custom timeout (ms)<input disabled={transport.timeoutMode !== 'custom'} min="0" step="1" type="number" value={transport.timeoutMs} onChange={(event) => update({ timeoutMs: Math.min(2_147_483_647, Math.max(0, Number(event.target.value) || 0)) })} /><small>0 disables the deadline</small></label>
         <label>Proxy URL<input placeholder="http://127.0.0.1:8080" spellCheck={false} value={transport.proxyUrl} onChange={(event) => update({ proxyUrl: event.target.value })} /></label>
         <label>Proxy exclusions<input placeholder="localhost, .example.com, 10.0.0.0/8" spellCheck={false} value={transport.proxyExclusions} onChange={(event) => update({ proxyExclusions: event.target.value })} /></label>
         <label>Certificate domains<input placeholder="api.example.com, *.internal.example" spellCheck={false} value={transport.clientCertificateDomains} onChange={(event) => update({ clientCertificateDomains: event.target.value })} /></label>

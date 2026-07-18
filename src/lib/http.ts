@@ -5,7 +5,7 @@ import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
 import { renderTemplate } from './templates';
 import { buildResponseTimeline } from './timeline';
-import { resolveFollowRedirects } from './transport';
+import { resolveFollowRedirects, resolveRequestTimeout } from './transport';
 
 export type SendRequestContext = {
   cookies?: CookieRecord[];
@@ -13,6 +13,7 @@ export type SendRequestContext = {
   preferredHttpVersion?: PreferredHttpVersion;
   maxRedirects?: number;
   followRedirects?: boolean;
+  requestTimeoutMs?: number;
   maxTimelineDataSizeKB?: number;
   filterResponsesByEnv?: boolean;
   vault?: Record<string, string>;
@@ -115,6 +116,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     : context;
   const prepared = await renderRequest(hooked, variables, renderContext);
   const followRedirects = resolveFollowRedirects(prepared.transport, context.followRedirects ?? true);
+  const timeoutMs = resolveRequestTimeout(prepared.transport, context.requestTimeoutMs ?? 30_000);
   const graphqlPayload = prepared.protocol === 'graphql' ? graphqlBody(prepared, variables) : undefined;
   const finish = async (response: HttpResponse) => context.pluginRuntime
     ? context.pluginRuntime.afterResponse(prepared, response)
@@ -171,6 +173,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         transport: {
           ...prepared.transport,
           followRedirects,
+          timeoutMs,
           preferredHttpVersion: context.preferredHttpVersion ?? 'default',
           maxRedirects: context.maxRedirects ?? 10,
         },
@@ -199,7 +202,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     headers: Object.fromEntries(headers.filter((header) => header.enabled).map((header) => [header.name, header.value])),
     body: browserBody(prepared, variables),
     redirect: followRedirects ? 'follow' : 'manual',
-    signal: AbortSignal.timeout(prepared.transport.timeoutMs),
+    signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
     credentials: prepared.transport.sendCookies ? 'include' : 'omit',
   });
   const body = await response.text();

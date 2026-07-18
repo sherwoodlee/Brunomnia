@@ -173,7 +173,7 @@ const normalizeScriptSubrequestInput = (input: unknown, sourceRequest: ApiReques
   request.method = stringValue(source.method, 'GET').trim().toUpperCase() || 'GET';
   if (!/^[A-Z][A-Z0-9!#$%&'*+.^_`|~-]{0,31}$/.test(request.method)) throw new Error('Script request method is not a valid HTTP token.');
   request.headers = scriptHeaders(source.header ?? source.headers);
-  request.transport = { ...sourceRequest.transport, timeoutMs: Math.min(10_000, Math.max(1_000, sourceRequest.transport.timeoutMs)) };
+  request.transport = { ...sourceRequest.transport, timeoutMode: 'custom', timeoutMs: Math.min(10_000, Math.max(1_000, sourceRequest.transport.timeoutMs)) };
   request.preRequestScript = '';
   request.tests = '';
   const auth = record(source.auth);
