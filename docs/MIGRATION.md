@@ -783,7 +783,7 @@ Compatibility bounds remain explicit: preserved bytes are the HTTP entity after 
 | Executable coverage | Complete baseline | Focused tests cover case/parameter normalization, invalid media types, exact invalid-UTF-8 byte recovery, Blob type/content, and binary extension behavior; complete frontend/native/CLI/app gates remain green within the recorded sandbox limit |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 52 verification](QA_MILESTONE_52.md) |
 
-Compatibility bounds remain explicit: routing trusts the declared Content-Type rather than sniffing media signatures. Actual image/audio codecs and embedded PDF controls depend on the operating-system WebView, and corrupt-media load events vary by engine. Viewers still require the complete body in memory and do not implement zoom/waveform/transcript tooling. Charset-aware text, byte-backed/recursive multipart parsing, filesystem-backed response bodies, and interactive HTML remain open. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: routing trusted the declared Content-Type rather than sniffing media signatures. Actual image/audio codecs and embedded PDF controls depend on the operating-system WebView, and corrupt-media load events vary by engine. Viewers still require the complete body in memory and do not implement zoom/waveform/transcript tooling. Milestones 53–55 later add charset-aware text and byte-backed recursive multipart viewing. Filesystem-backed response bodies and interactive HTML remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
 ## Milestone 53 — charset-aware response text (complete baseline)
 
@@ -799,7 +799,7 @@ Compatibility bounds remain explicit: routing trusts the declared Content-Type r
 | Executable coverage | Complete baseline | Focused tests cover aliases, quoted/case-insensitive parameters, Windows-1252, UTF-16LE valid-byte edge cases, UTF-8 BOM preservation, browser/native integration, corrupt Base64 fallback, and ordinary UTF-8 deduplication |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 53 verification](QA_MILESTONE_53.md) |
 
-Compatibility bounds remain explicit: decoding follows the declared charset and does not sniff encodings. Available pass-through labels depend on the operating-system WebView's Encoding Standard implementation; invalid/unsupported labels fall back to UTF-8 rather than bundling an independent codec table. Text diagnostics contain the decoded inspection string, while raw export retains decoded entity bytes. Filesystem-backed bodies, byte-backed recursive multipart parsing, content sniffing, and raw wire evidence remain open. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: decoding followed the declared charset and did not sniff encodings. Available pass-through labels depend on the operating-system WebView's Encoding Standard implementation; invalid/unsupported labels fall back to UTF-8 rather than bundling an independent codec table. Text diagnostics contain the decoded inspection string, while raw export retains decoded entity bytes. Milestones 54–55 later add byte-backed recursive multipart parsing. Filesystem-backed bodies, content sniffing, and raw wire evidence remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
 ## Milestone 54 — byte-backed multipart responses (complete baseline)
 
@@ -815,9 +815,26 @@ Compatibility bounds remain explicit: decoding follows the declared charset and 
 | Executable coverage | Complete baseline | Focused tests cover binary NUL/`0xff`/`0x80` payloads, exact artifact bytes, Windows-1252 part text, original byte sizes, and every prior boundary/header/error/limit case |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 54 verification](QA_MILESTONE_54.md) |
 
-Compatibility bounds remain explicit: the dependency-free parser materializes a one-byte-index string in addition to the already buffered response, unlike upstream's streaming `multiparty` adapter. Part headers are treated as byte-preserving Latin-1-style code units rather than implementing RFC 2047, and filename parameters do not implement RFC 5987/2231. Selected parts remain textual instead of recursively using friendly viewers; that is the next response phase. Save part uses the browser/WebView path rather than a native dialog. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: the dependency-free parser materialized a one-byte-index string in addition to the already buffered response, unlike upstream's streaming `multiparty` adapter. Part headers are treated as byte-preserving Latin-1-style code units rather than implementing RFC 2047, and filename parameters do not implement RFC 5987/2231. Milestone 55 later routes selected sections recursively through the friendly viewers. Save part uses the browser/WebView path rather than a native dialog. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 55 — remaining parity closure and release hardening
+## Milestone 55 — recursive multipart friendly viewers (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Selected-part dispatch | Complete baseline | The selected section routes by declared Content-Type into JSON/text, safe HTML, bounded CSV, exact-byte image/PDF/audio, or another multipart viewer |
+| Exact media continuity | Complete | Multipart media Blob artifacts consume the original part `Uint8Array`, never a replacement-character inspection string or re-encoding |
+| Nested multipart navigation | Complete baseline | Every expanded nested level has its own bounded selector, header toggle, exact Save part action, and malformed-input evidence |
+| MIME boundary fidelity | Complete | Aggregate and part Content-Type values retain parameter casing so case-sensitive outer and nested boundaries remain parseable while routing stays case-insensitive |
+| Lazy expansion | Complete | Only the currently selected nested path is rendered and parsed; switching parts remounts that section viewer and leaves siblings unexpanded |
+| Recursion safety | Complete | Nested multipart parsing stops after five levels and leaves selected nested sections over 5 MiB collapsed with exact-save guidance |
+| Existing safety continuity | Complete | The outer 5/100 MiB gate, 100-part/100-header caps, 1,000,000-character plain-text cap, network-blocked HTML sandbox, CSV bounds, and Blob URL cleanup remain active |
+| Bundle boundary | Complete | All recursion code remains in the lazy response-preview chunk; the main renderer stays at 498,231 bytes without a chunk warning |
+| Executable coverage | Complete baseline | Focused tests cover direct media byte slices, nested case-sensitive boundaries, recursive parsing, and exact depth/byte guard thresholds alongside the prior multipart/media suite |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 55 verification](QA_MILESTONE_55.md) |
+
+Compatibility bounds remain explicit: recursive routing still trusts declared Content-Type instead of sniffing content, and safe HTML remains script/form/network disabled. Recursion beyond five levels and nested multipart sections above 5 MiB require exact Save part inspection outside the viewer. The parser still buffers each expanded selected aggregate and materializes its byte-index string. MIME RFC 2047 and filename RFC 5987/2231 decoding, Content-ID attachment resolution, a native save dialog, and rendered interaction QA remain open.
+
+## Milestone 56 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

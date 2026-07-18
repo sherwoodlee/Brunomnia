@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { applyResponseBodyFilter, responseFilterLanguage } from '../lib/responseFilter';
 import { parseCsvPreview } from '../lib/csvPreview';
-import { createMultipartPartArtifact, parseMultipartPreview, type MultipartPreviewPart } from '../lib/multipartPreview';
+import { createMultipartPartArtifact, MAX_MULTIPART_PREVIEW_DEPTH, multipartNestedPreviewBlock, parseMultipartPreview, type MultipartPreviewPart } from '../lib/multipartPreview';
 import { prettyBody } from '../lib/request';
 import { responseBodyBytes } from '../lib/responseBytes';
 import { createResponseMediaArtifact, responseMedia, type ResponseMedia } from '../lib/responseMedia';
@@ -31,8 +31,8 @@ function CsvResponsePreview({ body }: { body: string }) {
   </div>;
 }
 
-function ResponseMediaPreview({ media, response }: { media: ResponseMedia; response: HttpResponse }) {
-  const artifact = useMemo(() => createResponseMediaArtifact(response, media), [media.mimeType, response.body, response.bodyBase64]);
+function ResponseMediaPreview({ media, source }: { media: ResponseMedia; source: Pick<HttpResponse, 'body' | 'bodyBase64'> | Uint8Array }) {
+  const artifact = useMemo(() => createResponseMediaArtifact(source, media), [media.mimeType, source]);
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   useEffect(() => {
@@ -67,23 +67,43 @@ const downloadMultipartPart = (part: MultipartPreviewPart) => {
   URL.revokeObjectURL(url);
 };
 
-function MultipartResponsePreview({ contentType, response }: { contentType: string; response: HttpResponse }) {
-  const bytes = useMemo(() => responseBodyBytes(response), [response.body, response.bodyBase64]);
+function MultipartPartBody({ depth, part }: { depth: number; part: MultipartPreviewPart }) {
+  const normalizedContentType = part.contentType.toLowerCase();
+  const media = responseMedia(part.contentType);
+  if (media) return <ResponseMediaPreview media={media} source={part.bodyBytes} />;
+  if (normalizedContentType.includes('html')) {
+    const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
+    return <iframe className="response-html-preview" sandbox="" srcDoc={`${policy}${part.body}`} title="Multipart section visual preview" />;
+  }
+  if (normalizedContentType.includes('multipart/')) {
+    const block = multipartNestedPreviewBlock(depth, part.bodyBytes.byteLength);
+    if (block === 'depth') return <div className="response-multipart-message">Nested multipart preview stopped at {MAX_MULTIPART_PREVIEW_DEPTH} levels. Save the section to inspect its complete original bytes.</div>;
+    if (block === 'size') return <div className="response-multipart-message">Nested multipart section over 5 MB is not expanded to avoid multiplying parser memory. Save the section to inspect its complete original bytes.</div>;
+    return <MultipartResponsePreview bytes={part.bodyBytes} contentType={part.contentType} depth={depth + 1} />;
+  }
+  if (normalizedContentType.includes('csv')) return <CsvResponsePreview body={part.body} />;
+
+  const truncatedBody = part.body.length > 1_000_000;
+  const body = part.body.slice(0, 1_000_000);
+  const displayBody = normalizedContentType.includes('json') ? prettyBody(body) : body;
+  return <>
+    <div className="code-viewer response-part-body">{displayBody.split('\n').map((line, index) => <div className="code-line" key={`${index}-${line}`}><span>{index + 1}</span><code>{line || ' '}</code></div>)}</div>
+    {truncatedBody ? <div className="response-multipart-message">Part preview truncated at 1,000,000 decoded characters; Save part retains the complete original bytes.</div> : null}
+  </>;
+}
+
+function MultipartResponsePreview({ bytes, contentType, depth = 0 }: { bytes: Uint8Array; contentType: string; depth?: number }) {
   const preview = useMemo(() => parseMultipartPreview(bytes, contentType), [bytes, contentType]);
   const [selectedId, setSelectedId] = useState(0);
   const [showHeaders, setShowHeaders] = useState(false);
   const selected = preview.parts.find((part) => part.id === selectedId) ?? preview.parts[0];
   if (preview.error) return <div className="response-multipart-message bad">Failed to parse multipart response: {preview.error}</div>;
   if (!selected) return <div className="response-multipart-message">No multipart sections to display.</div>;
-  const truncatedBody = selected.body.length > 1_000_000;
-  const partBody = selected.body.slice(0, 1_000_000);
-  const displayBody = selected.contentType.includes('json') ? prettyBody(partBody) : partBody;
   return <div className="response-multipart-preview">
     <div className="response-multipart-toolbar"><select aria-label="Multipart response part" onChange={(event) => { setSelectedId(Number(event.target.value)); setShowHeaders(false); }} value={selected.id}>{preview.parts.map((part) => <option key={part.id} value={part.id}>{part.title} · {part.sizeBytes} B</option>)}</select><button onClick={() => setShowHeaders((value) => !value)} type="button">{showHeaders ? 'Hide' : 'View'} headers</button><button onClick={() => downloadMultipartPart(selected)} type="button">Save part</button></div>
     {preview.truncated ? <div className="response-multipart-message">Part list truncated at 100 sections.</div> : null}
     {showHeaders ? <div className="response-multipart-headers">{selected.headers.map((header, index) => <div key={`${header.name}-${index}`}><strong>{header.name}</strong><span>{header.value}</span></div>)}</div> : null}
-    <div className="code-viewer response-part-body">{displayBody.split('\n').map((line, index) => <div className="code-line" key={`${index}-${line}`}><span>{index + 1}</span><code>{line || ' '}</code></div>)}</div>
-    {truncatedBody ? <div className="response-multipart-message">Part preview truncated at 1,000,000 decoded characters; Save part retains the complete original bytes.</div> : null}
+    <MultipartPartBody depth={depth} key={selected.id} part={selected} />
   </div>;
 }
 
@@ -95,16 +115,17 @@ function FilteredResponseBody({ response, filter, filterHistory, onApplyFilter, 
   const lines = (previewMode === 'raw' ? result.contents : prettyBody(result.contents)).split('\n');
   const [draft, setDraft] = useState(filter);
   useEffect(() => setDraft(filter), [filter]);
-  const contentType = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1].toLowerCase() ?? '';
+  const contentType = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1] ?? '';
+  const normalizedContentType = contentType.toLowerCase();
   const media = responseMedia(contentType);
 
-  if (previewMode === 'friendly' && media) return <ResponseMediaPreview media={media} response={response} />;
-  if (previewMode === 'friendly' && contentType.includes('html')) {
+  if (previewMode === 'friendly' && media) return <ResponseMediaPreview media={media} source={response} />;
+  if (previewMode === 'friendly' && normalizedContentType.includes('html')) {
     const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
     return <iframe className="response-html-preview" sandbox="" srcDoc={`${policy}${response.body}`} title="Response visual preview" />;
   }
-  if (previewMode === 'friendly' && contentType.includes('multipart/')) return <MultipartResponsePreview contentType={contentType} response={response} />;
-  if (previewMode === 'friendly' && contentType.includes('csv')) return <CsvResponsePreview body={response.body} />;
+  if (previewMode === 'friendly' && normalizedContentType.includes('multipart/')) return <MultipartResponsePreview bytes={responseBodyBytes(response)} contentType={contentType} />;
+  if (previewMode === 'friendly' && normalizedContentType.includes('csv')) return <CsvResponsePreview body={response.body} />;
 
   return <>
     <div className={`code-viewer${previewMode === 'raw' ? ' raw-response' : ''}`}>

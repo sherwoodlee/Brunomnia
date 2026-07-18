@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createMultipartPartArtifact, parseMultipartPreview } from './multipartPreview';
+import { createMultipartPartArtifact, MAX_NESTED_MULTIPART_BYTES, multipartNestedPreviewBlock, parseMultipartPreview } from './multipartPreview';
 
 const body = [
   '--AaB03x',
@@ -59,5 +59,31 @@ describe('multipart response preview', () => {
     expect(createMultipartPartArtifact(parts[0], 42)).toMatchObject({ contents: Uint8Array.from([0x00, 0xff, 0x80]), fileName: 'payload-42.bin' });
     expect(parts[1]).toMatchObject({ name: 'legacy', contentType: 'text/plain; charset=windows-1252', body: 'café', sizeBytes: 4 });
     expect(parts[1].bodyBytes).toEqual(Uint8Array.from([0x63, 0x61, 0x66, 0xe9]));
+  });
+
+  it('preserves case-sensitive nested boundaries for recursive parsing', () => {
+    const nested = [
+      '--Outer',
+      'Content-Disposition: form-data; name="nested"',
+      'Content-Type: multipart/mixed; boundary=InnerCase',
+      '',
+      '--InnerCase',
+      'Content-Type: application/json',
+      '',
+      '{"nested":true}',
+      '--InnerCase--',
+      '--Outer--',
+      '',
+    ].join('\r\n');
+
+    const outer = parseMultipartPreview(nested, 'Multipart/Mixed; boundary=Outer').parts[0];
+    expect(outer.contentType).toBe('multipart/mixed; boundary=InnerCase');
+    expect(parseMultipartPreview(outer.bodyBytes, outer.contentType).parts[0]).toMatchObject({ contentType: 'application/json', body: '{"nested":true}' });
+  });
+
+  it('bounds recursive multipart parsing by depth and selected-section bytes', () => {
+    expect(multipartNestedPreviewBlock(4, MAX_NESTED_MULTIPART_BYTES)).toBe('');
+    expect(multipartNestedPreviewBlock(5, 1)).toBe('depth');
+    expect(multipartNestedPreviewBlock(0, MAX_NESTED_MULTIPART_BYTES + 1)).toBe('size');
   });
 });

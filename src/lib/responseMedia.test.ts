@@ -22,4 +22,13 @@ describe('response media routing', () => {
     expect(artifact.blob.type).toBe('image/png');
     expect(new Uint8Array(await artifact.blob.arrayBuffer())).toEqual(artifact.bytes);
   });
+
+  it('creates the same media artifact directly from a multipart byte slice', async () => {
+    const bytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
+    const artifact = createResponseMediaArtifact(bytes, responseMedia('image/jpeg')!);
+
+    expect(artifact.bytes).toBe(bytes);
+    expect(artifact.blob.type).toBe('image/jpeg');
+    expect(new Uint8Array(await artifact.blob.arrayBuffer())).toEqual(bytes);
+  });
 });

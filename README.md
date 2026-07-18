@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the fiftieth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the fifty-fifth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -21,7 +21,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Distinct global-base/selected-global and collection-base/selected-collection environments, device-local private global sub-environments, folder/iteration/request-local variables, dynamic aliases, and template tags for UUIDs, time, Faker values, encoding, hashing, JSONPath, cookies, prompts, requests, and chained responses
 - Basic, Digest, OAuth 1.0/2.0, NTLM, AWS IAM v4, Bearer, API key, Hawk, Atlassian ASAP, and Netrc authentication
 - Persistent editable cookie jar with per-request send/store controls
-- A searchable 100-send activity log plus chronologically grouped per-request response history with finite/unlimited retention, active-environment filtering, rich URL/method/status/time/size evidence, delete/clear actions, historical request-version restoration, persistent Visual/Source/Raw preview modes with charset-aware text, safe HTML, byte-backed image/PDF/audio viewers, bounded CSV tables, and selectable byte-backed multipart sections, JSONPath/XPath body filters, 5/100 MiB preview safety gates, byte-exact decoded-body/raw and prettified JSON downloads, selected-response HTTP debug/HAR exports, body/header inspection, and persisted size-bounded outgoing/response timeline evidence
+- A searchable 100-send activity log plus chronologically grouped per-request response history with finite/unlimited retention, active-environment filtering, rich URL/method/status/time/size evidence, delete/clear actions, historical request-version restoration, persistent Visual/Source/Raw preview modes with charset-aware text, safe HTML, byte-backed image/PDF/audio viewers, bounded CSV tables, and selectable byte-backed multipart sections with bounded recursive friendly viewers, JSONPath/XPath body filters, 5/100 MiB preview safety gates, byte-exact decoded-body/raw and prettified JSON downloads, selected-response HTTP debug/HAR exports, body/header inspection, and persisted size-bounded outgoing/response timeline evidence
 - Delayed one-shot sends and sequential repeating sends with explicit cancellation and a 1,000-run safety bound
 - Permission-bounded pre-request scripts and async after-response tests with documented seven-level environment lookup, exact base/selected scope aliases, folder/query/auth helpers, shared Chai `assert` and chainable `expect` surfaces, bounded adapters for every documented bundled module name, path-scoped opt-in primary/secondary local body and PEM attachment, and mediated HTTP/vault capabilities
 - Selectable drag/keyboard-ordered collection runs with JSON/CSV iteration data, retries, bail/cancellation, cookie/response chaining, bounded WebSocket/SSE samples, redacted request metadata, size-limited response inspection, saved reports, and downloadable JSON/JUnit evidence
