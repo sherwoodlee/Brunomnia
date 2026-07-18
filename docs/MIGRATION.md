@@ -953,7 +953,22 @@ Compatibility bounds remain explicit: the history follows local `HEAD`, not ever
 
 Compatibility bounds remain explicit: this phase reads configured remote-tracking refs and fetches through the installed Git client. It does not discover repositories from provider accounts, store provider credentials, delete or rename remote branches, browse un-checked-out remote history, fetch tags, or add force/advanced refspec controls. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 63 — remaining parity closure and release hardening
+## Milestone 63 — guarded local Git branch deletion (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes deletion for non-current local branches from its branch manager with an explicit confirmation step |
+| User-visible deletion | Complete baseline | Git Sync lists every non-current local branch in a dedicated deletion selector and refreshes status immediately after success |
+| Confirmation policy | Complete | The action honors Brunomnia's existing device-local **Confirm destructive actions** preference and names the selected branch in its warning |
+| Native safety | Complete baseline | Full branch-name validation, exact local existence, current-branch rejection, argument-only execution, and `git branch -d` prevent option injection and refuse unmerged history loss |
+| Remote isolation | Complete | Deleting a local branch does not delete its remote-tracking ref; it becomes eligible for the remote-only tracking workflow when applicable |
+| Executable coverage | Complete baseline | A repository fixture covers current-branch refusal, merged deletion, unmerged refusal with ref preservation, and option-shaped name rejection |
+| Bundle boundary | Complete | Deletion stays in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 63 verification](QA_MILESTONE_63.md) |
+
+Compatibility bounds remain explicit: Brunomnia does not expose force deletion, remote-branch deletion, branch rename, bulk deletion, or provider-side branch protection metadata. Git's reachability check is authoritative, so a branch that is not merged into the current `HEAD` remains intact. Rendered confirmation/interaction QA remains omitted by standing direction.
+
+## Milestone 64 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
