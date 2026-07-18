@@ -865,9 +865,26 @@ Compatibility bounds at this milestone were explicit: JSON detection decoded the
 | Executable coverage | Complete baseline | Focused tests assert safe/scripted CSP and sandbox output plus false-default, strict normalization, import reset, and true-value persistence |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [preferences](GRAPHQL_AND_PREFERENCES.md), [parity ledger](PARITY.md), and [Milestone 57 verification](QA_MILESTONE_57.md) |
 
-Compatibility bounds remain explicit: this is a safer iframe composition rather than Electron's dedicated response WebView. Brunomnia does not inject the response URL as a base, provide a remote-resource mode, or add same-origin/form/popup/download/top-navigation tokens. CSP blocks subresource network APIs, but same-frame link or script navigation remains operating-system WebView behavior; navigated content stays in the opaque sandbox. Inline script CPU/memory use is not preempted, so the preference is for trusted responses only. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: this was a safer iframe composition rather than Electron's dedicated response WebView. Brunomnia did not yet inject the response URL as a base or provide a remote-resource mode, and it omitted same-origin/form/popup/download/top-navigation tokens. Milestone 58 later adds validated response-URL base injection and reset while retaining those sandbox restrictions. Inline script CPU/memory use is not preempted, so the preference is for trusted responses only. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 58 — remaining parity closure and release hardening
+## Milestone 58 — response URL-aware HTML previews (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` still inserts the response URL as an HTML `<base>` before loading its response WebView |
+| Response URL base | Complete baseline | Valid HTTP(S) URLs are normalized, attribute escaped, and injected before response-controlled markup so the first base wins even without an existing `<head>` |
+| Relative navigation | Complete baseline | Relative links resolve against the actual live or historical response URL and navigate only the response iframe |
+| Recursive continuity | Complete | Content-detected top-level HTML and every selected multipart HTML section inherit the same top-level response URL |
+| Reset control | Complete | A visible Reset preview action remounts the original stored response after same-frame navigation |
+| URL and referrer safety | Complete | Malformed and non-HTTP(S) base values are rejected; both iframe and injected document request no referrer |
+| Original-document confinement | Complete | Automatic remote CSS/image/font/script/fetch loading remains blocked, while the existing opaque sandbox continues to omit form, popup, download, same-origin, parent, and top-navigation authority |
+| Executable coverage | Complete baseline | Focused tests cover default/script policy continuity, URL normalization, first-base precedence, relative resolution, attribute escaping, and scheme rejection |
+| Bundle boundary | Complete | Base composition remains in the lazy response-preview graph; the main renderer is 497,469 bytes without a chunk warning |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 58 verification](QA_MILESTONE_58.md) |
+
+Compatibility bounds remain explicit: this is still a Tauri iframe rather than Electron's response WebView. A followed page stays opaque and sandboxed but uses its own CSP; with `allow-scripts` active, that destination may execute its own scripts and network requests. Brunomnia does not yet auto-load response-document remote subresources or expose upstream's response-link disable preference. The Reset action is a Brunomnia recovery affordance. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 59 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
