@@ -1307,6 +1307,15 @@ pub fn git_push(input: GitPushPullInput) -> Result<GitOperationOutput, String> {
         git_output(&root, &["check-ref-format", "--branch", &branch])?,
         "Validate branch name",
     )?;
+    let status = git_status(input.path.clone())?;
+    let tracks_remote = status
+        .upstream
+        .strip_prefix(remote)
+        .is_some_and(|tail| tail.starts_with('/') && tail.len() > 1);
+    if branch == status.branch && !status.can_push && (status.upstream.is_empty() || tracks_remote)
+    {
+        return Err("Nothing to push from the current branch.".into());
+    }
     let output = git_output(&root, &["push", "-u", remote, &branch])?;
     if !output.status.success() {
         return Err(push_error(&output));
@@ -1824,6 +1833,13 @@ mod tests {
         })
         .unwrap();
         assert!(!pushed.status.can_push);
+        assert!(git_push(GitPushPullInput {
+            path: root.to_string_lossy().into_owned(),
+            remote: "origin".into(),
+            branch: "main".into(),
+        })
+        .unwrap_err()
+        .contains("Nothing to push"));
     }
 
     #[test]
