@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the thirty-sixth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the thirty-seventh runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -43,9 +43,9 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Project-scoped MCP clients over Streamable HTTP/JSON-RPC and native STDIO, with cached tools, prompts, resources, resource templates, roots, invocation, and an event console
 - Optional OpenAI, Anthropic, Gemini, and custom/local OpenAI-compatible providers with vault-only credential execution, AI mock generation, and reviewable Git commit grouping suggestions
 - Pull-only Konnect control-plane discovery and Gateway Service/HTTP Route mapping that preserves local request work and isolates unsupported routes
-- Workspace v18 migrations, device-local bulk-editor preferences, legacy-safe timeout/certificate/proxy overrides, bounded resource hierarchy and request-row normalization, collection sub-environment repair, private-global publication filtering, split-YAML serialization, import-time authority stripping, and device-local integration/script permissions
+- Workspace v19 migrations, device-local bulk/editor/layout preferences, legacy-safe timeout/certificate/proxy overrides, bounded resource hierarchy and request-row normalization, collection sub-environment repair, private-global publication filtering, split-YAML serialization, import-time authority stripping, and device-local integration/script permissions
 - Atomic persistence in the OS application-data directory
-- System/dark/light appearance, comfortable/compact density, configurable editor sizing, request defaults, and customizable keyboard shortcuts
+- System/dark/light appearance, comfortable/compact density, horizontal/responsive or forced-vertical request layout, configurable editor sizing/wrapping/indentation/ligatures, request defaults, and customizable keyboard shortcuts
 - Responsive desktop UI with no login, upgrade, or cloud dependency
 
 ## Run it

@@ -542,7 +542,21 @@ Compatibility bounds remain explicit: reqwest's discovery is not claimed to repr
 
 Compatibility bounds remain explicit: bulk mode intentionally cannot represent disabled rows or descriptions, so the first text edit removes them as current Insomnia does. Brunomnia uses its bounded text editor rather than CodeMirror template highlighting/autocomplete. Path parameters, gRPC metadata, folder headers, and environment rows remain in their structured editors.
 
-## Milestone 37 — remaining parity closure and release hardening
+## Milestone 37 — editor and request-layout preferences (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local vertical layout, line wrapping, tabs/spaces, 1–16 indent width, and font-ligature controls use the current upstream defaults |
+| Request/response layout | Complete baseline | The normal desktop split remains horizontal/responsive; forced vertical mode stacks request above response at every width |
+| Editor presentation | Complete baseline | Code surfaces apply wrapping, horizontal overflow, CSS tab width, editor font size, and inherited ligature behavior immediately |
+| Tab editing | Complete baseline | Tab inserts a literal tab or bounded spaces, selected lines indent together, and Shift-Tab removes one matching level without consuming content |
+| Device-local safety | Complete | Managed projects and encrypted-sync pulls preserve local choices, imports reset defaults, malformed booleans cannot opt in, indent width clamps safely, and workspace v18 and earlier data migrates to v19 |
+| Executable coverage | Complete baseline | Focused tests cover tab/space insertion, selection indentation/outdentation, content safety, normalization, import reset, preference preservation, and interchange versioning; rendered QA remains intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 37 verification](QA_MILESTONE_37.md) |
+
+Compatibility bounds remain explicit: Brunomnia's automatic vertical breakpoint is 1,000 px rather than current Insomnia's 880 px, while forced vertical behavior is equivalent. Plain bounded textareas do not claim CodeMirror key maps, autocompletion, linting, folding, bracket helpers, or template-token presentation. Custom interface/monospace font families remain open.
+
+## Milestone 38 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

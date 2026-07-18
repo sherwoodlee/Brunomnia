@@ -289,7 +289,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 18;
+  version: 19;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -337,6 +337,11 @@ export type AppPreferences = {
   noProxy: string;
   useBulkHeaderEditor: boolean;
   useBulkParametersEditor: boolean;
+  forceVerticalLayout: boolean;
+  editorIndentWithTabs: boolean;
+  editorIndentSize: number;
+  editorLineWrapping: boolean;
+  fontVariantLigatures: boolean;
   scriptTimeoutMs: number;
   allowScriptRequests: boolean;
   allowScriptFileAccess: boolean;

@@ -9,6 +9,7 @@ import type {
 } from '../types';
 import { graphqlTypeLabel, insertGraphqlRootField, validateGraphqlDocument } from '../lib/graphql';
 import { prettyRequestBody } from '../lib/request';
+import { applyEditorTab } from '../lib/editorText';
 import { Icon } from './Icon';
 
 type ChangeRequest = (patch: Partial<ApiRequest>) => void;
@@ -31,6 +32,22 @@ export function CodeEditor({ ariaLabel, value, onChange }: CodeEditorProps) {
         aria-label={ariaLabel}
         className="code-editor"
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Tab' || event.metaKey || event.ctrlKey || event.altKey) return;
+          event.preventDefault();
+          const shell = event.currentTarget.closest<HTMLElement>('.app-shell');
+          const result = applyEditorTab(
+            value,
+            event.currentTarget.selectionStart,
+            event.currentTarget.selectionEnd,
+            shell?.dataset.editorIndentWithTabs !== 'false',
+            Number(shell?.dataset.editorIndentSize ?? 2),
+            event.shiftKey,
+          );
+          const target = event.currentTarget;
+          onChange(result.value);
+          requestAnimationFrame(() => target.setSelectionRange(result.selectionStart, result.selectionEnd));
+        }}
         onScroll={(event) => {
           if (gutter.current) gutter.current.scrollTop = event.currentTarget.scrollTop;
         }}

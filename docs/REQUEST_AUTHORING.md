@@ -21,6 +21,12 @@ Use **Bulk Edit** in the Headers tab or beside Query parameters to switch the de
 
 The toggle is device-local and applies when another request opens. **Regular Edit** restores the structured controls. Matching current Insomnia's bulk editors, only enabled nonblank rows are serialized; editing the bulk text replaces the list with enabled name/value rows, so disabled rows and descriptions that are not represented in the text are removed. Path parameters and gRPC metadata stay structured. Workspace v17 and earlier data safely defaults both bulk modes off during v18 migration, while workspace imports reset the device choices.
 
+## Editor and request layout preferences
+
+Preferences can force the request and response panels into a vertical stack; otherwise Brunomnia retains the horizontal split until its responsive breakpoint. Text editors can wrap long lines or keep horizontal scrolling, enable/disable font ligatures, and use a 1–16 indentation width.
+
+Press Tab in a code surface to insert a literal tab when **Indent with tabs** is enabled or the configured number of spaces when it is disabled. A multiline selection indents every selected line; Shift-Tab removes one tab or up to one configured space indentation level. Workspace v18 and earlier data migrates to the current-compatible defaults of responsive layout, wrapping on, tabs on, two-column indentation, and ligatures off.
+
 ## Body formatting
 
 For JSON or text bodies, choose **Beautify** in the body toolbar. Valid JSON receives two-space indentation. XML-looking text, or text with an XML content type, receives conservative structural indentation. Invalid JSON and unrecognized plain text are left unchanged; the formatter does not send content anywhere.
