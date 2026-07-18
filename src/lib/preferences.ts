@@ -36,6 +36,7 @@ export const defaultPreferences: AppPreferences = {
   fontInterface: '',
   fontMonospace: '',
   showPasswords: false,
+  allowHtmlPreviewRemoteResources: false,
   allowHtmlPreviewScripts: false,
   disableResponsePreviewLinks: false,
   preferredHttpVersion: 'default',

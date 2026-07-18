@@ -328,6 +328,7 @@ export type AppPreferences = {
   fontInterface: string;
   fontMonospace: string;
   showPasswords: boolean;
+  allowHtmlPreviewRemoteResources: boolean;
   allowHtmlPreviewScripts: boolean;
   disableResponsePreviewLinks: boolean;
   preferredHttpVersion: PreferredHttpVersion;

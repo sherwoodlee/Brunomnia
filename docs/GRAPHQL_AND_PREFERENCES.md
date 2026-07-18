@@ -45,6 +45,7 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - a per-request response history limit, where `0` keeps only the live result and `-1` retains all saved responses;
 - optional response-history filtering by active environment;
 - an upstream-compatible, off-by-default choice to disable clickable HTTP(S) links in JSON and Source Code response viewers;
+- an off-by-default remote-resource authority for HTML response previews;
 - an off-by-default inline-JavaScript mode for isolated HTML response previews;
 - a request timeout applied at execution time, defaulting to 30 seconds, with `0` disabling deadlines;
 - separate certificate-validation defaults for API requests and authentication flows;
