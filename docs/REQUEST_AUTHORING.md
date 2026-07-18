@@ -29,11 +29,11 @@ Press Tab in a code surface to insert a literal tab when **Indent with tabs** is
 
 Interface and editor typography are independent. Each accepts an optional comma-separated CSS font-family list and an 8–24 px size; blank family fields restore Brunomnia's built-in sans-serif or monospace stack. New/imported data defaults to 13 px interface and 11 px editor text. Existing editor-size values remain editor sizes during workspace v20 migration.
 
-## Authentication password visibility
+## Password and credential visibility
 
-Authentication tokens, passwords, API-key values, client secrets, authorization codes, refresh/access tokens, AWS secret/session values, and Hawk keys are masked by default in request and folder editors. Each secret has a Show/Hide control for temporary inspection. The device-local **Reveal saved authentication passwords** preference reveals all of these editor fields together and defaults off, matching current Insomnia's `showPasswords` setting.
+Authentication tokens, passwords, API-key values, client secrets, authorization codes, refresh/access tokens, AWS secret/session values, and Hawk keys are masked by default in request and folder editors. MCP bearer tokens and Basic passwords, AI-provider keys/references, and Konnect token references follow the same rule in the integration workbench. Each secret has a Show/Hide control for temporary inspection. The device-local **Reveal saved passwords and tokens** preference reveals all of these fields together and defaults off, matching current Insomnia's `showPasswords` setting.
 
-The preference changes presentation only. It does not alter stored values, logs, exports, request execution, or clipboard behavior, and it does not reveal local-vault or encrypted-sync passphrases. Managed projects and encrypted-sync pulls preserve the current device choice; workspace imports reset it off.
+The preference changes presentation only. It does not alter stored values, logs, exports, request/integration execution, or clipboard behavior, and it does not reveal local-vault or encrypted-sync passphrases. Managed projects and encrypted-sync pulls preserve the current device choice; workspace imports reset it off. A temporary reveal resets when the request or MCP client changes.
 
 ## Body formatting
 

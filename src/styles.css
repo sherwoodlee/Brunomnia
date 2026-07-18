@@ -1005,6 +1005,10 @@ kbd {
 .integration-fields { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .integration-fields label, .mcp-operation-run label { color: var(--muted); display: flex; flex-direction: column; font-size: 8px; gap: 6px; text-transform: uppercase; }
 .integration-fields .wide { grid-column: 1 / -1; }
+.integration-secret-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.integration-secret-field input { width: 100%; }
+.integration-secret-field.masked input { border-bottom-right-radius: 0; border-top-right-radius: 0; }
+.integration-secret-field button { border-left: 0; border-radius: 0 3px 3px 0; min-width: 48px; }
 .inline-toggle { align-items: center; color: var(--muted); display: flex; font-size: 8px; gap: 6px; }
 .inline-toggle input { accent-color: var(--accent); min-height: auto; }
 .integration-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }

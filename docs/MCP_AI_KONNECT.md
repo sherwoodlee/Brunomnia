@@ -16,6 +16,8 @@ Credential fields execute only when the entire value is one of these protected r
 
 The first form resolves from the passphrase-protected local vault. The second uses an external-vault tuple approved in **Security & Sync**. Raw MCP bearer tokens/passwords/sensitive headers, AI keys, and Konnect tokens are detected as plaintext and rejected at execution. A custom HTTP authorization header can reference a vault entry containing its complete value, such as `Bearer …`.
 
+Credential fields are masked by default. Each MCP bearer token/Basic password, AI-provider key, and Konnect token has a temporary Show/Hide control; the device-local **Reveal saved passwords and tokens** preference reveals them together with request authentication fields. This affects presentation only, and switching MCP clients clears temporary disclosure.
+
 Brunomnia imports workspace integrations in a non-authoritative state: MCP clients are disabled, bearer/Basic credential fields are cleared, AI and Konnect are disabled, and their credential fields are cleared. Changing an MCP URL, transport, command, or argument list also disables the client and clears its discovery cache.
 
 ## MCP clients
