@@ -13,6 +13,7 @@ import type { HttpResponse, ResponsePreviewMode } from '../types';
 type ResponseBodyPreviewProps = {
   allowHtmlPreviewScripts: boolean;
   response: HttpResponse;
+  responseUrl: string;
   filter: string;
   filterHistory: string[];
   onApplyFilter: (filter: string, remember: boolean) => void;
@@ -60,11 +61,13 @@ function ResponseMediaPreview({ media, source }: { media: ResponseMedia; source:
   return <iframe className="response-media-preview pdf" onError={decodeError} src={url} title="PDF response preview" />;
 }
 
-function HtmlResponsePreview({ allowScripts, body, title }: { allowScripts: boolean; body: string; title: string }) {
-  const preview = useMemo(() => responseHtmlPreview(body, allowScripts), [allowScripts, body]);
+function HtmlResponsePreview({ allowScripts, body, responseUrl, title }: { allowScripts: boolean; body: string; responseUrl: string; title: string }) {
+  const preview = useMemo(() => responseHtmlPreview(body, allowScripts, responseUrl), [allowScripts, body, responseUrl]);
+  const [revision, setRevision] = useState(0);
   return <div className="response-html-shell">
-    {allowScripts ? <div className="response-html-warning">HTML JavaScript enabled · subresource network APIs, forms, popups, parent DOM access, and top navigation remain blocked.</div> : null}
-    <iframe className="response-html-preview" sandbox={preview.sandbox} srcDoc={preview.document} title={title} />
+    {allowScripts ? <div className="response-html-warning">HTML JavaScript enabled · response subresources, forms, popups, parent DOM access, and top navigation remain blocked; followed pages use their own CSP.</div> : null}
+    {preview.baseUrl ? <div className="response-html-navigation"><span>Relative links use the response URL · followed pages stay sandboxed</span><button onClick={() => setRevision((value) => value + 1)} type="button">Reset preview</button></div> : null}
+    <iframe className="response-html-preview" key={revision} referrerPolicy="no-referrer" sandbox={preview.sandbox} srcDoc={preview.document} title={title} />
   </div>;
 }
 
@@ -78,19 +81,19 @@ const downloadMultipartPart = (part: MultipartPreviewPart) => {
   URL.revokeObjectURL(url);
 };
 
-function MultipartPartBody({ allowHtmlPreviewScripts, depth, part }: { allowHtmlPreviewScripts: boolean; depth: number; part: MultipartPreviewPart }) {
+function MultipartPartBody({ allowHtmlPreviewScripts, depth, part, responseUrl }: { allowHtmlPreviewScripts: boolean; depth: number; part: MultipartPreviewPart; responseUrl: string }) {
   const contentType = detectedResponseContentType(part.contentType, part.bodyBytes);
   const normalizedContentType = contentType.toLowerCase();
   const media = responseMedia(contentType);
   if (media) return <ResponseMediaPreview media={media} source={part.bodyBytes} />;
   if (normalizedContentType.includes('html')) {
-    return <HtmlResponsePreview allowScripts={allowHtmlPreviewScripts} body={part.body} title="Multipart section visual preview" />;
+    return <HtmlResponsePreview allowScripts={allowHtmlPreviewScripts} body={part.body} responseUrl={responseUrl} title="Multipart section visual preview" />;
   }
   if (normalizedContentType.includes('multipart/')) {
     const block = multipartNestedPreviewBlock(depth, part.bodyBytes.byteLength);
     if (block === 'depth') return <div className="response-multipart-message">Nested multipart preview stopped at {MAX_MULTIPART_PREVIEW_DEPTH} levels. Save the section to inspect its complete original bytes.</div>;
     if (block === 'size') return <div className="response-multipart-message">Nested multipart section over 5 MB is not expanded to avoid multiplying parser memory. Save the section to inspect its complete original bytes.</div>;
-    return <MultipartResponsePreview allowHtmlPreviewScripts={allowHtmlPreviewScripts} bytes={part.bodyBytes} contentType={contentType} depth={depth + 1} />;
+    return <MultipartResponsePreview allowHtmlPreviewScripts={allowHtmlPreviewScripts} bytes={part.bodyBytes} contentType={contentType} depth={depth + 1} responseUrl={responseUrl} />;
   }
   if (normalizedContentType.includes('csv')) return <CsvResponsePreview body={part.body} />;
 
@@ -103,7 +106,7 @@ function MultipartPartBody({ allowHtmlPreviewScripts, depth, part }: { allowHtml
   </>;
 }
 
-function MultipartResponsePreview({ allowHtmlPreviewScripts, bytes, contentType, depth = 0 }: { allowHtmlPreviewScripts: boolean; bytes: Uint8Array; contentType: string; depth?: number }) {
+function MultipartResponsePreview({ allowHtmlPreviewScripts, bytes, contentType, depth = 0, responseUrl }: { allowHtmlPreviewScripts: boolean; bytes: Uint8Array; contentType: string; depth?: number; responseUrl: string }) {
   const preview = useMemo(() => parseMultipartPreview(bytes, contentType), [bytes, contentType]);
   const [selectedId, setSelectedId] = useState(0);
   const [showHeaders, setShowHeaders] = useState(false);
@@ -114,11 +117,11 @@ function MultipartResponsePreview({ allowHtmlPreviewScripts, bytes, contentType,
     <div className="response-multipart-toolbar"><select aria-label="Multipart response part" onChange={(event) => { setSelectedId(Number(event.target.value)); setShowHeaders(false); }} value={selected.id}>{preview.parts.map((part) => <option key={part.id} value={part.id}>{part.title} · {part.sizeBytes} B</option>)}</select><button onClick={() => setShowHeaders((value) => !value)} type="button">{showHeaders ? 'Hide' : 'View'} headers</button><button onClick={() => downloadMultipartPart(selected)} type="button">Save part</button></div>
     {preview.truncated ? <div className="response-multipart-message">Part list truncated at 100 sections.</div> : null}
     {showHeaders ? <div className="response-multipart-headers">{selected.headers.map((header, index) => <div key={`${header.name}-${index}`}><strong>{header.name}</strong><span>{header.value}</span></div>)}</div> : null}
-    <MultipartPartBody allowHtmlPreviewScripts={allowHtmlPreviewScripts} depth={depth} key={selected.id} part={selected} />
+    <MultipartPartBody allowHtmlPreviewScripts={allowHtmlPreviewScripts} depth={depth} key={selected.id} part={selected} responseUrl={responseUrl} />
   </div>;
 }
 
-function FilteredResponseBody({ allowHtmlPreviewScripts, response, filter, filterHistory, onApplyFilter, previewMode }: Pick<ResponseBodyPreviewProps, 'allowHtmlPreviewScripts' | 'response' | 'filter' | 'filterHistory' | 'onApplyFilter' | 'previewMode'>) {
+function FilteredResponseBody({ allowHtmlPreviewScripts, response, responseUrl, filter, filterHistory, onApplyFilter, previewMode }: Pick<ResponseBodyPreviewProps, 'allowHtmlPreviewScripts' | 'response' | 'responseUrl' | 'filter' | 'filterHistory' | 'onApplyFilter' | 'previewMode'>) {
   const language = responseFilterLanguage(response);
   const result = useMemo(() => previewMode === 'raw'
     ? { contents: response.body, error: '', matchCount: null }
@@ -134,9 +137,9 @@ function FilteredResponseBody({ allowHtmlPreviewScripts, response, filter, filte
 
   if (previewMode === 'friendly' && media) return <ResponseMediaPreview media={media} source={response} />;
   if (previewMode === 'friendly' && normalizedContentType.includes('html')) {
-    return <HtmlResponsePreview allowScripts={allowHtmlPreviewScripts} body={response.body} title="Response visual preview" />;
+    return <HtmlResponsePreview allowScripts={allowHtmlPreviewScripts} body={response.body} responseUrl={responseUrl} title="Response visual preview" />;
   }
-  if (previewMode === 'friendly' && normalizedContentType.includes('multipart/')) return <MultipartResponsePreview allowHtmlPreviewScripts={allowHtmlPreviewScripts} bytes={bytes} contentType={contentType} />;
+  if (previewMode === 'friendly' && normalizedContentType.includes('multipart/')) return <MultipartResponsePreview allowHtmlPreviewScripts={allowHtmlPreviewScripts} bytes={bytes} contentType={contentType} responseUrl={responseUrl} />;
   if (previewMode === 'friendly' && normalizedContentType.includes('csv')) return <CsvResponsePreview body={response.body} />;
 
   return <>
@@ -153,7 +156,7 @@ function FilteredResponseBody({ allowHtmlPreviewScripts, response, filter, filte
   </>;
 }
 
-export default function ResponseBodyPreview({ allowHtmlPreviewScripts, response, filter, filterHistory, onApplyFilter, onDownload, onModeChange, previewMode, responseKey }: ResponseBodyPreviewProps) {
+export default function ResponseBodyPreview({ allowHtmlPreviewScripts, response, responseUrl, filter, filterHistory, onApplyFilter, onDownload, onModeChange, previewMode, responseKey }: ResponseBodyPreviewProps) {
   const band = responseSizeBand(response.sizeBytes);
   const [revealedKey, setRevealedKey] = useState('');
   const blocked = band === 'huge' || (band === 'large' && !alwaysShowLargeResponses && revealedKey !== responseKey);
@@ -164,6 +167,6 @@ export default function ResponseBodyPreview({ allowHtmlPreviewScripts, response,
       <strong>{band === 'huge' ? 'Response over 100 MB cannot be shown' : 'Response over 5 MB hidden for performance'}</strong>
       <span>{band === 'huge' ? 'Download the stored response bytes to inspect them outside Brunomnia.' : 'Show this response once, always show large responses for this app session, or download the stored body.'}</span>
       <div><button onClick={onDownload} type="button">Save response to file</button>{band === 'large' ? <><button onClick={() => setRevealedKey(responseKey)} type="button">Show anyway</button><button onClick={() => { alwaysShowLargeResponses = true; setRevealedKey(responseKey); }} type="button">Always show this session</button></> : null}</div>
-    </div> : <FilteredResponseBody allowHtmlPreviewScripts={allowHtmlPreviewScripts} filter={filter} filterHistory={filterHistory} key={responseKey} onApplyFilter={onApplyFilter} previewMode={previewMode} response={response} />}
+    </div> : <FilteredResponseBody allowHtmlPreviewScripts={allowHtmlPreviewScripts} filter={filter} filterHistory={filterHistory} key={responseKey} onApplyFilter={onApplyFilter} previewMode={previewMode} response={response} responseUrl={responseUrl} />}
   </div>;
 }

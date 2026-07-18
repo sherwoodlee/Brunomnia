@@ -806,7 +806,7 @@ function ResponsePanel({
           <StreamConsole connected={streamStatus === 'connected'} draft={streamDraft} frameKind={streamFrameKind} messages={streamMessages} onDraftChange={onStreamDraftChange} onFrameKindChange={onStreamFrameKindChange} onSend={onSendStreamMessage} protocol={protocol} />
         ) : null}
         {activeTab === 'preview' && !streaming ? (
-          <Suspense fallback={<div className="dialog-loading">Loading response preview…</div>}><ResponseBodyPreview allowHtmlPreviewScripts={allowHtmlPreviewScripts} filter={responseFilter} filterHistory={responseFilterHistory} onApplyFilter={onApplyResponseFilter} onDownload={() => onDownloadResponse(false)} onModeChange={onChangeResponsePreviewMode} previewMode={responsePreviewMode} response={response} responseKey={selectedResponseId || `${response.status}:${response.durationMs}:${response.sizeBytes}:${response.requestUrl ?? requestUrl}`} /></Suspense>
+          <Suspense fallback={<div className="dialog-loading">Loading response preview…</div>}><ResponseBodyPreview allowHtmlPreviewScripts={allowHtmlPreviewScripts} filter={responseFilter} filterHistory={responseFilterHistory} onApplyFilter={onApplyResponseFilter} onDownload={() => onDownloadResponse(false)} onModeChange={onChangeResponsePreviewMode} previewMode={responsePreviewMode} response={response} responseKey={selectedResponseId || `${response.status}:${response.durationMs}:${response.sizeBytes}:${response.requestUrl ?? requestUrl}`} responseUrl={response.requestUrl ?? requestUrl} /></Suspense>
         ) : null}
         {activeTab === 'headers' ? (
           <div className="response-table">{Object.entries(response.headers).map(([name, value]) => <div key={name}><strong>{name}</strong><span>{value}</span></div>)}</div>
