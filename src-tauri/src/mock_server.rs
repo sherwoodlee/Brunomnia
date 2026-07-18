@@ -1,7 +1,16 @@
 use crate::models::{MockRouteInput, MockServerInput, MockServerOutput};
-use axum::{body::Body, extract::State, http::Request, response::Response, Router};
+use axum::{
+    body::{to_bytes, Body},
+    extract::State,
+    http::{HeaderMap, Request},
+    response::Response,
+    Router,
+};
+use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{oneshot, Mutex};
+
+const MAX_TEMPLATE_REQUEST_BODY_BYTES: usize = 1_000_000;
 
 #[derive(Clone, Default)]
 pub struct MockServerState {
@@ -115,6 +124,20 @@ async fn handle_request(State(state): State<RouteState>, request: Request<Body>)
             ))
             .expect("valid mock 404 response");
     };
+    let query = request.uri().query().unwrap_or_default().to_string();
+    let request_path = request.uri().path().to_string();
+    let headers = request.headers().clone();
+    let (_, request_body) = request.into_parts();
+    let request_bytes = to_bytes(request_body, MAX_TEMPLATE_REQUEST_BODY_BYTES)
+        .await
+        .unwrap_or_default();
+    let template_data = RequestTemplateData::new(
+        &headers,
+        &query,
+        &request_path,
+        String::from_utf8(request_bytes.to_vec()).unwrap_or_default(),
+        parameters,
+    );
     if route.delay_ms > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(route.delay_ms.min(30_000))).await;
     }
@@ -128,13 +151,84 @@ async fn handle_request(State(state): State<RouteState>, request: Request<Body>)
         response = response.header(&header.name, &header.value);
     }
     response
-        .body(Body::from(render_template(&route.body, &parameters)))
+        .body(Body::from(render_template(&route.body, &template_data)))
         .unwrap_or_else(|error| {
             Response::builder()
                 .status(500)
                 .body(Body::from(format!("Invalid mock response: {error}")))
                 .expect("valid mock error response")
         })
+}
+
+#[derive(Debug, Default)]
+struct RequestTemplateData {
+    headers: HashMap<String, String>,
+    query_params: HashMap<String, String>,
+    path_segments: Vec<String>,
+    body: String,
+    body_fields: JsonValue,
+    path_parameters: HashMap<String, String>,
+}
+
+impl RequestTemplateData {
+    fn new(
+        headers: &HeaderMap,
+        query: &str,
+        path: &str,
+        body: String,
+        path_parameters: HashMap<String, String>,
+    ) -> Self {
+        let headers: HashMap<String, String> = headers
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|value| (name.as_str().to_lowercase(), value.to_string()))
+            })
+            .collect();
+        let query_params = url::form_urlencoded::parse(query.as_bytes())
+            .map(|(name, value)| (name.into_owned(), value.into_owned()))
+            .collect();
+        let path_segments = path
+            .trim_matches('/')
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .map(str::to_string)
+            .collect();
+        let content_type = headers
+            .get("content-type")
+            .map(String::as_str)
+            .unwrap_or_default();
+        let body_fields = parse_body_fields(&body, content_type);
+        Self {
+            headers,
+            query_params,
+            path_segments,
+            body,
+            body_fields,
+            path_parameters,
+        }
+    }
+}
+
+fn parse_body_fields(body: &str, content_type: &str) -> JsonValue {
+    let mime_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+    if mime_type == "application/json" || mime_type.ends_with("+json") {
+        return serde_json::from_str(body).unwrap_or(JsonValue::Null);
+    }
+    if mime_type == "application/x-www-form-urlencoded" {
+        let fields = url::form_urlencoded::parse(body.as_bytes())
+            .map(|(name, value)| (name.into_owned(), JsonValue::String(value.into_owned())))
+            .collect::<JsonMap<String, JsonValue>>();
+        return JsonValue::Object(fields);
+    }
+    JsonValue::Null
 }
 
 fn match_path(pattern: &str, actual: &str) -> Option<HashMap<String, String>> {
@@ -157,13 +251,113 @@ fn match_path(pattern: &str, actual: &str) -> Option<HashMap<String, String>> {
     Some(parameters)
 }
 
-fn render_template(body: &str, parameters: &HashMap<String, String>) -> String {
-    let mut output = body
-        .replace("{{$timestamp}}", &chrono::Utc::now().to_rfc3339())
-        .replace("{{$randomUUID}}", &uuid::Uuid::new_v4().to_string());
-    for (name, value) in parameters {
-        output = output.replace(&format!("{{{{request.path.{name}}}}}"), value);
+fn bracket_or_dot_key<'a>(expression: &'a str, prefix: &str) -> Option<&'a str> {
+    let suffix = expression.strip_prefix(prefix)?;
+    if let Some(key) = suffix.strip_prefix('.') {
+        return Some(key);
     }
+    suffix
+        .strip_prefix('[')
+        .and_then(|key| key.strip_suffix(']'))
+        .map(|key| key.trim().trim_matches(['\'', '"']))
+}
+
+fn json_value_at_path(value: &JsonValue, path: &str) -> String {
+    let mut current = value;
+    for part in path.split('.').filter(|part| !part.is_empty()) {
+        current = match current {
+            JsonValue::Object(object) => object.get(part).unwrap_or(&JsonValue::Null),
+            JsonValue::Array(array) => part
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| array.get(index))
+                .unwrap_or(&JsonValue::Null),
+            _ => &JsonValue::Null,
+        };
+    }
+    match current {
+        JsonValue::Null => String::new(),
+        JsonValue::String(value) => value.clone(),
+        value => value.to_string(),
+    }
+}
+
+fn variable_value(expression: &str, data: &RequestTemplateData) -> Option<String> {
+    match expression {
+        "$timestamp" => return Some(chrono::Utc::now().to_rfc3339()),
+        "$randomUUID" => return Some(uuid::Uuid::new_v4().to_string()),
+        "req.body" => return Some(data.body.clone()),
+        _ => {}
+    }
+    if let Some(key) = expression.strip_prefix("request.path.") {
+        return Some(data.path_parameters.get(key).cloned().unwrap_or_default());
+    }
+    if let Some(key) = bracket_or_dot_key(expression, "req.headers") {
+        return Some(
+            data.headers
+                .get(&key.to_lowercase())
+                .cloned()
+                .unwrap_or_default(),
+        );
+    }
+    if let Some(key) = bracket_or_dot_key(expression, "req.queryParams") {
+        return Some(data.query_params.get(key).cloned().unwrap_or_default());
+    }
+    if let Some(key) = bracket_or_dot_key(expression, "req.pathSegments") {
+        return Some(
+            key.parse::<usize>()
+                .ok()
+                .and_then(|index| data.path_segments.get(index))
+                .cloned()
+                .unwrap_or_default(),
+        );
+    }
+    expression
+        .strip_prefix("req.body.")
+        .map(|path| json_value_at_path(&data.body_fields, path))
+}
+
+fn output_value(expression: &str, data: &RequestTemplateData) -> Option<String> {
+    let (variable, filter) = expression
+        .split_once('|')
+        .map(|(variable, filter)| (variable.trim(), Some(filter.trim())))
+        .unwrap_or((expression.trim(), None));
+    let value = variable_value(variable, data)?;
+    if !value.is_empty() {
+        return Some(value);
+    }
+    let Some(filter) = filter else {
+        return Some(value);
+    };
+    let default = filter
+        .strip_prefix("default:")?
+        .trim()
+        .trim_matches(['\'', '"'])
+        .to_string();
+    Some(default)
+}
+
+fn render_template(body: &str, data: &RequestTemplateData) -> String {
+    let mut output = String::with_capacity(body.len());
+    let mut remaining = body;
+    while let Some(start) = remaining.find("{{") {
+        output.push_str(&remaining[..start]);
+        let token = &remaining[start + 2..];
+        let Some(end) = token.find("}}") else {
+            output.push_str(&remaining[start..]);
+            return output;
+        };
+        let expression = &token[..end];
+        if let Some(value) = output_value(expression, data) {
+            output.push_str(&value);
+        } else {
+            output.push_str("{{");
+            output.push_str(expression);
+            output.push_str("}}");
+        }
+        remaining = &token[end + 2..];
+    }
+    output.push_str(remaining);
     output
 }
 
@@ -181,10 +375,86 @@ mod tests {
 
     #[test]
     fn renders_path_and_dynamic_tokens() {
-        let parameters = HashMap::from([("id".to_string(), "abc".to_string())]);
-        let rendered = render_template("{{request.path.id}} {{$randomUUID}}", &parameters);
+        let data = RequestTemplateData {
+            path_parameters: HashMap::from([("id".to_string(), "abc".to_string())]),
+            ..Default::default()
+        };
+        let rendered = render_template("{{request.path.id}} {{$randomUUID}}", &data);
         assert!(rendered.starts_with("abc "));
         assert!(!rendered.contains("{{$randomUUID}}"));
+    }
+
+    #[test]
+    fn renders_request_aware_outputs_and_defaults() {
+        let data = RequestTemplateData {
+            headers: HashMap::from([("content-type".into(), "application/json".into())]),
+            query_params: HashMap::from([("order".into(), "ord 42".into())]),
+            path_segments: vec!["v1".into(), "orders".into()],
+            body: r#"{"customer":{"name":"Ada"},"quantity":2}"#.into(),
+            body_fields: serde_json::json!({ "customer": { "name": "Ada" }, "quantity": 2 }),
+            path_parameters: HashMap::new(),
+        };
+        let rendered = render_template(
+            "{{ req.headers['Content-Type'] }} {{ req.queryParams.order }} {{ req.pathSegments[1] }} {{ req.body.customer.name }} {{ req.body.quantity }} {{ req.body.missing | default: \"fallback\" }} X{{ req.queryParams.missing }}Y {{ future.value }}",
+            &data,
+        );
+        assert_eq!(
+            rendered,
+            "application/json ord 42 orders Ada 2 fallback XY {{ future.value }}"
+        );
+    }
+
+    #[test]
+    fn parses_json_and_form_request_fields() {
+        assert_eq!(
+            json_value_at_path(
+                &parse_body_fields(r#"{"items":[{"id":"one"}]}"#, "application/problem+json"),
+                "items.0.id"
+            ),
+            "one"
+        );
+        assert_eq!(
+            json_value_at_path(
+                &parse_body_fields("name=Ada+Lovelace", "application/x-www-form-urlencoded"),
+                "name"
+            ),
+            "Ada Lovelace"
+        );
+    }
+
+    #[tokio::test]
+    async fn renders_incoming_request_data_through_the_handler() {
+        let state = RouteState {
+            routes: Arc::new(vec![MockRouteInput {
+                id: "request-aware".into(),
+                name: "Request-aware route".into(),
+                enabled: true,
+                method: "POST".into(),
+                path: "/orders/{id}".into(),
+                status: 201,
+                headers: vec![KeyValue {
+                    name: "content-type".into(),
+                    value: "application/json".into(),
+                    enabled: true,
+                }],
+                body: r#"{"id":"{{ request.path.id }}","query":"{{ req.queryParams.expand }}","segment":"{{ req.pathSegments[0] }}","customer":"{{ req.body.customer.name }}","client":"{{ req.headers['X-Client'] }}"}"#.into(),
+                delay_ms: 0,
+            }]),
+        };
+        let request = Request::builder()
+            .method("POST")
+            .uri("/orders/ord_1?expand=full")
+            .header("content-type", "application/json")
+            .header("x-client", "desktop")
+            .body(Body::from(r#"{"customer":{"name":"Ada"}}"#))
+            .unwrap();
+        let response = handle_request(State(state), request).await;
+        assert_eq!(response.status(), 201);
+        let body = to_bytes(response.into_body(), 10_000).await.unwrap();
+        assert_eq!(
+            String::from_utf8(body.to_vec()).unwrap(),
+            r#"{"id":"ord_1","query":"full","segment":"orders","customer":"Ada","client":"desktop"}"#
+        );
     }
 
     #[tokio::test]

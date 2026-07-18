@@ -1153,7 +1153,20 @@ Compatibility bounds remain explicit: overwrite targets the selected route in th
 
 Compatibility bounds remain explicit: fetch response size is checked after the shared HTTP transport buffers it, and arbitrary examples/secrets inside a fetched specification are model input exactly as displayed. Signed query parameters are used for the fetch but credential-shaped values are removed from model context. Brunomnia does not resolve multi-file remote references or add provider/plugin-specific dynamic mock syntax in this phase. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 77 — remaining parity closure and release hardening
+## Milestone 77 — request-aware dynamic mock output (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Current [Insomnia dynamic-mocking documentation](https://developer.konghq.com/insomnia/dynamic-mocking/) defines Liquid `req.headers`, `req.queryParams`, `req.pathSegments`, raw/parsed `req.body`, and the `default` filter as request-aware response inputs |
+| Native request context | Complete baseline | The loopback handler exposes case-insensitive headers, decoded query parameters, ordered URL path segments, raw UTF-8 bodies, parsed JSON including arrays, parsed URL-encoded forms, and existing route path parameters |
+| Safe output subset | Complete baseline | Bounded `{{ … }}` output evaluation supports documented bracket/dot access and `| default: "value"`; unsupported syntax is preserved rather than evaluated or silently destroyed |
+| Resource boundary | Complete | Request bodies are inspected only after a route match and capped at 1,000,000 bytes; oversized or non-UTF-8 bodies expose no body value while static response rendering continues |
+| Executable coverage | Complete baseline | Pure renderer/body-parser fixtures and an async handler-level request prove header/query/path/JSON/form/default behavior without opening a listener |
+| Documentation and evidence | Complete | Added [local mock server guide](MOCK_SERVERS.md), updated [parity ledger](PARITY.md), and recorded [Milestone 77 verification](QA_MILESTONE_77.md) |
+
+Compatibility bounds remain explicit: conditional `assign`/`if`/`unless`/`raw` tags, multipart field parsing, Faker variables, additional Liquid filters, repeated-value arrays, percent-decoded path segments, and live route hot reload remain open. Unknown output syntax remains literal for later phases. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 78 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
