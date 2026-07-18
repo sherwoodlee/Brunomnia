@@ -90,6 +90,26 @@ pub struct GitConflict {
     pub binary: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitSummary {
+    pub oid: String,
+    pub short_oid: String,
+    pub message: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub authored_at: String,
+    pub parents: Vec<String>,
+    pub refs: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitPatch {
+    pub oid: String,
+    pub patch: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitCommitInput {
@@ -775,6 +795,102 @@ pub fn git_diff(path: String, staged: bool) -> Result<String, String> {
     Ok(output_text(&output.stdout))
 }
 
+fn parse_git_history(bytes: &[u8]) -> Vec<GitCommitSummary> {
+    String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_TEXT_OUTPUT)])
+        .split('\u{001e}')
+        .filter_map(|record| {
+            let fields = record
+                .trim_matches(['\r', '\n'])
+                .split('\0')
+                .collect::<Vec<_>>();
+            if fields.len() != 8 || fields[0].len() < 7 {
+                return None;
+            }
+            Some(GitCommitSummary {
+                oid: fields[0].to_string(),
+                short_oid: fields[1].to_string(),
+                author_name: fields[2].to_string(),
+                author_email: fields[3].to_string(),
+                authored_at: fields[4].to_string(),
+                message: fields[5].to_string(),
+                parents: fields[6].split_whitespace().map(str::to_string).collect(),
+                refs: fields[7]
+                    .split(", ")
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+pub fn git_history(path: String, limit: Option<usize>) -> Result<Vec<GitCommitSummary>, String> {
+    let root = project_root(&path, false)?;
+    let head = git_output(&root, &["rev-parse", "--verify", "--quiet", "HEAD"])?;
+    if !head.status.success() {
+        return Ok(vec![]);
+    }
+    let max_count = limit.unwrap_or(35).clamp(1, 100).to_string();
+    let output = require_success(
+        git_output(
+            &root,
+            &[
+                "log",
+                "--no-show-signature",
+                "--decorate=short",
+                "--date=iso-strict",
+                &format!("--max-count={max_count}"),
+                "--pretty=format:%H%x00%h%x00%an%x00%ae%x00%aI%x00%s%x00%P%x00%D%x1e",
+                "HEAD",
+                "--",
+            ],
+        )?,
+        "Git history",
+    )?;
+    Ok(parse_git_history(&output.stdout))
+}
+
+fn valid_commit_oid(oid: &str) -> bool {
+    matches!(oid.len(), 40 | 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+pub fn git_commit_patch(path: String, oid: String) -> Result<GitCommitPatch, String> {
+    let root = project_root(&path, false)?;
+    let oid = oid.trim().to_ascii_lowercase();
+    if !valid_commit_oid(&oid) {
+        return Err("Choose a full Git commit identifier from history.".into());
+    }
+    let commit_object = format!("{oid}^{{commit}}");
+    require_success(
+        git_output(&root, &["cat-file", "-e", &commit_object])?,
+        "Resolve Git commit",
+    )?;
+    let output = require_success(
+        git_output(
+            &root,
+            &[
+                "show",
+                "--no-ext-diff",
+                "--no-color",
+                "--format=fuller",
+                "--stat",
+                "--patch",
+                "--find-renames",
+                "--find-copies",
+                "--unified=3",
+                &oid,
+                "--",
+            ],
+        )?,
+        "Read Git commit",
+    )?;
+    Ok(GitCommitPatch {
+        oid,
+        patch: output_text(&output.stdout),
+    })
+}
+
 pub fn git_commit(input: GitCommitInput) -> Result<GitOperationOutput, String> {
     if input.message.trim().is_empty() {
         return Err("Enter a commit message.".into());
@@ -1136,5 +1252,54 @@ mod tests {
         )
         .unwrap();
         assert!(status.files.iter().all(|file| !file.conflicted));
+    }
+
+    #[test]
+    fn lists_bounded_commit_history_and_reads_a_validated_patch() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "History Test"]);
+        git(root, &["config", "user.email", "history@example.com"]);
+        fs::write(root.join("request.yaml"), "value: one\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "first request"]);
+        fs::write(root.join("request.yaml"), "value: two\n").unwrap();
+        git(root, &["commit", "-am", "second request"]);
+
+        let history = git_history(root.to_string_lossy().into_owned(), Some(1)).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].message, "second request");
+        assert_eq!(history[0].author_name, "History Test");
+        assert_eq!(history[0].author_email, "history@example.com");
+        assert_eq!(history[0].parents.len(), 1);
+        assert!(history[0]
+            .refs
+            .iter()
+            .any(|reference| reference.contains("main")));
+
+        let patch =
+            git_commit_patch(root.to_string_lossy().into_owned(), history[0].oid.clone()).unwrap();
+        assert_eq!(patch.oid, history[0].oid);
+        assert!(patch.patch.contains("second request"));
+        assert!(patch.patch.contains("-value: one"));
+        assert!(patch.patch.contains("+value: two"));
+        assert!(git_commit_patch(
+            root.to_string_lossy().into_owned(),
+            "HEAD; touch escaped".into(),
+        )
+        .unwrap_err()
+        .contains("full Git commit identifier"));
+    }
+
+    #[test]
+    fn returns_empty_history_for_an_unborn_repository() {
+        let temporary = tempfile::tempdir().unwrap();
+        git(temporary.path(), &["init", "-b", "main"]);
+        assert!(
+            git_history(temporary.path().to_string_lossy().into_owned(), None,)
+                .unwrap()
+                .is_empty()
+        );
     }
 }
