@@ -1035,16 +1035,31 @@ Compatibility bounds remain explicit: Brunomnia intentionally requires a complet
 | --- | --- | --- |
 | Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` validates repository credentials before creating commits requested with the push option |
 | Native preflight | Complete baseline | A dedicated read-only command validates the configured remote name and runs `git ls-remote --heads` through the installed Git credential helper/SSH path |
-| Commit ordering | Complete | Commit-and-push awaits remote access before invoking commit, preventing clear connectivity/read-auth failures from creating an avoidable local commit |
+| Commit ordering | Complete | Commit-and-push awaits remote access before invoking commit, preventing clear connectivity and private-remote access failures from creating an avoidable local commit |
 | Repository preservation | Complete | Validation changes no files, index entries, refs, or `HEAD`; it returns the native Git failure through the shared workbench error path |
 | Later push failure | Complete | Write authorization, branch policy, non-fast-forward races, and post-preflight outages can still reject push; the already-created local commit remains explicit and retryable |
 | Executable coverage | Complete baseline | A local bare-remote fixture proves successful access leaves `HEAD` and status unchanged and an unknown configured remote is refused before Git execution |
 | Bundle boundary | Complete | The renderer remains below the 500 kB warning line and remote access runs in a blocking native task rather than the UI thread |
 | Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 68 verification](QA_MILESTONE_68.md) |
 
-Compatibility bounds remain explicit: `ls-remote` proves reachability and read authentication, not write permission or branch acceptance. There remains an unavoidable race between preflight, local commit, and push; Brunomnia preserves the commit and reports any later push failure rather than attempting history rewriting. The installed Git client owns credential prompts/helpers, and no provider token or hosted Brunomnia account is introduced. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: `ls-remote` proves reachability and any access required to list heads, not a specific credential's validity on a publicly readable repository, write permission, or branch acceptance. Provider-native token introspection remains later work. There is also an unavoidable race between preflight, local commit, and push; Brunomnia preserves the commit and reports any later push failure rather than attempting history rewriting. The installed Git client owns credential prompts/helpers, and no provider token or hosted Brunomnia account is introduced. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 69 — remaining parity closure and release hardening
+## Milestone 69 — ordered reviewed Git commit groups (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` accepts an ordered list of commit messages/file groups, unstages the index, then stages and commits each group sequentially |
+| Plan validation | Complete | Brunomnia accepts 1–8 reviewed groups with non-empty bounded messages, requires every path to be a current non-conflicted change, and rejects duplicate assignment within or across groups |
+| Ordered execution | Complete baseline | Existing staged files are first returned to the working set; each reviewed group alone is staged and committed in displayed order with the configured optional author overrides |
+| Optional push | Complete baseline | **Commit groups + push** runs the remote-access preflight before index mutation and pushes the resulting branch only after every group succeeds |
+| Partial-progress recovery | Complete | A stage/commit failure refreshes current status and reports the completed count without rewriting earlier commits; a later push failure preserves all new local commits |
+| Executable coverage | Complete baseline | Pure plan tests cover order, stale/conflicted paths, duplicates, empty/bounded inputs; a two-file Git fixture proves distinct ordered commits and a clean final tree |
+| Bundle boundary | Complete | Validation/orchestration remains in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 69 verification](QA_MILESTONE_69.md) |
+
+Compatibility bounds remain explicit: grouped commits are sequential and non-atomic. Files omitted from the reviewed plan remain unstaged. A failure can occur after earlier groups have committed, and Brunomnia reports rather than rewrites that history. Groups cannot be manually reordered/edited as a table, and there is no hunk assignment, squash, amend, signing, automatic retry, or provider-native push-permission proof. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 70 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

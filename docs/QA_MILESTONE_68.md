@@ -29,7 +29,7 @@ The sandbox result remains one test short of the full 38-test native suite: only
 ## Focused coverage
 
 - A configured local bare remote is resolved by exact remote name and queried through direct Git arguments.
-- Successful validation leaves the local `HEAD` object identifier unchanged and the working/index status clean.
+- Successful validation against a local private-path remote leaves the local `HEAD` object identifier unchanged and the working/index status clean.
 - An unknown remote name fails before `ls-remote` execution.
 - Commit-and-push awaits validation before invoking the existing commit command.
 - Ordinary commit remains local-only and does not perform a network preflight.
@@ -43,4 +43,4 @@ Rendered QA was not run because this task's standing direction prohibited the in
 
 ## Acceptance boundary
 
-`git ls-remote --heads` validates remote reachability and read authentication only. It cannot prove write permission, fast-forward eligibility, branch-protection approval, remote availability after validation, or that another writer will not race the push. Those later failures leave the local commit intact and require retry or manual resolution. Brunomnia does not store provider credentials or add a hosted-account requirement.
+`git ls-remote --heads` validates remote reachability and any access needed to list heads. A public remote may permit that query anonymously, so this baseline cannot prove the validity of a particular stored token; it also cannot prove write permission, fast-forward eligibility, branch-protection approval, remote availability after validation, or that another writer will not race the push. Those later failures leave the local commit intact and require retry or manual resolution. Brunomnia does not store provider credentials or add a hosted-account requirement.
