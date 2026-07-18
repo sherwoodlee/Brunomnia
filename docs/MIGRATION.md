@@ -968,7 +968,24 @@ Compatibility bounds remain explicit: this phase reads configured remote-trackin
 
 Compatibility bounds remain explicit: Brunomnia does not expose force deletion, remote-branch deletion, branch rename, bulk deletion, or provider-side branch protection metadata. Git's reachability check is authoritative, so a branch that is not merged into the current `HEAD` remains intact. Rendered confirmation/interaction QA remains omitted by standing direction.
 
-## Milestone 64 — remaining parity closure and release hardening
+## Milestone 64 — confirmed Git working-tree discard (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes confirmed per-file and all-unstaged discard actions in its Git staging workflow |
+| Selected/all UI | Complete baseline | Git Sync exposes **Discard selected unstaged** and **Discard all unstaged** with counts, disabled states, progress, errors, and the existing destructive-action confirmation policy |
+| Index preservation | Complete | Tracked files restore from the index rather than `HEAD`, so staged content remains staged when later working-tree edits are discarded |
+| Untracked cleanup | Complete baseline | Selected untracked files are removed through bounded path arguments; ignored files and unrelated untracked files are untouched |
+| Conflict protection | Complete | Discard refuses the whole request during merge/rebase/conflict state instead of overwriting a resolution in progress |
+| Path/selection safety | Complete | Every path must be safe, repository-relative, currently changed, selected, and genuinely unstaged; staged-only and stale selections are rejected |
+| Project continuity | Complete | Managed YAML reloads after discard, while files not represented by project resources remain under ordinary Git/filesystem ownership |
+| Executable coverage | Complete baseline | A repository fixture proves staged-index preservation, tracked worktree restore, selected untracked removal, clean working diff, staged-only refusal, and traversal rejection |
+| Bundle boundary | Complete | Discard stays in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 64 verification](QA_MILESTONE_64.md) |
+
+Compatibility bounds remain explicit: this is a permanent discard after optional confirmation, with no trash/recovery layer. It does not discard staged changes, ignored files, active conflicts, submodule internals, or arbitrary directories as a unit. Git and filesystem errors may leave an earlier path group applied before a later group fails; no cross-file transaction is claimed. Rendered confirmation/interaction QA remains omitted by standing direction.
+
+## Milestone 65 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

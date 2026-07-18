@@ -75,6 +75,7 @@ export const getGitStatus = async (path: string) => {
 };
 export const stageGitFiles = async (path: string, paths: string[]) => invoke<GitStatus>('project_git_stage', { path, paths });
 export const unstageGitFiles = async (path: string, paths: string[]) => invoke<GitStatus>('project_git_unstage', { path, paths });
+export const discardGitFiles = async (path: string, paths: string[]) => invoke<GitStatus>('project_git_discard', { path, paths });
 export const getGitDiff = async (path: string, staged: boolean) => invoke<string>('project_git_diff', { path, staged });
 export const getGitHistory = async (path: string, limit = 35) => invoke<GitCommitSummary[]>('project_git_history', { path, limit });
 export const getGitCommitPatch = async (path: string, oid: string) => invoke<GitCommitPatch>('project_git_commit_patch', { path, oid });

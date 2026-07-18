@@ -32,7 +32,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Insomnia JSON v4/v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports
 - Scoped Brunomnia JSON, Insomnia v4/v5, HAR, and raw OpenAPI exports
 - Versioned workspace migrations with collision-safe import history, distinct environment-store interoperability, advanced-auth/cookie-jar mapping, and preserved source metadata
-- Reviewable split-YAML filesystem projects with ordinary Git init/clone/status/diff/stage/commit/history/local-and-remote-branch/create/delete/fetch/pull/push/merge workflows
+- Reviewable split-YAML filesystem projects with ordinary Git init/clone/status/diff/stage/unstaged-discard/commit/history/local-and-remote-branch/create/delete/fetch/pull/push/merge workflows
 - Three-way text conflict editing, binary ours/theirs resolution, and explicit merge abort without silently discarding local changes
 - Local dependency-free CommonJS plugins with disabled-by-default installation, explicit capability grants, request/response hooks, template tags, actions, themes, and plugin-local storage
 - A time-limited Worker boundary for plugin code, mediated network/prompt/clipboard access, and automatic grant removal when source changes or a workspace is imported

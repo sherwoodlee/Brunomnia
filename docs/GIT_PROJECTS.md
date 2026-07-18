@@ -31,6 +31,8 @@ Open **Git Sync** in the desktop app to:
 
 Brunomnia invokes the installed `git` executable directly with an argument array; it never constructs a shell command from repository values. Remote credentials remain the responsibility of Git's configured credential helper or SSH agent.
 
+**Discard selected unstaged** and **Discard all unstaged** permanently restore tracked working-tree files to their index versions and remove selected untracked files. Staged changes remain staged. Discard refuses staged-only paths, paths outside the repository, and every file while a merge/rebase/conflict is active. When **Confirm destructive actions** is enabled, Brunomnia asks for confirmation before invoking Git, then reloads managed YAML after success.
+
 History reads the current local `HEAD`; opening it never fetches or changes the repository. A history request is capped at 100 entries and the UI requests 35. Selected patches retain the native 2 MB text-output cap. Patch lookup accepts only the full hexadecimal identifier returned by the history command, so branch names and arbitrary revision expressions cannot cross that boundary.
 
 ## Remote branches

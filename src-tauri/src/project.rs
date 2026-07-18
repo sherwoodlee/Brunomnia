@@ -839,6 +839,61 @@ pub fn git_unstage(path: String, paths: Vec<String>) -> Result<GitStatusOutput, 
     git_status(root.to_string_lossy().into_owned())
 }
 
+pub fn git_discard(path: String, paths: Vec<String>) -> Result<GitStatusOutput, String> {
+    let root = project_root(&path, false)?;
+    if paths.is_empty() {
+        return Err("Select at least one unstaged file to discard.".into());
+    }
+    let status = git_status(root.to_string_lossy().into_owned())?;
+    if status.merge_in_progress
+        || status.rebase_in_progress
+        || status.files.iter().any(|file| file.conflicted)
+    {
+        return Err("Resolve or abort the active Git operation before discarding files.".into());
+    }
+    let mut tracked = BTreeSet::<PathBuf>::new();
+    let mut untracked = BTreeSet::<PathBuf>::new();
+    for path in paths {
+        let safe = safe_relative(&path)?;
+        let Some(file) = status.files.iter().find(|file| file.path == path) else {
+            return Err(format!("'{path}' no longer has an unstaged Git change."));
+        };
+        if file.index_status == "?" && file.worktree_status == "?" {
+            untracked.insert(safe);
+        } else if file.worktree_status != " " {
+            tracked.insert(safe);
+        } else {
+            return Err(format!("'{path}' has no unstaged Git change to discard."));
+        }
+    }
+    if !tracked.is_empty() {
+        let mut command = Command::new("git");
+        command
+            .arg("-C")
+            .arg(&root)
+            .args(["restore", "--worktree", "--"]);
+        tracked.iter().for_each(|path| {
+            command.arg(path);
+        });
+        require_success(
+            command.output().map_err(|error| error.to_string())?,
+            "Discard tracked changes",
+        )?;
+    }
+    if !untracked.is_empty() {
+        let mut command = Command::new("git");
+        command.arg("-C").arg(&root).args(["clean", "-f", "--"]);
+        untracked.iter().for_each(|path| {
+            command.arg(path);
+        });
+        require_success(
+            command.output().map_err(|error| error.to_string())?,
+            "Discard untracked files",
+        )?;
+    }
+    git_status(root.to_string_lossy().into_owned())
+}
+
 pub fn git_diff(path: String, staged: bool) -> Result<String, String> {
     let root = project_root(&path, false)?;
     let args = if staged {
@@ -1559,5 +1614,54 @@ mod tests {
             .iter()
             .any(|branch| branch == "unmerged"));
         assert!(git_delete_branch(root.to_string_lossy().into_owned(), "--force".into(),).is_err());
+    }
+
+    #[test]
+    fn discards_only_selected_unstaged_changes_and_preserves_the_index() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Discard Test"]);
+        git(root, &["config", "user.email", "discard@example.com"]);
+        fs::write(root.join("request.yaml"), "value: base\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "base request"]);
+
+        fs::write(root.join("request.yaml"), "value: staged\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        fs::write(root.join("request.yaml"), "value: working\n").unwrap();
+        fs::write(root.join("temporary.yaml"), "temporary: true\n").unwrap();
+
+        let status = git_discard(
+            root.to_string_lossy().into_owned(),
+            vec!["request.yaml".into(), "temporary.yaml".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("request.yaml")).unwrap(),
+            "value: staged\n"
+        );
+        assert!(!root.join("temporary.yaml").exists());
+        assert!(status.files.iter().any(|file| {
+            file.path == "request.yaml" && file.index_status == "M" && file.worktree_status == " "
+        }));
+        assert!(git_diff(root.to_string_lossy().into_owned(), false)
+            .unwrap()
+            .is_empty());
+        assert!(git_diff(root.to_string_lossy().into_owned(), true)
+            .unwrap()
+            .contains("+value: staged"));
+        assert!(git_discard(
+            root.to_string_lossy().into_owned(),
+            vec!["request.yaml".into()],
+        )
+        .unwrap_err()
+        .contains("no unstaged Git change"));
+        assert!(git_discard(
+            root.to_string_lossy().into_owned(),
+            vec!["../outside.yaml".into()],
+        )
+        .unwrap_err()
+        .contains("Unsafe project-relative path"));
     }
 }
