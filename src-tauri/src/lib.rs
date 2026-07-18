@@ -266,6 +266,14 @@ async fn project_git_checkout(
 }
 
 #[tauri::command]
+async fn project_git_delete_branch(
+    path: String,
+    branch: String,
+) -> Result<project::GitOperationOutput, String> {
+    blocking(move || project::git_delete_branch(path, branch)).await
+}
+
+#[tauri::command]
 async fn project_git_fetch(
     path: String,
     remote: String,
@@ -515,6 +523,7 @@ pub fn run() {
             project_git_commit_patch,
             project_git_commit,
             project_git_checkout,
+            project_git_delete_branch,
             project_git_fetch,
             project_git_checkout_remote,
             project_git_set_remote,

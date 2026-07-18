@@ -80,6 +80,7 @@ export const getGitHistory = async (path: string, limit = 35) => invoke<GitCommi
 export const getGitCommitPatch = async (path: string, oid: string) => invoke<GitCommitPatch>('project_git_commit_patch', { path, oid });
 export const commitGitChanges = async (path: string, message: string, authorName: string, authorEmail: string) => invoke<GitOperation>('project_git_commit', { input: { path, message, authorName, authorEmail } });
 export const checkoutGitBranch = async (path: string, branch: string, create = false) => invoke<GitOperation>('project_git_checkout', { path, branch, create });
+export const deleteGitBranch = async (path: string, branch: string) => invoke<GitOperation>('project_git_delete_branch', { path, branch });
 export const fetchGitRemote = async (path: string, remote: string) => invoke<GitOperation>('project_git_fetch', { path, remote });
 export const checkoutGitRemoteBranch = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_checkout_remote', { path, remote, branch });
 export const setGitRemote = async (path: string, name: string, url: string) => invoke<GitStatus>('project_git_set_remote', { path, name, url });

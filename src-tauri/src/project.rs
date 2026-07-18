@@ -997,6 +997,27 @@ pub fn git_checkout(
     )
 }
 
+pub fn git_delete_branch(path: String, branch: String) -> Result<GitOperationOutput, String> {
+    if branch.trim().is_empty() {
+        return Err("Choose a local branch to delete.".into());
+    }
+    let root = project_root(&path, false)?;
+    let branch = branch.trim();
+    require_success(
+        git_output(&root, &["check-ref-format", "--branch", branch])?,
+        "Validate branch name",
+    )?;
+    let status = git_status(root.to_string_lossy().into_owned())?;
+    if status.branch == branch {
+        return Err("Switch branches before deleting the current branch.".into());
+    }
+    if !status.branches.iter().any(|candidate| candidate == branch) {
+        return Err(format!("Local branch '{branch}' does not exist."));
+    }
+    let output = git_output(&root, &["branch", "-d", "--", branch])?;
+    operation(&root, output, "Delete local branch", false)
+}
+
 fn require_remote(root: &Path, name: &str) -> Result<String, String> {
     let name = if name.trim().is_empty() {
         "origin"
@@ -1494,5 +1515,49 @@ mod tests {
         )
         .unwrap_err()
         .contains("does not exist"));
+    }
+
+    #[test]
+    fn deletes_only_existing_non_current_fully_merged_local_branches() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Branch Test"]);
+        git(root, &["config", "user.email", "branch@example.com"]);
+        fs::write(root.join("request.yaml"), "value: main\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "main request"]);
+
+        git(root, &["checkout", "-b", "merged"]);
+        fs::write(root.join("request.yaml"), "value: merged\n").unwrap();
+        git(root, &["commit", "-am", "merged request"]);
+        assert!(
+            git_delete_branch(root.to_string_lossy().into_owned(), "merged".into(),)
+                .unwrap_err()
+                .contains("current branch")
+        );
+        git(root, &["checkout", "main"]);
+        git(root, &["merge", "--ff-only", "merged"]);
+        let deleted =
+            git_delete_branch(root.to_string_lossy().into_owned(), "merged".into()).unwrap();
+        assert!(!deleted
+            .status
+            .branches
+            .iter()
+            .any(|branch| branch == "merged"));
+
+        git(root, &["checkout", "-b", "unmerged"]);
+        fs::write(root.join("request.yaml"), "value: unmerged\n").unwrap();
+        git(root, &["commit", "-am", "unmerged request"]);
+        git(root, &["checkout", "main"]);
+        assert!(
+            git_delete_branch(root.to_string_lossy().into_owned(), "unmerged".into(),).is_err()
+        );
+        assert!(git_status(root.to_string_lossy().into_owned())
+            .unwrap()
+            .branches
+            .iter()
+            .any(|branch| branch == "unmerged"));
+        assert!(git_delete_branch(root.to_string_lossy().into_owned(), "--force".into(),).is_err());
     }
 }
