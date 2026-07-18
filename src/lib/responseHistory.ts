@@ -1,9 +1,11 @@
-import type { StoredResponse } from '../types';
+import type { ApiRequest, StoredResponse } from '../types';
 
 const sameScope = (candidate: StoredResponse, response: StoredResponse, filterResponsesByEnv: boolean) => candidate.requestId === response.requestId
   && (!filterResponsesByEnv || candidate.environmentId === response.environmentId);
 
 const newestFirst = (left: StoredResponse, right: StoredResponse) => right.receivedAt.localeCompare(left.receivedAt);
+
+export const createRequestSnapshot = (request: ApiRequest): ApiRequest => structuredClone(request);
 
 export const visibleResponseHistory = (
   responses: StoredResponse[],

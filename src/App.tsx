@@ -22,7 +22,7 @@ import { fetchGraphqlSchema } from './lib/graphql';
 import { shortcutMatches } from './lib/preferences';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, moveWorkspaceResource, orderedCollectionChildren, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
 import type { WorkspaceResourceMove } from './lib/resources';
-import { clearSavedResponseHistory, deleteSavedResponse, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
+import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
 import {
   CodeEditor,
@@ -772,7 +772,7 @@ function ResponsePanel({
           {!streaming ? <span>{formatBytes(response.sizeBytes)}</span> : null}
           {!streaming && response.httpVersion ? <span>{response.httpVersion}</span> : null}
         </div>
-        {!streaming && responseHistory.length ? <div className="response-history-controls"><label className="response-history-picker"><Icon name="history" size={15} /><select aria-label="Saved response" onChange={(event) => onSelectResponse(event.target.value)} value={selectedResponseId}>{selectedResponseId ? null : <option value="">Live response</option>}{responseHistory.map((saved) => <option key={saved.id} value={saved.id}>{new Date(saved.receivedAt).toLocaleString()} · {saved.status || 'ERR'} · {saved.durationMs} ms</option>)}</select></label><button aria-label="Delete selected saved response" disabled={!selectedResponseId} onClick={onDeleteResponse} type="button"><Icon name="trash" size={14} /></button><button aria-label="Clear active environment response history" disabled={!activeEnvironmentHistoryCount} onClick={onClearHistory} type="button">Clear {activeEnvironmentHistoryCount}</button></div> : <button aria-label="Response source" className="icon-button subtle" disabled type="button"><Icon name="globe" size={18} /></button>}
+        {!streaming && responseHistory.length ? <div className="response-history-controls"><label className="response-history-picker"><Icon name="history" size={15} /><select aria-label="Saved response" onChange={(event) => onSelectResponse(event.target.value)} value={selectedResponseId}>{selectedResponseId ? null : <option value="">Live response</option>}{responseHistory.map((saved) => <option key={saved.id} value={saved.id}>{new Date(saved.receivedAt).toLocaleString()} · {saved.status || 'ERR'} · {saved.durationMs} ms</option>)}</select></label><button aria-label="Delete saved response" disabled={!selectedResponseId} onClick={onDeleteResponse} type="button"><Icon name="trash" size={14} /></button><button aria-label="Clear environment history" disabled={!activeEnvironmentHistoryCount} onClick={onClearHistory} type="button">Clear {activeEnvironmentHistoryCount}</button></div> : <button aria-label="Response source" className="icon-button subtle" disabled type="button"><Icon name="globe" size={18} /></button>}
       </div>
       <nav className="tab-strip response-tabs" aria-label="Response details">
         {responseTabs.map((tab) => <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">{titleCase(tab)}{tab === 'tests' && scriptTests.length ? <small>{scriptTests.filter((test) => test.passed).length}/{scriptTests.length}</small> : tab === 'cookies' && cookies.length ? <small>{cookies.length}</small> : null}</button>)}
@@ -1064,7 +1064,12 @@ export default function App() {
     workspace.preferences.filterResponsesByEnv,
   ), [active?.request.id, activeEnvironment?.id, workspace.preferences.filterResponsesByEnv, workspace.responses]);
   const activeEnvironmentHistoryCount = activeResponseHistory.filter((saved) => saved.environmentId === activeEnvironment?.id).length;
-  const showLatestSavedResponse = (responses: StoredResponse[]) => {
+  const restoreSavedRequestVersion = (saved: StoredResponse) => {
+    void import('./lib/historicalRequest').then(({ restoreWorkspaceRequestSnapshot }) => {
+      setWorkspace((current) => restoreWorkspaceRequestSnapshot(saved, current));
+    }, () => undefined);
+  };
+  const showLatestSavedResponse = (responses: StoredResponse[], restoreRequest = false) => {
     const latest = visibleResponseHistory(
       responses,
       active?.request.id ?? '',
@@ -1073,18 +1078,24 @@ export default function App() {
     )[0];
     setSelectedResponseId(latest?.id ?? '');
     setResponse(latest ?? mockResponse());
+    if (latest && restoreRequest) restoreSavedRequestVersion(latest);
   };
   const deleteSelectedSavedResponse = () => {
     if (!selectedResponseId) return;
     const responses = deleteSavedResponse(workspace.responses, selectedResponseId);
     setWorkspace((current) => ({ ...current, responses: deleteSavedResponse(current.responses, selectedResponseId) }));
-    showLatestSavedResponse(responses);
+    showLatestSavedResponse(responses, true);
   };
   const clearActiveEnvironmentHistory = () => {
     if (!active || !activeEnvironment) return;
     const responses = clearSavedResponseHistory(workspace.responses, active.request.id, activeEnvironment.id);
     setWorkspace((current) => ({ ...current, responses: clearSavedResponseHistory(current.responses, active.request.id, activeEnvironment.id) }));
     showLatestSavedResponse(responses);
+  };
+  const selectSavedResponse = (saved: StoredResponse) => {
+    setSelectedResponseId(saved.id);
+    setResponse(saved);
+    restoreSavedRequestVersion(saved);
   };
   const unlockedVault = useMemo(() => vaultVariables(vaultSession), [vaultSession]);
   const externalSecretResolver = useCallback((input: ExternalSecretInput) => resolveAuthorizedExternalSecret(workspace, input), [workspace]);
@@ -1482,6 +1493,7 @@ export default function App() {
         requestUrl: result.requestUrl ?? executableRequest.url,
         environmentId: executionEnvironment.id,
         receivedAt,
+        requestSnapshot: createRequestSnapshot(active.request),
       };
       setSelectedResponseId(workspace.preferences.maxHistoryResponses === 0 ? '' : storedResponse.id);
       setWorkspace((current) => ({
@@ -1746,7 +1758,7 @@ export default function App() {
             onChangeCookies={(cookies) => setWorkspace((current) => ({ ...current, cookies }))}
             onClearHistory={clearActiveEnvironmentHistory}
             onDeleteResponse={deleteSelectedSavedResponse}
-            onSelectResponse={(id) => { const saved = activeResponseHistory.find((candidate) => candidate.id === id); if (saved) { setSelectedResponseId(id); setResponse(saved); } }}
+            onSelectResponse={(id) => { const saved = activeResponseHistory.find((candidate) => candidate.id === id); if (saved) selectSavedResponse(saved); }}
             onSendStreamMessage={() => void sendStreamMessage()}
             onStreamDraftChange={setStreamDraft}
             onStreamFrameKindChange={setStreamFrameKind}

@@ -275,9 +275,11 @@ describe('workspace migrations', () => {
 
   it('adds stable local identity fields to legacy stored responses', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
-    workspace.responses = [{ requestId: 'request', requestName: 'Legacy', requestUrl: 'https://example.test', receivedAt: '2026-07-17T00:00:00.000Z', status: 200, statusText: 'OK', headers: {}, body: '', durationMs: 1, sizeBytes: 0, timeline: [{ name: 'DataOut', value: '(12 KiB hidden)', elapsedMs: -3, hidden: true }, null] }];
+    const requestSnapshot = cloneSeedWorkspace().collections[0].requests[0];
+    workspace.responses = [{ requestId: 'request', requestName: 'Legacy', requestUrl: 'https://example.test', requestSnapshot, receivedAt: '2026-07-17T00:00:00.000Z', status: 200, statusText: 'OK', headers: {}, body: '', durationMs: 1, sizeBytes: 0, timeline: [{ name: 'DataOut', value: '(12 KiB hidden)', elapsedMs: -3, hidden: true }, null] }];
 
     expect(migrateWorkspace(workspace).responses[0]).toMatchObject({ id: 'legacy-response-0', environmentId: '', requestId: 'request', timeline: [{ name: 'DataOut', value: '(12 KiB hidden)', elapsedMs: 0, hidden: true }] });
+    expect(migrateWorkspace(workspace).responses[0].requestSnapshot?.url).toBe(requestSnapshot.url);
   });
 
   it('breaks malformed resource cycles and keeps private descendants device-local', () => {

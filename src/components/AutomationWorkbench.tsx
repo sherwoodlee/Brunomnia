@@ -22,7 +22,7 @@ import { startMockServer, stopMockServer, type RunningMock } from '../lib/mock';
 import { runStreamSample } from '../lib/protocol';
 import { resolveAuthorizedExternalSecret } from '../lib/security';
 import { generateMockWithAi } from '../lib/ai';
-import { retainResponseHistory } from '../lib/responseHistory';
+import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
 import { Icon } from './Icon';
 import { CodeEditor } from './ProtocolEditors';
 
@@ -217,7 +217,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
         const requestUrl = result.requestUrl ?? request.url;
         if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
-        const stored = { ...result, id: uid('response'), requestId: request.id, requestName: request.name, requestUrl, environmentId: environment.id, receivedAt: new Date().toISOString() };
+        const stored = { ...result, id: uid('response'), requestId: request.id, requestName: request.name, requestUrl, environmentId: environment.id, receivedAt: new Date().toISOString(), requestSnapshot: createRequestSnapshot(request) };
         runnerResponses = retainResponseHistory(runnerResponses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
         return result;
       }, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => runBrowserScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
