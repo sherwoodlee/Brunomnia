@@ -613,7 +613,21 @@ Compatibility bounds remain explicit: this milestone covers saved request and fo
 
 Compatibility bounds remain explicit: arbitrary MCP headers and ordinary request headers/environment values are not reclassified as credential fields. Local-vault value disclosure and vault/encrypted-sync passphrases retain independent controls. Rendered/browser interaction, password-manager behavior, and exact upstream randomized mask/copy presentation remain outside this source-verified milestone by standing direction.
 
-## Milestone 42 — remaining parity closure and release hardening
+## Milestone 42 — response history actions (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Delete selected response | Complete baseline | The response summary removes the selected persisted result by ID and immediately selects the newest remaining visible result |
+| Clear environment history | Complete baseline | Clear removes only the active request/environment scope, preserving the same request in other environments and every other request |
+| Current-compatible scope | Complete baseline | The active-environment clear boundary follows current Insomnia's `removeResponsesForRequest(requestId, activeEnvironmentId)` route behavior even when cross-environment display is enabled |
+| Persistent behavior | Complete | Actions update the device-local response store and normal autosave path; project files and encrypted-sync revisions continue to omit response history |
+| Accessible controls | Complete baseline | Delete and Clear have explicit accessible names; Delete requires a selected saved response and Clear reports/disables from the active-environment count |
+| Executable coverage | Complete baseline | Focused tests cover exact-ID deletion, request/environment-scoped clearing, preservation boundaries, and existing retention/visibility behavior |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 42 verification](QA_MILESTONE_42.md) |
+
+Compatibility bounds remain explicit: selecting an older response does not restore the request version that produced it. Response compare/export/search and WebSocket/SSE history actions remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 43 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
