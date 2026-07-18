@@ -38,6 +38,7 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - a preferred native protocol of Default negotiation, HTTP 1.0, HTTP 1.1, HTTP/2, or HTTP/2 Prior Knowledge;
 - a device-local follow-redirect default that inherited requests can override with Always or Never;
 - a native maximum redirect count, where `0` follows none and `-1` allows redirects until the request or Event Stream handshake deadline;
+- a maximum outgoing timeline chunk size in KiB, defaulting to 10;
 - a per-request response history limit, where `0` keeps only the live result and `-1` retains all saved responses;
 - optional response-history filtering by active environment;
 - a 1–600 second default timeout for new requests, with an explicit apply-to-existing action;
@@ -55,3 +56,5 @@ The HTTP version, follow-redirect default, and maximum-redirect preferences reac
 Standard HTTP/2 negotiates and can fall back; Prior Knowledge requires an HTTP/2-capable peer. Native responses show the protocol actually used in the response summary and timeline. Browser development mode honors Use Preferences/Always/Never through Fetch, but leaves protocol selection and the redirect count ceiling to the browser.
 
 Saved responses remain device-local and are selectable from the response summary. The default keeps 20 per request. When environment filtering is enabled, the selector and response template tags see only results from the active global environment, and the retention limit applies independently to each request/environment pair. Changing a limit does not erase data immediately; the relevant scope is pruned the next time that request stores a response.
+
+The timeline stores prepared request and aggregate response evidence with each saved result. Text, JSON, GraphQL, and URL-encoded outgoing data below the configured threshold remain inspectable; data at or above it becomes a size-only hidden marker. Matching current Insomnia behavior, a configured zero uses a 1 KiB fallback. Binary content is always represented by filename and size, and multipart content uses a configured-part summary because the native and browser transports do not expose their final wire boundary. Response bodies remain in Preview; the timeline records only their decoded aggregate size rather than duplicating content.

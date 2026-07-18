@@ -61,6 +61,24 @@ describe('native HTTP transport preferences', () => {
     expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({ followRedirects: false }) }) }));
   });
 
+  it('attaches size-bounded outgoing and response timeline evidence', async () => {
+    tauri.invoke.mockResolvedValue({ status: 201, statusText: 'Created', headers: {}, body: '{}', durationMs: 3, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
+    const request = createBlankRequest('timeline-evidence');
+    request.method = 'POST';
+    request.url = 'https://example.test/items';
+    request.bodyMode = 'text';
+    request.body = 'x'.repeat(1_024);
+
+    const response = await sendRequest(request, undefined, { maxTimelineDataSizeKB: 0 });
+    expect(response.timeline).toEqual([
+      expect.objectContaining({ name: 'Text', value: 'Preparing POST request to https://example.test/items' }),
+      expect.objectContaining({ name: 'DataOut', value: '(1.0 KiB hidden)', hidden: true }),
+      expect.objectContaining({ value: 'Response 201 Created; received 2 B decoded body' }),
+      expect.objectContaining({ value: 'Negotiated HTTP/1.1' }),
+      expect.objectContaining({ value: 'Response body decoded and available to scripts and preview' }),
+    ]);
+  });
+
   it('filters response template history to the active environment when enabled', async () => {
     tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
     const request = createBlankRequest('filtered-response-history');

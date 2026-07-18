@@ -196,6 +196,13 @@ export type StoredResponse = HttpResponse & {
   receivedAt: string;
 };
 
+export type ResponseTimelineEntry = {
+  name: 'Text' | 'DataOut';
+  value: string;
+  elapsedMs: number;
+  hidden?: boolean;
+};
+
 export type ApiRequest = {
   id: string;
   name: string;
@@ -315,6 +322,7 @@ export type AppPreferences = {
   preferredHttpVersion: PreferredHttpVersion;
   maxRedirects: number;
   followRedirects: boolean;
+  maxTimelineDataSizeKB: number;
   maxHistoryResponses: number;
   filterResponsesByEnv: boolean;
   requestTimeoutMs: number;
@@ -483,6 +491,7 @@ export type HttpResponse = {
   setCookies?: string[];
   requestUrl?: string;
   httpVersion?: string;
+  timeline?: ResponseTimelineEntry[];
 };
 
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests' | 'docs';

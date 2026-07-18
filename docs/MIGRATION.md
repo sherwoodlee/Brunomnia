@@ -463,7 +463,23 @@ Compatibility bounds remain explicit: limit changes prune only when the relevant
 
 Compatibility bounds remain explicit: redirect-hop timeline entries, per-request numeric ceilings, WebSocket handshake redirect controls, and live chain fixtures remain open. Browser Fetch does not expose its hop ceiling. Internal adapter requests that deliberately disable redirects do not inherit the device default.
 
-## Milestone 32 — remaining parity closure and release hardening
+## Milestone 32 — size-bounded response timeline evidence (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local Max timeline chunk size defaults to 10 KiB, accepts nonnegative integers, and treats zero as the current upstream 1 KiB fallback |
+| Outgoing evidence | Complete baseline | Resolved text, JSON, GraphQL, and repeated URL-encoded data below the threshold remain visible; exact-limit and oversized data become size-only hidden markers |
+| Structured/binary safety | Complete baseline | Binary content remains filename/size-only; multipart evidence lists configured values/files and logical size without claiming generated wire framing |
+| Response evidence | Complete baseline | Timeline entries retain status, decoded aggregate body size, timing, and negotiated native protocol without duplicating the response body |
+| Persistence and selection | Complete | Timeline entries follow their saved response ID, survive device-local migration, and reopen with older response history selections |
+| Execution breadth | Complete baseline | Native and browser HTTP/GraphQL plus collection-run and script/plugin secondary requests use the same evidence policy; internal integration results carry it when surfaced by their callers |
+| Device-local safety | Complete | Unknown values default to 10, negative values clamp to zero, workspace imports reset the preference, and project/sync publication continues to omit response history |
+| Executable coverage | Complete baseline | Frontend tests cover text, form, multipart, exact thresholds, zero fallback, IEC sizes, native invocation attachment, preference migration, and timeline normalization; rendered QA remains intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 32 verification](QA_MILESTONE_32.md) |
+
+Compatibility bounds remain explicit: reqwest and browser Fetch do not expose libcurl debug callback chunks, so Brunomnia records one prepared outgoing payload and one decoded aggregate response summary. Raw transport-added headers, TLS/connect diagnostics, redirect hops, exact multipart wire framing, compressed wire-byte accounting, and Event Stream handshake timeline files remain open.
+
+## Milestone 33 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
