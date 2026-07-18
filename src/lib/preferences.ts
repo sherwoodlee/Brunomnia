@@ -31,7 +31,10 @@ export const defaultShortcuts: AppPreferences['shortcuts'] = {
 export const defaultPreferences: AppPreferences = {
   theme: 'system',
   density: 'comfortable',
-  fontSize: 13,
+  fontSize: 11,
+  interfaceFontSize: 13,
+  fontInterface: '',
+  fontMonospace: '',
   preferredHttpVersion: 'default',
   maxRedirects: 10,
   followRedirects: true,

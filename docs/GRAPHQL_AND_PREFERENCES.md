@@ -34,7 +34,7 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 
 - system, dark, or light appearance;
 - comfortable or compact density;
-- 11–20 px editor font size;
+- separate 8–24 px interface and editor sizes plus optional interface/monospace font-family lists;
 - responsive or forced-vertical request/response layout;
 - text wrapping, tab/space indentation, a 1–16 indent width, and font ligatures;
 - a preferred native protocol of Default negotiation, HTTP 1.0, HTTP 1.1, HTTP/2, or HTTP/2 Prior Knowledge;
@@ -59,6 +59,8 @@ Preferences stay on this device. Split-YAML folder/Git projects omit them, encry
 Header and query-parameter tabs can switch between regular rows and the device-persistent bulk editor directly. Bulk mode uses one `name: value` pair per line, splits only at the first colon, and preserves duplicate order. Matching current Insomnia, disabled/blank rows are omitted from the bulk text and the first bulk edit replaces row descriptions; path parameters and gRPC metadata remain in their structured editors.
 
 The request/response split remains horizontal until the responsive breakpoint unless **Stack request and response vertically** is enabled. Code surfaces honor the line-wrap and ligature choices immediately. Tab inserts either a literal tab or the configured 1–16 spaces; Shift-Tab removes one matching indentation level from the current or selected lines. These controls stay device-local and reset to current-compatible defaults on workspace import.
+
+Interface typography defaults to 13 px and the system sans-serif stack; editor typography defaults to 11 px and the system monospace stack. Optional comma-separated CSS font-family lists override each independently, and clearing a field restores the built-in stack. Existing Brunomnia editor-size values survive v20 migration, while new/imported workspaces use the current-compatible split defaults and both sizes clamp to 8–24 px.
 
 The HTTP version, redirect, timeout, and API certificate-validation preferences reach ordinary HTTP/GraphQL, Event Streams, gRPC, collection runs, secondary script/plugin requests, artifact URL imports, and integrations. Native HTTP/GraphQL and Event Streams also resolve the proxy preference. OAuth token requests resolve the same proxy plus the separate authentication validation preference. Requests can inherit or override timeout, redirect, validation, and native HTTP proxy choices. Workspace v14 and earlier timeouts, v15 and earlier validation booleans, and v16 and earlier nonempty request proxies migrate to explicit modes so upgrades preserve behavior.
 

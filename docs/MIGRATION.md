@@ -556,7 +556,22 @@ Compatibility bounds remain explicit: bulk mode intentionally cannot represent d
 
 Compatibility bounds remain explicit: Brunomnia's automatic vertical breakpoint is 1,000 px rather than current Insomnia's 880 px, while forced vertical behavior is equivalent. Plain bounded textareas do not claim CodeMirror key maps, autocompletion, linting, folding, bracket helpers, or template-token presentation. Custom interface/monospace font families remain open.
 
-## Milestone 38 — remaining parity closure and release hardening
+## Milestone 38 — separate interface and editor typography (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local interface/editor family fields and separate 8–24 px size controls match current upstream bounds and 13/11 px defaults |
+| Live font families | Complete baseline | Nonblank interface and monospace CSS family lists override the built-in stacks independently; clearing either field restores its fallback |
+| Live font sizes | Complete baseline | Interface size applies at the app shell and editor size drives bounded code surfaces independently |
+| Legacy safety | Complete | Existing Brunomnia `fontSize` values remain editor sizes; new/imported data receives the split defaults during workspace v20 migration |
+| Input safety | Complete baseline | Newlines become spaces, non-string families normalize empty, family lists cap at 512 characters, and both sizes clamp to 8–24 px |
+| Device-local safety | Complete | Managed projects and encrypted-sync pulls preserve local choices while imports reset both families and sizes |
+| Executable coverage | Complete baseline | Focused tests cover defaults, bounds, family normalization, import reset, explicit preservation, and interchange versioning; rendered/font-availability QA remains intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 38 verification](QA_MILESTONE_38.md) |
+
+Compatibility bounds remain explicit: font family fields depend on fonts installed on the device and provide no discovery picker. The app-shell size affects inherited interface typography, but Brunomnia still has deliberately fixed pixel sizes in dense controls and does not claim a complete typographic scaling audit. Rendered verification remains omitted by standing direction.
+
+## Milestone 39 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

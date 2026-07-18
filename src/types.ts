@@ -289,7 +289,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 19;
+  version: 20;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -322,6 +322,9 @@ export type AppPreferences = {
   theme: 'system' | 'dark' | 'light';
   density: 'comfortable' | 'compact';
   fontSize: number;
+  interfaceFontSize: number;
+  fontInterface: string;
+  fontMonospace: string;
   preferredHttpVersion: PreferredHttpVersion;
   maxRedirects: number;
   followRedirects: boolean;
