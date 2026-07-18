@@ -3,7 +3,7 @@ use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, Output},
 };
@@ -58,13 +58,23 @@ pub struct GitRemote {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitRemoteBranch {
+    pub remote: String,
+    pub branch: String,
+    pub tracking_ref: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitStatusOutput {
     pub branch: String,
     pub upstream: String,
     pub ahead: usize,
     pub behind: usize,
+    pub can_push: bool,
     pub files: Vec<GitFileStatus>,
     pub branches: Vec<String>,
+    pub remote_branches: Vec<GitRemoteBranch>,
     pub remotes: Vec<GitRemote>,
     pub merge_in_progress: bool,
     pub rebase_in_progress: bool,
@@ -88,6 +98,26 @@ pub struct GitConflict {
     pub theirs: String,
     pub working: String,
     pub binary: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitSummary {
+    pub oid: String,
+    pub short_oid: String,
+    pub message: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub authored_at: String,
+    pub parents: Vec<String>,
+    pub refs: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitPatch {
+    pub oid: String,
+    pub patch: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -635,6 +665,49 @@ fn list_remotes(root: &Path) -> Vec<GitRemote> {
     remotes.into_values().collect()
 }
 
+fn list_remote_branches(root: &Path, remotes: &[GitRemote]) -> Vec<GitRemoteBranch> {
+    let output = git_output(
+        root,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)%00%(symref)",
+            "refs/remotes",
+        ],
+    )
+    .ok();
+    let mut remote_names = remotes
+        .iter()
+        .map(|remote| remote.name.as_str())
+        .collect::<Vec<_>>();
+    remote_names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+    let mut branches = BTreeSet::new();
+    if let Some(output) = output.filter(|output| output.status.success()) {
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let (tracking_ref, symbolic_target) = line.split_once('\0').unwrap_or((line, ""));
+            if !symbolic_target.is_empty() {
+                continue;
+            }
+            let Some(remote) = remote_names.iter().find(|remote| {
+                tracking_ref
+                    .strip_prefix(**remote)
+                    .is_some_and(|tail| tail.starts_with('/') && tail.len() > 1)
+            }) else {
+                continue;
+            };
+            let branch = tracking_ref[remote.len() + 1..].to_string();
+            branches.insert(((*remote).to_string(), branch, tracking_ref.to_string()));
+        }
+    }
+    branches
+        .into_iter()
+        .map(|(remote, branch, tracking_ref)| GitRemoteBranch {
+            remote,
+            branch,
+            tracking_ref,
+        })
+        .collect()
+}
+
 pub fn git_status(path: String) -> Result<GitStatusOutput, String> {
     let root = project_root(&path, false)?;
     let output = require_success(
@@ -678,14 +751,28 @@ pub fn git_status(path: String) -> Result<GitStatusOutput, String> {
         })
         .collect();
     let git = git_dir(&root);
+    let remotes = list_remotes(&root);
+    let remote_branches = list_remote_branches(&root, &remotes);
+    let has_head = git_output(&root, &["rev-parse", "--verify", "HEAD"])
+        .is_ok_and(|output| output.status.success());
+    let can_push = branch != "HEAD"
+        && !branch.is_empty()
+        && !remotes.is_empty()
+        && if upstream.is_empty() {
+            has_head
+        } else {
+            ahead > 0
+        };
     Ok(GitStatusOutput {
         branch,
         upstream,
         ahead,
         behind,
+        can_push,
         files,
         branches: list_branches(&root),
-        remotes: list_remotes(&root),
+        remote_branches,
+        remotes,
         merge_in_progress: git.join("MERGE_HEAD").exists(),
         rebase_in_progress: git.join("rebase-merge").exists() || git.join("rebase-apply").exists(),
     })
@@ -713,6 +800,40 @@ fn operation(
         stderr,
         status: git_status(root.to_string_lossy().into_owned())?,
     })
+}
+
+fn push_error(output: &Output) -> String {
+    let stdout = output_text(&output.stdout);
+    let stderr = output_text(&output.stderr);
+    let detail = if stderr.is_empty() { stdout } else { stderr };
+    let normalized = detail.to_ascii_lowercase();
+    if normalized.contains("non-fast-forward")
+        || normalized.contains("fetch first")
+        || normalized.contains("remote contains work that you do not have locally")
+    {
+        return "Push rejected because the remote branch has newer commits. Pull and resolve remote changes before pushing again.".into();
+    }
+    if normalized.contains("authentication failed")
+        || normalized.contains("could not read username")
+        || normalized.contains("permission denied")
+        || normalized.contains("publickey")
+        || normalized.contains("write access")
+        || normalized.contains("http 401")
+        || normalized.contains("http 403")
+    {
+        return "Push requires valid Git authentication and write permission. Update the installed Git credential helper or SSH agent, then retry.".into();
+    }
+    if normalized.contains("repository not found") {
+        return "The Git remote repository was not found or is not accessible with the installed credentials.".into();
+    }
+    format!(
+        "Push failed: {}",
+        if detail.is_empty() {
+            "Git returned no error details."
+        } else {
+            &detail
+        }
+    )
 }
 
 pub fn git_stage(path: String, paths: Vec<String>) -> Result<GitStatusOutput, String> {
@@ -764,6 +885,61 @@ pub fn git_unstage(path: String, paths: Vec<String>) -> Result<GitStatusOutput, 
     git_status(root.to_string_lossy().into_owned())
 }
 
+pub fn git_discard(path: String, paths: Vec<String>) -> Result<GitStatusOutput, String> {
+    let root = project_root(&path, false)?;
+    if paths.is_empty() {
+        return Err("Select at least one unstaged file to discard.".into());
+    }
+    let status = git_status(root.to_string_lossy().into_owned())?;
+    if status.merge_in_progress
+        || status.rebase_in_progress
+        || status.files.iter().any(|file| file.conflicted)
+    {
+        return Err("Resolve or abort the active Git operation before discarding files.".into());
+    }
+    let mut tracked = BTreeSet::<PathBuf>::new();
+    let mut untracked = BTreeSet::<PathBuf>::new();
+    for path in paths {
+        let safe = safe_relative(&path)?;
+        let Some(file) = status.files.iter().find(|file| file.path == path) else {
+            return Err(format!("'{path}' no longer has an unstaged Git change."));
+        };
+        if file.index_status == "?" && file.worktree_status == "?" {
+            untracked.insert(safe);
+        } else if file.worktree_status != " " {
+            tracked.insert(safe);
+        } else {
+            return Err(format!("'{path}' has no unstaged Git change to discard."));
+        }
+    }
+    if !tracked.is_empty() {
+        let mut command = Command::new("git");
+        command
+            .arg("-C")
+            .arg(&root)
+            .args(["restore", "--worktree", "--"]);
+        tracked.iter().for_each(|path| {
+            command.arg(path);
+        });
+        require_success(
+            command.output().map_err(|error| error.to_string())?,
+            "Discard tracked changes",
+        )?;
+    }
+    if !untracked.is_empty() {
+        let mut command = Command::new("git");
+        command.arg("-C").arg(&root).args(["clean", "-f", "--"]);
+        untracked.iter().for_each(|path| {
+            command.arg(path);
+        });
+        require_success(
+            command.output().map_err(|error| error.to_string())?,
+            "Discard untracked files",
+        )?;
+    }
+    git_status(root.to_string_lossy().into_owned())
+}
+
 pub fn git_diff(path: String, staged: bool) -> Result<String, String> {
     let root = project_root(&path, false)?;
     let args = if staged {
@@ -773,6 +949,151 @@ pub fn git_diff(path: String, staged: bool) -> Result<String, String> {
     };
     let output = require_success(git_output(&root, &args)?, "Git diff")?;
     Ok(output_text(&output.stdout))
+}
+
+pub fn git_file_diff(path: String, staged: bool, file: String) -> Result<String, String> {
+    let root = project_root(&path, false)?;
+    let relative = safe_relative(&file)?;
+    let status = git_status(root.to_string_lossy().into_owned())?;
+    let Some(changed) = status.files.iter().find(|changed| changed.path == file) else {
+        return Err(format!("'{file}' is not a current Git change."));
+    };
+    if staged && !changed.staged {
+        return Err(format!("'{file}' has no staged Git change."));
+    }
+    if !staged && changed.worktree_status == " " {
+        return Err(format!("'{file}' has no unstaged Git change."));
+    }
+    if changed.index_status == "?" && changed.worktree_status == "?" {
+        let target = confined_existing(&root.join(relative), &root)?;
+        let prefix = format!("Untracked file: {file}\n\n");
+        let available = MAX_TEXT_OUTPUT.saturating_sub(prefix.len());
+        let mut bytes = Vec::new();
+        fs::File::open(&target)
+            .map_err(|error| format!("Unable to preview {file}: {error}"))?
+            .take((available + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("Unable to preview {file}: {error}"))?;
+        if bytes.len() > available {
+            return Ok(format!(
+                "Untracked file: {file}\n\nPreview unavailable because this file exceeds the 2 MB Git text limit."
+            ));
+        }
+        let source = String::from_utf8(bytes).map_err(|_| {
+            format!("Untracked file '{file}' is binary and cannot be previewed as text.")
+        })?;
+        return Ok(format!("{prefix}{source}"));
+    }
+    let args = if staged {
+        vec![
+            "diff",
+            "--cached",
+            "--no-ext-diff",
+            "--unified=3",
+            "--",
+            &file,
+        ]
+    } else {
+        vec!["diff", "--no-ext-diff", "--unified=3", "--", &file]
+    };
+    let output = require_success(git_output(&root, &args)?, "Git file diff")?;
+    Ok(output_text(&output.stdout))
+}
+
+fn parse_git_history(bytes: &[u8]) -> Vec<GitCommitSummary> {
+    String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_TEXT_OUTPUT)])
+        .split('\u{001e}')
+        .filter_map(|record| {
+            let fields = record
+                .trim_matches(['\r', '\n'])
+                .split('\0')
+                .collect::<Vec<_>>();
+            if fields.len() != 8 || fields[0].len() < 7 {
+                return None;
+            }
+            Some(GitCommitSummary {
+                oid: fields[0].to_string(),
+                short_oid: fields[1].to_string(),
+                author_name: fields[2].to_string(),
+                author_email: fields[3].to_string(),
+                authored_at: fields[4].to_string(),
+                message: fields[5].to_string(),
+                parents: fields[6].split_whitespace().map(str::to_string).collect(),
+                refs: fields[7]
+                    .split(", ")
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+pub fn git_history(path: String, limit: Option<usize>) -> Result<Vec<GitCommitSummary>, String> {
+    let root = project_root(&path, false)?;
+    let head = git_output(&root, &["rev-parse", "--verify", "--quiet", "HEAD"])?;
+    if !head.status.success() {
+        return Ok(vec![]);
+    }
+    let max_count = limit.unwrap_or(35).clamp(1, 100).to_string();
+    let output = require_success(
+        git_output(
+            &root,
+            &[
+                "log",
+                "--no-show-signature",
+                "--decorate=short",
+                "--date=iso-strict",
+                &format!("--max-count={max_count}"),
+                "--pretty=format:%H%x00%h%x00%an%x00%ae%x00%aI%x00%s%x00%P%x00%D%x1e",
+                "HEAD",
+                "--",
+            ],
+        )?,
+        "Git history",
+    )?;
+    Ok(parse_git_history(&output.stdout))
+}
+
+fn valid_commit_oid(oid: &str) -> bool {
+    matches!(oid.len(), 40 | 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+pub fn git_commit_patch(path: String, oid: String) -> Result<GitCommitPatch, String> {
+    let root = project_root(&path, false)?;
+    let oid = oid.trim().to_ascii_lowercase();
+    if !valid_commit_oid(&oid) {
+        return Err("Choose a full Git commit identifier from history.".into());
+    }
+    let commit_object = format!("{oid}^{{commit}}");
+    require_success(
+        git_output(&root, &["cat-file", "-e", &commit_object])?,
+        "Resolve Git commit",
+    )?;
+    let output = require_success(
+        git_output(
+            &root,
+            &[
+                "show",
+                "--no-ext-diff",
+                "--no-color",
+                "--format=fuller",
+                "--stat",
+                "--patch",
+                "--find-renames",
+                "--find-copies",
+                "--unified=3",
+                &oid,
+                "--",
+            ],
+        )?,
+        "Read Git commit",
+    )?;
+    Ok(GitCommitPatch {
+        oid,
+        patch: output_text(&output.stdout),
+    })
 }
 
 pub fn git_commit(input: GitCommitInput) -> Result<GitOperationOutput, String> {
@@ -824,6 +1145,86 @@ pub fn git_checkout(
         },
         false,
     )
+}
+
+pub fn git_delete_branch(path: String, branch: String) -> Result<GitOperationOutput, String> {
+    if branch.trim().is_empty() {
+        return Err("Choose a local branch to delete.".into());
+    }
+    let root = project_root(&path, false)?;
+    let branch = branch.trim();
+    require_success(
+        git_output(&root, &["check-ref-format", "--branch", branch])?,
+        "Validate branch name",
+    )?;
+    let status = git_status(root.to_string_lossy().into_owned())?;
+    if status.branch == branch {
+        return Err("Switch branches before deleting the current branch.".into());
+    }
+    if !status.branches.iter().any(|candidate| candidate == branch) {
+        return Err(format!("Local branch '{branch}' does not exist."));
+    }
+    let output = git_output(&root, &["branch", "-d", "--", branch])?;
+    operation(&root, output, "Delete local branch", false)
+}
+
+fn require_remote(root: &Path, name: &str) -> Result<String, String> {
+    let name = if name.trim().is_empty() {
+        "origin"
+    } else {
+        name.trim()
+    };
+    if name.starts_with('-') || !list_remotes(root).iter().any(|remote| remote.name == name) {
+        return Err(format!("Git remote '{name}' does not exist."));
+    }
+    Ok(name.to_string())
+}
+
+pub fn git_fetch(path: String, remote: String) -> Result<GitOperationOutput, String> {
+    let root = project_root(&path, false)?;
+    let remote = require_remote(&root, &remote)?;
+    let output = git_output(&root, &["fetch", "--prune", "--no-tags", "--", &remote])?;
+    operation(&root, output, "Fetch", false)
+}
+
+pub fn git_checkout_remote(
+    path: String,
+    remote: String,
+    branch: String,
+) -> Result<GitOperationOutput, String> {
+    if branch.trim().is_empty() {
+        return Err("Choose a remote branch to check out.".into());
+    }
+    let root = project_root(&path, false)?;
+    let remote = require_remote(&root, &remote)?;
+    let branch = branch.trim();
+    require_success(
+        git_output(&root, &["check-ref-format", "--branch", branch])?,
+        "Validate branch name",
+    )?;
+    if list_branches(&root)
+        .iter()
+        .any(|candidate| candidate == branch)
+    {
+        return Err(format!(
+            "Local branch '{branch}' already exists. Switch to it from Local Branches."
+        ));
+    }
+    require_success(
+        git_output(&root, &["fetch", "--no-tags", "--", &remote, branch])?,
+        "Fetch remote branch",
+    )?;
+    let tracking_ref = format!("{remote}/{branch}");
+    let full_tracking_ref = format!("refs/remotes/{tracking_ref}");
+    require_success(
+        git_output(
+            &root,
+            &["show-ref", "--verify", "--quiet", &full_tracking_ref],
+        )?,
+        "Resolve remote branch",
+    )?;
+    let output = git_output(&root, &["checkout", "--track", "-b", branch, &tracking_ref])?;
+    operation(&root, output, "Fetch and checkout remote branch", false)
 }
 
 pub fn git_set_remote(path: String, name: String, url: String) -> Result<GitStatusOutput, String> {
@@ -906,8 +1307,40 @@ pub fn git_push(input: GitPushPullInput) -> Result<GitOperationOutput, String> {
         git_output(&root, &["check-ref-format", "--branch", &branch])?,
         "Validate branch name",
     )?;
+    let status = git_status(input.path.clone())?;
+    let tracks_remote = status
+        .upstream
+        .strip_prefix(remote)
+        .is_some_and(|tail| tail.starts_with('/') && tail.len() > 1);
+    if branch == status.branch && !status.can_push && (status.upstream.is_empty() || tracks_remote)
+    {
+        return Err("Nothing to push from the current branch.".into());
+    }
     let output = git_output(&root, &["push", "-u", remote, &branch])?;
+    if !output.status.success() {
+        return Err(push_error(&output));
+    }
     operation(&root, output, "Push", false)
+}
+
+pub fn git_validate_remote_access(path: String, remote: String) -> Result<(), String> {
+    let root = project_root(&path, false)?;
+    let remote = if remote.trim().is_empty() {
+        "origin"
+    } else {
+        remote.trim()
+    };
+    if !list_remotes(&root)
+        .iter()
+        .any(|candidate| candidate.name == remote)
+    {
+        return Err(format!("Git remote '{remote}' does not exist."));
+    }
+    require_success(
+        git_output(&root, &["ls-remote", "--heads", "--", remote])?,
+        "Validate Git remote access",
+    )?;
+    Ok(())
 }
 
 pub fn git_merge(path: String, branch: String) -> Result<GitOperationOutput, String> {
@@ -920,6 +1353,18 @@ pub fn git_merge(path: String, branch: String) -> Result<GitOperationOutput, Str
         .any(|candidate| candidate == branch.trim())
     {
         return Err("Choose an existing local branch to merge.".into());
+    }
+    let status = git_status(path.clone())?;
+    if status.merge_in_progress || status.rebase_in_progress {
+        return Err(
+            "Finish or abort the current merge or rebase before starting another merge.".into(),
+        );
+    }
+    if !status.files.is_empty() {
+        return Err(
+            "Commit or discard all staged and unstaged changes before merging another branch."
+                .into(),
+        );
     }
     let output = git_output(&root, &["merge", "--no-commit", "--no-ff", branch.trim()])?;
     operation(&root, output, "Merge", true)
@@ -1136,5 +1581,608 @@ mod tests {
         )
         .unwrap();
         assert!(status.files.iter().all(|file| !file.conflicted));
+    }
+
+    #[test]
+    fn refuses_branch_merges_with_staged_or_unstaged_work() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Merge Guard Test"]);
+        git(root, &["config", "user.email", "merge-guard@example.com"]);
+        fs::write(root.join("request.yaml"), "value: base\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "base request"]);
+        git(root, &["checkout", "-b", "feature"]);
+        fs::write(root.join("feature.yaml"), "feature: true\n").unwrap();
+        git(root, &["add", "feature.yaml"]);
+        git(root, &["commit", "-m", "feature request"]);
+        git(root, &["checkout", "main"]);
+
+        fs::write(root.join("request.yaml"), "value: local\n").unwrap();
+        let unstaged_error =
+            git_merge(root.to_string_lossy().into_owned(), "feature".into()).unwrap_err();
+        assert!(unstaged_error.contains("Commit or discard"));
+        assert_eq!(
+            fs::read_to_string(root.join("request.yaml")).unwrap(),
+            "value: local\n"
+        );
+        assert!(!root.join(".git/MERGE_HEAD").exists());
+
+        git(root, &["add", "request.yaml"]);
+        let staged_error =
+            git_merge(root.to_string_lossy().into_owned(), "feature".into()).unwrap_err();
+        assert!(staged_error.contains("Commit or discard"));
+        assert!(git_diff(root.to_string_lossy().into_owned(), true)
+            .unwrap()
+            .contains("+value: local"));
+        assert!(!root.join(".git/MERGE_HEAD").exists());
+    }
+
+    #[test]
+    fn lists_bounded_commit_history_and_reads_a_validated_patch() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "History Test"]);
+        git(root, &["config", "user.email", "history@example.com"]);
+        fs::write(root.join("request.yaml"), "value: one\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "first request"]);
+        fs::write(root.join("request.yaml"), "value: two\n").unwrap();
+        git(root, &["commit", "-am", "second request"]);
+
+        let history = git_history(root.to_string_lossy().into_owned(), Some(1)).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].message, "second request");
+        assert_eq!(history[0].author_name, "History Test");
+        assert_eq!(history[0].author_email, "history@example.com");
+        assert_eq!(history[0].parents.len(), 1);
+        assert!(history[0]
+            .refs
+            .iter()
+            .any(|reference| reference.contains("main")));
+
+        let patch =
+            git_commit_patch(root.to_string_lossy().into_owned(), history[0].oid.clone()).unwrap();
+        assert_eq!(patch.oid, history[0].oid);
+        assert!(patch.patch.contains("second request"));
+        assert!(patch.patch.contains("-value: one"));
+        assert!(patch.patch.contains("+value: two"));
+        assert!(git_commit_patch(
+            root.to_string_lossy().into_owned(),
+            "HEAD; touch escaped".into(),
+        )
+        .unwrap_err()
+        .contains("full Git commit identifier"));
+    }
+
+    #[test]
+    fn returns_empty_history_for_an_unborn_repository() {
+        let temporary = tempfile::tempdir().unwrap();
+        git(temporary.path(), &["init", "-b", "main"]);
+        assert!(
+            git_history(temporary.path().to_string_lossy().into_owned(), None,)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn fetches_remote_branches_and_checks_out_an_explicit_tracking_branch() {
+        let remote = tempfile::tempdir().unwrap();
+        git(remote.path(), &["init", "--bare", "-b", "main"]);
+
+        let source = tempfile::tempdir().unwrap();
+        git(source.path(), &["init", "-b", "main"]);
+        git(source.path(), &["config", "user.name", "Remote Test"]);
+        git(
+            source.path(),
+            &["config", "user.email", "remote@example.com"],
+        );
+        fs::write(source.path().join("request.yaml"), "value: main\n").unwrap();
+        git(source.path(), &["add", "request.yaml"]);
+        git(source.path(), &["commit", "-m", "main request"]);
+        let remote_path = remote.path().to_string_lossy().into_owned();
+        git(source.path(), &["remote", "add", "origin", &remote_path]);
+        git(source.path(), &["push", "-u", "origin", "main"]);
+
+        let clone_parent = tempfile::tempdir().unwrap();
+        let clone_path = clone_parent.path().join("project");
+        git_clone(remote_path, clone_path.to_string_lossy().into_owned()).unwrap();
+
+        git(source.path(), &["checkout", "-b", "feature/remote"]);
+        fs::write(source.path().join("request.yaml"), "value: remote\n").unwrap();
+        git(source.path(), &["commit", "-am", "remote request"]);
+        git(source.path(), &["push", "-u", "origin", "feature/remote"]);
+        git(source.path(), &["checkout", "-b", "stale"]);
+        git(source.path(), &["push", "-u", "origin", "stale"]);
+        git(source.path(), &["checkout", "feature/remote"]);
+
+        let mut fetched = git_fetch(clone_path.to_string_lossy().into_owned(), "origin".into())
+            .unwrap()
+            .status;
+        assert!(fetched.remote_branches.iter().any(|branch| {
+            branch.remote == "origin"
+                && branch.branch == "feature/remote"
+                && branch.tracking_ref == "origin/feature/remote"
+        }));
+        assert!(fetched
+            .remote_branches
+            .iter()
+            .all(|branch| branch.branch != "HEAD"));
+        assert!(fetched
+            .remote_branches
+            .iter()
+            .any(|branch| branch.branch == "stale"));
+        git(source.path(), &["push", "origin", "--delete", "stale"]);
+        fetched = git_fetch(clone_path.to_string_lossy().into_owned(), "origin".into())
+            .unwrap()
+            .status;
+        assert!(fetched
+            .remote_branches
+            .iter()
+            .all(|branch| branch.branch != "stale"));
+
+        let checked_out = git_checkout_remote(
+            clone_path.to_string_lossy().into_owned(),
+            "origin".into(),
+            "feature/remote".into(),
+        )
+        .unwrap();
+        assert_eq!(checked_out.status.branch, "feature/remote");
+        assert_eq!(checked_out.status.upstream, "origin/feature/remote");
+        assert!(git_checkout_remote(
+            clone_path.to_string_lossy().into_owned(),
+            "origin".into(),
+            "feature/remote".into(),
+        )
+        .unwrap_err()
+        .contains("already exists"));
+        assert!(git_fetch(
+            clone_path.to_string_lossy().into_owned(),
+            "--upload-pack=unsafe".into(),
+        )
+        .unwrap_err()
+        .contains("does not exist"));
+    }
+
+    #[test]
+    fn validates_configured_remote_access_without_mutating_the_repository() {
+        let remote = tempfile::tempdir().unwrap();
+        git(remote.path(), &["init", "--bare", "-b", "main"]);
+
+        let local = tempfile::tempdir().unwrap();
+        let root = local.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Remote Validation Test"]);
+        git(
+            root,
+            &["config", "user.email", "remote-validation@example.com"],
+        );
+        fs::write(root.join("request.yaml"), "value: local\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "local request"]);
+        let remote_path = remote.path().to_string_lossy().into_owned();
+        git(root, &["remote", "add", "origin", &remote_path]);
+
+        let head_before =
+            require_success(git_output(root, &["rev-parse", "HEAD"]).unwrap(), "HEAD")
+                .map(|output| output_text(&output.stdout))
+                .unwrap();
+        git_validate_remote_access(root.to_string_lossy().into_owned(), "origin".into()).unwrap();
+        assert_eq!(
+            require_success(git_output(root, &["rev-parse", "HEAD"]).unwrap(), "HEAD")
+                .map(|output| output_text(&output.stdout))
+                .unwrap(),
+            head_before
+        );
+        assert!(git_status(root.to_string_lossy().into_owned())
+            .unwrap()
+            .files
+            .is_empty());
+        assert!(
+            git_validate_remote_access(root.to_string_lossy().into_owned(), "missing".into(),)
+                .unwrap_err()
+                .contains("does not exist")
+        );
+    }
+
+    #[test]
+    fn reports_when_the_current_branch_has_a_tip_ready_to_push() {
+        let remote = tempfile::tempdir().unwrap();
+        git(remote.path(), &["init", "--bare", "-b", "main"]);
+
+        let local = tempfile::tempdir().unwrap();
+        let root = local.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Push Readiness Test"]);
+        git(root, &["config", "user.email", "push-ready@example.com"]);
+        fs::write(root.join("request.yaml"), "value: one\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "first request"]);
+        assert!(
+            !git_status(root.to_string_lossy().into_owned())
+                .unwrap()
+                .can_push
+        );
+
+        let remote_path = remote.path().to_string_lossy().into_owned();
+        git(root, &["remote", "add", "origin", &remote_path]);
+        assert!(
+            git_status(root.to_string_lossy().into_owned())
+                .unwrap()
+                .can_push
+        );
+        git(root, &["push", "-u", "origin", "main"]);
+        assert!(
+            !git_status(root.to_string_lossy().into_owned())
+                .unwrap()
+                .can_push
+        );
+
+        fs::write(root.join("request.yaml"), "value: two\n").unwrap();
+        git(root, &["commit", "-am", "second request"]);
+        let status = git_status(root.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(status.ahead, 1);
+        assert!(status.can_push);
+        let pushed = git_push(GitPushPullInput {
+            path: root.to_string_lossy().into_owned(),
+            remote: "origin".into(),
+            branch: "main".into(),
+        })
+        .unwrap();
+        assert!(!pushed.status.can_push);
+        assert!(git_push(GitPushPullInput {
+            path: root.to_string_lossy().into_owned(),
+            remote: "origin".into(),
+            branch: "main".into(),
+        })
+        .unwrap_err()
+        .contains("Nothing to push"));
+    }
+
+    #[test]
+    fn explains_non_fast_forward_push_rejections_without_rewriting_local_work() {
+        let remote = tempfile::tempdir().unwrap();
+        git(remote.path(), &["init", "--bare", "-b", "main"]);
+
+        let primary = tempfile::tempdir().unwrap();
+        let root = primary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Primary Push Test"]);
+        git(root, &["config", "user.email", "primary-push@example.com"]);
+        fs::write(root.join("request.yaml"), "value: base\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "base request"]);
+        let remote_path = remote.path().to_string_lossy().into_owned();
+        git(root, &["remote", "add", "origin", &remote_path]);
+        git(root, &["push", "-u", "origin", "main"]);
+
+        let secondary_parent = tempfile::tempdir().unwrap();
+        let secondary = secondary_parent.path().join("secondary");
+        git(
+            secondary_parent.path(),
+            &["clone", &remote_path, secondary.to_string_lossy().as_ref()],
+        );
+        git(&secondary, &["config", "user.name", "Secondary Push Test"]);
+        git(
+            &secondary,
+            &["config", "user.email", "secondary-push@example.com"],
+        );
+        fs::write(secondary.join("remote.yaml"), "remote: newer\n").unwrap();
+        git(&secondary, &["add", "remote.yaml"]);
+        git(&secondary, &["commit", "-m", "remote request"]);
+        git(&secondary, &["push", "origin", "main"]);
+
+        fs::write(root.join("local.yaml"), "local: pending\n").unwrap();
+        git(root, &["add", "local.yaml"]);
+        git(root, &["commit", "-m", "local request"]);
+        let error = git_push(GitPushPullInput {
+            path: root.to_string_lossy().into_owned(),
+            remote: "origin".into(),
+            branch: "main".into(),
+        })
+        .unwrap_err();
+        assert!(error.contains("remote branch has newer commits"));
+        assert!(error.contains("Pull and resolve"));
+        assert_eq!(
+            output_text(
+                &require_success(
+                    git_output(root, &["log", "-1", "--format=%s"]).unwrap(),
+                    "Read local tip",
+                )
+                .unwrap()
+                .stdout,
+            ),
+            "local request"
+        );
+        assert!(
+            git_status(root.to_string_lossy().into_owned())
+                .unwrap()
+                .can_push
+        );
+    }
+
+    #[test]
+    fn deletes_only_existing_non_current_fully_merged_local_branches() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Branch Test"]);
+        git(root, &["config", "user.email", "branch@example.com"]);
+        fs::write(root.join("request.yaml"), "value: main\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "main request"]);
+
+        git(root, &["checkout", "-b", "merged"]);
+        fs::write(root.join("request.yaml"), "value: merged\n").unwrap();
+        git(root, &["commit", "-am", "merged request"]);
+        assert!(
+            git_delete_branch(root.to_string_lossy().into_owned(), "merged".into(),)
+                .unwrap_err()
+                .contains("current branch")
+        );
+        git(root, &["checkout", "main"]);
+        git(root, &["merge", "--ff-only", "merged"]);
+        let deleted =
+            git_delete_branch(root.to_string_lossy().into_owned(), "merged".into()).unwrap();
+        assert!(!deleted
+            .status
+            .branches
+            .iter()
+            .any(|branch| branch == "merged"));
+
+        git(root, &["checkout", "-b", "unmerged"]);
+        fs::write(root.join("request.yaml"), "value: unmerged\n").unwrap();
+        git(root, &["commit", "-am", "unmerged request"]);
+        git(root, &["checkout", "main"]);
+        assert!(
+            git_delete_branch(root.to_string_lossy().into_owned(), "unmerged".into(),).is_err()
+        );
+        assert!(git_status(root.to_string_lossy().into_owned())
+            .unwrap()
+            .branches
+            .iter()
+            .any(|branch| branch == "unmerged"));
+        assert!(git_delete_branch(root.to_string_lossy().into_owned(), "--force".into(),).is_err());
+    }
+
+    #[test]
+    fn discards_only_selected_unstaged_changes_and_preserves_the_index() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Discard Test"]);
+        git(root, &["config", "user.email", "discard@example.com"]);
+        fs::write(root.join("request.yaml"), "value: base\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "base request"]);
+
+        fs::write(root.join("request.yaml"), "value: staged\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        fs::write(root.join("request.yaml"), "value: working\n").unwrap();
+        fs::write(root.join("temporary.yaml"), "temporary: true\n").unwrap();
+
+        let status = git_discard(
+            root.to_string_lossy().into_owned(),
+            vec!["request.yaml".into(), "temporary.yaml".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("request.yaml")).unwrap(),
+            "value: staged\n"
+        );
+        assert!(!root.join("temporary.yaml").exists());
+        assert!(status.files.iter().any(|file| {
+            file.path == "request.yaml" && file.index_status == "M" && file.worktree_status == " "
+        }));
+        assert!(git_diff(root.to_string_lossy().into_owned(), false)
+            .unwrap()
+            .is_empty());
+        assert!(git_diff(root.to_string_lossy().into_owned(), true)
+            .unwrap()
+            .contains("+value: staged"));
+        assert!(git_discard(
+            root.to_string_lossy().into_owned(),
+            vec!["request.yaml".into()],
+        )
+        .unwrap_err()
+        .contains("no unstaged Git change"));
+        assert!(git_discard(
+            root.to_string_lossy().into_owned(),
+            vec!["../outside.yaml".into()],
+        )
+        .unwrap_err()
+        .contains("Unsafe project-relative path"));
+    }
+
+    #[test]
+    fn stages_and_unstages_multiple_files_as_one_selection() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Bulk Stage Test"]);
+        git(root, &["config", "user.email", "bulk-stage@example.com"]);
+        fs::write(root.join("first.yaml"), "value: first base\n").unwrap();
+        fs::write(root.join("second.yaml"), "value: second base\n").unwrap();
+        git(root, &["add", "first.yaml", "second.yaml"]);
+        git(root, &["commit", "-m", "base files"]);
+
+        fs::write(root.join("first.yaml"), "value: first working\n").unwrap();
+        fs::write(root.join("second.yaml"), "value: second working\n").unwrap();
+        let staged = git_stage(
+            root.to_string_lossy().into_owned(),
+            vec!["first.yaml".into(), "second.yaml".into()],
+        )
+        .unwrap();
+        assert!(staged.files.iter().all(|file| file.staged));
+        let staged_diff = git_diff(root.to_string_lossy().into_owned(), true).unwrap();
+        assert!(staged_diff.contains("+value: first working"));
+        assert!(staged_diff.contains("+value: second working"));
+
+        let unstaged = git_unstage(
+            root.to_string_lossy().into_owned(),
+            vec!["first.yaml".into(), "second.yaml".into()],
+        )
+        .unwrap();
+        assert!(unstaged.files.iter().all(|file| !file.staged));
+        assert!(git_diff(root.to_string_lossy().into_owned(), true)
+            .unwrap()
+            .is_empty());
+        let working_diff = git_diff(root.to_string_lossy().into_owned(), false).unwrap();
+        assert!(working_diff.contains("+value: first working"));
+        assert!(working_diff.contains("+value: second working"));
+    }
+
+    #[test]
+    fn creates_ordered_commits_from_reviewed_file_groups() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Grouped Commit Test"]);
+        git(
+            root,
+            &["config", "user.email", "grouped-commit@example.com"],
+        );
+        fs::write(root.join("first.yaml"), "value: first base\n").unwrap();
+        fs::write(root.join("second.yaml"), "value: second base\n").unwrap();
+        git(root, &["add", "first.yaml", "second.yaml"]);
+        git(root, &["commit", "-m", "base files"]);
+
+        fs::write(root.join("first.yaml"), "value: first grouped\n").unwrap();
+        fs::write(root.join("second.yaml"), "value: second grouped\n").unwrap();
+        git_stage(
+            root.to_string_lossy().into_owned(),
+            vec!["first.yaml".into(), "second.yaml".into()],
+        )
+        .unwrap();
+        git_unstage(
+            root.to_string_lossy().into_owned(),
+            vec!["first.yaml".into(), "second.yaml".into()],
+        )
+        .unwrap();
+
+        git_stage(
+            root.to_string_lossy().into_owned(),
+            vec!["first.yaml".into()],
+        )
+        .unwrap();
+        git_commit(GitCommitInput {
+            path: root.to_string_lossy().into_owned(),
+            message: "feat: first group".into(),
+            author_name: String::new(),
+            author_email: String::new(),
+        })
+        .unwrap();
+        git_stage(
+            root.to_string_lossy().into_owned(),
+            vec!["second.yaml".into()],
+        )
+        .unwrap();
+        git_commit(GitCommitInput {
+            path: root.to_string_lossy().into_owned(),
+            message: "test: second group".into(),
+            author_name: String::new(),
+            author_email: String::new(),
+        })
+        .unwrap();
+
+        let messages = output_text(
+            &require_success(
+                git_output(root, &["log", "-2", "--format=%s"]).unwrap(),
+                "Read grouped history",
+            )
+            .unwrap()
+            .stdout,
+        );
+        assert_eq!(messages, "test: second group\nfeat: first group");
+        assert_eq!(
+            output_text(
+                &require_success(
+                    git_output(root, &["show", "HEAD^:first.yaml"]).unwrap(),
+                    "Read first group",
+                )
+                .unwrap()
+                .stdout,
+            ),
+            "value: first grouped"
+        );
+        assert_eq!(
+            output_text(
+                &require_success(
+                    git_output(root, &["show", "HEAD^:second.yaml"]).unwrap(),
+                    "Read uncommitted second group",
+                )
+                .unwrap()
+                .stdout,
+            ),
+            "value: second base"
+        );
+        assert!(git_status(root.to_string_lossy().into_owned())
+            .unwrap()
+            .files
+            .is_empty());
+    }
+
+    #[test]
+    fn returns_confined_per_file_diffs_including_untracked_text() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Diff Test"]);
+        git(root, &["config", "user.email", "diff@example.com"]);
+        fs::write(root.join("request.yaml"), "value: base\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "base request"]);
+
+        fs::write(root.join("request.yaml"), "value: working\n").unwrap();
+        fs::write(root.join("new.yaml"), "value: new\n").unwrap();
+        fs::write(root.join("binary.bin"), [0xff, 0x00]).unwrap();
+        let working = git_file_diff(
+            root.to_string_lossy().into_owned(),
+            false,
+            "request.yaml".into(),
+        )
+        .unwrap();
+        assert!(working.contains("-value: base"));
+        assert!(working.contains("+value: working"));
+        let untracked = git_file_diff(
+            root.to_string_lossy().into_owned(),
+            false,
+            "new.yaml".into(),
+        )
+        .unwrap();
+        assert!(untracked.starts_with("Untracked file: new.yaml"));
+        assert!(untracked.contains("value: new"));
+        assert!(git_file_diff(
+            root.to_string_lossy().into_owned(),
+            false,
+            "binary.bin".into(),
+        )
+        .unwrap_err()
+        .contains("binary"));
+
+        git(root, &["add", "request.yaml"]);
+        let staged = git_file_diff(
+            root.to_string_lossy().into_owned(),
+            true,
+            "request.yaml".into(),
+        )
+        .unwrap();
+        assert!(staged.contains("-value: base"));
+        assert!(staged.contains("+value: working"));
+        assert!(
+            git_file_diff(root.to_string_lossy().into_owned(), true, "new.yaml".into(),)
+                .unwrap_err()
+                .contains("no staged Git change")
+        );
+        assert!(git_file_diff(
+            root.to_string_lossy().into_owned(),
+            false,
+            "../outside.yaml".into(),
+        )
+        .unwrap_err()
+        .contains("Unsafe project-relative path"));
     }
 }

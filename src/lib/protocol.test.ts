@@ -57,9 +57,9 @@ describe('sseConnectConfig', () => {
 describe('streamTransportConfig', () => {
   it('adds device HTTP and redirect preferences without mutating request transport', () => {
     const request = cloneSeedWorkspace().collections[0].requests[0];
-    const transport = streamTransportConfig(request, 'http2-prior-knowledge', 3, false);
+    const transport = streamTransportConfig(request, 'http2-prior-knowledge', 3, false, 12_345, false, { enabled: true, httpProxy: 'http://http-proxy', httpsProxy: 'http://https-proxy', noProxy: 'localhost' });
 
-    expect(transport).toMatchObject({ timeoutMs: request.transport.timeoutMs, preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: 3, followRedirects: false });
+    expect(transport).toMatchObject({ timeoutMs: 12_345, validateCertificates: false, proxyMode: 'custom', proxyUrl: 'http://https-proxy', proxyExclusions: 'localhost', preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: 3, followRedirects: false });
     expect(request.transport).not.toHaveProperty('preferredHttpVersion');
     expect(request.transport).not.toHaveProperty('maxRedirects');
   });
@@ -70,5 +70,29 @@ describe('streamTransportConfig', () => {
     expect(streamTransportConfig(request, 'default', 10, false).followRedirects).toBe(true);
     request.transport.followRedirectsMode = 'off';
     expect(streamTransportConfig(request, 'default', 10, true).followRedirects).toBe(false);
+  });
+
+  it('preserves a custom stream timeout over the device preference', () => {
+    const request = cloneSeedWorkspace().collections[0].requests[0];
+    request.transport.timeoutMode = 'custom';
+    request.transport.timeoutMs = 7_654;
+    expect(streamTransportConfig(request, 'default', 10, true, 30_000).timeoutMs).toBe(7_654);
+  });
+
+  it('preserves an explicit stream validation mode over the device preference', () => {
+    const request = cloneSeedWorkspace().collections[0].requests[0];
+    request.transport.validateCertificatesMode = 'on';
+    expect(streamTransportConfig(request, 'default', 10, true, 30_000, false).validateCertificates).toBe(true);
+    request.transport.validateCertificatesMode = 'off';
+    expect(streamTransportConfig(request, 'default', 10, true, 30_000, true).validateCertificates).toBe(false);
+  });
+
+  it('preserves explicit stream proxy modes over the device preference', () => {
+    const request = cloneSeedWorkspace().collections[0].requests[0];
+    request.transport.proxyMode = 'custom';
+    request.transport.proxyUrl = 'http://request-proxy';
+    expect(streamTransportConfig(request, 'default', 10, true, 30_000, true, { enabled: false, httpProxy: '', httpsProxy: '', noProxy: '' }).proxyUrl).toBe('http://request-proxy');
+    request.transport.proxyMode = 'disabled';
+    expect(streamTransportConfig(request, 'default', 10, true, 30_000, true, { enabled: true, httpProxy: 'http://global', httpsProxy: 'http://global', noProxy: '' }).proxyMode).toBe('disabled');
   });
 });

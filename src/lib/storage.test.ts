@@ -20,7 +20,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(14);
+    expect(migrated.version).toBe(22);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
@@ -36,12 +36,16 @@ describe('workspace migrations', () => {
     expect(migrated.imports).toEqual([]);
     expect(migrated.cookies).toEqual([]);
     expect(migrated.responses).toEqual([]);
+    expect(migrated.responseFilters).toEqual({});
     expect(migrated.mcpClients).toEqual([]);
     expect(migrated.ai.enabled).toBe(false);
     expect(migrated.konnect.baseUrl).toBe('https://us.api.konghq.com');
-    expect(migrated.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, autoFetchGraphqlSchema: true });
-    expect(migrated.collections[0].requests[0].transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global' });
-    expect(migrated.preferences).toMatchObject({ scriptTimeoutMs: 10_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
+    expect(migrated.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, validateCertificates: true, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', autoFetchGraphqlSchema: true });
+    expect(migrated.preferences).toMatchObject({ useBulkHeaderEditor: false, useBulkParametersEditor: false });
+    expect(migrated.preferences).toMatchObject({ forceVerticalLayout: false, editorIndentWithTabs: true, editorIndentSize: 2, editorLineWrapping: true, fontVariantLigatures: false });
+    expect(migrated.preferences).toMatchObject({ fontSize: 11, interfaceFontSize: 13, fontInterface: '', fontMonospace: '', showPasswords: false, allowHtmlPreviewRemoteResources: false, allowHtmlPreviewScripts: false, disableResponsePreviewLinks: false });
+    expect(migrated.collections[0].requests[0].transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global', timeoutMode: 'global', validateCertificatesMode: 'global', proxyMode: 'global' });
+    expect(migrated.preferences).toMatchObject({ scriptTimeoutMs: 10_000, allowScriptRequests: false, allowScriptFileAccess: false, dataFolders: [], enableVaultInScripts: false });
     expect(migrated.preferences.shortcuts['generate-code']).toBe('Mod+Shift+G');
     expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaEndpoint: '', schemaFetchedAt: '' });
   });
@@ -95,13 +99,32 @@ describe('workspace migrations', () => {
     });
   });
 
+  it('bounds per-request response filters and discards stale request metadata', () => {
+    const workspace = cloneSeedWorkspace();
+    const requestId = workspace.collections[0].requests[0].id;
+    const secondRequestId = workspace.collections[0].requests[1].id;
+    workspace.responseFilters = {
+      [requestId]: { filter: `  ${'$'.repeat(2_100)}  `, history: [' $.items[*] ', '$.items[*]', ...Array.from({ length: 15 }, (_, index) => `$.item${index}`)], previewMode: 'raw' },
+      [secondRequestId]: { filter: '', history: [], previewMode: 'invalid' as 'source' },
+      missing: { filter: '$.secret', history: ['$.secret'], previewMode: 'friendly' },
+    };
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.responseFilters?.[requestId].filter).toHaveLength(2_000);
+    expect(migrated.responseFilters?.[requestId].history).toHaveLength(10);
+    expect(migrated.responseFilters?.[requestId].history[0]).toBe('$.items[*]');
+    expect(migrated.responseFilters?.[requestId].previewMode).toBe('raw');
+    expect(migrated.responseFilters?.[secondRequestId].previewMode).toBe('source');
+    expect(migrated.responseFilters?.missing).toBeUndefined();
+  });
+
   it('normalizes collection sub-environments and repairs a stale selection', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
     const collection = (workspace.collections as Array<Record<string, unknown>>)[0];
     collection.subEnvironments = [{ id: 'staging', name: 'Staging', variables: [{ name: 'host', value: 'staging.example', enabled: true }] }, null];
     collection.activeSubEnvironmentId = 'missing';
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(14);
+    expect(migrated.version).toBe(22);
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });
@@ -154,7 +177,7 @@ describe('workspace migrations', () => {
     }];
     exported.ai = { ...exported.ai, enabled: true, apiKey: 'raw-ai-key', mockGeneration: true, commitSuggestions: true };
     exported.konnect = { ...exported.konnect, enabled: true, token: 'raw-konnect-token' };
-    exported.preferences = { ...exported.preferences, theme: 'light', preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 99, maxHistoryResponses: -1, filterResponsesByEnv: true, requestTimeoutMs: 123_000, allowScriptRequests: true, allowScriptFileAccess: true, enableVaultInScripts: true };
+    exported.preferences = { ...exported.preferences, theme: 'light', fontSize: 22, interfaceFontSize: 21, fontInterface: 'Imported UI', fontMonospace: 'Imported Mono', showPasswords: true, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: true, preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 99, maxHistoryResponses: -1, filterResponsesByEnv: true, requestTimeoutMs: 123_000, allowScriptRequests: true, allowScriptFileAccess: true, dataFolders: ['/private/imported-authority'], enableVaultInScripts: true, forceVerticalLayout: true, editorIndentWithTabs: false, editorIndentSize: 8, editorLineWrapping: false, fontVariantLigatures: true };
 
     const imported = parseWorkspaceImport(JSON.stringify(exported));
     expect(imported.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
@@ -163,19 +186,25 @@ describe('workspace migrations', () => {
     expect(imported.mcpClients[0]).toMatchObject({ enabled: false, token: '', password: '' });
     expect(imported.ai).toMatchObject({ enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false });
     expect(imported.konnect).toMatchObject({ enabled: false, token: '' });
-    expect(imported.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
+    expect(imported.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, validateCertificates: true, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', allowScriptRequests: false, allowScriptFileAccess: false, dataFolders: [], enableVaultInScripts: false });
+    expect(imported.preferences).toMatchObject({ useBulkHeaderEditor: false, useBulkParametersEditor: false });
+    expect(imported.preferences).toMatchObject({ forceVerticalLayout: false, editorIndentWithTabs: true, editorIndentSize: 2, editorLineWrapping: true, fontVariantLigatures: false });
+    expect(imported.preferences).toMatchObject({ fontSize: 11, interfaceFontSize: 13, fontInterface: '', fontMonospace: '', showPasswords: false, allowHtmlPreviewRemoteResources: false, allowHtmlPreviewScripts: false, disableResponsePreviewLinks: false });
   });
 
   it('normalizes preference bounds and shortcut values', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
-    workspace.preferences = { theme: 'unknown', density: 'compact', fontSize: 99, preferredHttpVersion: 'http3', maxRedirects: -99.8, followRedirects: 'sometimes', maxTimelineDataSizeKB: -400.2, maxHistoryResponses: -400.2, filterResponsesByEnv: 'yes', requestTimeoutMs: 1, scriptTimeoutMs: 999_999, allowScriptRequests: 'yes', allowScriptFileAccess: 'yes', enableVaultInScripts: 1, shortcuts: { palette: ' mod + shift + p ', send: 42 } };
+    workspace.preferences = { theme: 'unknown', density: 'compact', fontSize: 99, interfaceFontSize: 2, fontInterface: 'Fancy\nUI', fontMonospace: 42, showPasswords: 'yes', allowHtmlPreviewRemoteResources: 'yes', allowHtmlPreviewScripts: 'yes', disableResponsePreviewLinks: 'yes', preferredHttpVersion: 'http3', maxRedirects: -99.8, followRedirects: 'sometimes', maxTimelineDataSizeKB: -400.2, maxHistoryResponses: -400.2, filterResponsesByEnv: 'yes', requestTimeoutMs: 1, validateCertificates: false, validateAuthCertificates: 'no', proxyEnabled: 'yes', httpProxy: 42, httpsProxy: false, noProxy: null, forceVerticalLayout: 'yes', editorIndentWithTabs: 0, editorIndentSize: 999, editorLineWrapping: null, fontVariantLigatures: 1, scriptTimeoutMs: 999_999, allowScriptRequests: 'yes', allowScriptFileAccess: 'yes', dataFolders: [' /tmp/fixtures ', '/tmp/fixtures', 42, '', 'x'.repeat(5_000)], enableVaultInScripts: 1, shortcuts: { palette: ' mod + shift + p ', send: 42 } };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 20, preferredHttpVersion: 'default', maxRedirects: -1, followRedirects: true, maxTimelineDataSizeKB: 0, maxHistoryResponses: -1, filterResponsesByEnv: false, requestTimeoutMs: 1_000, scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
+    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 24, interfaceFontSize: 8, fontInterface: 'Fancy UI', fontMonospace: '', showPasswords: false, allowHtmlPreviewRemoteResources: false, allowHtmlPreviewScripts: false, disableResponsePreviewLinks: false, preferredHttpVersion: 'default', maxRedirects: -1, followRedirects: true, maxTimelineDataSizeKB: 0, maxHistoryResponses: -1, filterResponsesByEnv: false, requestTimeoutMs: 1, validateCertificates: false, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
+    expect(migrated.preferences).toMatchObject({ useBulkHeaderEditor: false, useBulkParametersEditor: false });
+    expect(migrated.preferences).toMatchObject({ forceVerticalLayout: false, editorIndentWithTabs: true, editorIndentSize: 16, editorLineWrapping: true, fontVariantLigatures: false });
+    expect(migrated.preferences.dataFolders).toEqual(['/tmp/fixtures', 'x'.repeat(4_096)]);
     expect(migrated.preferences.shortcuts.palette).toBe('Mod+Shift+P');
     expect(migrated.preferences.shortcuts.send).toBe('Mod+Enter');
   });
 
-  it('preserves supported device-local HTTP preferences', () => {
+  it('preserves supported device-local preferences', () => {
     const workspace = cloneSeedWorkspace();
     workspace.preferences.preferredHttpVersion = 'http2-prior-knowledge';
     workspace.preferences.maxRedirects = -1;
@@ -183,7 +212,29 @@ describe('workspace migrations', () => {
     workspace.preferences.maxTimelineDataSizeKB = 77;
     workspace.preferences.maxHistoryResponses = -1;
     workspace.preferences.filterResponsesByEnv = true;
-    expect(migrateWorkspace(workspace).preferences).toMatchObject({ preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 77, maxHistoryResponses: -1, filterResponsesByEnv: true });
+    workspace.preferences.validateCertificates = false;
+    workspace.preferences.validateAuthCertificates = false;
+    workspace.preferences.proxyEnabled = true;
+    workspace.preferences.httpProxy = 'http://http-proxy.test:8080';
+    workspace.preferences.httpsProxy = 'http://https-proxy.test:8443';
+    workspace.preferences.noProxy = 'localhost,.internal';
+    workspace.preferences.useBulkHeaderEditor = true;
+    workspace.preferences.useBulkParametersEditor = true;
+    workspace.preferences.forceVerticalLayout = true;
+    workspace.preferences.editorIndentWithTabs = false;
+    workspace.preferences.editorIndentSize = 8;
+    workspace.preferences.editorLineWrapping = false;
+    workspace.preferences.fontVariantLigatures = true;
+    workspace.preferences.fontSize = 18;
+    workspace.preferences.interfaceFontSize = 17;
+    workspace.preferences.fontInterface = 'Avenir Next, sans-serif';
+    workspace.preferences.fontMonospace = 'JetBrains Mono, monospace';
+    workspace.preferences.showPasswords = true;
+    workspace.preferences.allowHtmlPreviewRemoteResources = true;
+    workspace.preferences.allowHtmlPreviewScripts = true;
+    workspace.preferences.disableResponsePreviewLinks = true;
+    workspace.preferences.dataFolders = ['/Users/example/fixtures', '/Volumes/shared/data'];
+    expect(migrateWorkspace(workspace).preferences).toMatchObject({ preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 77, maxHistoryResponses: -1, filterResponsesByEnv: true, validateCertificates: false, validateAuthCertificates: false, proxyEnabled: true, httpProxy: 'http://http-proxy.test:8080', httpsProxy: 'http://https-proxy.test:8443', noProxy: 'localhost,.internal', useBulkHeaderEditor: true, useBulkParametersEditor: true, forceVerticalLayout: true, editorIndentWithTabs: false, editorIndentSize: 8, editorLineWrapping: false, fontVariantLigatures: true, fontSize: 18, interfaceFontSize: 17, fontInterface: 'Avenir Next, sans-serif', fontMonospace: 'JetBrains Mono, monospace', showPasswords: true, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: true, dataFolders: ['/Users/example/fixtures', '/Volumes/shared/data'] });
   });
 
   it('migrates legacy redirect booleans and preserves supported three-state overrides', () => {
@@ -201,11 +252,69 @@ describe('workspace migrations', () => {
     expect(migrated.collections[0].requests[2].transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global' });
   });
 
+  it('preserves legacy saved timeouts as custom overrides and keeps explicit inheritance', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    const requests = (workspace.collections as Array<{ requests: Array<{ transport: Record<string, unknown> }> }>)[0].requests;
+    delete requests[0].transport.timeoutMode;
+    requests[0].transport.timeoutMs = 12_345;
+    requests[1].transport.timeoutMode = 'global';
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.collections[0].requests[0].transport).toMatchObject({ timeoutMode: 'custom', timeoutMs: 12_345 });
+    expect(migrated.collections[0].requests[1].transport.timeoutMode).toBe('global');
+  });
+
+  it('preserves legacy certificate choices as explicit modes and keeps inheritance', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    const requests = (workspace.collections as Array<{ requests: Array<{ transport: Record<string, unknown> }> }>)[0].requests;
+    delete requests[0].transport.validateCertificatesMode;
+    requests[0].transport.validateCertificates = false;
+    delete requests[1].transport.validateCertificatesMode;
+    requests[1].transport.validateCertificates = true;
+    requests[2].transport.validateCertificatesMode = 'global';
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.collections[0].requests[0].transport).toMatchObject({ validateCertificates: false, validateCertificatesMode: 'off' });
+    expect(migrated.collections[0].requests[1].transport).toMatchObject({ validateCertificates: true, validateCertificatesMode: 'on' });
+    expect(migrated.collections[0].requests[2].transport.validateCertificatesMode).toBe('global');
+  });
+
+  it('preserves legacy request proxies as custom and keeps empty requests inherited', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    const requests = (workspace.collections as Array<{ requests: Array<{ transport: Record<string, unknown> }> }>)[0].requests;
+    delete requests[0].transport.proxyMode;
+    requests[0].transport.proxyUrl = 'http://legacy-proxy.test:8080';
+    requests[0].transport.proxyExclusions = 'localhost';
+    delete requests[1].transport.proxyMode;
+    requests[1].transport.proxyUrl = '';
+    requests[1].transport.proxyExclusions = '';
+    requests[2].transport.proxyMode = 'disabled';
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.collections[0].requests[0].transport).toMatchObject({ proxyMode: 'custom', proxyUrl: 'http://legacy-proxy.test:8080', proxyExclusions: 'localhost' });
+    expect(migrated.collections[0].requests[1].transport.proxyMode).toBe('global');
+    expect(migrated.collections[0].requests[2].transport.proxyMode).toBe('disabled');
+  });
+
   it('adds stable local identity fields to legacy stored responses', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
-    workspace.responses = [{ requestId: 'request', requestName: 'Legacy', requestUrl: 'https://example.test', receivedAt: '2026-07-17T00:00:00.000Z', status: 200, statusText: 'OK', headers: {}, body: '', durationMs: 1, sizeBytes: 0, timeline: [{ name: 'DataOut', value: '(12 KiB hidden)', elapsedMs: -3, hidden: true }, null] }];
+    const requestSnapshot = cloneSeedWorkspace().collections[0].requests[0];
+    workspace.responses = [{ requestId: 'request', requestName: 'Legacy', requestUrl: 'https://example.test', requestSnapshot, receivedAt: '2026-07-17T00:00:00.000Z', status: 200, statusText: 'OK', headers: {}, body: '', durationMs: 1, sizeBytes: 0, timeline: [{ name: 'DataOut', value: '(12 KiB hidden)', elapsedMs: -3, hidden: true }, null] }];
 
     expect(migrateWorkspace(workspace).responses[0]).toMatchObject({ id: 'legacy-response-0', environmentId: '', requestId: 'request', timeline: [{ name: 'DataOut', value: '(12 KiB hidden)', elapsedMs: 0, hidden: true }] });
+    expect(migrateWorkspace(workspace).responses[0].requestSnapshot?.url).toBe(requestSnapshot.url);
+  });
+
+  it('preserves optional exact response bytes and rejects non-string containers', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.responses = [
+      { id: 'binary', requestId: 'request', requestName: 'Binary', requestUrl: 'https://example.test/file', environmentId: '', receivedAt: '2026-07-17T00:00:00.000Z', status: 200, statusText: 'OK', headers: {}, body: 'f�o', bodyBase64: 'ZoBv', durationMs: 1, sizeBytes: 3 },
+      { id: 'invalid', requestId: 'request', requestName: 'Invalid', requestUrl: 'https://example.test/file', environmentId: '', receivedAt: '2026-07-17T00:00:01.000Z', status: 200, statusText: 'OK', headers: {}, body: 'safe', bodyBase64: { bytes: [] }, durationMs: 1, sizeBytes: 4 },
+    ];
+
+    const responses = migrateWorkspace(workspace).responses;
+    expect(responses[0]).toMatchObject({ id: 'binary', body: 'f�o', bodyBase64: 'ZoBv' });
+    expect(responses[1]).not.toHaveProperty('bodyBase64');
   });
 
   it('breaks malformed resource cycles and keeps private descendants device-local', () => {

@@ -7,7 +7,7 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | Capability | Status | Notes |
 | --- | --- | --- |
 | Tauri 2 desktop shell | Complete | Native bundle configuration and app icons included |
-| REST/HTTP transport | Complete | Rust `reqwest`, redirects, 60-second timeout, arbitrary headers/body |
+| REST/HTTP transport | Complete | Rust `reqwest`, redirects, inherited/custom execution-time timeout with `0` disabled, arbitrary headers/body |
 | Local persistence | Complete | Versioned JSON, atomic write to OS app-data directory |
 | Collections and requests | Complete | Create, select, edit, search, and group requests |
 | Environments | Complete | Local variables and template resolution |
@@ -27,7 +27,7 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | gRPC schema discovery | Complete | Server Reflection v1 and pasted `.proto` compilation into a local descriptor pool |
 | gRPC execution | Complete | Dynamic protobuf JSON mapping; unary, client-streaming, server-streaming and bidirectional calls |
 | Rich HTTP bodies | Complete | None, JSON, text, URL-encoded, multipart text/files and binary files |
-| Transport configuration | Complete for HTTP/SSE | Redirect policy, bounded connect/HTTP timeout, unlimited active SSE duration, certificate validation, HTTP proxy and PEM client identity |
+| Transport configuration | Complete for HTTP/SSE | Redirect policy, inherited/custom connect/HTTP timeout with `0` disabled, inherited/always/never API certificate validation, unlimited active SSE duration, HTTP proxy and PEM client identity |
 | gRPC TLS | Complete | System trust roots, timeout and PEM client identity |
 | WebSocket TLS | Baseline | System trust roots and arbitrary handshake headers; custom proxy/client identity is deferred |
 | Workspace migration | Complete | Version 1 workspaces migrate in place to the version 2 protocol schema |
@@ -134,7 +134,7 @@ Compatibility bounds remain explicit: HTTP MCP OAuth discovery/redirect handling
 | GraphQL authoring | Complete baseline | Query/variables composition, operation name, structural checks, cached root-field validation, root-field search/insertion, deprecation display, and type documentation browsing |
 | GraphQL template boundary | Complete | Query template syntax remains literal to match Insomnia; variables retain local/vault/external template support |
 | Request scheduling | Complete baseline | Initial delay, sequential repeat interval, stop-future-runs control, and a 1,000-send local safety bound |
-| Desktop preferences | Complete baseline | System/dark/light appearance, comfortable/compact density, editor font size, preferred HTTP version, new-request timeout, apply-to-existing timeout, GraphQL auto-fetch, and delete confirmation |
+| Desktop preferences | Complete baseline | System/dark/light appearance, comfortable/compact density, editor font size, preferred HTTP version, execution-time timeout and API/authentication certificate-validation defaults with request overrides, GraphQL auto-fetch, and delete confirmation |
 | Keyboard shortcuts | Complete baseline | Ten device-local editable bindings, platform `Mod` abstraction, collision warnings, clearing/reset, URL focus, request create/duplicate/delete, history, sidebar, environment, send, Preferences, and palette actions |
 | Workspace migration | Complete | Versions 1–8 migrate to v9 bounded GraphQL schema cache fields and normalized device-local preferences; imports receive safe defaults and project/encrypted-sync reads preserve local preferences |
 | Documentation and evidence | Complete | [GraphQL and preferences guide](GRAPHQL_AND_PREFERENCES.md) and [Milestone 9 verification](QA_MILESTONE_9.md) |
@@ -181,7 +181,7 @@ Compatibility bounds remain explicit: generated snippets do not yet embed multip
 | Secondary requests | Complete baseline | Off-by-default device-local grant, mediated HTTP(S) normalization, separate vault capability, five-request/256 KB input/5 MB response/10-second transport bounds, and no nested script/plugin execution |
 | Vault scripts | Complete baseline | Off-by-default device-local grant exposes only current unlocked local entries through `insomnia.vault.get`, with no result/export/project/sync serialization |
 | CLI safety | Complete baseline | Workspace JavaScript requires `--allow-scripts`; secondary requests additionally require `--allow-script-requests`; workspace data cannot self-grant either capability |
-| Workspace migration | Complete | Versions 1–11 migrate to v12 safe script timeout and disabled network/vault grants; imports reset authority and shared reads preserve device-local preferences |
+| Workspace migration | Complete | Versions 1–15 migrate to v16 with legacy-safe timeout/certificate overrides, safe script timeout and disabled network/vault grants; imports reset authority and shared reads preserve device-local preferences |
 | Documentation and evidence | Complete | [Permission-bounded scripting guide](SCRIPTING.md) and [Milestone 12 verification](QA_MILESTONE_12.md) |
 
 Compatibility bounds remain explicit: the full upstream library/Node module set, complete Chai/Lodash behavior, advanced auth/body helpers, separately persisted base-environment mutation, script access to external-vault providers, and broader Postman compatibility remain. The browser Worker is the desktop capability boundary; CLI scripts use Node `vm` and therefore require an explicit trusted-workspace flag rather than being represented as hostile-code isolation. Exact scope/helper/async/state-continuity work follows in Milestone 13.
@@ -377,7 +377,7 @@ Compatibility bounds remain explicit: Brunomnia discovers named tests inside req
 
 | Capability | Status | Notes |
 | --- | --- | --- |
-| Long-running native sessions | Complete baseline | SSE uses the configured timeout for connection establishment without applying a total deadline to an active response stream |
+| Long-running native sessions | Complete baseline | SSE uses the effective positive timeout for connection establishment, or no header deadline at zero, without applying a total deadline to an active response stream |
 | Reconnect policy | Complete baseline | Per-request automatic reconnect toggle, 100–60,000 ms delay, and 0–1,000 retry limit; zero means retry until explicit disconnect |
 | Protocol resume | Complete baseline | Valid `id:` values are retained and sent as `Last-Event-ID`; numeric `retry:` values can replace the local delay within the same bounds |
 | Cancellation | Complete | Explicit disconnect cancels an active read, reconnect delay, or reconnect attempt and removes the session |
@@ -424,7 +424,7 @@ Compatibility bounds remain explicit: the sandbox cannot bind deterministic comp
 | Current preference surface | Complete baseline | Device-local maximum redirects defaults to 10, accepts zero and positive integer ceilings, and uses `-1` for unlimited redirects as documented by the current upstream setting |
 | Request precedence | Complete | A request with Follow HTTP redirects disabled always uses a no-follow native policy regardless of the device maximum |
 | Finite execution | Complete | Zero rejects the first redirect; positive values configure reqwest's explicit hop limit and return a transport error when reached |
-| Unlimited execution | Complete baseline | `-1` uses a custom follow policy without a hop ceiling; ordinary requests retain their total deadline and SSE header establishment is explicitly bounded by the request timeout |
+| Unlimited execution | Complete baseline | `-1` uses a custom follow policy without a hop ceiling; ordinary requests retain a positive total deadline and SSE header establishment follows the effective timeout, including disabled zero |
 | Execution breadth | Complete baseline | HTTP, GraphQL, SSE/reconnect, introspection, collection runs, scripts/plugins, imports, OAuth, AI, MCP, Konnect, and Git AI inherit the device preference |
 | Device-local safety | Complete | Existing data defaults to 10, malformed values normalize safely, project/sync reads preserve the device value, and workspace imports reset it |
 | Executable coverage | Complete baseline | Frontend tests cover migration, invocation/stream input, and request immutability; native tests cover disabled, zero, finite, and unlimited policy selection; live redirect chains remain sandbox-limited |
@@ -479,10 +479,725 @@ Compatibility bounds remain explicit: redirect-hop timeline entries, per-request
 
 Compatibility bounds remain explicit: reqwest and browser Fetch do not expose libcurl debug callback chunks, so Brunomnia records one prepared outgoing payload and one decoded aggregate response summary. Raw transport-added headers, TLS/connect diagnostics, redirect hops, exact multipart wire framing, compressed wire-byte accounting, and Event Stream handshake timeline files remain open.
 
-## Milestone 33 — remaining parity closure and release hardening
+## Milestone 33 — global request timeout and per-request inheritance (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local Request timeout defaults to 30,000 ms, is read at execution time, accepts nonnegative integers, and uses `0` to disable deadlines like current upstream |
+| Request inheritance | Complete | New requests persist Use Preferences; Custom retains a per-request deadline and takes precedence over the device value |
+| Legacy safety | Complete | Workspace v14 and earlier requests with saved timeouts migrate to Custom, while requests without a saved transport timeout adopt inheritance |
+| Execution breadth | Complete baseline | Primary HTTP/GraphQL, Event Streams, gRPC, collection runs, CLI, script/plugin calls, URL imports, OAuth, and HTTP-backed integrations receive the effective timeout |
+| Disabled deadlines | Complete baseline | Browser Fetch omits its AbortSignal; native HTTP omits client connect/total deadlines; SSE omits the response-header timer; gRPC omits channel/RPC and response-stream deadlines |
+| Internal safety | Complete | GraphQL introspection, AI, MCP, Konnect, and bounded script subrequests retain deliberate custom deadlines instead of inheriting an unlimited preference |
+| Import behavior | Complete baseline | Ordinary cURL imports inherit the preference; explicit `--max-time`, including zero, becomes a custom request timeout |
+| Executable coverage | Complete baseline | Frontend tests cover inheritance, zero, explicit overrides, legacy migration, native invocation, stream configuration, and cURL defaults; native compile/lint passes and rendered/live timeout fixtures remain intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 33 verification](QA_MILESTONE_33.md) |
+
+Compatibility bounds remain explicit: WebSocket connection APIs do not expose the same total request timer as HTTP, an active SSE response intentionally has no lifetime deadline after headers, and no rendered or live slow-server fixture is claimed in this phase. Brunomnia's per-request Custom mode is an additional local capability; current Insomnia exposes the device preference globally.
+
+## Milestone 34 — certificate-validation defaults and request inheritance (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Separate on-by-default device-local validation settings exist for API requests and OAuth/authentication traffic, matching current upstream's `validateSSL` and `validateAuthSSL` split |
+| Request inheritance | Complete | New requests persist Use Preferences; Always/Never override the API device default for native transports |
+| Authentication separation | Complete baseline | OAuth token requests ignore the API request mode and resolve the authentication validation preference, matching current upstream token behavior; automated authorization-window callback capture remains open |
+| Legacy safety | Complete | Workspace v15 and earlier request booleans migrate to Always/Never, while requests without a saved transport validation value adopt inheritance |
+| Execution breadth | Complete baseline | Native HTTP/GraphQL, Event Streams, gRPC, collection runs, script/plugin calls, URL imports, OAuth tokens, Git-AI, and HTTP-backed integrations receive the effective setting |
+| Browser/CLI safety | Complete baseline | Browser Fetch keeps browser-owned TLS verification; the CLI rejects an effective Never mode instead of weakening Node TLS globally |
+| Import behavior | Complete baseline | Ordinary cURL imports inherit the API preference; explicit `--insecure` becomes a Never override |
+| Executable coverage | Complete baseline | Frontend tests cover both defaults, explicit modes, legacy migration, OAuth separation, native invocation, stream configuration, and cURL defaults/override; rendered and live untrusted-certificate fixtures remain intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 34 verification](QA_MILESTONE_34.md) |
+
+Compatibility bounds remain explicit: browser engines own TLS validation, CLI Node Fetch cannot safely disable it per request, and OAuth authorization-window/callback capture is not implemented. Brunomnia's request-level Always/Never modes are an additional local capability; current Insomnia exposes the API and authentication choices globally.
+
+## Milestone 35 — proxy defaults and request inheritance (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local manual proxy enablement, separate HTTP/HTTPS URLs, and a no-proxy list match the current upstream setting shape; manual mode defaults off |
+| Request inheritance | Complete | New requests persist Use Preferences; Custom and Direct explicitly override the device preference |
+| Legacy safety | Complete | Workspace v16 and earlier requests with a saved proxy URL/exclusion list migrate to Custom, while empty legacy proxy fields adopt inheritance |
+| Native execution | Complete baseline | Native HTTP, GraphQL, OAuth, integration, secondary-request, and Event Stream setup resolve the effective proxy after URL templating; protocol-specific manual URLs and no-proxy exclusions reach reqwest |
+| System behavior | Complete baseline | With manual mode off, reqwest uses its supported system/environment proxy discovery; Direct disables proxy discovery for the request |
+| Import and script behavior | Complete baseline | Ordinary cURL imports inherit preferences; explicit cURL/script proxy changes become Custom overrides |
+| Browser/CLI safety | Complete baseline | Browser development mode retains browser-owned routing; the CLI refuses an effective manual proxy because its bundled Node Fetch transport has no scoped proxy agent |
+| Executable coverage | Complete baseline | Frontend tests cover system/manual protocol selection, no-proxy forwarding, both overrides, legacy migration, native invocation, stream input, and cURL behavior; native compile/lint passes and rendered/live proxy fixtures remain intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 35 verification](QA_MILESTONE_35.md) |
+
+Compatibility bounds remain explicit: reqwest's discovery is not claimed to reproduce Electron session PAC resolution. Browser engines own development-mode proxy routing. gRPC and WebSocket proxy transport remain open, and the CLI deliberately refuses manual proxy execution instead of silently bypassing it. Brunomnia's request-level Custom/Direct modes are an additional local capability; current Insomnia exposes proxy selection globally.
+
+## Milestone 36 — bulk request-header and query-parameter editors (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Separate device-local header and query-parameter bulk-mode settings default off, matching the current upstream settings model |
+| Request-pane switching | Complete | Headers and query parameters toggle directly between Bulk Edit and Regular Edit; the selected mode persists across requests on the device |
+| Bulk syntax | Complete baseline | One `name: value` pair is parsed per nonblank line, only the first colon separates the value, and duplicate order is retained |
+| Row semantics | Complete baseline | Enabled nonblank rows are serialized; editing bulk text replaces the list with enabled name/value rows, matching upstream omission of disabled rows and descriptions |
+| Protocol breadth | Complete baseline | HTTP, GraphQL, WebSocket, and SSE request headers share the bulk editor; query rows remain the common ordered request model while path parameters and gRPC metadata stay structured |
+| Device-local safety | Complete | Managed projects and encrypted-sync pulls preserve local choices, imports reset them off, malformed values cannot enable them, and workspace v17 and earlier data migrates to v18 defaults |
+| Executable coverage | Complete baseline | Focused tests cover formatting, first-colon parsing, duplicate order, blank/disabled omission, default/import normalization, preference preservation, and interchange versioning; rendered QA remains intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 36 verification](QA_MILESTONE_36.md) |
+
+Compatibility bounds remain explicit: bulk mode intentionally cannot represent disabled rows or descriptions, so the first text edit removes them as current Insomnia does. Brunomnia uses its bounded text editor rather than CodeMirror template highlighting/autocomplete. Path parameters, gRPC metadata, folder headers, and environment rows remain in their structured editors.
+
+## Milestone 37 — editor and request-layout preferences (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local vertical layout, line wrapping, tabs/spaces, 1–16 indent width, and font-ligature controls use the current upstream defaults |
+| Request/response layout | Complete baseline | The normal desktop split remains horizontal/responsive; forced vertical mode stacks request above response at every width |
+| Editor presentation | Complete baseline | Code surfaces apply wrapping, horizontal overflow, CSS tab width, editor font size, and inherited ligature behavior immediately |
+| Tab editing | Complete baseline | Tab inserts a literal tab or bounded spaces, selected lines indent together, and Shift-Tab removes one matching level without consuming content |
+| Device-local safety | Complete | Managed projects and encrypted-sync pulls preserve local choices, imports reset defaults, malformed booleans cannot opt in, indent width clamps safely, and workspace v18 and earlier data migrates to v19 |
+| Executable coverage | Complete baseline | Focused tests cover tab/space insertion, selection indentation/outdentation, content safety, normalization, import reset, preference preservation, and interchange versioning; rendered QA remains intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 37 verification](QA_MILESTONE_37.md) |
+
+Compatibility bounds remain explicit: Brunomnia's automatic vertical breakpoint is 1,000 px rather than current Insomnia's 880 px, while forced vertical behavior is equivalent. Plain bounded textareas do not claim CodeMirror key maps, autocompletion, linting, folding, bracket helpers, or template-token presentation. Custom interface/monospace font families remain open.
+
+## Milestone 38 — separate interface and editor typography (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local interface/editor family fields and separate 8–24 px size controls match current upstream bounds and 13/11 px defaults |
+| Live font families | Complete baseline | Nonblank interface and monospace CSS family lists override the built-in stacks independently; clearing either field restores its fallback |
+| Live font sizes | Complete baseline | Interface size applies at the app shell and editor size drives bounded code surfaces independently |
+| Legacy safety | Complete | Existing Brunomnia `fontSize` values remain editor sizes; new/imported data receives the split defaults during workspace v20 migration |
+| Input safety | Complete baseline | Newlines become spaces, non-string families normalize empty, family lists cap at 512 characters, and both sizes clamp to 8–24 px |
+| Device-local safety | Complete | Managed projects and encrypted-sync pulls preserve local choices while imports reset both families and sizes |
+| Executable coverage | Complete baseline | Focused tests cover defaults, bounds, family normalization, import reset, explicit preservation, and interchange versioning; rendered/font-availability QA remains intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 38 verification](QA_MILESTONE_38.md) |
+
+Compatibility bounds remain explicit: font family fields depend on fonts installed on the device and provide no discovery picker. The app-shell size affects inherited interface typography, but Brunomnia still has deliberately fixed pixel sizes in dense controls and does not claim a complete typographic scaling audit. Rendered verification remains omitted by standing direction.
+
+## Milestone 39 — path-scoped script data folders (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | A device-local allowed-data-folder list complements the existing off-by-default script file grant, matching current Insomnia's explicit folder setting |
+| Native containment | Complete baseline | Rust canonicalizes the requested file and existing directory roots, requires component-aware containment, and rejects traversal, outside-root files, and symlink escapes before reading bytes |
+| Execution breadth | Complete | Primary requests, secondary requests, and collection-run scripting pass the same roots into body, multipart, and PEM attachment hydration |
+| Device-local safety | Complete | Folder roots and the file grant are omitted from managed projects/encrypted revisions, preserved across device-local upgrades, and reset on workspace import |
+| Input bounds | Complete baseline | Preferences retain at most 100 unique nonblank roots of at most 4,096 characters; empty, missing, and non-directory roots grant no access |
+| Executable coverage | Complete baseline | Frontend tests cover defaults, normalization, deduplication, import stripping, explicit preservation, and workspace v21 interchange; native tests cover allowed reads, limits, missing roots, outside roots, and symlink escape |
+| Documentation and evidence | Complete | Updated [scripting](SCRIPTING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 39 verification](QA_MILESTONE_39.md) |
+
+Compatibility bounds remain explicit: Brunomnia's desktop grant is read-only and applies to mediated script attachments; it does not implement upstream's described folder writes or automatically allow the OS temporary/application-data directories. Roots are typed rather than selected through a folder picker. The trusted CLI retains its separate invocation flag and does not consume the device list. Canonical checks close ordinary traversal and symlink escapes but do not claim a capability-secure directory handle against adversarial filesystem races.
+
+## Milestone 40 — authentication password visibility (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | A device-local Reveal saved authentication passwords setting defaults off and strictly normalizes, matching current Insomnia's `showPasswords` default |
+| Authentication breadth | Complete baseline | Request and inherited-folder editors apply the choice to Bearer, Basic/Digest/NTLM, API key, OAuth 1/2, AWS IAM, and Hawk secret fields |
+| Per-field inspection | Complete baseline | When the global preference is off, every marked secret exposes an accessible Show/Hide control without changing the underlying value |
+| Sensitive boundary | Complete | Vault unlock/entry disclosure and encrypted-sync passphrases remain independently masked; display choices do not affect execution, storage, exports, logs, or clipboard behavior |
+| Device-local safety | Complete | Managed projects and encrypted-sync pulls preserve the local choice, workspace imports reset it off, and malformed truthy values cannot enable it |
+| Executable coverage | Complete baseline | Focused tests cover default masking, global reveal, per-field reveal, strict normalization, import reset, explicit preservation, and workspace v22 interchange |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 40 verification](QA_MILESTONE_40.md) |
+
+Compatibility bounds remain explicit: this milestone covers saved request and folder authentication secrets. Integration credential fields remain independently masked, ordinary headers/environment values are not reclassified as passwords, and rendered/browser interaction QA remains omitted by standing direction. Current Insomnia's exact CodeMirror masking/copy affordances are not claimed.
+
+## Milestone 41 — integration credential visibility (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference extension | Complete baseline | The existing device-local false-default `showPasswords` choice now covers stored integration credentials as well as request/folder authentication |
+| Integration breadth | Complete baseline | MCP bearer tokens and Basic passwords, AI-provider keys/references, and Konnect token references are masked by default and share the global reveal choice |
+| Per-field inspection | Complete baseline | Every integration credential exposes an accessible Show/Hide control while the global preference is off |
+| Disclosure lifecycle | Complete | Enabling the global choice clears temporary local disclosure; switching MCP clients remounts its panel so revealed state cannot carry to another client |
+| Sensitive boundary | Complete | Visibility remains presentation-only; storage, vault resolution, policy checks, execution, exports, logs, and independent vault/sync passphrase controls are unchanged |
+| Executable coverage | Complete baseline | Focused tests cover default masking, global reveal, and one-field reveal; the complete frontend, native, CLI, and macOS app gates remain green within the recorded sandbox limit |
+| Documentation and evidence | Complete | Updated [MCP/AI/Konnect](MCP_AI_KONNECT.md), [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 41 verification](QA_MILESTONE_41.md) |
+
+Compatibility bounds remain explicit: arbitrary MCP headers and ordinary request headers/environment values are not reclassified as credential fields. Local-vault value disclosure and vault/encrypted-sync passphrases retain independent controls. Rendered/browser interaction, password-manager behavior, and exact upstream randomized mask/copy presentation remain outside this source-verified milestone by standing direction.
+
+## Milestone 42 — response history actions (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Delete selected response | Complete baseline | The response summary removes the selected persisted result by ID and immediately selects the newest remaining visible result |
+| Clear environment history | Complete baseline | Clear removes only the active request/environment scope, preserving the same request in other environments and every other request |
+| Current-compatible scope | Complete baseline | The active-environment clear boundary follows current Insomnia's `removeResponsesForRequest(requestId, activeEnvironmentId)` route behavior even when cross-environment display is enabled |
+| Persistent behavior | Complete | Actions update the device-local response store and normal autosave path; project files and encrypted-sync revisions continue to omit response history |
+| Accessible controls | Complete baseline | Delete and Clear have explicit accessible names; Delete requires a selected saved response and Clear reports/disables from the active-environment count |
+| Executable coverage | Complete baseline | Focused tests cover exact-ID deletion, request/environment-scoped clearing, preservation boundaries, and existing retention/visibility behavior |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 42 verification](QA_MILESTONE_42.md) |
+
+Compatibility bounds remain explicit: selecting an older response does not restore the request version that produced it. Response compare/export/search and WebSocket/SSE history actions remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 43 — historical request versions (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Request snapshot capture | Complete baseline | Every newly persisted direct-send, collection-run, and script-subrequest response carries an independent structured clone of the editable request version |
+| Historical selection | Complete baseline | Selecting a saved response restores the matching request's authoring state while preserving its stable ID and current folder position |
+| Delete fallback | Complete baseline | Deleting the selected response activates and restores the newest remaining visible version when a valid snapshot exists |
+| Legacy and hostile-data safety | Complete | Missing snapshots, snapshots for another request ID, and malformed snapshots remain response-only; asynchronous restoration aborts if the user switches requests |
+| Device-local boundary | Complete | Snapshots travel only with the existing device-local response store and remain omitted from managed projects and encrypted-sync revisions |
+| Bundle boundary | Complete | Snapshot validation/restoration is lazy-loaded in a 939-byte chunk; the 499,964-byte main chunk remains below Vite's warning threshold |
+| Executable coverage | Complete baseline | Focused tests cover independent cloning, matching restoration, folder preservation, invalid/mismatched refusal, storage survival, and secondary-request capture |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 43 verification](QA_MILESTONE_43.md) |
+
+Compatibility bounds remain explicit: legacy response entries cannot reconstruct request versions they never stored. Restoring a request version does not restore its historical collection/folder placement, selected environment, cookies, plugin state, or vault contents. Response comparison/export/search and persistent streaming histories remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 44 — response body downloads (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Raw response export | Complete baseline | Every non-streaming response can download the displayed UTF-8 body without mutation through the local browser/WebView download path |
+| Prettified JSON export | Complete baseline | JSON content types expose a separate action that formats valid JSON with two spaces and preserves invalid JSON verbatim |
+| Filename and media evidence | Complete baseline | Artifacts use a bounded filesystem-safe request name, timestamp, content-type-derived extension, and normalized media type |
+| Historical breadth | Complete | The action operates on the currently selected live or persisted historical response rather than only the latest send |
+| Bundle boundary | Complete | Response artifact/download code is lazy-loaded in a sub-1 KB chunk, and the existing code-generation dialog moves to its own 7,616-byte chunk; the main bundle falls to the recorded no-warning size |
+| Executable coverage | Complete baseline | Focused tests cover raw fidelity, JSON formatting, invalid-JSON fallback, case-insensitive content types, safe filenames, and unknown-type fallback |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 44 verification](QA_MILESTONE_44.md) |
+
+Compatibility bounds at this milestone were explicit: the response model stored decoded UTF-8 text, so byte-exact binary download was not yet claimed. Milestone 51 later resolves decoded entity-byte storage and raw export; native save dialogs and persistent streaming history remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 45 — selected-response diagnostics (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| HTTP debug export | Complete baseline | HTTP and GraphQL responses export a deterministic status line, displayed response headers, blank separator, and displayed UTF-8 body as text |
+| Selected-response HAR | Complete baseline | The displayed live or saved response exports as one HAR 1.2 entry with request/response metadata, duration, size, protocol, redirect target, and body content |
+| Historical request fidelity | Complete baseline | A selected saved response uses its matching structured request snapshot, including historical URL, method, configured headers, and supported body metadata |
+| Query and payload breadth | Complete baseline | Actual URL query pairs retain order and duplicates; JSON, text, GraphQL, URL-encoded, and multipart metadata map to HAR post data without inventing binary bytes |
+| Deterministic artifact boundary | Complete | Files use bounded safe request names and timestamps; invalid receipt dates fall back deterministically; export is local and lazy-loaded |
+| Executable coverage | Complete baseline | Focused tests cover transcript ordering, status/header/body fidelity, single-entry HAR structure, historical metadata, duplicate query keys, payload sizing, redirects, and malformed URL/date fallbacks |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 45 verification](QA_MILESTONE_45.md) |
+
+Compatibility bounds remain explicit: debug/HAR artifacts are textual diagnostics over decoded aggregate evidence and a header map, not raw libcurl events. Milestone 51 later preserves exact decoded entity bytes for raw download, but these diagnostics still cannot preserve raw wire ordering, duplicate response-header fields, TLS evidence, redirect hops, compressed bytes, or arbitrary binary representation. HAR request headers and bodies come from the saved editable request snapshot and cannot reconstruct transport-added headers, resolved secret values, request cookies, or multipart framing. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 46 — response filters and history navigation (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| JSON response filtering | Complete baseline | Read-only JSON previews accept root, dot/bracket property, index, wildcard, and recursive-property JSONPath selectors and render the ordered result array |
+| XML response filtering | Complete baseline | XML previews use the WebView's standards-based DOM parser and XPath evaluator, wrapping serialized matches in a deterministic result element |
+| Filter history | Complete baseline | Current and ten unique newest-first filters persist per request, reload safely, reapply from a menu, clear without altering history, and discard stale request keys during normalization |
+| History chronology | Complete baseline | Saved responses group into the five current Insomnia time buckets using matching five-minute, two-hour, local-day, and local-week boundaries |
+| History evidence | Complete baseline | Every choice exposes receipt time, status, saved method where available, actual URL, duration, and stored body size before selection |
+| Preview isolation | Complete | Filtering never mutates the stored response or raw, pretty, debug, and HAR artifact inputs; invalid selectors return bounded visible errors |
+| Bundle boundary | Complete | The evaluator and filtered preview lazy-load in a 4,641-byte chunk while the main production bundle remains below the warning threshold |
+| Executable coverage | Complete baseline | Focused tests cover JSONPath traversal, wildcards, recursive descent, invalid selectors, language detection, filter-history bounds, chronological grouping, and hostile persisted metadata |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 46 verification](QA_MILESTONE_46.md) |
+
+Compatibility bounds remain explicit: the dependency-free JSONPath baseline does not yet implement predicates, unions, slices, or script expressions. XPath execution depends on the standards-based desktop/browser DOM rather than the Node-only test runner. Response filter metadata is bounded but remains part of the local workspace store. The pinned current Insomnia history component has no response-comparison action, so the earlier generic comparison gap is removed rather than implemented without source evidence. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 47 — large-response preview safety (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Source-matched thresholds | Complete | Strict greater-than checks use the pinned upstream 5 MiB large and 100 MiB huge constants, with finite/non-negative normalization |
+| Large response guard | Complete baseline | Responses over 5 MiB avoid preview prettification, filter evaluation, line splitting, and DOM row construction until explicitly shown |
+| Session reveal | Complete baseline | Show anyway reveals only the current response; Always show applies to subsequent 5–100 MiB responses for the current renderer session |
+| Huge response guard | Complete baseline | Responses over 100 MiB remain hidden and cannot reach the filtered/pretty preview surface |
+| Download escape hatch | Complete baseline | Both guards expose the established raw response artifact without forcing a preview render |
+| Non-preview isolation | Complete | Status, headers, cookies, timeline, tests, history selection, and explicit export actions remain available while Preview is blocked |
+| Bundle boundary | Complete | Threshold and guarded-preview logic stays in the lazy response-preview chunk; the main production bundle remains below the warning threshold |
+| Executable coverage | Complete baseline | Focused tests pin both byte constants, exact-boundary behavior, strict greater-than transitions, and invalid/negative normalization |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 47 verification](QA_MILESTONE_47.md) |
+
+Compatibility bounds at this milestone were explicit: Brunomnia loaded decoded UTF-8 response text into workspace state before Preview received it. This phase prevented expensive renderer transformations but did not implement filesystem-backed/deferred bodies or byte-exact binary export. Milestone 51 later preserves decoded entity bytes and exact raw downloads; filesystem-backed/deferred reads, compressed wire bytes, and pre-allocation limits remain open. The 100 MiB guard remains absolute even after Always show. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 48 — response preview modes (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Per-request mode selection | Complete baseline | The pinned friendly/source/raw values appear as Visual Preview, Source Code, and Raw Data and persist independently for each request |
+| Source mode | Complete baseline | Existing JSON/XML detection, JSONPath/XPath filtering, match evidence, and textual prettification remain available with line numbers |
+| Raw mode | Complete baseline | The stored UTF-8 inspection string renders without prettification, active filters, or line numbers; Copy also uses that string |
+| Visual JSON/text baseline | Complete baseline | JSON retains safe filtered/prettified presentation and other non-HTML text falls back to the established source renderer |
+| Visual HTML baseline | Complete baseline | `text/html` renders in a sandboxed iframe with no permissions and an injected default-deny CSP that permits only inline style and data-backed images/fonts |
+| Mode/filter isolation | Complete | Raw and HTML visual modes do not evaluate hidden filters; switching back restores the bounded per-request filter state without mutating the response |
+| Large-response composition | Complete | The 5/100 MiB guard wraps every mode, while the mode selector remains available without forcing body evaluation |
+| Bundle boundary | Complete | Preview modes and visual rendering stay in the lazy response-preview chunk; the main production bundle remains below the warning threshold |
+| Executable coverage | Complete baseline | Storage tests cover valid raw persistence, invalid/legacy fallback to source, bounded filters, and stale-key removal; the clean TypeScript and app builds verify every mode branch |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 48 verification](QA_MILESTONE_48.md) |
+
+Compatibility bounds at this milestone were explicit: Visual Preview did not yet implement byte-backed image, PDF, audio, CSV-table, multipart, or charset-aware viewers. CSV and decoded-text multipart arrive in Milestones 49–50; Milestone 51 preserves underlying decoded entity bytes; Milestone 52 adds image/PDF/audio viewers; and Milestone 53 resolves declared charsets while Raw/Copy remain inspection-string surfaces. HTML visual mode intentionally blocks scripts, forms, privileged navigation, and remote resources; it is safer but less interactive than upstream's optional JavaScript WebView. Byte-backed multipart viewers remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 49 — CSV response preview (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Friendly CSV routing | Complete baseline | Visual Preview routes CSV media types into a scrollable selectable table while Source and Raw retain their established textual paths |
+| CSV quoting | Complete baseline | The parser preserves quoted delimiters, doubled quotes, quoted CRLF/newlines, empty fields, and ordinary UTF-8 text |
+| Delimiter detection | Complete baseline | Comma, tab, semicolon, and pipe candidates are counted outside quoted content on the first record with deterministic comma tie-breaking |
+| Empty/error handling | Complete | Empty lines are skipped, empty cells remain, no-row input gets a visible state, and unterminated quoted fields produce a bounded error instead of partial data |
+| Render limits | Complete | Tables cap at 10,000 rows, 200 columns, and 250,000 cells with a visible truncation notice, composing with the existing 5 MiB preview guard |
+| Safe cell rendering | Complete | React text nodes escape cell values; no CSV content is inserted as HTML or executed |
+| Bundle boundary | Complete | CSV parsing and table rendering stay in the lazy response-preview chunk; the main production bundle is unchanged and remains below the warning threshold |
+| Executable coverage | Complete baseline | Focused tests cover quoting, escaped quotes, multiline fields, CRLF, delimiter detection, empty rows/cells, malformed quotes, and every safety limit |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 49 verification](QA_MILESTONE_49.md) |
+
+Compatibility bounds remain explicit: delimiter inference is a deterministic four-candidate baseline rather than Papa Parse's complete dialect inference. The viewer does not infer headers, column types, encodings, or formulas and does not virtualize table rows. The upstream keyboard-select-all behavior is left to ordinary browser/table selection because rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 50 — multipart response preview (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| MIME boundary parsing | Complete baseline | Visual Preview accepts quoted/unquoted boundaries, CRLF/LF framing, final closing delimiters, preambles/epilogues, and boundary-like non-delimiter content |
+| Part metadata | Complete baseline | Up to 100 parts retain disposition name/filename, deterministic title, decoded UTF-8 size, content type, and up to 100 unfolded headers |
+| Part navigation | Complete baseline | A selector changes the active part without leaving Preview and shows its name/filename plus stored decoded size |
+| Header inspection | Complete baseline | Each selected part can toggle a bounded case-preserving header table |
+| Textual part preview | Complete baseline | JSON parts prettify and other parts render decoded source text with line numbers; preview caps at 1,000,000 characters with a visible notice |
+| Part export | Complete baseline | Save part writes the complete stored decoded text with a bounded safe filename and content-type-derived extension when no filename exists |
+| Error/limit safety | Complete | Missing, overlong, incomplete, or malformed boundary/header evidence yields visible errors; excess parts are ignored with an explicit truncation notice |
+| Bundle boundary | Complete | MIME parsing, part actions, and viewer UI stay in the lazy response-preview chunk; the main production bundle is unchanged |
+| Executable coverage | Complete baseline | Focused tests cover quoted boundaries, CRLF/LF, folded headers, names/filenames, multiple parts, invalid/incomplete input, part limits, exact artifact content, and filename safety |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 50 verification](QA_MILESTONE_50.md) |
+
+Compatibility bounds at this milestone were explicit: parsing operated on the decoded UTF-8 response string, so arbitrary binary part bytes could be lossy. Milestone 54 later replaces that parser and Save part artifact with exact entity-byte slices plus per-part charset decoding. Part rendering remains textual and does not recursively invoke the HTML/CSV/image/PDF/audio viewers. Header count and part count are bounded; filename parameters do not yet implement RFC 5987/2231 extended encoding. Save part uses the browser/WebView download path rather than a native save dialog. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 51 — byte-preserving HTTP responses (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Native response bytes | Complete baseline | Reqwest responses are consumed as decoded entity bytes, report the actual byte length, and keep the existing one-time content-decode fallback |
+| Browser response bytes | Complete baseline | Fetch consumes `arrayBuffer()` rather than lossy `text()` and applies the same deterministic UTF-8 inspection contract |
+| Compact persistence | Complete baseline | Valid UTF-8 is exactly reconstructable from the stored text; only lossy UTF-8 decoding adds a Base64 sidecar, which survives device-local response history normalization |
+| Byte-exact raw export | Complete baseline | Raw/download actions emit exact decoded entity bytes for live and selected historical responses while prettified JSON and diagnostic exports remain intentionally textual |
+| Plugin continuity | Complete baseline | Response plugins read exact buffers; binary replacement bodies retain bytes and text replacement bodies clear stale binary state |
+| Size evidence | Complete | Response size now records decoded entity bytes rather than the UTF-8 length of replacement-character display text |
+| Bundle boundary | Complete | Byte helpers add no dependency and the renderer remains below the production chunk warning threshold; response artifact UI stays lazy-loaded |
+| Executable coverage | Complete baseline | Focused Rust/browser/helper/download/storage/plugin tests cover valid UTF-8 deduplication, invalid UTF-8 preservation, corrupt persisted fallback, raw export, and plugin-source continuity |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 51 verification](QA_MILESTONE_51.md) |
+
+Compatibility bounds remain explicit: preserved bytes are the HTTP entity after reqwest/browser content decoding, not compressed wire bytes. Brunomnia still buffers bodies before applying preview limits and persists them in the device-local workspace instead of Insomnia's filesystem-backed/deferred body paths. Charset-aware text decoding, byte-backed multipart parsing, image/PDF/audio viewers, native save dialogs, and raw transport/header timelines remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 52 — byte-backed media response previews (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Media routing | Complete baseline | Visual Preview recognizes normalized declared `image/*`, `application/pdf`, and `audio/*` media types while Source and Raw retain textual inspection behavior |
+| Exact byte artifacts | Complete | Every viewer receives a correctly typed Blob built from the Phase 51 decoded entity bytes, including responses whose UTF-8 inspection text is lossy |
+| Image viewer | Complete baseline | Images scale within a centered scrollable surface without HTML insertion or a remote request |
+| PDF viewer | Complete baseline | PDFs render in a titled full-surface iframe backed by a local Blob URL |
+| Audio viewer | Complete baseline | Audio uses accessible native WebView controls in a bounded centered layout |
+| Lifecycle and errors | Complete | Media URLs are created only after the large-response guard, revoked on unmount/change, and paired with explicit preparing, empty-body, creation, and decoder-error states |
+| Export continuity | Complete baseline | Raw export remains byte-exact and now derives common PDF/image/audio plus octet-stream filename extensions without a new dependency |
+| Bundle boundary | Complete | Media parsing/artifact/UI code stays in the lazy response-preview/download chunks; the 497,345-byte main bundle is unchanged and below the warning threshold |
+| Executable coverage | Complete baseline | Focused tests cover case/parameter normalization, invalid media types, exact invalid-UTF-8 byte recovery, Blob type/content, and binary extension behavior; complete frontend/native/CLI/app gates remain green within the recorded sandbox limit |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 52 verification](QA_MILESTONE_52.md) |
+
+Compatibility bounds at this milestone were explicit: routing trusted the declared Content-Type rather than sniffing media signatures. Actual image/audio codecs and embedded PDF controls depend on the operating-system WebView, and corrupt-media load events vary by engine. Viewers still require the complete body in memory and do not implement zoom/waveform/transcript tooling. Milestones 53–55 later add charset-aware text and byte-backed recursive multipart viewing. Filesystem-backed response bodies and interactive HTML remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 53 — charset-aware response text (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Charset parsing | Complete baseline | Content-Type lookup is case-insensitive, accepts quoted/unquoted parameters, bounds labels, and defaults missing values to UTF-8 |
+| Current aliases | Complete | `utf8`, `utf16le`, `ucs2`, `ucs-2`, `latin1`, `binary`, and `win1250` through `win1258` map to the pinned Insomnia labels; other WebView-supported labels pass through |
+| Transport parity | Complete baseline | Native and browser HTTP responses decode from the same exact entity-byte helper before timelines, plugins, scripts, filters, previews, or text exports consume the body |
+| Byte continuity | Complete | Legacy single-byte, UTF-16, malformed UTF-8, and leading-BOM bodies retain a Base64 sidecar whenever the decoded inspection string cannot reconstruct the original bytes |
+| Fallback safety | Complete | Unsupported decoder labels fall back to the prior UTF-8 replacement behavior without discarding raw bytes |
+| Downstream continuity | Complete | JSON/XML/CSV/multipart text, Raw/Source/Copy, templates, plugins, scripts, HAR/debug, history, and media all receive the appropriate decoded text or exact-byte surface |
+| Bundle boundary | Complete | The dependency-free decoder adds 868 bytes to the main renderer, which remains below the warning threshold at 498,213 bytes |
+| Executable coverage | Complete baseline | Focused tests cover aliases, quoted/case-insensitive parameters, Windows-1252, UTF-16LE valid-byte edge cases, UTF-8 BOM preservation, browser/native integration, corrupt Base64 fallback, and ordinary UTF-8 deduplication |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 53 verification](QA_MILESTONE_53.md) |
+
+Compatibility bounds at this milestone were explicit: decoding followed the declared charset and did not sniff encodings. Available pass-through labels depend on the operating-system WebView's Encoding Standard implementation; invalid/unsupported labels fall back to UTF-8 rather than bundling an independent codec table. Text diagnostics contain the decoded inspection string, while raw export retains decoded entity bytes. Milestones 54–55 later add byte-backed recursive multipart parsing. Filesystem-backed bodies, content sniffing, and raw wire evidence remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 54 — byte-backed multipart responses (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Entity-byte parsing | Complete baseline | Boundary and header separators are located in a one-code-unit-per-byte index string, then every part is sliced from the exact Phase 51 entity buffer |
+| Framing continuity | Complete | Quoted/unquoted boundaries, CRLF/LF, closing markers, preambles/epilogues, line-boundary enforcement, folded headers, and existing malformed-input errors retain Phase 50 behavior |
+| Exact part evidence | Complete | Each part carries original bytes and true byte count alongside its bounded headers, disposition metadata, filename, and decoded inspection string |
+| Part charsets | Complete baseline | Declared part Content-Type charsets use the shared Phase 53 alias/fallback decoder without altering the stored bytes |
+| Exact part export | Complete baseline | Save part writes the original byte slice through Blob/object URL, preserves safe supplied filenames, and adds useful JSON/HTML/XML/CSV/PDF/bin fallbacks |
+| Preview bounds | Complete | Parsing stays behind the outer 5/100 MiB response guard, keeps the 100-part/100-header caps, and truncates only the displayed 1,000,000-character text, never exported bytes |
+| Bundle boundary | Complete | Parser/viewer changes remain in the lazy response-preview chunk; the main bundle grows only 18 bytes to 498,231 bytes and remains warning-free |
+| Executable coverage | Complete baseline | Focused tests cover binary NUL/`0xff`/`0x80` payloads, exact artifact bytes, Windows-1252 part text, original byte sizes, and every prior boundary/header/error/limit case |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 54 verification](QA_MILESTONE_54.md) |
+
+Compatibility bounds at this milestone were explicit: the dependency-free parser materialized a one-byte-index string in addition to the already buffered response, unlike upstream's streaming `multiparty` adapter. Part headers are treated as byte-preserving Latin-1-style code units rather than implementing RFC 2047, and filename parameters do not implement RFC 5987/2231. Milestone 55 later routes selected sections recursively through the friendly viewers. Save part uses the browser/WebView path rather than a native dialog. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 55 — recursive multipart friendly viewers (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Selected-part dispatch | Complete baseline | The selected section routes by declared Content-Type into JSON/text, safe HTML, bounded CSV, exact-byte image/PDF/audio, or another multipart viewer |
+| Exact media continuity | Complete | Multipart media Blob artifacts consume the original part `Uint8Array`, never a replacement-character inspection string or re-encoding |
+| Nested multipart navigation | Complete baseline | Every expanded nested level has its own bounded selector, header toggle, exact Save part action, and malformed-input evidence |
+| MIME boundary fidelity | Complete | Aggregate and part Content-Type values retain parameter casing so case-sensitive outer and nested boundaries remain parseable while routing stays case-insensitive |
+| Lazy expansion | Complete | Only the currently selected nested path is rendered and parsed; switching parts remounts that section viewer and leaves siblings unexpanded |
+| Recursion safety | Complete | Nested multipart parsing stops after five levels and leaves selected nested sections over 5 MiB collapsed with exact-save guidance |
+| Existing safety continuity | Complete | The outer 5/100 MiB gate, 100-part/100-header caps, 1,000,000-character plain-text cap, network-blocked HTML sandbox, CSV bounds, and Blob URL cleanup remain active |
+| Bundle boundary | Complete | All recursion code remains in the lazy response-preview chunk; the main renderer stays at 498,231 bytes without a chunk warning |
+| Executable coverage | Complete baseline | Focused tests cover direct media byte slices, nested case-sensitive boundaries, recursive parsing, and exact depth/byte guard thresholds alongside the prior multipart/media suite |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 55 verification](QA_MILESTONE_55.md) |
+
+Compatibility bounds at this milestone were explicit: recursive routing still trusted declared Content-Type instead of sniffing content, and safe HTML remained script/form/network disabled. Milestone 56 later adds the pinned JSON and leading-doctype detection order. Recursion beyond five levels and nested multipart sections above 5 MiB require exact Save part inspection outside the viewer. The parser still buffers each expanded selected aggregate and materializes its byte-index string. MIME RFC 2047 and filename RFC 5987/2231 decoding, Content-ID attachment resolution, a native save dialog, and rendered interaction QA remain open.
+
+## Milestone 56 — response content detection (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Upstream routing order | Complete baseline | Friendly routing first tries valid JSON, then a leading HTML doctype, then the original Content-Type, matching the pinned Insomnia viewer precedence |
+| Misleading-header JSON | Complete | Any complete entity that parses as UTF-8 JSON routes as `application/json` before declared image/media/text/binary handling |
+| Common HTML errors | Complete baseline | A case-insensitive HTML doctype in the trimmed first 100 entity bytes routes to the existing safe HTML viewer when the header is not already `text/html` |
+| Recursive continuity | Complete | The same detection runs for selected multipart parts before their JSON/HTML/media/CSV/nested routing decision |
+| MIME parameter fidelity | Complete | Empty, malformed, or unmatched bodies return the original Content-Type verbatim so case-sensitive multipart boundary values remain intact |
+| Safety continuity | Complete | Detection remains behind the established outer response gate; HTML work is prefix-bounded, parse failures are swallowed, and the body/header evidence is never mutated |
+| Bundle boundary | Complete | Detection stays in the lazy response-preview graph; the main renderer remains byte-identical at 498,231 bytes without a chunk warning |
+| Executable coverage | Complete baseline | Focused tests cover misleading image/text types, JSON scalars, doctype position, non-doctype markup, empty bodies, and exact boundary-parameter preservation |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 56 verification](QA_MILESTONE_56.md) |
+
+Compatibility bounds at this milestone were explicit: JSON detection decoded the complete entity as UTF-8 and parsed it, matching upstream rather than performing streaming or charset-statistical detection. HTML detection required a doctype inside the first 100 bytes; bare markup, XML, media signatures, and other file formats were not sniffed. Milestone 57 later adds opt-in isolated inline scripts. Detection changes only the viewer route and never rewrites stored Content-Type evidence.
+
+## Milestone 57 — opt-in HTML preview JavaScript (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| User-visible preference | Complete baseline | Preferences exposes the pinned HTML JavaScript choice without an account or entitlement; Brunomnia keeps the authority off by default instead of upstream's enabled default |
+| Inline interaction | Complete baseline | Opt-in HTML previews receive `sandbox="allow-scripts"` and a CSP `script-src 'unsafe-inline'`, enabling ordinary inline DOM interaction without same-origin authority |
+| Constrained authority | Complete | External scripts, `eval`, fetch/XHR/WebSocket/EventSource, subresource network loads, forms, popups, modals, downloads, parent DOM access, and top navigation stay ungranted |
+| Safe-default continuity | Complete | With the grant off, the prior empty sandbox and script-blocking CSP remain byte-for-byte policy equivalents |
+| Recursive continuity | Complete | Top-level, content-detected, saved-history, and selected multipart HTML use the same preference and preview component |
+| Device boundary | Complete | Strict boolean normalization, import reset, folder/Git omission, encrypted-pull preservation, defaults reset, and the loading workspace all keep authority device-local |
+| Visible state | Complete | Every script-enabled HTML surface shows an amber warning naming the retained restrictions |
+| Bundle hygiene | Complete | Canonical loading-state defaults remove a duplicate preferences literal; the main renderer shrinks to 497,440 bytes and remains warning-free while preview/settings code stays lazy |
+| Executable coverage | Complete baseline | Focused tests assert safe/scripted CSP and sandbox output plus false-default, strict normalization, import reset, and true-value persistence |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [preferences](GRAPHQL_AND_PREFERENCES.md), [parity ledger](PARITY.md), and [Milestone 57 verification](QA_MILESTONE_57.md) |
+
+Compatibility bounds at this milestone were explicit: this was a safer iframe composition rather than Electron's dedicated response WebView. Brunomnia did not yet inject the response URL as a base or provide a remote-resource mode, and it omitted same-origin/form/popup/download/top-navigation tokens. Milestone 58 later adds validated response-URL base injection and reset while retaining those sandbox restrictions. Inline script CPU/memory use is not preempted, so the preference is for trusted responses only. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 58 — response URL-aware HTML previews (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` still inserts the response URL as an HTML `<base>` before loading its response WebView |
+| Response URL base | Complete baseline | Valid HTTP(S) URLs are normalized, attribute escaped, and injected before response-controlled markup so the first base wins even without an existing `<head>` |
+| Relative navigation | Complete baseline | Relative links resolve against the actual live or historical response URL and navigate only the response iframe |
+| Recursive continuity | Complete | Content-detected top-level HTML and every selected multipart HTML section inherit the same top-level response URL |
+| Reset control | Complete | A visible Reset preview action remounts the original stored response after same-frame navigation |
+| URL and referrer safety | Complete | Malformed and non-HTTP(S) base values are rejected; both iframe and injected document request no referrer |
+| Original-document confinement | Complete | Automatic remote CSS/image/font/script/fetch loading remains blocked, while the existing opaque sandbox continues to omit form, popup, download, same-origin, parent, and top-navigation authority |
+| Executable coverage | Complete baseline | Focused tests cover default/script policy continuity, URL normalization, first-base precedence, relative resolution, attribute escaping, and scheme rejection |
+| Bundle boundary | Complete | Base composition remains in the lazy response-preview graph; the main renderer is 497,469 bytes without a chunk warning |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 58 verification](QA_MILESTONE_58.md) |
+
+Compatibility bounds at this milestone were explicit: this remained a Tauri iframe rather than Electron's response WebView. A followed page stayed opaque and sandboxed but used its own CSP; with `allow-scripts` active, that destination could execute its own scripts and network requests. Brunomnia did not yet auto-load response-document remote subresources or expose upstream's response-link disable preference. Milestone 59 later adds the preference to textual response viewers. The Reset action is a Brunomnia recovery affordance. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 59 — response viewer links (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` defaults `disableResponsePreviewLinks` false and applies it to JSON/source CodeEditor link callbacks, not HTML WebView navigation |
+| User-visible preference | Complete | Preferences exposes **Disable links in response viewer** with the same false default and no account or entitlement requirement |
+| Text-viewer coverage | Complete baseline | Friendly JSON and Source Code render bounded clickable HTTP(S) targets; Raw Data and disabled mode retain plain text |
+| XML compatibility | Complete baseline | The four upstream XML entities are decoded for the external target without rewriting displayed or copied response text |
+| Native external open | Complete baseline | A dedicated Tauri command validates and caps the URL, then invokes the platform opener with an argument vector and no command shell |
+| Browser-development fallback | Complete | Browser mode opens a normalized target with `noopener,noreferrer`; browser popup policy remains authoritative |
+| Bounded detection | Complete | Detection caps each URL at 8 KiB and each line at 100 clickable targets while preserving unmatched text and trailing punctuation |
+| Device boundary | Complete | Strict boolean normalization, import reset, folder/Git omission, encrypted-pull preservation, defaults reset, and the loading workspace keep the preference device-local |
+| Failure visibility | Complete | Native validation/spawn errors appear below the response viewer instead of navigating the Brunomnia WebView |
+| Executable coverage | Complete baseline | Focused tests cover text segmentation, punctuation, XML decoding, scheme/length rejection, default/import/normalization/persistence behavior, and native URL validation |
+| Bundle boundary | Complete | Link logic remains in the lazy response-preview graph; the main renderer is 497,677 bytes without a chunk warning |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [preferences](GRAPHQL_AND_PREFERENCES.md), [parity ledger](PARITY.md), and [Milestone 59 verification](QA_MILESTONE_59.md) |
+
+Compatibility bounds at this milestone were explicit: Brunomnia's dependency-free tokenizer was not CodeMirror's link extension and did not claim every URL grammar or editor gesture. It recognized absolute HTTP(S) text only, opened links in the default browser, and intentionally left Raw Data inert. The native opener had compile/test coverage on macOS; Windows `rundll32` and Linux `xdg-open` branches still needed release-host integration fixtures. Automatic original-document remote resources remained open until Milestone 60. Rendered link interaction QA remained omitted by standing direction.
+
+## Milestone 60 — opt-in HTML remote resources (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` loads response HTML in an unrestricted Electron WebView with its response URL as base and JavaScript controlled separately |
+| User-visible authority | Complete baseline | Preferences exposes a free, device-local **Allow remote resources in HTML response previews** grant; Brunomnia deliberately defaults it off instead of upstream's implicit enabled behavior |
+| Static remote content | Complete baseline | Remote-only mode permits HTTP(S) CSS, images, fonts, media, and frames plus local data/blob media while scripts and network APIs stay blocked |
+| Dual-grant active content | Complete baseline | External HTTP(S) scripts, HTTP(S)/WebSocket connections, and blob/HTTP(S) workers require both remote-resource and JavaScript grants |
+| Constrained authority | Complete | Every mode blocks forms, popups, modals, downloads, same-origin/parent/top access, objects, and `eval`; ordinary CORS and mixed-content rules remain active |
+| Recursive continuity | Complete | Live, saved-history, content-detected, and recursively selected multipart HTML share the same two grants and response URL base |
+| Device boundary | Complete | Strict boolean normalization, import reset, folder/Git omission, encrypted-pull preservation, defaults reset, and the loading workspace keep the grant device-local |
+| Visible state | Complete | Remote-only, script-only, and dual-grant modes show authority-specific warnings outside the iframe |
+| Executable coverage | Complete baseline | Focused tests cover all four policy combinations, base continuity, forbidden sources, strict preference normalization/import reset, and supported local persistence |
+| Bundle boundary | Complete | Policy composition stays in the lazy response-preview graph; the main renderer is 497,969 bytes without a chunk warning |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [preferences](GRAPHQL_AND_PREFERENCES.md), [parity ledger](PARITY.md), and [Milestone 60 verification](QA_MILESTONE_60.md) |
+
+Compatibility bounds remain explicit: this is an explicit two-grant CSP/sandbox model rather than upstream's implicit unrestricted response WebView. It does not grant forms, popups, downloads, same-origin access, objects, `eval`, parent/top navigation, non-HTTP(S) resources, or WebView-level certificate/proxy overrides. Cross-origin and mixed-content failures remain platform policy. Rendered network/interaction QA remains omitted by standing direction.
+
+## Milestone 61 — bounded Git commit history (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes a History table with message, relative time, author name, and author-email tooltip; its local Git layer requests 35 entries and may fetch the current remote first |
+| History list | Complete baseline | Git Sync exposes the 35 newest commits reachable from local `HEAD`, with full/short IDs, subject, author identity, strict ISO author time, parents, and local ref decorations |
+| Commit inspection | Complete baseline | Selecting a commit renders its metadata, file statistics, rename/copy-aware patch, and root/merge parents without mutating the working tree |
+| Bounded native boundary | Complete | Requests clamp to 1–100 commits, text remains capped at 2 MB, Git uses direct argument arrays, and patch lookup accepts only a full hexadecimal SHA-1/SHA-256 identifier verified as a commit object |
+| Empty repository | Complete | An unborn repository returns an ordinary empty history instead of surfacing Git's missing-`HEAD` failure |
+| Network behavior | Complete | History is deliberately local and side-effect-free; unlike upstream, opening it never performs an implicit fetch or credential prompt |
+| Executable coverage | Complete baseline | Native fixtures verify newest-first limits, author/parent/ref parsing, patch contents, malicious revision rejection, and unborn repositories |
+| Bundle boundary | Complete | History stays in the existing lazy Git workbench; the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 61 verification](QA_MILESTONE_61.md) |
+
+Compatibility bounds remain explicit: the history follows local `HEAD`, not every local/remote branch, and does not fetch. Commit-message bodies, signatures, graph lanes, searching, pagination beyond the bounded request, checkout/revert/reset actions, and binary patch rendering remain outside this baseline. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 62 — remote Git branch workflows (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` separates local and remote-only branches, refreshes remote refs, and exposes **Fetch and checkout** for a selected remote branch |
+| Remote discovery | Complete baseline | Git status includes sorted remote/branch/tracking-ref records from configured remote-tracking refs and excludes symbolic remote `HEAD` pointers |
+| Explicit refresh | Complete baseline | **Fetch and prune branches** updates the selected configured remote, prunes deleted refs, skips tags, and reports native Git credential/network failures in the workbench |
+| Tracking checkout | Complete baseline | **Fetch + checkout** refreshes the exact branch, verifies its full remote-tracking ref, rejects a duplicate local name, creates the same-named local tracking branch, and reloads project YAML |
+| Argument safety | Complete | Branches pass `git check-ref-format`; remotes must already exist and cannot be option-shaped; all Git calls use argument arrays and exact refs without a shell |
+| Credential boundary | Complete | Fetch uses the installed Git credential helper or SSH agent; Brunomnia stores no provider token and introduces no account or entitlement check |
+| Executable coverage | Complete baseline | A local bare-repository fixture covers fetch, slash-containing branch discovery, symbolic-ref filtering, upstream tracking, duplicate rejection, and malicious remote-option rejection |
+| Bundle boundary | Complete | Remote workflows stay in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 62 verification](QA_MILESTONE_62.md) |
+
+Compatibility bounds remain explicit: this phase reads configured remote-tracking refs and fetches through the installed Git client. It does not discover repositories from provider accounts, store provider credentials, delete or rename remote branches, browse un-checked-out remote history, fetch tags, or add force/advanced refspec controls. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 63 — guarded local Git branch deletion (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes deletion for non-current local branches from its branch manager with an explicit confirmation step |
+| User-visible deletion | Complete baseline | Git Sync lists every non-current local branch in a dedicated deletion selector and refreshes status immediately after success |
+| Confirmation policy | Complete | The action honors Brunomnia's existing device-local **Confirm destructive actions** preference and names the selected branch in its warning |
+| Native safety | Complete baseline | Full branch-name validation, exact local existence, current-branch rejection, argument-only execution, and `git branch -d` prevent option injection and refuse unmerged history loss |
+| Remote isolation | Complete | Deleting a local branch does not delete its remote-tracking ref; it becomes eligible for the remote-only tracking workflow when applicable |
+| Executable coverage | Complete baseline | A repository fixture covers current-branch refusal, merged deletion, unmerged refusal with ref preservation, and option-shaped name rejection |
+| Bundle boundary | Complete | Deletion stays in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 63 verification](QA_MILESTONE_63.md) |
+
+Compatibility bounds remain explicit: Brunomnia does not expose force deletion, remote-branch deletion, branch rename, bulk deletion, or provider-side branch protection metadata. Git's reachability check is authoritative, so a branch that is not merged into the current `HEAD` remains intact. Rendered confirmation/interaction QA remains omitted by standing direction.
+
+## Milestone 64 — confirmed Git working-tree discard (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes confirmed per-file and all-unstaged discard actions in its Git staging workflow |
+| Selected/all UI | Complete baseline | Git Sync exposes **Discard selected unstaged** and **Discard all unstaged** with counts, disabled states, progress, errors, and the existing destructive-action confirmation policy |
+| Index preservation | Complete | Tracked files restore from the index rather than `HEAD`, so staged content remains staged when later working-tree edits are discarded |
+| Untracked cleanup | Complete baseline | Selected untracked files are removed through bounded path arguments; ignored files and unrelated untracked files are untouched |
+| Conflict protection | Complete | Discard refuses the whole request during merge/rebase/conflict state instead of overwriting a resolution in progress |
+| Path/selection safety | Complete | Every path must be safe, repository-relative, currently changed, selected, and genuinely unstaged; staged-only and stale selections are rejected |
+| Project continuity | Complete | Managed YAML reloads after discard, while files not represented by project resources remain under ordinary Git/filesystem ownership |
+| Executable coverage | Complete baseline | A repository fixture proves staged-index preservation, tracked worktree restore, selected untracked removal, clean working diff, staged-only refusal, and traversal rejection |
+| Bundle boundary | Complete | Discard stays in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 64 verification](QA_MILESTONE_64.md) |
+
+Compatibility bounds remain explicit: this is a permanent discard after optional confirmation, with no trash/recovery layer. It does not discard staged changes, ignored files, active conflicts, submodule internals, or arbitrary directories as a unit. Git and filesystem errors may leave an earlier path group applied before a later group fails; no cross-file transaction is claimed. Rendered confirmation/interaction QA remains omitted by standing direction.
+
+## Milestone 65 — confined per-file Git diff review (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` lets the staging workflow select one staged/unstaged file and compare its before/after content |
+| File selector | Complete baseline | The diff header lists only files relevant to the current **Unstaged** or **Staged** mode and retains an aggregate-all option |
+| Tracked files | Complete baseline | Native Git returns an exact file-scoped unified diff against the index or `HEAD`, preserving staged-versus-working semantics and deletion evidence |
+| Untracked text | Complete baseline | Safe UTF-8 untracked files receive a direct text preview under the shared 2 MB Git output cap instead of an empty aggregate diff |
+| Binary/large handling | Complete | Binary untracked files fail explicitly; oversized files show a bounded size notice; symlinks and escaping paths are rejected before reads |
+| Stale/mode protection | Complete | The native command requires a current status entry and the requested staged/unstaged state; changing modes clears the file selection |
+| Executable coverage | Complete baseline | A repository fixture covers tracked working/staged patches, untracked UTF-8 content, binary refusal, mode mismatch, and traversal rejection |
+| Bundle boundary | Complete | Per-file review stays in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 65 verification](QA_MILESTONE_65.md) |
+
+Compatibility bounds remain explicit: Brunomnia renders a unified textual patch/direct untracked preview rather than upstream's side-by-side semantic editor. Binary tracked changes use Git's ordinary binary diff marker; binary untracked files have no byte/hex viewer. Rename/copy presentation follows Git's path-filter behavior, and no syntax-aware diff or hunk staging is claimed. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 66 — bulk staging and resilient commit-and-push (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes selected/all stage and unstage controls plus separate **Commit** and **Commit and push** actions in its Git staging modal |
+| Selected/all staging | Complete baseline | Git Sync filters current non-conflicted status into selected/all stageable and unstageable sets, with accurate disabled states and shared progress/error handling |
+| Secret/conflict safety | Complete | Every staging path still passes native relative-path validation, bulk staging observes the plaintext-secret policy, and conflicts remain owned by the explicit resolution workbench |
+| Commit-and-push | Complete baseline | The shared commit path clears stale suggestions/history, records the committed status first, and optionally pushes the resulting branch tip through the configured Git remote |
+| Partial-failure reporting | Complete | A rejected or unavailable push reports that the commit was created locally; Brunomnia neither claims atomicity nor attempts to rewrite the new local commit |
+| Executable coverage | Complete baseline | A two-file repository fixture proves one-call staging and unstaging, both staged patches, an empty index afterward, and preserved working-tree changes |
+| Bundle boundary | Complete | Bulk controls and commit orchestration remain in the lazy Git workbench while the main renderer stays below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 66 verification](QA_MILESTONE_66.md) |
+
+Compatibility bounds remain explicit: commit-and-push is a two-step local/network operation, not an atomic transaction. A successful local commit is intentionally preserved when authentication, connectivity, branch protection, non-fast-forward policy, or another remote rule rejects the push. Stage/unstage all omits conflicted files, and there is no hunk-level staging, commit amendment, signing UI, force push, or automatic retry. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 67 — clean-tree branch-merge preflight (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` refuses branch-manager merges when its current changes query reports staged or unstaged work |
+| Native preflight | Complete | Brunomnia resolves an existing local target, then requires no staged, unstaged, untracked, conflicted, merge-in-progress, or rebase-in-progress state before invoking Git merge |
+| Preservation | Complete | A rejected preflight does not start a merge or rewrite the index/worktree; users explicitly commit or discard their current work first |
+| Existing merge flow | Complete baseline | Clean-tree merges retain the established no-fast-forward/no-autocommit invocation, three-way conflict resolution, binary side selection, and abort path |
+| Executable coverage | Complete baseline | A repository fixture proves both unstaged and staged work are rejected, local content/index evidence remains present, and no `MERGE_HEAD` is created |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 67 verification](QA_MILESTONE_67.md) |
+
+Compatibility bounds remain explicit: Brunomnia intentionally requires a completely clean tracked/untracked working state before branch merge even where native Git could merge non-overlapping local edits. This does not add stash, autostash, rebase, cherry-pick, hunk staging, force operations, or automatic conflict cleanup. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 68 — commit-and-push remote access preflight (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` validates repository credentials before creating commits requested with the push option |
+| Native preflight | Complete baseline | A dedicated read-only command validates the configured remote name and runs `git ls-remote --heads` through the installed Git credential helper/SSH path |
+| Commit ordering | Complete | Commit-and-push awaits remote access before invoking commit, preventing clear connectivity and private-remote access failures from creating an avoidable local commit |
+| Repository preservation | Complete | Validation changes no files, index entries, refs, or `HEAD`; it returns the native Git failure through the shared workbench error path |
+| Later push failure | Complete | Write authorization, branch policy, non-fast-forward races, and post-preflight outages can still reject push; the already-created local commit remains explicit and retryable |
+| Executable coverage | Complete baseline | A local bare-remote fixture proves successful access leaves `HEAD` and status unchanged and an unknown configured remote is refused before Git execution |
+| Bundle boundary | Complete | The renderer remains below the 500 kB warning line and remote access runs in a blocking native task rather than the UI thread |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 68 verification](QA_MILESTONE_68.md) |
+
+Compatibility bounds remain explicit: `ls-remote` proves reachability and any access required to list heads, not a specific credential's validity on a publicly readable repository, write permission, or branch acceptance. Provider-native token introspection remains later work. There is also an unavoidable race between preflight, local commit, and push; Brunomnia preserves the commit and reports any later push failure rather than attempting history rewriting. The installed Git client owns credential prompts/helpers, and no provider token or hosted Brunomnia account is introduced. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 69 — ordered reviewed Git commit groups (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` accepts an ordered list of commit messages/file groups, unstages the index, then stages and commits each group sequentially |
+| Plan validation | Complete | Brunomnia accepts 1–8 reviewed groups with non-empty bounded messages, requires every path to be a current non-conflicted change, and rejects duplicate assignment within or across groups |
+| Ordered execution | Complete baseline | Existing staged files are first returned to the working set; each reviewed group alone is staged and committed in displayed order with the configured optional author overrides |
+| Optional push | Complete baseline | **Commit groups + push** runs the remote-access preflight before index mutation and pushes the resulting branch only after every group succeeds |
+| Partial-progress recovery | Complete | A stage/commit failure refreshes current status and reports the completed count without rewriting earlier commits; a later push failure preserves all new local commits |
+| Executable coverage | Complete baseline | Pure plan tests cover order, stale/conflicted paths, duplicates, empty/bounded inputs; a two-file Git fixture proves distinct ordered commits and a clean final tree |
+| Bundle boundary | Complete | Validation/orchestration remains in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 69 verification](QA_MILESTONE_69.md) |
+
+Compatibility bounds remain explicit: grouped commits are sequential and non-atomic. Files omitted from the reviewed plan remain unstaged. A failure can occur after earlier groups have committed, and Brunomnia reports rather than rewrites that history. Groups cannot be manually reordered/edited as a table, and there is no hunk assignment, squash, amend, signing, automatic retry, or provider-native push-permission proof. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 70 — Git push-readiness state (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` computes and persists whether the current Git repository has changes ready to push, separately from its local log |
+| Native status | Complete baseline | Every Git status result now carries `canPush`: tracked branches require a positive ahead count; an untracked local branch requires a valid `HEAD` plus at least one remote |
+| Unpublished evidence | Complete baseline | A committed branch with a remote but no upstream is identified as **Unpublished branch** instead of looking identical to an unborn/no-remote state |
+| Guarded standalone push | Complete | **Push** requires the exact configured remote, a named branch, computed ready state, no current operation, and the existing plaintext-secret policy |
+| Commit workflows | Complete | Commit-and-push and grouped commit-and-push remain available while the branch is currently even with its upstream because their commit step creates the new pushable tip |
+| Executable coverage | Complete baseline | A local bare-remote fixture proves no-remote, unpublished, equal-upstream, one-ahead, and post-push states without external network access |
+| Bundle boundary | Complete | Status/UI additions remain in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 70 verification](QA_MILESTONE_70.md) |
+
+Compatibility bounds remain explicit: readiness is local-ref evidence, not a live remote or permission check. Remote-tracking refs may be stale until fetch, and branch protection, authentication, write authorization, non-fast-forward races, and server availability are evaluated only by preflight/push. No force push, automatic fetch, background polling, provider account, or hosted entitlement is introduced. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 71 — actionable Git push failures (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` distinguishes non-fast-forward, authentication-required, tag-exists, HTTP, and generic push rejection paths |
+| Non-fast-forward | Complete baseline | Native `non-fast-forward`, `fetch first`, and remote-newer evidence becomes a stable instruction to pull and resolve before retrying |
+| Authentication/access | Complete baseline | Common HTTPS credential, HTTP 401/403, SSH public-key/permission, write-access, and repository-not-found evidence receives actionable installed-Git guidance |
+| Unknown failures | Complete | Unclassified failures retain Git's bounded stderr/stdout instead of collapsing to an ambiguous boolean or empty message |
+| Local preservation | Complete | Classification occurs after a failed non-force push and never mutates refs, index, worktree, or an earlier commit-and-push/grouped-commit result |
+| Executable coverage | Complete baseline | Two local clones produce a real divergent bare remote; the rejected primary push reports pull/resolve guidance, keeps its local tip, and remains ready to push |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 71 verification](QA_MILESTONE_71.md) |
+
+Compatibility bounds remain explicit: classification uses stable native Git text patterns and cannot normalize every localized/version/provider-specific message. Branch pushes do not include tags, so upstream's tag-exists category is not applicable to this command. Brunomnia does not auto-pull, retry, force push, rebase, rewrite commits, or add provider credentials. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 72 — native nothing-to-push defense (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` checks `canPush` inside its push action and returns **Nothing to push** before remote mutation |
+| Native recheck | Complete | Push independently reloads status after validating the exact remote/branch and rejects an equal or behind-only current branch targeting its own tracked remote |
+| Network avoidance | Complete | The no-op result is returned before spawning `git push`, complementing rather than trusting the renderer's disabled state |
+| Alternate targets | Complete | A different explicit branch or a current branch tracking another remote is not rejected using unrelated current-upstream readiness evidence |
+| Executable coverage | Complete baseline | The local bare-remote readiness fixture now repeats push after an equalized successful push and receives **Nothing to push** |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 72 verification](QA_MILESTONE_72.md) |
+
+Compatibility bounds remain explicit: readiness uses last-known local remote-tracking refs and can be stale until fetch. Alternate explicit branch/remote pushes proceed to native Git because current-branch status cannot prove they are empty. No background fetch, force push, retry, or provider call is added. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 73 — reviewable request/response AI mock context (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes active-response-to-route extraction and model-backed spec text/URL mock generation |
+| Explicit source selection | Complete baseline | The mock workbench keeps manual input and adds opt-in active-request and latest-active-response sources with optional additional instructions |
+| Disclosure boundary | Complete baseline | The exact prepared context is reviewable; configured credentials, credential-named values, URL user information, cookies, and binary bytes are redacted or omitted without resolving environment/vault values |
+| Bounded generation | Complete | Context and additional instructions are independently bounded, their composed input is capped at 190,000 characters, and existing structured-output validation remains unchanged |
+| Executable coverage | Complete baseline | Focused tests prove current-request extraction, active-environment latest-response selection, credential redaction, context-only generation, bounds, and missing-source errors |
+| Documentation and evidence | Complete | Updated [AI integration guide](MCP_AI_KONNECT.md), [parity ledger](PARITY.md), and [Milestone 73 verification](QA_MILESTONE_73.md) |
+
+Compatibility bounds remain explicit: redaction recognizes credential-shaped fields but is not a general data-loss-prevention system, so users must review domain data in the displayed context. URL fetching, direct response-to-route conversion without AI, binary response interpretation, `.gguf` loading, and hosted/self-host mock deployment remain open. No context is attached until selected. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 74 — direct response-to-mock route creation (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes an active-response extractor that derives a URL pathname and omits `Content-Length` before creating or replacing a mock route |
+| Local direct conversion | Complete baseline | The selected local mock server can receive a new editable route from the active request's latest response without an account, model, network call, or entitlement check |
+| Route fidelity | Complete | Saved request method, response URL path/status/text body, and response headers are copied; decoded-body length, encoding, connection, and transfer headers are omitted |
+| Safety bounds | Complete | Binary responses are refused instead of lossy string conversion, text bodies are capped at 10,000,000 characters, unknown methods fall back to GET, and invalid URLs fall back to `/new-route` |
+| Executable coverage | Complete baseline | Focused tests prove method/path/status/body/header conversion, transport-header removal, non-UTF text support, invalid-source fallbacks, and binary/oversize refusal |
+| Documentation and evidence | Complete | Updated [AI integration guide](MCP_AI_KONNECT.md), [parity ledger](PARITY.md), and [Milestone 74 verification](QA_MILESTONE_74.md) |
+
+Compatibility bounds remain explicit: this phase creates a new route in the currently selected server; response-to-existing-route overwrite and server selection from the request response pane remain open. Mock routes remain text-backed, so binary bodies are refused. Running native mock instances still require restart to consume route edits. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 75 — selected-route response overwrite (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` overwrites an existing mock route from the active response by patching body, status, MIME/header data only |
+| Selected-route action | Complete baseline | The mock route editor can explicitly replace the selected route's status, headers, and body from the active request's latest response |
+| Authored-field preservation | Complete | Route identity, name, method, path, enabled state, and delay remain untouched so hand-authored routing and scenario behavior are not discarded |
+| Shared safety boundary | Complete | Existing-route overwrite reuses text/binary detection, 10,000,000-character body bounds, decoded-body transport-header removal, and active-environment latest-response selection |
+| Executable coverage | Complete baseline | Focused tests prove response-field replacement, authored-field preservation, stable header IDs, and binary refusal on overwrite |
+| Documentation and evidence | Complete | Updated [AI integration guide](MCP_AI_KONNECT.md), [parity ledger](PARITY.md), and [Milestone 75 verification](QA_MILESTONE_75.md) |
+
+Compatibility bounds remain explicit: overwrite targets the selected route in the selected mock server; Brunomnia does not yet expose the server/route chooser inside the request response pane. Binary bodies remain refused, and a running native mock instance must be restarted to consume route edits. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 76 — reviewed specification-URL AI mocks (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` routes specification URLs through its model-backed mock-generation worker; its route model remains text-backed rather than binary |
+| Two-step consent | Complete baseline | **Fetch for review** downloads the source locally; only the separate mock-creation action sends the displayed source to the configured model |
+| Confined fetch | Complete | HTTP(S)-only URL validation, no URL user information, stored auth/cookie/script/environment/vault exclusion, configured transport policy, 2xx/text checks, and a post-buffer 5 MB response limit |
+| Disclosure and bounds | Complete | Credential-shaped URL query values are redacted from model context, source URLs lose fragments, exact fetched content is reviewable, and the context remains inside the 94,000-character source and 190,000-character composed-input bounds |
+| Executable coverage | Complete baseline | Focused tests prove URL normalization/refusal, credential rejection/redaction, text-type handling, context truncation, and empty/binary/oversize response errors |
+| Documentation and evidence | Complete | Updated [AI integration guide](MCP_AI_KONNECT.md), [parity ledger](PARITY.md), and [Milestone 76 verification](QA_MILESTONE_76.md) |
+
+Compatibility bounds remain explicit: fetch response size is checked after the shared HTTP transport buffers it, and arbitrary examples/secrets inside a fetched specification are model input exactly as displayed. Signed query parameters are used for the fetch but credential-shaped values are removed from model context. Brunomnia does not resolve multi-file remote references or add provider/plugin-specific dynamic mock syntax in this phase. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 77 — request-aware dynamic mock output (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Current [Insomnia dynamic-mocking documentation](https://developer.konghq.com/insomnia/dynamic-mocking/) defines Liquid `req.headers`, `req.queryParams`, `req.pathSegments`, raw/parsed `req.body`, and the `default` filter as request-aware response inputs |
+| Native request context | Complete baseline | The loopback handler exposes case-insensitive headers, decoded query parameters, ordered URL path segments, raw UTF-8 bodies, parsed JSON including arrays, parsed URL-encoded forms, and existing route path parameters |
+| Safe output subset | Complete baseline | Bounded `{{ … }}` output evaluation supports documented bracket/dot access and `| default: "value"`; unsupported syntax is preserved rather than evaluated or silently destroyed |
+| Resource boundary | Complete | Request bodies are inspected only after a route match and capped at 1,000,000 bytes; oversized or non-UTF-8 bodies expose no body value while static response rendering continues |
+| Executable coverage | Complete baseline | Pure renderer/body-parser fixtures and an async handler-level request prove header/query/path/JSON/form/default behavior without opening a listener |
+| Documentation and evidence | Complete | Added [local mock server guide](MOCK_SERVERS.md), updated [parity ledger](PARITY.md), and recorded [Milestone 77 verification](QA_MILESTONE_77.md) |
+
+Compatibility bounds remain explicit: conditional `assign`/`if`/`unless`/`raw` tags, multipart field parsing, Faker variables, additional Liquid filters, repeated-value arrays, percent-decoded path segments, and live route hot reload remain open. Unknown output syntax remains literal for later phases. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 78 — bounded Liquid mock controls (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Local values | Complete baseline | `{% assign name = expression %}` stores up to 100 response-local values of 10,000 bytes each for later output or conditions |
+| Conditional output | Complete baseline | Nested `if`/`unless`, optional `else`, truthiness, and `==`/`!=` comparisons select response fragments without evaluating JavaScript or shell code |
+| Literal regions | Complete baseline | `raw`/`endraw` copies template-looking text unchanged and accepts whitespace-normalized tag delimiters |
+| Resource limits | Complete | Evaluation stops after 1,000 template-token operations, before a 21st nested conditional, or after 5,000,000 dynamically inserted bytes; the unprocessed remainder stays literal |
+| Failure posture | Complete | Unknown filters/tags, invalid assignments, unmatched controls, and over-limit content remain reviewable text instead of acquiring broader execution semantics |
+| Executable coverage | Complete baseline | Native fixtures prove assignment, comparisons, nested/inverted branches, `else`, raw output, unsupported-tag preservation, and both evaluation limits |
+| Documentation and evidence | Complete | Updated [local mock server guide](MOCK_SERVERS.md), [parity ledger](PARITY.md), and [Milestone 78 verification](QA_MILESTONE_78.md) |
+
+Compatibility bounds remain explicit: this is a documented safe subset rather than a general Liquid engine. Multipart field parsing, Faker variables, `elsif`, loops/includes, broader operators/filters, repeated-value arrays, percent-decoded path segments, and live route hot reload remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 79 — complete documented mock Faker surface (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Kong's current [Faker variables list](https://developer.konghq.com/insomnia/faker-variables/) and [pinned Mockbin allowlist](https://github.com/Kong/insomnia-mockbin/blob/c2a388563ea8259f9b235e4b3dfe87f64d568014/lib/routes/bins/run.js) expose 118 property-style names through `faker` |
+| Name coverage | Complete baseline | Every currently documented identifier, color, text/date, network, name/address, job, image, finance, company, database, file, and commerce name renders through `{{ faker.name }}` |
+| Local generation | Complete | Values are generated in the native process without an account, hosted mock service, network fetch, JavaScript engine, or new dependency |
+| Template continuity | Complete | Faker values work in output, assignments, and conditions, use the existing token/expansion limits, and leave unknown names literal |
+| Output safety | Complete | Image variables return strings only; no remote image is fetched. Every generated value is non-empty and remains below 1,000 bytes in executable coverage |
+| Executable coverage | Complete baseline | A table-driven native test evaluates all 118 names, focused shape checks cover representative types, and the response renderer proves known/unknown Faker handling |
+| Documentation and evidence | Complete | Updated [local mock server guide](MOCK_SERVERS.md), [parity ledger](PARITY.md), and [Milestone 79 verification](QA_MILESTONE_79.md) |
+
+Compatibility bounds remain explicit: Brunomnia preserves the documented variable names and output categories, not FakerJS implementation identity. Its compact built-in English corpus, exact values, locale breadth, probability distributions, and date semantics can differ from upstream. Multipart field parsing, `elsif`, broader Liquid operators/filters, repeated-value arrays, percent-decoded path segments, and live route hot reload remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 80 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
-- Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
+- Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
 - Cross-platform installers, signing/notarization guidance, accessibility audit, load/performance testing, and recovery tests
 - Declare parity only after every ledger row has reproducible evidence
 

@@ -45,6 +45,12 @@ export function PluginWorkbench({ workspace, onChangeWorkspace }: PluginWorkbenc
   const [message, setMessage] = useState('');
   const selected = workspace.plugins.find((plugin) => plugin.id === selectedId);
   const request = activeRequest(workspace);
+  const proxyPreferences = {
+    enabled: workspace.preferences.proxyEnabled,
+    httpProxy: workspace.preferences.httpProxy,
+    httpsProxy: workspace.preferences.httpsProxy,
+    noProxy: workspace.preferences.noProxy,
+  };
   const requested = useMemo(() => new Set(selected?.requestedPermissions ?? []), [selected?.requestedPermissions]);
 
   const changeWorkspace = (updater: (current: Workspace) => Workspace) => onChangeWorkspace(updater);
@@ -109,6 +115,10 @@ export function PluginWorkbench({ workspace, onChangeWorkspace }: PluginWorkbenc
       preferredHttpVersion: workspace.preferences.preferredHttpVersion,
       maxRedirects: workspace.preferences.maxRedirects,
       followRedirects: workspace.preferences.followRedirects,
+      requestTimeoutMs: workspace.preferences.requestTimeoutMs,
+      validateCertificates: workspace.preferences.validateCertificates,
+      validateAuthCertificates: workspace.preferences.validateAuthCertificates,
+      proxy: proxyPreferences,
       maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
       filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
     }),

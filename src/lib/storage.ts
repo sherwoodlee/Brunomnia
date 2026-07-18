@@ -195,7 +195,14 @@ const normalizePreferences = (value: unknown): AppPreferences => {
   return {
     theme: source?.theme === 'dark' || source?.theme === 'light' ? source.theme : 'system',
     density: source?.density === 'compact' ? 'compact' : 'comfortable',
-    fontSize: Math.min(20, Math.max(11, Number(source?.fontSize) || defaultPreferences.fontSize)),
+    fontSize: Math.min(24, Math.max(8, Number(source?.fontSize) || defaultPreferences.fontSize)),
+    interfaceFontSize: Math.min(24, Math.max(8, Number(source?.interfaceFontSize) || defaultPreferences.interfaceFontSize)),
+    fontInterface: stringValue(source?.fontInterface).replace(/[\r\n]/g, ' ').slice(0, 512),
+    fontMonospace: stringValue(source?.fontMonospace).replace(/[\r\n]/g, ' ').slice(0, 512),
+    showPasswords: source?.showPasswords === true,
+    allowHtmlPreviewRemoteResources: source?.allowHtmlPreviewRemoteResources === true,
+    allowHtmlPreviewScripts: source?.allowHtmlPreviewScripts === true,
+    disableResponsePreviewLinks: source?.disableResponsePreviewLinks === true,
     preferredHttpVersion: source?.preferredHttpVersion === 'http1.0'
       || source?.preferredHttpVersion === 'http1.1'
       || source?.preferredHttpVersion === 'http2'
@@ -213,10 +220,31 @@ const normalizePreferences = (value: unknown): AppPreferences => {
       ? Math.max(-1, Math.trunc(source.maxHistoryResponses))
       : defaultPreferences.maxHistoryResponses,
     filterResponsesByEnv: source?.filterResponsesByEnv === true,
-    requestTimeoutMs: Math.min(600_000, Math.max(1_000, Number(source?.requestTimeoutMs) || defaultPreferences.requestTimeoutMs)),
+    requestTimeoutMs: typeof source?.requestTimeoutMs === 'number' && Number.isFinite(source.requestTimeoutMs)
+      ? Math.min(2_147_483_647, Math.max(0, Math.trunc(source.requestTimeoutMs)))
+      : defaultPreferences.requestTimeoutMs,
+    validateCertificates: source?.validateCertificates !== false,
+    validateAuthCertificates: source?.validateAuthCertificates !== false,
+    proxyEnabled: source?.proxyEnabled === true,
+    httpProxy: stringValue(source?.httpProxy).slice(0, 4_096),
+    httpsProxy: stringValue(source?.httpsProxy).slice(0, 4_096),
+    noProxy: stringValue(source?.noProxy).slice(0, 20_000),
+    useBulkHeaderEditor: source?.useBulkHeaderEditor === true,
+    useBulkParametersEditor: source?.useBulkParametersEditor === true,
+    forceVerticalLayout: source?.forceVerticalLayout === true,
+    editorIndentWithTabs: source?.editorIndentWithTabs !== false,
+    editorIndentSize: Math.min(16, Math.max(1, Math.trunc(Number(source?.editorIndentSize) || defaultPreferences.editorIndentSize))),
+    editorLineWrapping: source?.editorLineWrapping !== false,
+    fontVariantLigatures: source?.fontVariantLigatures === true,
     scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
     allowScriptRequests: source?.allowScriptRequests === true,
     allowScriptFileAccess: source?.allowScriptFileAccess === true,
+    dataFolders: Array.isArray(source?.dataFolders)
+      ? [...new Set(source.dataFolders
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim().slice(0, 4_096))
+        .filter(Boolean))].slice(0, 100)
+      : [],
     enableVaultInScripts: source?.enableVaultInScripts === true,
     autoFetchGraphqlSchema: source?.autoFetchGraphqlSchema !== false,
     confirmDestructive: source?.confirmDestructive !== false,
@@ -240,17 +268,38 @@ const normalizeResponseTimeline = (value: unknown): ResponseTimelineEntry[] => !
 const normalizeStoredResponses = (value: unknown): StoredResponse[] => Array.isArray(value) ? value.flatMap((entry, index) => {
   const source = record(entry);
   if (!source) return [];
+  const { bodyBase64: encodedBody, ...response } = source;
+  const bodyBase64 = typeof encodedBody === 'string' && encodedBody.length ? encodedBody : undefined;
   return [{
-    ...source,
+    ...response,
     id: stringValue(source.id, `legacy-response-${index}`),
     requestId: stringValue(source.requestId),
     requestName: stringValue(source.requestName),
     requestUrl: stringValue(source.requestUrl),
     environmentId: stringValue(source.environmentId),
     receivedAt: stringValue(source.receivedAt, new Date(0).toISOString()),
+    body: stringValue(source.body),
+    ...(bodyBase64 ? { bodyBase64 } : {}),
     timeline: normalizeResponseTimeline(source.timeline),
   } as StoredResponse];
 }) : [];
+
+const normalizeResponseFilters = (value: unknown, requestIds: Set<string>) => {
+  const source = record(value);
+  if (!source) return {};
+  return Object.fromEntries(Object.entries(source).flatMap(([requestId, entry]) => {
+    if (!requestIds.has(requestId)) return [];
+    const state = record(entry);
+    const filter = stringValue(state?.filter).trim().slice(0, 2_000);
+    const previewMode = state?.previewMode === 'friendly' || state?.previewMode === 'raw' ? state.previewMode : 'source';
+    const seen = new Set<string>();
+    const history = (Array.isArray(state?.history) ? state.history : []).flatMap((candidate): string[] => {
+      const normalized = stringValue(candidate).trim().slice(0, 2_000);
+      return normalized && !seen.has(normalized) && Boolean(seen.add(normalized)) ? [normalized] : [];
+    }).slice(0, 10);
+    return [[requestId, { filter, history, previewMode }]];
+  }));
+};
 
 const normalizeFolders = (value: unknown, defaultAuth: AuthConfig): RequestFolder[] => {
   const source = !Array.isArray(value) ? [] : value.slice(0, 1_000);
@@ -367,6 +416,23 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         || request.transport?.followRedirectsMode === 'off'
         ? request.transport.followRedirectsMode
         : request.transport?.followRedirects === false ? 'off' : 'global';
+      const timeoutMode = request.transport?.timeoutMode === 'global' || request.transport?.timeoutMode === 'custom'
+        ? request.transport.timeoutMode
+        : typeof request.transport?.timeoutMs === 'number' ? 'custom' : 'global';
+      const validateCertificatesMode = request.transport?.validateCertificatesMode === 'global'
+        || request.transport?.validateCertificatesMode === 'on'
+        || request.transport?.validateCertificatesMode === 'off'
+        ? request.transport.validateCertificatesMode
+        : typeof request.transport?.validateCertificates === 'boolean'
+          ? request.transport.validateCertificates ? 'on' : 'off'
+          : 'global';
+      const proxyMode = request.transport?.proxyMode === 'global'
+        || request.transport?.proxyMode === 'custom'
+        || request.transport?.proxyMode === 'disabled'
+        ? request.transport.proxyMode
+        : stringValue(request.transport?.proxyUrl).trim() || stringValue(request.transport?.proxyExclusions).trim()
+          ? 'custom'
+          : 'global';
       return {
         ...defaults,
         ...request,
@@ -393,6 +459,13 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           ...request.transport,
           followRedirects: followRedirectsMode !== 'off',
           followRedirectsMode,
+          timeoutMode,
+          timeoutMs: typeof request.transport?.timeoutMs === 'number' && Number.isFinite(request.transport.timeoutMs)
+            ? Math.min(2_147_483_647, Math.max(0, Math.trunc(request.transport.timeoutMs)))
+            : defaults.transport.timeoutMs,
+          validateCertificates: validateCertificatesMode !== 'off',
+          validateCertificatesMode,
+          proxyMode,
         },
         sse: {
           ...defaults.sse,
@@ -432,7 +505,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 14,
+    version: 22,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
@@ -444,6 +517,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     imports: workspace.imports ?? [],
     cookies: workspace.cookies ?? [],
     responses: normalizeStoredResponses(workspace.responses),
+    responseFilters: normalizeResponseFilters(workspace.responseFilters, requestIds),
     project: { ...seed.project, ...workspace.project },
     plugins: normalizePlugins(workspace.plugins),
     pluginData: workspace.pluginData ?? {},

@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { createBlankRequest } from '../data/seed';
 import type {
   ApiDesign,
   Collection,
@@ -22,7 +23,9 @@ import { startMockServer, stopMockServer, type RunningMock } from '../lib/mock';
 import { runStreamSample } from '../lib/protocol';
 import { resolveAuthorizedExternalSecret } from '../lib/security';
 import { generateMockWithAi } from '../lib/ai';
-import { retainResponseHistory } from '../lib/responseHistory';
+import { buildMockAiContext, buildMockSpecUrlContext, composeMockAiInput, findActiveRequest, findLatestResponseForActiveRequest, validateMockSpecUrl, type MockAiContext, type MockAiContextSource } from '../lib/mockAiContext';
+import { createMockRouteFromResponse, overwriteMockRouteFromResponse } from '../lib/mockRouteFromResponse';
+import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
 import { Icon } from './Icon';
 import { CodeEditor } from './ProtocolEditors';
 
@@ -39,6 +42,13 @@ type AutomationWorkbenchProps = {
   onStartMock: (serverId: string, runningMock: RunningMock) => void;
   onStopMock: (serverId: string) => void;
 };
+
+const workspaceProxyPreferences = (workspace: Workspace) => ({
+  enabled: workspace.preferences.proxyEnabled,
+  httpProxy: workspace.preferences.httpProxy,
+  httpsProxy: workspace.preferences.httpsProxy,
+  noProxy: workspace.preferences.noProxy,
+});
 
 export function AutomationWorkbench(props: AutomationWorkbenchProps) {
   if (props.section === 'design') return <DesignWorkbench {...props} />;
@@ -191,7 +201,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       let runnerResponses = [...workspace.responses];
       const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
       const pluginCallbacks: PluginHostCallbacks = {
-        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv }),
+        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv }),
         prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
         readClipboard: () => navigator.clipboard.readText(),
         writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -206,16 +216,18 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           variables: Object.entries(variables).map(([name, value]) => ({ id: `runner-${name}`, name, value, enabled: true })),
         };
         const result = request.protocol === 'websocket' || request.protocol === 'sse'
-          ? await runStreamSample(request, requestEnvironment, streamWindowMs, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects)
-          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
+          ? await runStreamSample(request, requestEnvironment, streamWindowMs, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspaceProxyPreferences(workspace))
+          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
         const requestUrl = result.requestUrl ?? request.url;
         if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
-        const stored = { ...result, id: uid('response'), requestId: request.id, requestName: request.name, requestUrl, environmentId: environment.id, receivedAt: new Date().toISOString() };
+        const stored = { ...result, id: uid('response'), requestId: request.id, requestName: request.name, requestUrl, environmentId: environment.id, receivedAt: new Date().toISOString(), requestSnapshot: createRequestSnapshot(request) };
         runnerResponses = retainResponseHistory(runnerResponses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
         return result;
       }, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => runBrowserScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
         ...scriptOptions,
-        readFile: workspace.preferences.allowScriptFileAccess ? readDesktopScriptFile : undefined,
+        readFile: workspace.preferences.allowScriptFileAccess
+          ? (path) => readDesktopScriptFile(path, workspace.preferences.dataFolders)
+          : undefined,
         vault: workspace.preferences.enableVaultInScripts ? vault : undefined,
         sendRequest: workspace.preferences.allowScriptRequests ? async (subrequest, subrequestVariables) => {
           const subresponse = await sendRequest(subrequest, {
@@ -227,6 +239,10 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
             preferredHttpVersion: workspace.preferences.preferredHttpVersion,
             maxRedirects: workspace.preferences.maxRedirects,
             followRedirects: workspace.preferences.followRedirects,
+            requestTimeoutMs: workspace.preferences.requestTimeoutMs,
+            validateCertificates: workspace.preferences.validateCertificates,
+            validateAuthCertificates: workspace.preferences.validateAuthCertificates,
+            proxy: workspaceProxyPreferences(workspace),
             maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
             filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
             vault: workspace.preferences.enableVaultInScripts ? vault : {},
@@ -289,10 +305,21 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
   const [error, setError] = useState('');
   const [showAi, setShowAi] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
+  const [aiContextSource, setAiContextSource] = useState<MockAiContextSource>('manual');
+  const [aiSpecUrl, setAiSpecUrl] = useState('');
+  const [aiSpecContext, setAiSpecContext] = useState<MockAiContext>();
+  const [fetchingAiSpec, setFetchingAiSpec] = useState(false);
   const [aiPort, setAiPort] = useState(4020);
   const [generating, setGenerating] = useState(false);
   const server = workspace.mockServers.find((candidate) => candidate.id === activeId) ?? workspace.mockServers[0];
   const route = server?.routes.find((candidate) => candidate.id === activeRouteId) ?? server?.routes[0];
+  const activeRequest = useMemo(() => findActiveRequest(workspace), [workspace]);
+  const latestResponse = useMemo(() => findLatestResponseForActiveRequest(workspace), [workspace]);
+  const selectedAiContext = useMemo(() => {
+    if (aiContextSource === 'manual') return undefined;
+    if (aiContextSource === 'spec-url') return aiSpecContext;
+    try { return buildMockAiContext(workspace, aiContextSource); } catch { return undefined; }
+  }, [aiContextSource, aiSpecContext, workspace]);
 
   const updateServer = (patch: Partial<MockServer>) => {
     if (!server) return;
@@ -319,11 +346,42 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     if (generating) return;
     setGenerating(true); setError('');
     try {
-      const generated = await generateMockWithAi(workspace.ai, aiPrompt, aiPort, activeEnvironment, { preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
+      const input = composeMockAiInput(aiPrompt, selectedAiContext);
+      const generated = await generateMockWithAi(workspace.ai, input, aiPort, activeEnvironment, { preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
       onChangeWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, generated] }));
       setActiveId(generated.id); setActiveRouteId(generated.routes[0]?.id ?? ''); setShowAi(false); setAiPrompt('');
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setGenerating(false); }
+  };
+  const fetchAiSpecification = async () => {
+    if (fetchingAiSpec) return;
+    setFetchingAiSpec(true); setError(''); setAiSpecContext(undefined);
+    try {
+      const url = validateMockSpecUrl(aiSpecUrl);
+      const request = createBlankRequest('ai-mock-spec-url');
+      request.name = 'AI mock specification'; request.url = url; request.method = 'GET'; request.bodyMode = 'none'; request.preRequestScript = ''; request.tests = '';
+      const response = await sendRequest(request, undefined, { preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: false });
+      if (response.status < 200 || response.status >= 300) throw new Error(`Specification URL returned ${response.status} ${response.statusText}.`);
+      setAiSpecContext(buildMockSpecUrlContext(url, response));
+    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    finally { setFetchingAiSpec(false); }
+  };
+  const createRouteFromLatestResponse = () => {
+    if (!server || !latestResponse) return;
+    setError('');
+    try {
+      const created = createMockRouteFromResponse(latestResponse);
+      updateServer({ routes: [...server.routes, created] });
+      setActiveRouteId(created.id);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+  };
+  const overwriteRouteFromLatestResponse = () => {
+    if (!server || !route || !latestResponse) return;
+    setError('');
+    try {
+      const updated = overwriteMockRouteFromResponse(route, latestResponse);
+      updateServer({ routes: server.routes.map((candidate) => candidate.id === route.id ? updated : candidate) });
+    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
   };
 
   if (!server) return <AutomationEmpty title="No mock servers" action="Create local mock" onAction={() => {
@@ -337,10 +395,19 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
       <AutomationHeader eyebrow="Mock" title="Local mock servers" subtitle="Serve deterministic scenarios from this device with no account or hosted dependency.">
         <select aria-label="Mock server" value={server.id} onChange={(event) => { setActiveId(event.target.value); const next = workspace.mockServers.find((candidate) => candidate.id === event.target.value); setActiveRouteId(next?.routes[0]?.id ?? ''); }}>{workspace.mockServers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         <button className="secondary-action" disabled={!workspace.ai.enabled || !workspace.ai.mockGeneration} onClick={() => setShowAi((current) => !current)} type="button">AI generate</button>
+        <button className="secondary-action" disabled={!latestResponse} onClick={createRouteFromLatestResponse} title={latestResponse ? `Create a route from ${latestResponse.status} ${latestResponse.statusText}` : 'Send the active request first'} type="button">Response → route</button>
         <button className={activeRun ? 'danger-action' : 'primary-action'} onClick={() => void toggleServer()} type="button">{activeRun ? 'Stop server' : 'Start server'}</button>
       </AutomationHeader>
       <div className="mock-content">
-        {showAi ? <div className="ai-mock-generator"><label>Prompt, OpenAPI, or example response<textarea value={aiPrompt} onChange={(event) => setAiPrompt(event.target.value)} placeholder="Create an orders API with list, create, and status endpoints…" /></label><label>Local port<input min="1024" max="65535" type="number" value={aiPort} onChange={(event) => setAiPort(Number(event.target.value))} /></label><button disabled={!aiPrompt.trim() || generating} onClick={() => void generateAiMock()} type="button">{generating ? 'Generating…' : 'Create editable local mock'}</button><p>Only this input is sent to your configured model. Generated routes are validated locally and remain editable.</p></div> : null}
+        {showAi ? <div className="ai-mock-generator">
+          <label>Context source<select aria-label="AI mock context source" value={aiContextSource} onChange={(event) => setAiContextSource(event.target.value as MockAiContextSource)}><option value="manual">Manual input</option><option disabled={!activeRequest} value="active-request">Active request</option><option disabled={!latestResponse} value="latest-response">Latest response</option><option value="spec-url">Specification URL</option></select></label>
+          <label>{aiContextSource === 'manual' ? 'Prompt, OpenAPI, or example response' : 'Additional instructions (optional)'}<textarea value={aiPrompt} onChange={(event) => setAiPrompt(event.target.value)} placeholder={aiContextSource === 'manual' ? 'Create an orders API with list, create, and status endpoints…' : 'Add edge cases or describe the routes you want…'} /></label>
+          <label>Local port<input min="1024" max="65535" type="number" value={aiPort} onChange={(event) => setAiPort(Number(event.target.value))} /></label>
+          <button disabled={generating || (aiContextSource === 'manual' ? !aiPrompt.trim() : !selectedAiContext)} onClick={() => void generateAiMock()} type="button">{generating ? 'Generating…' : 'Create editable local mock'}</button>
+          <p>Only the prompt and explicitly selected, reviewable context are sent to your configured model. Credential fields are redacted; vault values and resolved environment values are never added.</p>
+          {aiContextSource === 'spec-url' ? <div className="ai-mock-url"><label>Specification URL<input aria-label="AI mock specification URL" placeholder="https://example.com/openapi.yaml" type="url" value={aiSpecUrl} onChange={(event) => { setAiSpecUrl(event.target.value); setAiSpecContext(undefined); }} /></label><button disabled={fetchingAiSpec || !aiSpecUrl.trim()} onClick={() => void fetchAiSpecification()} type="button">{fetchingAiSpec ? 'Fetching…' : 'Fetch for review'}</button><p>Fetch uses the entered URL but adds no stored auth, cookies, scripts, environment, or vault values. Nothing is sent to the model until you review the context and create the mock.</p></div> : null}
+          {selectedAiContext ? <details className="ai-mock-context"><summary>Review model context · {selectedAiContext.label}</summary><pre>{selectedAiContext.text}</pre></details> : aiContextSource !== 'manual' ? <p className="ai-mock-context-error">{aiContextSource === 'active-request' ? 'Select an active request first.' : aiContextSource === 'latest-response' ? 'Send the active request first.' : 'Fetch the specification URL for review first.'}</p> : null}
+        </div> : null}
         <div className="mock-grid">
         <aside className="mock-routes">
           <header><strong>Routes</strong><button onClick={() => { const created: MockRoute = { id: uid('route'), name: 'New scenario', enabled: true, method: 'GET', path: '/resource', status: 200, headers: [], body: '{}', delayMs: 0 }; updateServer({ routes: [...server.routes, created] }); setActiveRouteId(created.id); }} type="button"><Icon name="plus" size={14} /> New route</button></header>
@@ -348,7 +415,7 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
         </aside>
         {route ? <div className="mock-route-editor">
           <div className="mock-route-bar"><select aria-label="Mock method" value={route.method} onChange={(event) => updateRoute({ method: event.target.value as MockRoute['method'] })}>{['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE'].map((method) => <option key={method}>{method}</option>)}</select><input aria-label="Mock route path" value={route.path} onChange={(event) => updateRoute({ path: event.target.value })} /><label>Status<input aria-label="Mock status" min="100" max="599" type="number" value={route.status} onChange={(event) => updateRoute({ status: Number(event.target.value) })} /></label><label>Delay<input aria-label="Mock delay" min="0" max="30000" type="number" value={route.delayMs} onChange={(event) => updateRoute({ delayMs: Number(event.target.value) })} /></label></div>
-          <div className="mock-route-meta"><input aria-label="Mock route name" value={route.name} onChange={(event) => updateRoute({ name: event.target.value })} /><label><input checked={route.enabled} type="checkbox" onChange={(event) => updateRoute({ enabled: event.target.checked })} /> Route enabled</label><button onClick={() => updateServer({ routes: server.routes.filter((candidate) => candidate.id !== route.id) })} type="button"><Icon name="trash" size={14} /> Delete</button></div>
+          <div className="mock-route-meta"><input aria-label="Mock route name" value={route.name} onChange={(event) => updateRoute({ name: event.target.value })} /><label><input checked={route.enabled} type="checkbox" onChange={(event) => updateRoute({ enabled: event.target.checked })} /> Route enabled</label><button className="mock-response-action" disabled={!latestResponse} onClick={overwriteRouteFromLatestResponse} title={latestResponse ? 'Replace status, headers, and body from the latest response' : 'Send the active request first'} type="button"><Icon name="history" size={14} /> Use latest response</button><button onClick={() => updateServer({ routes: server.routes.filter((candidate) => candidate.id !== route.id) })} type="button"><Icon name="trash" size={14} /> Delete</button></div>
           <div className="mock-header-editor">
             <header><strong>Response headers</strong><button onClick={() => updateRoute({ headers: [...route.headers, { id: uid('mock-header'), name: '', value: '', enabled: true }] })} type="button"><Icon name="plus" size={13} /> Add header</button></header>
             {route.headers.map((header) => <div className="mock-header-row" key={header.id}><input aria-label="Enable mock response header" checked={header.enabled} type="checkbox" onChange={(event) => updateRoute({ headers: route.headers.map((candidate) => candidate.id === header.id ? { ...candidate, enabled: event.target.checked } : candidate) })} /><input aria-label="Mock response header name" placeholder="Header" value={header.name} onChange={(event) => updateRoute({ headers: route.headers.map((candidate) => candidate.id === header.id ? { ...candidate, name: event.target.value } : candidate) })} /><input aria-label="Mock response header value" placeholder="Value" value={header.value} onChange={(event) => updateRoute({ headers: route.headers.map((candidate) => candidate.id === header.id ? { ...candidate, value: event.target.value } : candidate) })} /><button aria-label="Remove mock response header" onClick={() => updateRoute({ headers: route.headers.filter((candidate) => candidate.id !== header.id) })} type="button"><Icon name="trash" size={13} /></button></div>)}
@@ -356,7 +423,7 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
           </div>
           <CodeEditor ariaLabel="Mock response body" value={route.body} onChange={(body) => updateRoute({ body })} />
         </div> : <AutomationEmpty title="No routes" action="Add route" onAction={() => { const created: MockRoute = { id: uid('route'), name: 'New scenario', enabled: true, method: 'GET', path: '/resource', status: 200, headers: [], body: '{}', delayMs: 0 }; updateServer({ routes: [created] }); setActiveRouteId(created.id); }} />}
-        <aside className="mock-inspector"><div className={`mock-status-card${activeRun ? ' running' : ''}`}><i /><small>{activeRun ? 'Running locally' : 'Server stopped'}</small><strong>{activeRun?.baseUrl ?? `http://${server.host}:${server.port}`}</strong><span>{server.routes.filter((item) => item.enabled).length} enabled routes</span></div><h3>Dynamic tokens</h3><code>{'{{$timestamp}}'}</code><code>{'{{$randomUUID}}'}</code><code>{'{{request.path.id}}'}</code><p>Path tokens resolve from routes such as <code>/orders/{'{id}'}</code>.</p></aside>
+        <aside className="mock-inspector"><div className={`mock-status-card${activeRun ? ' running' : ''}`}><i /><small>{activeRun ? 'Running locally' : 'Server stopped'}</small><strong>{activeRun?.baseUrl ?? `http://${server.host}:${server.port}`}</strong><span>{server.routes.filter((item) => item.enabled).length} enabled routes</span></div><h3>Dynamic tokens</h3><code>{'{{$timestamp}}'}</code><code>{'{{$randomUUID}}'}</code><code>{'{{request.path.id}}'}</code><h3>Request-aware output</h3><code>{"{{ req.headers['X-Client'] }}"}</code><code>{'{{ req.queryParams.id }}'}</code><code>{'{{ req.pathSegments[0] }}'}</code><code>{'{{ req.body.name | default: "Guest" }}'}</code><h3>Control tags</h3><code>{'{% assign greeting = "Hello" %}'}</code><code>{'{% if req.queryParams.admin %}allowed{% else %}denied{% endif %}'}</code><code>{'{% unless req.body.disabled %}enabled{% endunless %}'}</code><code>{'{% raw %}{{ unchanged }}{% endraw %}'}</code><h3>Faker values</h3><code>{'{{ faker.randomUUID }}'}</code><code>{'{{ faker.randomFullName }}'}</code><code>{'{{ faker.randomExampleEmail }}'}</code><code>{'{{ faker.isoTimestamp }}'}</code><p>All 118 documented Faker names render locally. JSON and form bodies are parsed inside a 1 MB request inspection limit. Evaluation is capped at 1,000 template operations and 20 conditional levels. Unknown syntax remains unchanged.</p></aside>
         </div>
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}

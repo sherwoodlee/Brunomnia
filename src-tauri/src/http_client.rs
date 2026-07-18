@@ -115,14 +115,13 @@ fn build_client_with_options(
     };
     let mut builder = Client::builder()
         .redirect(redirect)
-        .danger_accept_invalid_certs(!transport.validate_certificates)
-        .connect_timeout(std::time::Duration::from_millis(
-            transport.timeout_ms.clamp(100, 600_000),
-        ));
-    if total_timeout {
-        builder = builder.timeout(std::time::Duration::from_millis(
-            transport.timeout_ms.clamp(100, 600_000),
-        ));
+        .danger_accept_invalid_certs(!transport.validate_certificates);
+    if transport.timeout_ms > 0 {
+        let timeout = std::time::Duration::from_millis(transport.timeout_ms);
+        builder = builder.connect_timeout(timeout);
+        if total_timeout {
+            builder = builder.timeout(timeout);
+        }
     }
     builder = match http_version_mode(transport) {
         HttpVersionMode::Http10 | HttpVersionMode::Http11 => builder.http1_only(),
@@ -134,7 +133,11 @@ fn build_client_with_options(
         builder = builder.no_gzip().no_brotli().no_deflate().no_zstd();
     }
 
-    if !transport.proxy_url.trim().is_empty() {
+    if transport.proxy_mode == "disabled" {
+        builder = builder.no_proxy();
+    } else if (transport.proxy_mode == "custom" || transport.proxy_mode.is_empty())
+        && !transport.proxy_url.trim().is_empty()
+    {
         let proxy = reqwest::Proxy::all(transport.proxy_url.trim())
             .map_err(|error| format!("Invalid proxy URL: {error}"))?
             .no_proxy(reqwest::NoProxy::from_string(
@@ -470,18 +473,31 @@ async fn read_response(
         .map(str::to_string)
         .collect();
     let headers = flatten_headers(response.headers());
-    let body = response.text().await?;
+    let bytes = response.bytes().await?;
+    let size_bytes = bytes.len();
+    let (body, body_base64) = response_body_fields(&bytes);
 
     Ok(HttpResponseOutput {
         status: status.as_u16(),
         status_text: status.canonical_reason().unwrap_or("Unknown").to_string(),
         headers,
-        size_bytes: body.len(),
+        size_bytes,
         body,
+        body_base64,
         duration_ms: started.elapsed().as_millis(),
         set_cookies,
         http_version,
     })
+}
+
+fn response_body_fields(bytes: &[u8]) -> (String, Option<String>) {
+    match std::str::from_utf8(bytes) {
+        Ok(body) => (body.to_string(), None),
+        Err(_) => (
+            String::from_utf8_lossy(bytes).into_owned(),
+            Some(STANDARD.encode(bytes)),
+        ),
+    }
 }
 
 pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
@@ -606,5 +622,17 @@ mod tests {
         assert_eq!(mode(true, -1), RedirectMode::Unlimited);
         assert_eq!(mode(true, 0), RedirectMode::Limited(0));
         assert_eq!(mode(true, 10), RedirectMode::Limited(10));
+    }
+
+    #[test]
+    fn preserves_exact_non_utf8_response_bytes() {
+        assert_eq!(
+            response_body_fields("héllo".as_bytes()),
+            ("héllo".into(), None)
+        );
+        assert_eq!(
+            response_body_fields(&[0x66, 0x80, 0x6f, 0x00]),
+            ("f�o\0".into(), Some("ZoBvAA==".into()))
+        );
     }
 }

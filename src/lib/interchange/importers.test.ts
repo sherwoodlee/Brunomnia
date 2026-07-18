@@ -131,9 +131,27 @@ cookieJar:
     const result = importArtifact(`curl -X POST 'https://api.example.com/items' -H 'Content-Type: application/json' --data '{"ok":true}'
 curl --get 'https://api.example.com/search' --data-urlencode 'q=two words'`, 'requests.sh');
     expect(result.format).toBe('curl');
+    expect(result.collections[0].requests[0].transport.timeoutMode).toBe('global');
+    expect(result.collections[0].requests[0].transport.validateCertificatesMode).toBe('global');
+    expect(result.collections[0].requests[0].transport.proxyMode).toBe('global');
     expect(result.collections[0].requests).toHaveLength(2);
     expect(result.collections[0].requests[0]).toMatchObject({ method: 'POST', bodyMode: 'json' });
     expect(result.collections[0].requests[1].url).toContain('q=two%20words');
+  });
+
+  it('keeps an explicit cURL max-time as a custom request timeout', () => {
+    const result = importArtifact("curl --max-time 0 'https://api.example.com/events'", 'timeout.sh');
+    expect(result.collections[0].requests[0].transport).toMatchObject({ timeoutMode: 'custom', timeoutMs: 0 });
+  });
+
+  it('keeps cURL insecure as an explicit certificate override', () => {
+    const result = importArtifact("curl --insecure 'https://dev.example.com'", 'insecure.sh');
+    expect(result.collections[0].requests[0].transport).toMatchObject({ validateCertificates: false, validateCertificatesMode: 'off' });
+  });
+
+  it('keeps an explicit cURL proxy as a custom request proxy', () => {
+    const result = importArtifact("curl --proxy 'http://proxy.example:8080' 'https://api.example.com'", 'proxy.sh');
+    expect(result.collections[0].requests[0].transport).toMatchObject({ proxyMode: 'custom', proxyUrl: 'http://proxy.example:8080' });
   });
 
   it('imports OpenAPI 3 and Swagger 2 documents', () => {
@@ -236,7 +254,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(14);
+    expect(second.version).toBe(22);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

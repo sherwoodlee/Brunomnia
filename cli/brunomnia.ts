@@ -10,6 +10,8 @@ import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resource
 import { hydrateScriptFileReferences, prepareScriptSubrequest, type ScriptFileBudget, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 import { createScriptExpect } from '../src/lib/scriptExpect';
 import { createScriptModules } from '../src/lib/scriptModules';
+import { resolveCertificateValidation, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from '../src/lib/transport';
+import { migrateWorkspace } from '../src/lib/storage';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -31,9 +33,9 @@ const readCliScriptFile = async (path: string) => {
   return { fileName: basename(path) || 'attachment.bin', mimeType: scriptFileMime(path), dataBase64: bytes.toString('base64') };
 };
 const loadWorkspace = async (path: string): Promise<Workspace> => {
-  const parsed = JSON.parse(await loadText(path)) as Partial<Workspace>;
-  if (parsed.format !== 'brunomnia' || !Array.isArray(parsed.collections)) fail('The input is not a Brunomnia workspace.');
-  return parsed as Workspace;
+  const parsed = JSON.parse(await loadText(path)) as unknown;
+  try { return migrateWorkspace(parsed); }
+  catch { return fail('The input is not a Brunomnia workspace.'); }
 };
 
 const expectApi = createScriptExpect();
@@ -198,6 +200,7 @@ const runNodeScript = async (
     else throw new Error(`Request auth type '${type}' is not supported by script mutation yet.`);
   };
   requestWithHelpers.proxy = { getProxyUrl: () => request.transport.proxyUrl, update: (input) => {
+    request.transport.proxyMode = 'custom';
     if (input.url) request.transport.proxyUrl = String(input.url);
     else if (input.host) request.transport.proxyUrl = `${String(input.protocol ?? 'http')}://${String(input.host)}${input.port ? `:${String(input.port)}` : ''}`;
     request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(',') : String(input.exclusions ?? request.transport.proxyExclusions);
@@ -361,7 +364,7 @@ const runNodeScript = async (
   return { request: hydratedRequest, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
 };
 
-const executeHttp = async (request: ApiRequest, variables: Record<string, string>): Promise<HttpResponse> => {
+const executeHttp = async (request: ApiRequest, variables: Record<string, string>, requestTimeoutMs = 30_000, proxyPreferences?: ProxyPreferences): Promise<HttpResponse> => {
   if (request.protocol !== 'http' && request.protocol !== 'graphql') throw new Error(`CLI collection execution does not yet support ${request.protocol}.`);
   const url = buildRequestUrl(request, variables);
   const headers = buildHeaders(request, variables);
@@ -384,12 +387,16 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
   }
   else if (request.bodyMode === 'binary' && request.binaryBody) body = Buffer.from(request.binaryBody.dataBase64, 'base64');
   const started = performance.now();
+  const timeoutMs = resolveRequestTimeout(request.transport, requestTimeoutMs);
+  if (resolveProxyTransport(request.transport, url, proxyPreferences).proxyMode === 'custom') {
+    throw new Error('The CLI cannot use a manual proxy because Node Fetch does not expose per-request proxy configuration. Use the native desktop transport or configure a supported runner-level proxy.');
+  }
   const response = await fetch(url, {
     method: request.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled && header.name).map((header) => [header.name, header.value])),
     body: request.method === 'GET' || request.method === 'HEAD' ? undefined : body,
     redirect: request.transport.followRedirects ? 'follow' : 'manual',
-    signal: AbortSignal.timeout(request.transport.timeoutMs),
+    signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
   });
   const responseBody = await response.text();
   return { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url };
@@ -451,17 +458,29 @@ const main = async () => {
     const requestedTestNamePattern = flag('--testNamePattern') ?? flag('-t') ?? flag('--test-name-pattern');
     if (subject === 'collection' && requestedTestNamePattern !== undefined) fail('--testNamePattern is only available for run test.');
     const testNamePattern = subject === 'test' ? validateTestNamePattern(requestedTestNamePattern) : undefined;
+    const executeWorkspaceHttp = (request: ApiRequest, variables: Record<string, string>) => {
+      const validateCertificates = workspace.preferences.validateCertificates;
+      if (!resolveCertificateValidation(request.transport, validateCertificates)) {
+        throw new Error('The CLI cannot disable TLS certificate validation because Node Fetch does not expose that authority. Use the native desktop transport for explicitly untrusted development certificates.');
+      }
+      return executeHttp(request, variables, workspace.preferences.requestTimeoutMs, {
+        enabled: workspace.preferences.proxyEnabled,
+        httpProxy: workspace.preferences.httpProxy,
+        httpsProxy: workspace.preferences.httpsProxy,
+        noProxy: workspace.preferences.noProxy,
+      });
+    };
     const report = await runCollection(collection, environment, {
       iterations: Number(flag('--iterations') ?? 1), retries: Number(flag('--retries') ?? 0), bail: hasFlag('--bail'), delayMs: 0,
       testNamePattern,
       scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(flag('--script-timeout') ?? 10_000))),
       environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
       dataRows: dataPath ? parseRunnerData(await loadText(dataPath)) : [],
-    }, executeHttp, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => {
+    }, executeWorkspaceHttp, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => {
       if (source.trim() && !hasFlag('--allow-scripts')) throw new Error('CLI script execution is disabled. Re-run trusted workspaces with --allow-scripts.');
       return runNodeScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
         ...scriptOptions,
-        sendRequest: hasFlag('--allow-script-requests') ? executeHttp : undefined,
+        sendRequest: hasFlag('--allow-script-requests') ? executeWorkspaceHttp : undefined,
         readFile: hasFlag('--allow-script-files') ? readCliScriptFile : undefined,
       });
     });

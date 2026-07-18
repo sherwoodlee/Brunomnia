@@ -5,7 +5,8 @@ import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
 import { renderTemplate } from './templates';
 import { buildResponseTimeline } from './timeline';
-import { resolveFollowRedirects } from './transport';
+import { decodeHttpResponseBody, responseBodyFromBytes, responseCharset } from './responseBytes';
+import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
 
 export type SendRequestContext = {
   cookies?: CookieRecord[];
@@ -13,6 +14,10 @@ export type SendRequestContext = {
   preferredHttpVersion?: PreferredHttpVersion;
   maxRedirects?: number;
   followRedirects?: boolean;
+  requestTimeoutMs?: number;
+  validateCertificates?: boolean;
+  validateAuthCertificates?: boolean;
+  proxy?: ProxyPreferences;
   maxTimelineDataSizeKB?: number;
   filterResponsesByEnv?: boolean;
   vault?: Record<string, string>;
@@ -115,11 +120,14 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     : context;
   const prepared = await renderRequest(hooked, variables, renderContext);
   const followRedirects = resolveFollowRedirects(prepared.transport, context.followRedirects ?? true);
+  const timeoutMs = resolveRequestTimeout(prepared.transport, context.requestTimeoutMs ?? 30_000);
+  const validateCertificates = resolveCertificateValidation(prepared.transport, context.validateCertificates ?? true);
   const graphqlPayload = prepared.protocol === 'graphql' ? graphqlBody(prepared, variables) : undefined;
   const finish = async (response: HttpResponse) => context.pluginRuntime
     ? context.pluginRuntime.afterResponse(prepared, response)
     : response;
   let url = buildRequestUrl(prepared, variables);
+  const proxy = resolveProxyTransport(prepared.transport, url, context.proxy);
   let headers = buildHeaders(prepared, variables);
   const contentType = (value: string) => value.toLowerCase() === 'content-type';
   if (prepared.protocol === 'graphql' && !headers.some((header) => header.enabled && contentType(header.name))) {
@@ -171,6 +179,9 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         transport: {
           ...prepared.transport,
           followRedirects,
+          timeoutMs,
+          validateCertificates,
+          ...proxy,
           preferredHttpVersion: context.preferredHttpVersion ?? 'default',
           maxRedirects: context.maxRedirects ?? 10,
         },
@@ -185,7 +196,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         },
       },
     });
-    return finish(withTimeline(output));
+    return finish(withTimeline(decodeHttpResponseBody(output)));
   }
 
   if (new URL(url).hostname === 'api.acme.dev') {
@@ -199,17 +210,19 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     headers: Object.fromEntries(headers.filter((header) => header.enabled).map((header) => [header.name, header.value])),
     body: browserBody(prepared, variables),
     redirect: followRedirects ? 'follow' : 'manual',
-    signal: AbortSignal.timeout(prepared.transport.timeoutMs),
+    signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
     credentials: prepared.transport.sendCookies ? 'include' : 'omit',
   });
-  const body = await response.text();
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const responseHeaders = Object.fromEntries(response.headers.entries());
+  const responseBody = responseBodyFromBytes(bytes, responseCharset(responseHeaders));
   return finish(withTimeline({
     status: response.status,
     statusText: response.statusText,
-    headers: Object.fromEntries(response.headers.entries()),
-    body,
+    headers: responseHeaders,
+    ...responseBody,
     durationMs: Math.round(performance.now() - startedAt),
-    sizeBytes: new Blob([body]).size,
+    sizeBytes: bytes.byteLength,
   }));
 };
 
@@ -257,10 +270,11 @@ export const fetchOAuth2Token = async (
     formBody: fields.filter(([, value]) => value !== '').map(([name, value], index) => ({ id: `oauth2-${index}`, name, value, enabled: true })),
     multipartBody: [],
     auth: { ...request.auth, type: auth.credentialsInBody ? 'none' : 'basic', username: auth.clientId, password: auth.clientSecret, disabled: false },
+    transport: { ...request.transport, validateCertificatesMode: 'global' },
     preRequestScript: '',
     tests: '',
   };
-  const response = await sendRequest(tokenRequest, environment, context);
+  const response = await sendRequest(tokenRequest, environment, { ...context, validateCertificates: context.validateAuthCertificates ?? true });
   let payload: Record<string, unknown>;
   try { payload = JSON.parse(response.body) as Record<string, unknown>; }
   catch { payload = Object.fromEntries(new URLSearchParams(response.body).entries()); }

@@ -41,6 +41,8 @@ pub struct TransportConfig {
     #[serde(default = "default_true")]
     pub validate_certificates: bool,
     #[serde(default)]
+    pub proxy_mode: String,
+    #[serde(default)]
     pub proxy_url: String,
     #[serde(default)]
     pub proxy_exclusions: String,
@@ -62,6 +64,7 @@ impl Default for TransportConfig {
             follow_redirects: true,
             timeout_ms: default_timeout(),
             validate_certificates: true,
+            proxy_mode: "system".into(),
             proxy_url: String::new(),
             proxy_exclusions: String::new(),
             client_certificate_pem: String::new(),
@@ -159,6 +162,8 @@ pub struct HttpResponseOutput {
     pub status_text: String,
     pub headers: BTreeMap<String, String>,
     pub body: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_base64: Option<String>,
     pub duration_ms: u128,
     pub size_bytes: usize,
     pub set_cookies: Vec<String>,

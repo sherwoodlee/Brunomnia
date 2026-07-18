@@ -16,6 +16,8 @@ Credential fields execute only when the entire value is one of these protected r
 
 The first form resolves from the passphrase-protected local vault. The second uses an external-vault tuple approved in **Security & Sync**. Raw MCP bearer tokens/passwords/sensitive headers, AI keys, and Konnect tokens are detected as plaintext and rejected at execution. A custom HTTP authorization header can reference a vault entry containing its complete value, such as `Bearer …`.
 
+Credential fields are masked by default. Each MCP bearer token/Basic password, AI-provider key, and Konnect token has a temporary Show/Hide control; the device-local **Reveal saved passwords and tokens** preference reveals them together with request authentication fields. This affects presentation only, and switching MCP clients clears temporary disclosure.
+
 Brunomnia imports workspace integrations in a non-authoritative state: MCP clients are disabled, bearer/Basic credential fields are cleared, AI and Konnect are disabled, and their credential fields are cleared. Changing an MCP URL, transport, command, or argument list also disables the client and clears its discovery cache.
 
 ## MCP clients
@@ -70,9 +72,13 @@ Remote endpoints require HTTPS. Plain HTTP is allowed only for `localhost`, `127
 
 ### AI mock generation
 
-The mock workbench sends only the prompt, OpenAPI text, example response, or other source pasted into its AI panel. Output is parsed as data, never evaluated as code. Generated mocks are bound to `127.0.0.1`; methods, paths, status codes, string headers, delays, route count, and port range are validated before the mock is saved.
+The mock workbench accepts a pasted prompt, OpenAPI text, or example response. It can instead attach the configured active request, that request's latest saved response, or a fetched specification URL, with optional additional instructions. A non-manual source must be explicitly selected, and the exact prepared context is reviewable before generation. When response-history environment filtering is enabled, latest-response selection stays inside the active environment.
 
-Input is capped at 200 KB, output at 10 MB after transport buffering, routes at 500, headers per route at 100, and delay at 60 seconds. Brunomnia does not automatically fetch a URL or inspect an existing response for this workflow; paste the relevant material explicitly.
+Prepared context uses configured request values rather than resolving environment or vault references. Authentication values, credential-named headers/query/body fields, URL user information, cookies, and file bytes are redacted or omitted; arbitrary domain data in request/response bodies is still model input, so the preview remains the final disclosure check. The composed workbench input is capped at 190,000 characters and the provider adapter retains its 200,000-character hard cap. Output is parsed as data, never evaluated as code. Generated mocks are bound to `127.0.0.1`; methods, paths, status codes, string headers, delays, route count, and port range are validated before the mock is saved.
+
+Specification URLs are fetched only after **Fetch for review**. They must be HTTP(S), at most 8,192 characters, and cannot contain URL user information. Fetch uses the entered URL—including its query—but adds no stored authentication, cookies, scripts, environment, vault, or external-secret values. It follows the configured redirect, timeout, certificate, HTTP-version, and proxy policy. A 2xx text/JSON/YAML/XML response is required; the post-buffer response limit is 5 MB. Credential-shaped query values are redacted from the model context, and fetched content is truncated inside the shared 94,000-character context bound. The displayed context is the final disclosure check because arbitrary specification examples remain intact.
+
+Output remains capped at 10 MB after transport buffering, routes at 500, headers per route at 100, and delay at 60 seconds. Separately, the mock workbench can create a route or replace the selected route's status/headers/body directly from the active request's latest text response without an AI provider; those local actions are not model input.
 
 ### Git suggestions
 

@@ -6,19 +6,24 @@ import { publicEnvironments } from './resources';
 export type ProjectWriteResult = { path: string; filesWritten: number; filesUnchanged: number; filesRemoved: number };
 export type GitFileStatus = { path: string; indexStatus: string; worktreeStatus: string; staged: boolean; conflicted: boolean };
 export type GitRemote = { name: string; fetchUrl: string; pushUrl: string };
+export type GitRemoteBranch = { remote: string; branch: string; trackingRef: string };
 export type GitStatus = {
   branch: string;
   upstream: string;
   ahead: number;
   behind: number;
+  canPush: boolean;
   files: GitFileStatus[];
   branches: string[];
+  remoteBranches: GitRemoteBranch[];
   remotes: GitRemote[];
   mergeInProgress: boolean;
   rebaseInProgress: boolean;
 };
 export type GitOperation = { summary: string; stdout: string; stderr: string; status: GitStatus };
 export type GitConflict = { path: string; base: string; ours: string; theirs: string; working: string; binary: boolean };
+export type GitCommitSummary = { oid: string; shortOid: string; message: string; authorName: string; authorEmail: string; authoredAt: string; parents: string[]; refs: string[] };
+export type GitCommitPatch = { oid: string; patch: string };
 export type LocalPluginSource = { source: string; name: string; version: string; description: string; path: string };
 
 const nativeOnly = () => {
@@ -42,7 +47,7 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     ...current,
     ...project,
     format: 'brunomnia',
-    version: 14,
+    version: 22,
     history: current.history,
     runnerReports: current.runnerReports,
     imports: current.imports,
@@ -71,11 +76,19 @@ export const getGitStatus = async (path: string) => {
 };
 export const stageGitFiles = async (path: string, paths: string[]) => invoke<GitStatus>('project_git_stage', { path, paths });
 export const unstageGitFiles = async (path: string, paths: string[]) => invoke<GitStatus>('project_git_unstage', { path, paths });
+export const discardGitFiles = async (path: string, paths: string[]) => invoke<GitStatus>('project_git_discard', { path, paths });
 export const getGitDiff = async (path: string, staged: boolean) => invoke<string>('project_git_diff', { path, staged });
+export const getGitFileDiff = async (path: string, staged: boolean, file: string) => invoke<string>('project_git_file_diff', { path, staged, file });
+export const getGitHistory = async (path: string, limit = 35) => invoke<GitCommitSummary[]>('project_git_history', { path, limit });
+export const getGitCommitPatch = async (path: string, oid: string) => invoke<GitCommitPatch>('project_git_commit_patch', { path, oid });
 export const commitGitChanges = async (path: string, message: string, authorName: string, authorEmail: string) => invoke<GitOperation>('project_git_commit', { input: { path, message, authorName, authorEmail } });
 export const checkoutGitBranch = async (path: string, branch: string, create = false) => invoke<GitOperation>('project_git_checkout', { path, branch, create });
+export const deleteGitBranch = async (path: string, branch: string) => invoke<GitOperation>('project_git_delete_branch', { path, branch });
+export const fetchGitRemote = async (path: string, remote: string) => invoke<GitOperation>('project_git_fetch', { path, remote });
+export const checkoutGitRemoteBranch = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_checkout_remote', { path, remote, branch });
 export const setGitRemote = async (path: string, name: string, url: string) => invoke<GitStatus>('project_git_set_remote', { path, name, url });
 export const pullGitProject = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_pull', { input: { path, remote, branch } });
+export const validateGitRemoteAccess = async (path: string, remote: string) => invoke<void>('project_git_validate_remote_access', { path, remote });
 export const pushGitProject = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_push', { input: { path, remote, branch } });
 export const mergeGitBranch = async (path: string, branch: string) => invoke<GitOperation>('project_git_merge', { path, branch });
 export const abortGitMerge = async (path: string) => invoke<GitStatus>('project_git_abort_merge', { path });

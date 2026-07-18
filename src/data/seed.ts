@@ -61,8 +61,11 @@ message Order { string id = 1; string status = 2; double total = 3; }`,
   transport: {
     followRedirects: true,
     followRedirectsMode: 'global',
+    timeoutMode: 'global',
     timeoutMs: 60000,
+    validateCertificatesMode: 'global',
     validateCertificates: true,
+    proxyMode: 'global',
     proxyUrl: '',
     proxyExclusions: '',
     clientCertificatePem: '',
@@ -111,7 +114,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 14,
+  version: 22,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -250,6 +253,7 @@ paths:
   imports: [],
   cookies: [],
   responses: [],
+  responseFilters: {},
   project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
   plugins: [],
   pluginData: {},

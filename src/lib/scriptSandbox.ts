@@ -1,7 +1,7 @@
 import { createBlankRequest } from '../data/seed';
 import type { ApiRequest, CookieRecord, FilePayload, HttpResponse, KeyValue, MultipartPart, ScriptRunResult, StoredResponse } from '../types';
 import { storeResponseCookies } from './cookies';
-import { retainResponseHistory } from './responseHistory';
+import { createRequestSnapshot, retainResponseHistory } from './responseHistory';
 import { createScriptExpect } from './scriptExpect';
 import { createScriptModules } from './scriptModules';
 
@@ -75,7 +75,7 @@ export const applyScriptSubresponse = (
 ): { cookies: CookieRecord[]; responses: StoredResponse[] } => {
   const requestUrl = response.requestUrl ?? request.url;
   const nextCookies = request.transport.storeCookies ? storeResponseCookies(cookies, requestUrl, response.setCookies ?? []) : cookies;
-  const stored: StoredResponse = { ...response, id: crypto.randomUUID(), requestId: request.id, requestName: request.name, requestUrl, environmentId, receivedAt };
+  const stored: StoredResponse = { ...response, id: crypto.randomUUID(), requestId: request.id, requestName: request.name, requestUrl, environmentId, receivedAt, requestSnapshot: createRequestSnapshot(request) };
   return { cookies: nextCookies, responses: retainResponseHistory(responses, stored, maxHistoryResponses, filterResponsesByEnv) };
 };
 
@@ -173,7 +173,7 @@ const normalizeScriptSubrequestInput = (input: unknown, sourceRequest: ApiReques
   request.method = stringValue(source.method, 'GET').trim().toUpperCase() || 'GET';
   if (!/^[A-Z][A-Z0-9!#$%&'*+.^_`|~-]{0,31}$/.test(request.method)) throw new Error('Script request method is not a valid HTTP token.');
   request.headers = scriptHeaders(source.header ?? source.headers);
-  request.transport = { ...sourceRequest.transport, timeoutMs: Math.min(10_000, Math.max(1_000, sourceRequest.transport.timeoutMs)) };
+  request.transport = { ...sourceRequest.transport, timeoutMode: 'custom', timeoutMs: Math.min(10_000, Math.max(1_000, sourceRequest.transport.timeoutMs)) };
   request.preRequestScript = '';
   request.tests = '';
   const auth = record(source.auth);
@@ -188,6 +188,7 @@ const normalizeScriptSubrequestInput = (input: unknown, sourceRequest: ApiReques
   }
   const proxy = record(source.proxy);
   if (proxy) {
+    request.transport.proxyMode = 'custom';
     if (proxy.url) request.transport.proxyUrl = stringValue(proxy.url);
     else if (proxy.host) request.transport.proxyUrl = `${stringValue(proxy.protocol, 'http')}://${stringValue(proxy.host)}${proxy.port ? `:${stringValue(proxy.port)}` : ''}`;
     request.transport.proxyExclusions = Array.isArray(proxy.exclusions) ? proxy.exclusions.map(String).join(',') : stringValue(proxy.exclusions);
@@ -466,6 +467,7 @@ self.onmessage = async ({ data }) => {
     getProxyUrl: () => state.request.transport.proxyUrl,
     update: (proxy) => {
       const input = proxy || {};
+      state.request.transport.proxyMode = 'custom';
       if (input.url) state.request.transport.proxyUrl = String(input.url);
       else if (input.host) state.request.transport.proxyUrl = String(input.protocol || 'http') + '://' + String(input.host) + (input.port ? ':' + String(input.port) : '');
       state.request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(',') : String(input.exclusions ?? state.request.transport.proxyExclusions);

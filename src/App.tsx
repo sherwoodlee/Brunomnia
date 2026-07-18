@@ -5,24 +5,24 @@ import { createBlankRequest } from './data/seed';
 import { sendRequest, type SendRequestContext } from './lib/http';
 import { storeResponseCookies } from './lib/cookies';
 import { connectStream, disconnectStream, invokeGrpc, loadGrpcSchema, sendWebSocketMessage } from './lib/protocol';
-import { environmentMap, formatBytes, mockResponse, normalizeHttpMethod, prettyBody } from './lib/request';
+import { environmentMap, formatBytes, mockResponse, normalizeHttpMethod } from './lib/request';
 import { loadWorkspace, saveWorkspace } from './lib/storage';
 import { applyScriptSubresponse, runBrowserScript, type ScriptRunOptions } from './lib/scriptSandbox';
 import { readDesktopScriptFile } from './lib/scriptFiles';
 import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import { AuthEditor } from './components/AuthEditor';
-import { CodeGenerationDialog } from './components/CodeGenerationDialog';
 import { applyArtifactImport } from './lib/interchange/apply';
 import type { ArtifactImport } from './lib/interchange/types';
 import { writeProject } from './lib/project';
 import { applyPluginTheme, createPluginRuntime, describePlugin, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
 import { plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
 import { fetchGraphqlSchema } from './lib/graphql';
-import { shortcutMatches } from './lib/preferences';
+import { defaultPreferences, shortcutMatches } from './lib/preferences';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, moveWorkspaceResource, orderedCollectionChildren, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
 import type { WorkspaceResourceMove } from './lib/resources';
-import { retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
+import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
+import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -44,6 +44,7 @@ import type {
   Protocol,
   RequestFolder,
   RequestTab,
+  ResponsePreviewMode,
   ResponseTab,
   ScriptRunResult,
   SidebarMode,
@@ -61,6 +62,8 @@ const PluginWorkbench = lazy(() => import('./components/PluginWorkbench').then((
 const SecurityWorkbench = lazy(() => import('./components/SecurityWorkbench').then((module) => ({ default: module.SecurityWorkbench })));
 const IntegrationWorkbench = lazy(() => import('./components/IntegrationWorkbench').then((module) => ({ default: module.IntegrationWorkbench })));
 const PreferencesWorkbench = lazy(() => import('./components/PreferencesWorkbench').then((module) => ({ default: module.PreferencesWorkbench })));
+const CodeGenerationDialog = lazy(() => import('./components/CodeGenerationDialog').then((module) => ({ default: module.CodeGenerationDialog })));
+const ResponseBodyPreview = lazy(() => import('./components/ResponseBodyPreview'));
 
 const requestTabs: RequestTab[] = ['params', 'headers', 'auth', 'body', 'transport', 'scripts', 'tests', 'docs'];
 const responseTabs: ResponseTab[] = ['preview', 'headers', 'cookies', 'timeline', 'tests'];
@@ -78,6 +81,11 @@ const protocolLabel = (request: ApiRequest) => request.protocol === 'http' ? req
 const methodClass = (method: string) => methods.includes(method as HttpMethod) ? method.toLowerCase() : 'custom';
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+const rememberResponseFilter = (history: string[], filter: string) => {
+  const value = filter.trim().slice(0, 2_000);
+  return value ? [value, ...history.filter((candidate) => candidate !== value)].slice(0, 10) : history.slice(0, 10);
+};
 
 const scriptVariableRows = (values: Record<string, string>, existing: KeyValue[], prefix: string, disabled = existing.filter((row) => !row.enabled && row.name).map((row) => row.name)): KeyValue[] => {
   const names = new Set(Object.keys(values));
@@ -217,6 +225,23 @@ function KeyValueEditor({
       </button>
     </div>
   );
+}
+
+function BulkKeyValueEditor({ rows, onChange, ariaLabel }: { rows: KeyValue[]; onChange: (rows: KeyValue[]) => void; ariaLabel: string }) {
+  const formatted = formatBulkKeyValues(rows);
+  const [draft, setDraft] = useState(formatted);
+  const lastEmitted = useRef(formatted);
+  useEffect(() => {
+    if (formatted === lastEmitted.current) return;
+    lastEmitted.current = formatted;
+    setDraft(formatted);
+  }, [formatted]);
+  return <CodeEditor ariaLabel={ariaLabel} value={draft} onChange={(value) => {
+    setDraft(value);
+    const parsed = parseBulkKeyValues(value, (index) => rows[index]?.id ?? uid('field'));
+    lastEmitted.current = formatBulkKeyValues(parsed);
+    onChange(parsed);
+  }} />;
 }
 
 type CollectionSidebarProps = {
@@ -482,6 +507,9 @@ type RequestPanelProps = {
   workspaceCookies: CookieRecord[];
   storedResponses: StoredResponse[];
   requestContext: SendRequestContext;
+  showPasswords: boolean;
+  useBulkHeaderEditor: boolean;
+  useBulkParametersEditor: boolean;
   activeTab: RequestTab;
   isSending: boolean;
   streamStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
@@ -497,6 +525,8 @@ type RequestPanelProps = {
   onLoadGraphqlSchema: () => void;
   onAddRequest: () => void;
   onGenerateCode: () => void;
+  onToggleBulkHeaderEditor: () => void;
+  onToggleBulkParametersEditor: () => void;
   scheduledSendLabel: string;
   urlInputRef: RefObject<HTMLInputElement | null>;
 };
@@ -525,6 +555,11 @@ function RequestPanel({
   workspaceCookies,
   storedResponses,
   requestContext,
+  showPasswords,
+  useBulkHeaderEditor,
+  useBulkParametersEditor,
+  onToggleBulkHeaderEditor,
+  onToggleBulkParametersEditor,
 }: RequestPanelProps) {
   const streamProtocol = request.protocol === 'websocket' || request.protocol === 'sse';
   const actionLabel = streamProtocol
@@ -609,21 +644,21 @@ function RequestPanel({
         {activeTab === 'params' ? (
           <div className="parameter-editors">
             <section><header><strong>Path parameters</strong><small>Replace matching {'{name}'} segments in the URL.</small></header><KeyValueEditor detailed rows={request.pathParams} onChange={(pathParams) => onChange({ pathParams })} namePlaceholder="Path parameter" /></section>
-            <section><header><strong>Query parameters</strong><small>Enabled rows are appended in order; duplicate names are preserved.</small></header><KeyValueEditor detailed rows={request.params} onChange={(params) => onChange({ params })} namePlaceholder="Query parameter" /></section>
+            <section><header><strong>Query parameters</strong><small>Enabled rows are appended in order; duplicate names are preserved.</small><button onClick={onToggleBulkParametersEditor} type="button">{useBulkParametersEditor ? 'Regular Edit' : 'Bulk Edit'}</button></header>{useBulkParametersEditor ? <div className="bulk-parameter-editor"><BulkKeyValueEditor ariaLabel="Bulk query parameters" rows={request.params} onChange={(params) => onChange({ params })} /></div> : <KeyValueEditor detailed rows={request.params} onChange={(params) => onChange({ params })} namePlaceholder="Query parameter" />}</section>
           </div>
         ) : null}
         {activeTab === 'headers' && request.protocol !== 'grpc' ? (
-          <KeyValueEditor detailed rows={request.headers} onChange={(headers) => onChange({ headers })} namePlaceholder="Header" />
+          <div className="editor-stack bulk-key-value-stack"><div className="editor-toolbar"><span>Request headers</span><button onClick={onToggleBulkHeaderEditor} type="button">{useBulkHeaderEditor ? 'Regular Edit' : 'Bulk Edit'}</button></div>{useBulkHeaderEditor ? <BulkKeyValueEditor ariaLabel="Bulk request headers" rows={request.headers} onChange={(headers) => onChange({ headers })} /> : <div className="bulk-regular-editor"><KeyValueEditor detailed rows={request.headers} onChange={(headers) => onChange({ headers })} namePlaceholder="Header" /></div>}</div>
         ) : null}
         {activeTab === 'headers' && request.protocol === 'grpc' ? (
           <KeyValueEditor rows={request.grpc.metadata} onChange={(metadata) => onChange({ grpc: { ...request.grpc, metadata } })} namePlaceholder="Metadata" />
         ) : null}
-        {activeTab === 'auth' ? <div className="folder-auth-editor"><label><input checked={request.inheritFolderAuth === true} disabled={!request.folderId || !folderAncestors(collection, request.folderId).some((folder) => folder.auth)} onChange={(event) => onChange({ inheritFolderAuth: event.target.checked })} type="checkbox" /> Inherit authentication from closest configured folder</label><AuthEditor cookies={workspaceCookies} environment={environment} request={request} requestContext={requestContext} responses={storedResponses} onChange={onChange} /></div> : null}
+        {activeTab === 'auth' ? <div className="folder-auth-editor"><label><input checked={request.inheritFolderAuth === true} disabled={!request.folderId || !folderAncestors(collection, request.folderId).some((folder) => folder.auth)} onChange={(event) => onChange({ inheritFolderAuth: event.target.checked })} type="checkbox" /> Inherit authentication from closest configured folder</label><AuthEditor cookies={workspaceCookies} environment={environment} request={request} requestContext={requestContext} responses={storedResponses} showPasswords={showPasswords} onChange={onChange} /></div> : null}
         {activeTab === 'body' && request.protocol === 'http' ? <HttpBodyEditor onChange={onChange} request={request} /> : null}
         {activeTab === 'body' && request.protocol === 'graphql' ? <GraphqlEditor onChange={onChange} onLoadSchema={onLoadGraphqlSchema} request={request} schemaLoading={graphqlSchemaLoading} /> : null}
         {activeTab === 'body' && (request.protocol === 'websocket' || request.protocol === 'sse') ? <StreamSetup onChange={onChange} request={request} /> : null}
         {activeTab === 'body' && request.protocol === 'grpc' ? <GrpcEditor onChange={onChange} onLoadSchema={onLoadGrpcSchema} request={request} schema={grpcSchema} schemaLoading={grpcSchemaLoading} /> : null}
-        {activeTab === 'transport' ? <TransportEditor onChange={onChange} request={request} /> : null}
+        {activeTab === 'transport' ? <TransportEditor globalTimeoutMs={requestContext.requestTimeoutMs ?? 30_000} onChange={onChange} request={request} /> : null}
         {activeTab === 'scripts' ? (
           <div className="editor-stack">
             <div className="editor-toolbar"><span>Pre-request script</span><small>JavaScript</small></div>
@@ -644,9 +679,16 @@ function RequestPanel({
 }
 
 type ResponsePanelProps = {
+  allowHtmlPreviewRemoteResources: boolean;
+  allowHtmlPreviewScripts: boolean;
+  disableResponsePreviewLinks: boolean;
   response: HttpResponse;
   responseHistory: StoredResponse[];
+  responseFilter: string;
+  responseFilterHistory: string[];
+  responsePreviewMode: ResponsePreviewMode;
   selectedResponseId: string;
+  activeEnvironmentHistoryCount: number;
   protocol: Protocol;
   activeTab: ResponseTab;
   isSending: boolean;
@@ -659,6 +701,12 @@ type ResponsePanelProps = {
   cookies: CookieRecord[];
   requestUrl: string;
   onChangeCookies: (cookies: CookieRecord[]) => void;
+  onClearHistory: () => void;
+  onDeleteResponse: () => void;
+  onDownloadResponse: (prettify: boolean) => void;
+  onExportResponseDiagnostic: (kind: 'debug' | 'har') => void;
+  onApplyResponseFilter: (filter: string, remember: boolean) => void;
+  onChangeResponsePreviewMode: (mode: ResponsePreviewMode) => void;
   onSelectResponse: (id: string) => void;
   onTabChange: (tab: ResponseTab) => void;
   onStreamDraftChange: (value: string) => void;
@@ -694,9 +742,16 @@ function CookieEditor({ cookies, requestUrl, onChange }: { cookies: CookieRecord
 }
 
 function ResponsePanel({
+  allowHtmlPreviewRemoteResources,
+  allowHtmlPreviewScripts,
+  disableResponsePreviewLinks,
   response,
   responseHistory,
+  responseFilter,
+  responseFilterHistory,
+  responsePreviewMode,
   selectedResponseId,
+  activeEnvironmentHistoryCount,
   protocol,
   activeTab,
   isSending,
@@ -709,6 +764,12 @@ function ResponsePanel({
   cookies,
   requestUrl,
   onChangeCookies,
+  onClearHistory,
+  onDeleteResponse,
+  onDownloadResponse,
+  onExportResponseDiagnostic,
+  onApplyResponseFilter,
+  onChangeResponsePreviewMode,
   onSelectResponse,
   onTabChange,
   onStreamDraftChange,
@@ -716,15 +777,16 @@ function ResponsePanel({
   onSendStreamMessage,
 }: ResponsePanelProps) {
   const streaming = protocol === 'websocket' || protocol === 'sse';
-  const displayBody = prettyBody(response.body);
-  const lines = displayBody.split('\n');
+  const canPrettify = Object.entries(response.headers).some(([name, value]) => name.toLowerCase() === 'content-type' && /json/i.test(value));
+  const canExportHttpDiagnostics = protocol === 'http' || protocol === 'graphql';
+  const historySections = responseHistorySections(responseHistory);
   const timelineEntries = response.timeline?.length ? response.timeline : [
     { name: 'Text' as const, value: 'Request started', elapsedMs: 0 },
     { name: 'Text' as const, value: `Response ${response.status} ${response.statusText}`, elapsedMs: response.durationMs },
     ...(response.httpVersion ? [{ name: 'Text' as const, value: `Negotiated ${response.httpVersion}`, elapsedMs: response.durationMs }] : []),
     { name: 'Text' as const, value: 'Response body decoded', elapsedMs: response.durationMs },
   ];
-  const copyResponse = () => void navigator.clipboard.writeText(displayBody);
+  const copyResponse = () => void navigator.clipboard.writeText(response.body);
   return (
     <section className="response-panel">
       <div className="response-document-spacer" />
@@ -738,7 +800,7 @@ function ResponsePanel({
           {!streaming ? <span>{formatBytes(response.sizeBytes)}</span> : null}
           {!streaming && response.httpVersion ? <span>{response.httpVersion}</span> : null}
         </div>
-        {!streaming && responseHistory.length ? <label className="response-history-picker"><Icon name="history" size={15} /><select aria-label="Saved response" onChange={(event) => onSelectResponse(event.target.value)} value={selectedResponseId}>{selectedResponseId ? null : <option value="">Live response</option>}{responseHistory.map((saved) => <option key={saved.id} value={saved.id}>{new Date(saved.receivedAt).toLocaleString()} · {saved.status || 'ERR'} · {saved.durationMs} ms</option>)}</select></label> : <button aria-label="Response source" className="icon-button subtle" disabled type="button"><Icon name="globe" size={18} /></button>}
+        {!streaming && responseHistory.length ? <div className="response-history-controls"><label className="response-history-picker"><Icon name="history" size={15} /><select aria-label="Saved response" onChange={(event) => onSelectResponse(event.target.value)} value={selectedResponseId}>{selectedResponseId ? null : <option value="">Live response</option>}{historySections.map((section) => <optgroup key={section.label} label={section.label}>{section.responses.map((saved) => <option key={saved.id} value={saved.id}>{new Date(saved.receivedAt).toLocaleTimeString()} · {saved.status || 'ERR'} · {saved.requestSnapshot?.method ?? ''} {saved.requestUrl} · {saved.durationMs} ms · {formatBytes(saved.sizeBytes)}</option>)}</optgroup>)}</select></label><button aria-label="Delete saved response" disabled={!selectedResponseId} onClick={onDeleteResponse} type="button"><Icon name="trash" size={14} /></button><button aria-label="Clear environment history" disabled={!activeEnvironmentHistoryCount} onClick={onClearHistory} type="button">Clear {activeEnvironmentHistoryCount}</button></div> : <button aria-label="Response source" className="icon-button subtle" disabled type="button"><Icon name="globe" size={18} /></button>}
       </div>
       <nav className="tab-strip response-tabs" aria-label="Response details">
         {responseTabs.map((tab) => <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">{titleCase(tab)}{tab === 'tests' && scriptTests.length ? <small>{scriptTests.filter((test) => test.passed).length}/{scriptTests.length}</small> : tab === 'cookies' && cookies.length ? <small>{cookies.length}</small> : null}</button>)}
@@ -748,11 +810,7 @@ function ResponsePanel({
           <StreamConsole connected={streamStatus === 'connected'} draft={streamDraft} frameKind={streamFrameKind} messages={streamMessages} onDraftChange={onStreamDraftChange} onFrameKindChange={onStreamFrameKindChange} onSend={onSendStreamMessage} protocol={protocol} />
         ) : null}
         {activeTab === 'preview' && !streaming ? (
-          <div className="code-viewer">
-            {lines.map((line, index) => (
-              <div className="code-line" key={`${index}-${line}`}><span>{index + 1}</span><code>{line || ' '}</code></div>
-            ))}
-          </div>
+          <Suspense fallback={<div className="dialog-loading">Loading response preview…</div>}><ResponseBodyPreview allowHtmlPreviewRemoteResources={allowHtmlPreviewRemoteResources} allowHtmlPreviewScripts={allowHtmlPreviewScripts} disableResponsePreviewLinks={disableResponsePreviewLinks} filter={responseFilter} filterHistory={responseFilterHistory} onApplyFilter={onApplyResponseFilter} onDownload={() => onDownloadResponse(false)} onModeChange={onChangeResponsePreviewMode} previewMode={responsePreviewMode} response={response} responseKey={selectedResponseId || `${response.status}:${response.durationMs}:${response.sizeBytes}:${response.requestUrl ?? requestUrl}`} responseUrl={response.requestUrl ?? requestUrl} /></Suspense>
         ) : null}
         {activeTab === 'headers' ? (
           <div className="response-table">{Object.entries(response.headers).map(([name, value]) => <div key={name}><strong>{name}</strong><span>{value}</span></div>)}</div>
@@ -775,8 +833,12 @@ function ResponsePanel({
       <div className="panel-footer response-footer">
         <span>{streaming ? 'EVENT LOG' : protocol === 'grpc' ? 'PROTO JSON' : 'JSON'}</span>
         {!streaming ? <button onClick={copyResponse} type="button"><Icon name="copy" size={14} /> Copy</button> : null}
+        {!streaming ? <button onClick={() => onDownloadResponse(false)} type="button"><Icon name="download" size={14} /> Export raw</button> : null}
+        {!streaming && canPrettify ? <button onClick={() => onDownloadResponse(true)} type="button"><Icon name="download" size={14} /> Export pretty</button> : null}
+        {canExportHttpDiagnostics ? <button onClick={() => onExportResponseDiagnostic('debug')} type="button"><Icon name="download" size={14} /> Export debug</button> : null}
+        {canExportHttpDiagnostics ? <button onClick={() => onExportResponseDiagnostic('har')} type="button"><Icon name="download" size={14} /> Export HAR</button> : null}
         <span className="footer-spacer" />
-        <span>{streaming ? `${streamMessages.length} messages` : `${lines.length} lines`}</span>
+        <span>{streaming ? `${streamMessages.length} messages` : `${formatBytes(response.sizeBytes)} stored`}</span>
       </div>
     </section>
   );
@@ -867,12 +929,13 @@ type FolderDialogProps = {
   cookies: CookieRecord[];
   responses: StoredResponse[];
   requestContext: SendRequestContext;
+  showPasswords: boolean;
   onChange: (folder: RequestFolder) => void;
   onClose: () => void;
   onDelete: () => void;
 };
 
-function FolderDialog({ collection, folder, environment, cookies, responses, requestContext, onChange, onClose, onDelete }: FolderDialogProps) {
+function FolderDialog({ collection, folder, environment, cookies, responses, requestContext, showPasswords, onChange, onClose, onDelete }: FolderDialogProps) {
   const [tab, setTab] = useState<'variables' | 'headers' | 'auth' | 'scripts' | 'docs'>('variables');
   const authRequest = createBlankRequest(`folder-auth-${folder.id}`);
   authRequest.auth = folder.auth ?? authRequest.auth;
@@ -884,7 +947,7 @@ function FolderDialog({ collection, folder, environment, cookies, responses, req
     <div className="folder-modal-content">
       {tab === 'variables' ? <><p>Folder values override collection and selected environment values for every descendant request.</p><KeyValueEditor namePlaceholder="Variable" onChange={(variables) => onChange({ ...folder, environment: variables })} rows={folder.environment} /></> : null}
       {tab === 'headers' ? <><p>Closer folders and request headers override inherited headers with the same name.</p><KeyValueEditor namePlaceholder="Header" onChange={(headers) => onChange({ ...folder, headers })} rows={folder.headers} /></> : null}
-      {tab === 'auth' ? <><label className="folder-auth-toggle"><input checked={Boolean(folder.auth)} onChange={(event) => onChange({ ...folder, auth: event.target.checked ? authRequest.auth : undefined })} type="checkbox" /> Configure inheritable authentication</label>{folder.auth ? <AuthEditor cookies={cookies} environment={environment} onChange={(patch) => { if (patch.auth) onChange({ ...folder, auth: patch.auth }); }} request={authRequest} requestContext={requestContext} responses={responses} /> : <div className="empty-state compact"><Icon name="lock" size={24} /><strong>No folder authentication</strong><span>Enable it here, then choose “Inherit” on descendant requests.</span></div>}</> : null}
+      {tab === 'auth' ? <><label className="folder-auth-toggle"><input checked={Boolean(folder.auth)} onChange={(event) => onChange({ ...folder, auth: event.target.checked ? authRequest.auth : undefined })} type="checkbox" /> Configure inheritable authentication</label>{folder.auth ? <AuthEditor cookies={cookies} environment={environment} onChange={(patch) => { if (patch.auth) onChange({ ...folder, auth: patch.auth }); }} request={authRequest} requestContext={requestContext} responses={responses} showPasswords={showPasswords} /> : <div className="empty-state compact"><Icon name="lock" size={24} /><strong>No folder authentication</strong><span>Enable it here, then choose “Inherit” on descendant requests.</span></div>}</> : null}
       {tab === 'scripts' ? <div className="folder-script-grid"><section><header>Pre-request · root to request</header><CodeEditor ariaLabel="Folder pre-request script" onChange={(preRequestScript) => onChange({ ...folder, preRequestScript })} value={folder.preRequestScript} /></section><section><header>After-response · request to root</header><CodeEditor ariaLabel="Folder after-response script" onChange={(tests) => onChange({ ...folder, tests })} value={folder.tests} /></section></div> : null}
       {tab === 'docs' ? <div className="request-docs-editor"><header><strong>Folder documentation</strong><small>Markdown source</small></header><textarea aria-label="Folder documentation" onChange={(event) => onChange({ ...folder, documentation: event.target.value })} value={folder.documentation} /><section><small>Preview</small><pre>{folder.documentation || 'No documentation yet.'}</pre></section></div> : null}
     </div>
@@ -929,7 +992,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 14, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 13, preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30000, scriptTimeoutMs: 10000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L', 'generate-code': 'Mod+Shift+G' } },
+    format: 'brunomnia', version: 22, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], responseFilters: {}, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -1016,12 +1079,86 @@ export default function App() {
   activeRequestIdRef.current = workspace.activeRequestId;
   const selectedEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
   const activeEnvironment = useMemo(() => resolveEnvironment(workspace.environments, workspace.activeEnvironmentId), [workspace.activeEnvironmentId, workspace.environments]);
+  const proxyPreferences = useMemo(() => ({
+    enabled: workspace.preferences.proxyEnabled,
+    httpProxy: workspace.preferences.httpProxy,
+    httpsProxy: workspace.preferences.httpsProxy,
+    noProxy: workspace.preferences.noProxy,
+  }), [workspace.preferences.httpProxy, workspace.preferences.httpsProxy, workspace.preferences.noProxy, workspace.preferences.proxyEnabled]);
   const activeResponseHistory = useMemo(() => visibleResponseHistory(
     workspace.responses,
     active?.request.id ?? '',
     activeEnvironment?.id ?? '',
     workspace.preferences.filterResponsesByEnv,
   ), [active?.request.id, activeEnvironment?.id, workspace.preferences.filterResponsesByEnv, workspace.responses]);
+  const activeEnvironmentHistoryCount = activeResponseHistory.filter((saved) => saved.environmentId === activeEnvironment?.id).length;
+  const restoreSavedRequestVersion = (saved: StoredResponse) => {
+    void import('./lib/historicalRequest').then(({ restoreWorkspaceRequestSnapshot }) => {
+      setWorkspace((current) => restoreWorkspaceRequestSnapshot(saved, current));
+    }, () => undefined);
+  };
+  const showLatestSavedResponse = (responses: StoredResponse[], restoreRequest = false) => {
+    const latest = visibleResponseHistory(
+      responses,
+      active?.request.id ?? '',
+      activeEnvironment?.id ?? '',
+      workspace.preferences.filterResponsesByEnv,
+    )[0];
+    setSelectedResponseId(latest?.id ?? '');
+    setResponse(latest ?? mockResponse());
+    if (latest && restoreRequest) restoreSavedRequestVersion(latest);
+  };
+  const deleteSelectedSavedResponse = () => {
+    if (!selectedResponseId) return;
+    const responses = deleteSavedResponse(workspace.responses, selectedResponseId);
+    setWorkspace((current) => ({ ...current, responses: deleteSavedResponse(current.responses, selectedResponseId) }));
+    showLatestSavedResponse(responses, true);
+  };
+  const clearActiveEnvironmentHistory = () => {
+    if (!active || !activeEnvironment) return;
+    const responses = clearSavedResponseHistory(workspace.responses, active.request.id, activeEnvironment.id);
+    setWorkspace((current) => ({ ...current, responses: clearSavedResponseHistory(current.responses, active.request.id, activeEnvironment.id) }));
+    showLatestSavedResponse(responses);
+  };
+  const selectSavedResponse = (saved: StoredResponse) => {
+    setSelectedResponseId(saved.id);
+    setResponse(saved);
+    restoreSavedRequestVersion(saved);
+  };
+  const downloadResponseBody = (prettify: boolean) => {
+    void import('./lib/responseDownload').then(({ downloadResponseBody }) => downloadResponseBody(active?.request.name ?? 'response', response, prettify), () => undefined);
+  };
+  const exportResponseDiagnostic = (kind: 'debug' | 'har') => {
+    if (!active) return;
+    const saved = selectedResponseId ? activeResponseHistory.find((candidate) => candidate.id === selectedResponseId) : undefined;
+    const request = saved?.requestSnapshot?.id === active.request.id ? saved.requestSnapshot : active.request;
+    void import('./lib/responseDownload').then(({ downloadResponseDiagnostic }) => {
+      downloadResponseDiagnostic(request, response, kind, saved?.receivedAt);
+    }, () => undefined);
+  };
+  const applyResponseFilter = (filter: string, remember: boolean) => {
+    if (!active) return;
+    const requestId = active.request.id;
+    const value = filter.trim().slice(0, 2_000);
+    setWorkspace((current) => {
+      const previous = current.responseFilters?.[requestId] ?? { filter: '', history: [], previewMode: 'source' as const };
+      return {
+        ...current,
+        responseFilters: {
+          ...current.responseFilters,
+          [requestId]: { ...previous, filter: value, history: remember ? rememberResponseFilter(previous.history, value) : previous.history },
+        },
+      };
+    });
+  };
+  const changeResponsePreviewMode = (previewMode: ResponsePreviewMode) => {
+    if (!active) return;
+    const requestId = active.request.id;
+    setWorkspace((current) => {
+      const previous = current.responseFilters?.[requestId] ?? { filter: '', history: [], previewMode: 'source' as const };
+      return { ...current, responseFilters: { ...current.responseFilters, [requestId]: { ...previous, previewMode } } };
+    });
+  };
   const unlockedVault = useMemo(() => vaultVariables(vaultSession), [vaultSession]);
   const externalSecretResolver = useCallback((input: ExternalSecretInput) => resolveAuthorizedExternalSecret(workspace, input), [workspace]);
 
@@ -1061,7 +1198,6 @@ export default function App() {
     setWorkspace((current) => {
       const id = uid('request');
       const request = createBlankRequest(id);
-      request.transport.timeoutMs = current.preferences.requestTimeoutMs;
       if (current.collections.length === 0) {
         return { ...current, activeRequestId: id, collections: [{ id: uid('collection'), name: 'Requests', expanded: true, requests: [request], resourceOrder: [id] }] };
       }
@@ -1141,7 +1277,6 @@ export default function App() {
       if (!nextActive) nextActive = collections.flatMap((collection) => collection.requests)[0]?.id ?? '';
       if (!nextActive) {
         const request = createBlankRequest(uid('request'));
-        request.transport.timeoutMs = current.preferences.requestTimeoutMs;
         if (!collections.length) collections = [{ id: uid('collection'), name: 'Requests', expanded: true, requests: [request], resourceOrder: [request.id] }];
         else collections = collections.map((collection, index) => index === 0 ? { ...collection, requests: [request], resourceOrder: [...(collection.resourceOrder ?? (collection.folders ?? []).map((folder) => folder.id)), request.id] } : collection);
         nextActive = request.id;
@@ -1155,7 +1290,7 @@ export default function App() {
     const targetRequest = active.request;
     setGrpcSchemaLoading(true);
     try {
-      const schema = await loadGrpcSchema(targetRequest, activeEnvironment);
+      const schema = await loadGrpcSchema(targetRequest, activeEnvironment, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates);
       const service = schema.services.find((candidate) => candidate.fullName === targetRequest.grpc.service) ?? schema.services[0];
       const method = service?.methods.find((candidate) => candidate.name === targetRequest.grpc.method) ?? service?.methods[0];
       setGrpcSchemas((current) => ({ ...current, [targetRequest.id]: schema }));
@@ -1180,7 +1315,7 @@ export default function App() {
     const targetRequest = applyCollectionConfiguration(collection, active.request, activeEnvironment).request;
     setGraphqlSchemaLoading(true);
     try {
-      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver });
+      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver });
       setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => ({ ...collection, requests: collection.requests.map((request) => request.id === targetRequest.id ? { ...request, graphql: { ...request.graphql, schema, schemaEndpoint: targetRequest.url, schemaFetchedAt: new Date().toISOString() } } : request) })) }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1283,7 +1418,7 @@ export default function App() {
       streamSession.current = sessionId;
       streamProtocol.current = request.protocol;
       try {
-        await connectStream(request, { ...executionEnvironment, variables: [...executionEnvironment.variables, ...Object.entries(unlockedVault).map(([name, value]) => ({ id: `vault-${name}`, name, value, enabled: true }))] }, sessionId, onStreamEvent, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects);
+        await connectStream(request, { ...executionEnvironment, variables: [...executionEnvironment.variables, ...Object.entries(unlockedVault).map(([name, value]) => ({ id: `vault-${name}`, name, value, enabled: true }))] }, sessionId, onStreamEvent, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences);
         setStreamStatus('connected');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1302,7 +1437,7 @@ export default function App() {
     let scriptResponses = [...workspace.responses];
     const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const pluginCallbacks: PluginHostCallbacks = {
-      network: (pluginRequest) => sendRequest(pluginRequest, executionEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv }),
+      network: (pluginRequest) => sendRequest(pluginRequest, executionEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv }),
       prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
       readClipboard: () => navigator.clipboard.readText(),
       writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -1339,7 +1474,9 @@ export default function App() {
         collectionVariables: previous?.collectionVariables ?? initialScriptScopes.collectionVariables,
         collectionDisabled: previous?.collectionDisabled ?? initialScriptScopes.collectionDisabled,
         folders: previous?.folders ?? scriptFolderVariables(configured.folders),
-        readFile: workspace.preferences.allowScriptFileAccess && isTauri() ? readDesktopScriptFile : undefined,
+        readFile: workspace.preferences.allowScriptFileAccess && isTauri()
+          ? (path) => readDesktopScriptFile(path, workspace.preferences.dataFolders)
+          : undefined,
         vault: workspace.preferences.enableVaultInScripts ? unlockedVault : undefined,
         sendRequest: workspace.preferences.allowScriptRequests ? async (subrequest, subrequestVariables) => {
           const subresponse = await sendRequest(subrequest, {
@@ -1351,6 +1488,10 @@ export default function App() {
             preferredHttpVersion: workspace.preferences.preferredHttpVersion,
             maxRedirects: workspace.preferences.maxRedirects,
             followRedirects: workspace.preferences.followRedirects,
+            requestTimeoutMs: workspace.preferences.requestTimeoutMs,
+            validateCertificates: workspace.preferences.validateCertificates,
+            validateAuthCertificates: workspace.preferences.validateAuthCertificates,
+            proxy: proxyPreferences,
             maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
             filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
             vault: workspace.preferences.enableVaultInScripts ? unlockedVault : {},
@@ -1387,14 +1528,14 @@ export default function App() {
         const output = await invokeGrpc(callRequest, {
           ...executionEnvironment,
           variables: Object.entries({ ...requestVariables, ...unlockedVault }).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
-        });
+        }, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates);
         const body = JSON.stringify({ status: output.status, callType: output.callType, messages: output.messages }, null, 2);
         result = await pluginRuntime.afterResponse(executableRequest, { status: 200, statusText: `gRPC ${output.status}`, headers: { 'grpc-call-type': output.callType }, body, durationMs: output.durationMs, sizeBytes: new Blob([body]).size });
       } else {
         result = await sendRequest(executableRequest, {
           ...executionEnvironment,
           variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
-        }, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault: unlockedVault, externalSecret: externalSecretResolver });
+        }, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault: unlockedVault, externalSecret: externalSecretResolver });
       }
       const afterResponse = await runScript(executableRequest.tests, executableRequest, result, preRequest.localVariables, preRequest);
       setScriptTests(afterResponse.tests);
@@ -1414,6 +1555,7 @@ export default function App() {
         requestUrl: result.requestUrl ?? executableRequest.url,
         environmentId: executionEnvironment.id,
         receivedAt,
+        requestSnapshot: createRequestSnapshot(active.request),
       };
       setSelectedResponseId(workspace.preferences.maxHistoryResponses === 0 ? '' : storedResponse.id);
       setWorkspace((current) => ({
@@ -1549,7 +1691,7 @@ export default function App() {
     request.bodyMode = 'none';
     request.preRequestScript = '';
     request.tests = '';
-    const result = await sendRequest(request, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv });
+    const result = await sendRequest(request, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv });
     if (result.status < 200 || result.status >= 300) throw new Error(`Import URL returned ${result.status} ${result.statusText}.`);
     if (result.sizeBytes > 20_000_000) throw new Error('The import exceeds the 20 MB local conversion limit.');
     return result.body;
@@ -1591,7 +1733,7 @@ export default function App() {
   const codegenConfiguration = applyCollectionConfiguration(activeCollection, active.request, activeEnvironment);
 
   return (
-    <main className="app-shell" data-density={workspace.preferences.density} data-theme={workspace.activePluginTheme ? 'plugin' : workspace.preferences.theme} style={{ '--editor-font-size': `${workspace.preferences.fontSize}px` } as CSSProperties}>
+    <main className="app-shell" data-density={workspace.preferences.density} data-editor-indent-size={workspace.preferences.editorIndentSize} data-editor-indent-with-tabs={workspace.preferences.editorIndentWithTabs} data-editor-line-wrapping={workspace.preferences.editorLineWrapping} data-force-vertical-layout={workspace.preferences.forceVerticalLayout} data-theme={workspace.activePluginTheme ? 'plugin' : workspace.preferences.theme} style={{ '--editor-font-size': `${workspace.preferences.fontSize}px`, '--interface-font-size': `${workspace.preferences.interfaceFontSize}px`, '--font-sans': workspace.preferences.fontInterface.trim() || undefined, '--font-mono': workspace.preferences.fontMonospace.trim() || undefined, '--editor-indent-size': workspace.preferences.editorIndentSize, '--font-ligatures': workspace.preferences.fontVariantLigatures ? 'normal' : 'none' } as CSSProperties}>
       <header className="topbar">
         <div className="brand"><div className="brand-mark"><span /></div><strong>Brunomnia</strong></div>
         <button className="workspace-switcher" type="button"><Icon name="archive" size={17} /><span>{workspace.name}</span><Icon name="chevron-down" size={15} /></button>
@@ -1652,31 +1794,49 @@ export default function App() {
             onAddRequest={addRequest}
             onCancelScheduled={cancelScheduledSends}
             onGenerateCode={() => setShowCodeGeneration(true)}
+            onToggleBulkHeaderEditor={() => setWorkspace((current) => ({ ...current, preferences: { ...current.preferences, useBulkHeaderEditor: !current.preferences.useBulkHeaderEditor } }))}
+            onToggleBulkParametersEditor={() => setWorkspace((current) => ({ ...current, preferences: { ...current.preferences, useBulkParametersEditor: !current.preferences.useBulkParametersEditor } }))}
             onLoadGraphqlSchema={() => void loadActiveGraphqlSchema()}
             onLoadGrpcSchema={() => void loadActiveGrpcSchema()}
             onOpenSendOptions={() => setShowSendOptions(true)}
             onSend={() => void executeRequest()}
             onTabChange={setRequestTab}
             request={active.request}
-            requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver }}
+            requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver }}
             scheduledSendLabel={scheduledSendLabel}
+            showPasswords={workspace.preferences.showPasswords}
             storedResponses={workspace.responses}
             streamStatus={streamStatus}
             urlInputRef={urlInputRef}
             workspaceCookies={workspace.cookies}
+            useBulkHeaderEditor={workspace.preferences.useBulkHeaderEditor}
+            useBulkParametersEditor={workspace.preferences.useBulkParametersEditor}
           />
           <ResponsePanel
             activeTab={responseTab}
+            activeEnvironmentHistoryCount={activeEnvironmentHistoryCount}
+            allowHtmlPreviewRemoteResources={workspace.preferences.allowHtmlPreviewRemoteResources}
+            allowHtmlPreviewScripts={workspace.preferences.allowHtmlPreviewScripts}
+            disableResponsePreviewLinks={workspace.preferences.disableResponsePreviewLinks}
             cookies={workspace.cookies}
             isSending={isSending}
-            onSendStreamMessage={() => void sendStreamMessage()}
             onChangeCookies={(cookies) => setWorkspace((current) => ({ ...current, cookies }))}
-            onSelectResponse={(id) => { const saved = activeResponseHistory.find((candidate) => candidate.id === id); if (saved) { setSelectedResponseId(id); setResponse(saved); } }}
+            onClearHistory={clearActiveEnvironmentHistory}
+            onDeleteResponse={deleteSelectedSavedResponse}
+            onDownloadResponse={downloadResponseBody}
+            onExportResponseDiagnostic={exportResponseDiagnostic}
+            onApplyResponseFilter={applyResponseFilter}
+            onChangeResponsePreviewMode={changeResponsePreviewMode}
+            onSelectResponse={(id) => { const saved = activeResponseHistory.find((candidate) => candidate.id === id); if (saved) selectSavedResponse(saved); }}
+            onSendStreamMessage={() => void sendStreamMessage()}
             onStreamDraftChange={setStreamDraft}
             onStreamFrameKindChange={setStreamFrameKind}
             onTabChange={setResponseTab}
             protocol={active.request.protocol}
             response={response}
+            responseFilter={workspace.responseFilters?.[active.request.id]?.filter ?? ''}
+            responseFilterHistory={workspace.responseFilters?.[active.request.id]?.history ?? []}
+            responsePreviewMode={workspace.responseFilters?.[active.request.id]?.previewMode ?? 'source'}
             responseHistory={activeResponseHistory}
             requestUrl={response.requestUrl ?? active.request.url}
             selectedResponseId={selectedResponseId}
@@ -1687,7 +1847,7 @@ export default function App() {
             streamMessages={streamMessages}
             streamStatus={streamStatus}
           />
-        </div> : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver }} workspace={workspace} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : (
+        </div> : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver }} workspace={workspace} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : (
           <Suspense fallback={<div className="dialog-loading">Loading automation…</div>}><AutomationWorkbench
             activeEnvironment={activeEnvironment}
             onChangeWorkspace={(updater) => setWorkspace(updater)}
@@ -1723,7 +1883,7 @@ export default function App() {
 
       {showEnvironment ? <EnvironmentDialog activeId={workspace.activeEnvironmentId} environments={workspace.environments} onAdd={addEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} onDelete={deleteEnvironment} onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))} /> : null}
       {configuredCollection ? <CollectionDialog collection={configuredCollection} onChange={updateCollection} onClose={() => setCollectionEditor(undefined)} /> : null}
-      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={activeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver }} responses={workspace.responses} /> : null}
+      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={activeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
       {showSendOptions ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSendOptions(false)}>
         <section aria-labelledby="send-options-title" aria-modal="true" className="modal send-options-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
           <header><div><small>Request scheduling</small><h2 id="send-options-title">Send options</h2></div><button aria-label="Close" className="icon-button subtle" onClick={() => setShowSendOptions(false)} type="button"><Icon name="x" /></button></header>
@@ -1737,7 +1897,7 @@ export default function App() {
       </div> : null}
       {showImport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading import tools…</div></div>}><ImportDialog onApply={applyImport} onClose={() => setShowImport(false)} onFetchUrl={fetchImportUrl} /></Suspense> : null}
       {showExport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading export tools…</div></div>}><ExportDialog onClose={() => setShowExport(false)} workspace={workspace} /></Suspense> : null}
-      {showCodeGeneration ? <CodeGenerationDialog onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /> : null}
+      {showCodeGeneration ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading code generator…</div></div>}><CodeGenerationDialog onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /></Suspense> : null}
       {showPalette ? <CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => setWorkbenchSection('design')} onEnvironment={() => setShowEnvironment(true)} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => setWorkbenchSection('mocks')} onPreferences={() => setWorkbenchSection('preferences')} onRunner={() => setWorkbenchSection('runner')} /> : null}
     </main>
   );

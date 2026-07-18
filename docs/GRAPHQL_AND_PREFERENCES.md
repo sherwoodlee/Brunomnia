@@ -34,15 +34,24 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 
 - system, dark, or light appearance;
 - comfortable or compact density;
-- 11–20 px editor font size;
+- an off-by-default device-wide reveal choice for saved request/folder authentication and integration credentials;
+- separate 8–24 px interface and editor sizes plus optional interface/monospace font-family lists;
+- responsive or forced-vertical request/response layout;
+- text wrapping, tab/space indentation, a 1–16 indent width, and font ligatures;
 - a preferred native protocol of Default negotiation, HTTP 1.0, HTTP 1.1, HTTP/2, or HTTP/2 Prior Knowledge;
 - a device-local follow-redirect default that inherited requests can override with Always or Never;
 - a native maximum redirect count, where `0` follows none and `-1` allows redirects until the request or Event Stream handshake deadline;
 - a maximum outgoing timeline chunk size in KiB, defaulting to 10;
 - a per-request response history limit, where `0` keeps only the live result and `-1` retains all saved responses;
 - optional response-history filtering by active environment;
-- a 1–600 second default timeout for new requests, with an explicit apply-to-existing action;
-- a 1–60 second script deadline plus separate off-by-default secondary-request, local-file, and local-vault script authorities;
+- an upstream-compatible, off-by-default choice to disable clickable HTTP(S) links in JSON and Source Code response viewers;
+- an off-by-default remote-resource authority for HTML response previews;
+- an off-by-default inline-JavaScript mode for isolated HTML response previews;
+- a request timeout applied at execution time, defaulting to 30 seconds, with `0` disabling deadlines;
+- separate certificate-validation defaults for API requests and authentication flows;
+- system or manual HTTP/HTTPS proxy selection with a no-proxy list;
+- regular or bulk request-header and query-parameter editors;
+- a 1–60 second script deadline plus separate off-by-default secondary-request, local-file, and local-vault script authorities, with an explicit desktop data-folder allowlist for script attachments;
 - automatic GraphQL introspection;
 - request-deletion confirmation; and
 - eleven editable keyboard bindings.
@@ -51,9 +60,19 @@ Click a shortcut field and press a combination. `Mod` maps to Command on macOS a
 
 Preferences stay on this device. Split-YAML folder/Git projects omit them, encrypted-sync pulls preserve the current device's values, and imported workspace files start with safe defaults. Plugin themes take precedence while active.
 
-The HTTP version, follow-redirect default, and maximum-redirect preferences reach ordinary HTTP and GraphQL sends, Event Streams, collection runs, secondary script/plugin requests, artifact URL imports, OAuth token calls, and HTTP-backed integrations. Each request chooses **Use Preferences**, **Always**, or **Never** in its Transport tab. Always and Never take precedence over the device default; Never also wins over the numeric maximum. Security-sensitive internal requests such as GraphQL introspection, AI provider calls, MCP, and Konnect deliberately use Never.
+Authentication and integration secret inputs are masked by default. Use the adjacent Show/Hide control for a single field, or enable **Reveal saved passwords and tokens** to reveal request/folder authentication plus MCP bearer/Basic, AI-provider, and Konnect credential fields together on this device. The preference does not expose values outside the existing editor, change stored bytes, or reveal local-vault and encrypted-sync passphrases; those keep their own controls. Switching requests or MCP clients discards temporary field-level disclosure.
 
-Standard HTTP/2 negotiates and can fall back; Prior Knowledge requires an HTTP/2-capable peer. Native responses show the protocol actually used in the response summary and timeline. Browser development mode honors Use Preferences/Always/Never through Fetch, but leaves protocol selection and the redirect count ceiling to the browser.
+Desktop script file attachments require both the off-by-default file authority and at least one allowed data folder. Enter one absolute root per line; the value is normalized when the field loses focus. The native host canonicalizes roots and requested files before reading and rejects traversal or symlink resolution outside every root. The grant covers read-only script body, multipart, and PEM attachment hydration, not ordinary user-selected payloads or file writes. The CLI keeps its separate explicit `--allow-script-files` trust flag and does not inherit this device list.
+
+Header and query-parameter tabs can switch between regular rows and the device-persistent bulk editor directly. Bulk mode uses one `name: value` pair per line, splits only at the first colon, and preserves duplicate order. Matching current Insomnia, disabled/blank rows are omitted from the bulk text and the first bulk edit replaces row descriptions; path parameters and gRPC metadata remain in their structured editors.
+
+The request/response split remains horizontal until the responsive breakpoint unless **Stack request and response vertically** is enabled. Code surfaces honor the line-wrap and ligature choices immediately. Tab inserts either a literal tab or the configured 1–16 spaces; Shift-Tab removes one matching indentation level from the current or selected lines. These controls stay device-local and reset to current-compatible defaults on workspace import.
+
+Interface typography defaults to 13 px and the system sans-serif stack; editor typography defaults to 11 px and the system monospace stack. Optional comma-separated CSS font-family lists override each independently, and clearing a field restores the built-in stack. Existing Brunomnia editor-size values survive v20 migration, while new/imported workspaces use the current-compatible split defaults and both sizes clamp to 8–24 px.
+
+The HTTP version, redirect, timeout, and API certificate-validation preferences reach ordinary HTTP/GraphQL, Event Streams, gRPC, collection runs, secondary script/plugin requests, artifact URL imports, and integrations. Native HTTP/GraphQL and Event Streams also resolve the proxy preference. OAuth token requests resolve the same proxy plus the separate authentication validation preference. Requests can inherit or override timeout, redirect, validation, and native HTTP proxy choices. Workspace v14 and earlier timeouts, v15 and earlier validation booleans, and v16 and earlier nonempty request proxies migrate to explicit modes so upgrades preserve behavior.
+
+Standard HTTP/2 negotiates and can fall back; Prior Knowledge requires an HTTP/2-capable peer. Native responses show the negotiated protocol. With manual proxy disabled, reqwest retains its system/environment proxy discovery; manual mode selects HTTP or HTTPS proxy by resolved request URL and applies the no-proxy list. Browser development mode honors redirect/timeouts but owns TLS, proxy routing, protocol, and redirect limits. The CLI refuses manual proxies and disabled validation because Node Fetch exposes neither per-request authority.
 
 Saved responses remain device-local and are selectable from the response summary. The default keeps 20 per request. When environment filtering is enabled, the selector and response template tags see only results from the active global environment, and the retention limit applies independently to each request/environment pair. Changing a limit does not erase data immediately; the relevant scope is pruned the next time that request stores a response.
 

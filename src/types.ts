@@ -154,8 +154,11 @@ export type GrpcConfig = {
 export type TransportConfig = {
   followRedirects: boolean;
   followRedirectsMode: 'global' | 'on' | 'off';
+  timeoutMode: 'global' | 'custom';
   timeoutMs: number;
+  validateCertificatesMode: 'global' | 'on' | 'off';
   validateCertificates: boolean;
+  proxyMode: 'global' | 'custom' | 'disabled';
   proxyUrl: string;
   proxyExclusions: string;
   clientCertificatePem: string;
@@ -194,6 +197,7 @@ export type StoredResponse = HttpResponse & {
   requestUrl: string;
   environmentId: string;
   receivedAt: string;
+  requestSnapshot?: ApiRequest;
 };
 
 export type ResponseTimelineEntry = {
@@ -286,7 +290,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 14;
+  version: 22;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -299,6 +303,7 @@ export type Workspace = {
   imports: ImportRecord[];
   cookies: CookieRecord[];
   responses: StoredResponse[];
+  responseFilters?: Record<string, { filter: string; history: string[]; previewMode: ResponsePreviewMode }>;
   project: ProjectConfig;
   plugins: PluginRecord[];
   pluginData: Record<string, Record<string, string>>;
@@ -319,6 +324,13 @@ export type AppPreferences = {
   theme: 'system' | 'dark' | 'light';
   density: 'comfortable' | 'compact';
   fontSize: number;
+  interfaceFontSize: number;
+  fontInterface: string;
+  fontMonospace: string;
+  showPasswords: boolean;
+  allowHtmlPreviewRemoteResources: boolean;
+  allowHtmlPreviewScripts: boolean;
+  disableResponsePreviewLinks: boolean;
   preferredHttpVersion: PreferredHttpVersion;
   maxRedirects: number;
   followRedirects: boolean;
@@ -326,9 +338,23 @@ export type AppPreferences = {
   maxHistoryResponses: number;
   filterResponsesByEnv: boolean;
   requestTimeoutMs: number;
+  validateCertificates: boolean;
+  validateAuthCertificates: boolean;
+  proxyEnabled: boolean;
+  httpProxy: string;
+  httpsProxy: string;
+  noProxy: string;
+  useBulkHeaderEditor: boolean;
+  useBulkParametersEditor: boolean;
+  forceVerticalLayout: boolean;
+  editorIndentWithTabs: boolean;
+  editorIndentSize: number;
+  editorLineWrapping: boolean;
+  fontVariantLigatures: boolean;
   scriptTimeoutMs: number;
   allowScriptRequests: boolean;
   allowScriptFileAccess: boolean;
+  dataFolders: string[];
   enableVaultInScripts: boolean;
   autoFetchGraphqlSchema: boolean;
   confirmDestructive: boolean;
@@ -486,6 +512,7 @@ export type HttpResponse = {
   statusText: string;
   headers: Record<string, string>;
   body: string;
+  bodyBase64?: string;
   durationMs: number;
   sizeBytes: number;
   setCookies?: string[];
@@ -496,6 +523,7 @@ export type HttpResponse = {
 
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests' | 'docs';
 export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline' | 'tests';
+export type ResponsePreviewMode = 'friendly' | 'source' | 'raw';
 export type SidebarMode = 'collections' | 'history';
 export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins' | 'security' | 'integrations' | 'preferences';
 
