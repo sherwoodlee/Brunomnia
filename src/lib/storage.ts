@@ -284,12 +284,13 @@ const normalizeResponseFilters = (value: unknown, requestIds: Set<string>) => {
     if (!requestIds.has(requestId)) return [];
     const state = record(entry);
     const filter = stringValue(state?.filter).trim().slice(0, 2_000);
+    const previewMode = state?.previewMode === 'friendly' || state?.previewMode === 'raw' ? state.previewMode : 'source';
     const seen = new Set<string>();
     const history = (Array.isArray(state?.history) ? state.history : []).flatMap((candidate): string[] => {
       const normalized = stringValue(candidate).trim().slice(0, 2_000);
       return normalized && !seen.has(normalized) && Boolean(seen.add(normalized)) ? [normalized] : [];
     }).slice(0, 10);
-    return [[requestId, { filter, history }]];
+    return [[requestId, { filter, history, previewMode }]];
   }));
 };
 

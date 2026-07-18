@@ -102,15 +102,19 @@ describe('workspace migrations', () => {
   it('bounds per-request response filters and discards stale request metadata', () => {
     const workspace = cloneSeedWorkspace();
     const requestId = workspace.collections[0].requests[0].id;
+    const secondRequestId = workspace.collections[0].requests[1].id;
     workspace.responseFilters = {
-      [requestId]: { filter: `  ${'$'.repeat(2_100)}  `, history: [' $.items[*] ', '$.items[*]', ...Array.from({ length: 15 }, (_, index) => `$.item${index}`)] },
-      missing: { filter: '$.secret', history: ['$.secret'] },
+      [requestId]: { filter: `  ${'$'.repeat(2_100)}  `, history: [' $.items[*] ', '$.items[*]', ...Array.from({ length: 15 }, (_, index) => `$.item${index}`)], previewMode: 'raw' },
+      [secondRequestId]: { filter: '', history: [], previewMode: 'invalid' as 'source' },
+      missing: { filter: '$.secret', history: ['$.secret'], previewMode: 'friendly' },
     };
 
     const migrated = migrateWorkspace(workspace);
     expect(migrated.responseFilters?.[requestId].filter).toHaveLength(2_000);
     expect(migrated.responseFilters?.[requestId].history).toHaveLength(10);
     expect(migrated.responseFilters?.[requestId].history[0]).toBe('$.items[*]');
+    expect(migrated.responseFilters?.[requestId].previewMode).toBe('raw');
+    expect(migrated.responseFilters?.[secondRequestId].previewMode).toBe('source');
     expect(migrated.responseFilters?.missing).toBeUndefined();
   });
 

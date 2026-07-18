@@ -702,7 +702,24 @@ Compatibility bounds remain explicit: the dependency-free JSONPath baseline does
 
 Compatibility bounds remain explicit: Brunomnia currently loads decoded UTF-8 response text into its workspace state before the preview component receives it. This phase prevents expensive renderer transformations and rows but does not implement Insomnia's filesystem-backed body buffer, deferred body read, compressed/raw byte preservation, or byte-exact binary export. The 100 MiB guard remains absolute even after Always show. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 48 — remaining parity closure and release hardening
+## Milestone 48 — response preview modes (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Per-request mode selection | Complete baseline | The pinned friendly/source/raw values appear as Visual Preview, Source Code, and Raw Data and persist independently for each request |
+| Source mode | Complete baseline | Existing JSON/XML detection, JSONPath/XPath filtering, match evidence, and textual prettification remain available with line numbers |
+| Raw mode | Complete baseline | The exact stored UTF-8 string renders without prettification, active filters, or line numbers; Copy also uses the raw string |
+| Visual JSON/text baseline | Complete baseline | JSON retains safe filtered/prettified presentation and other non-HTML text falls back to the established source renderer |
+| Visual HTML baseline | Complete baseline | `text/html` renders in a sandboxed iframe with no permissions and an injected default-deny CSP that permits only inline style and data-backed images/fonts |
+| Mode/filter isolation | Complete | Raw and HTML visual modes do not evaluate hidden filters; switching back restores the bounded per-request filter state without mutating the response |
+| Large-response composition | Complete | The 5/100 MiB guard wraps every mode, while the mode selector remains available without forcing body evaluation |
+| Bundle boundary | Complete | Preview modes and visual rendering stay in the lazy response-preview chunk; the main production bundle remains below the warning threshold |
+| Executable coverage | Complete baseline | Storage tests cover valid raw persistence, invalid/legacy fallback to source, bounded filters, and stale-key removal; the clean TypeScript and app builds verify every mode branch |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 48 verification](QA_MILESTONE_48.md) |
+
+Compatibility bounds remain explicit: Visual Preview does not yet implement byte-backed image, PDF, audio, CSV-table, multipart, or charset-aware viewers. HTML visual mode intentionally blocks scripts, forms, privileged navigation, and remote resources; it is safer but less interactive than upstream's optional JavaScript WebView. Raw mode is exact only for Brunomnia's stored decoded UTF-8 string, not original response bytes. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 49 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

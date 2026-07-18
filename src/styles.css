@@ -615,6 +615,13 @@ kbd {
 .response-size-warning > span { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .response-size-warning > div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .response-size-warning button { background: var(--button); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 7px 10px; }
+.response-preview-shell { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.response-preview-toolbar { align-items: center; background: var(--panel-soft); border-bottom: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; min-height: 31px; padding: 4px 12px; }
+.response-preview-toolbar span { color: var(--muted); font: 9px var(--font-mono); text-transform: uppercase; }
+.response-preview-toolbar select { background: transparent; border: 0; color: var(--text); font: 10px var(--font-mono); outline: 0; }
+.response-preview-shell .code-viewer { flex: 1; }
+.raw-response .code-line > span { display: none; }
+.response-html-preview { background: white; border: 0; flex: 1; min-height: 0; width: 100%; }
 .footer-spacer { flex: 1; }
 
 .test-results { padding: 16px; }
