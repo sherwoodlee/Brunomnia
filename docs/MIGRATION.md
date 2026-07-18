@@ -1140,7 +1140,20 @@ Compatibility bounds remain explicit: this phase creates a new route in the curr
 
 Compatibility bounds remain explicit: overwrite targets the selected route in the selected mock server; Brunomnia does not yet expose the server/route chooser inside the request response pane. Binary bodies remain refused, and a running native mock instance must be restarted to consume route edits. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 76 — remaining parity closure and release hardening
+## Milestone 76 — reviewed specification-URL AI mocks (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` routes specification URLs through its model-backed mock-generation worker; its route model remains text-backed rather than binary |
+| Two-step consent | Complete baseline | **Fetch for review** downloads the source locally; only the separate mock-creation action sends the displayed source to the configured model |
+| Confined fetch | Complete | HTTP(S)-only URL validation, no URL user information, stored auth/cookie/script/environment/vault exclusion, configured transport policy, 2xx/text checks, and a post-buffer 5 MB response limit |
+| Disclosure and bounds | Complete | Credential-shaped URL query values are redacted from model context, source URLs lose fragments, exact fetched content is reviewable, and the context remains inside the 94,000-character source and 190,000-character composed-input bounds |
+| Executable coverage | Complete baseline | Focused tests prove URL normalization/refusal, credential rejection/redaction, text-type handling, context truncation, and empty/binary/oversize response errors |
+| Documentation and evidence | Complete | Updated [AI integration guide](MCP_AI_KONNECT.md), [parity ledger](PARITY.md), and [Milestone 76 verification](QA_MILESTONE_76.md) |
+
+Compatibility bounds remain explicit: fetch response size is checked after the shared HTTP transport buffers it, and arbitrary examples/secrets inside a fetched specification are model input exactly as displayed. Signed query parameters are used for the fetch but credential-shaped values are removed from model context. Brunomnia does not resolve multi-file remote references or add provider/plugin-specific dynamic mock syntax in this phase. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 77 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
