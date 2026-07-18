@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ApiRequest, CookieRecord, Environment, StoredResponse } from '../types';
 import { createOAuth2AuthorizationUrl, generateCodeVerifier } from '../lib/auth';
 import { fetchOAuth2Token, type SendRequestContext } from '../lib/http';
@@ -10,6 +10,7 @@ type AuthEditorProps = {
   cookies: CookieRecord[];
   responses: StoredResponse[];
   requestContext: SendRequestContext;
+  showPasswords: boolean;
   onChange: (patch: Partial<ApiRequest>) => void;
 };
 
@@ -19,19 +20,28 @@ type AuthFieldProps = {
   onChange: (value: string) => void;
   placeholder?: string;
   secret?: boolean;
+  showPasswords: boolean;
 };
 
-function AuthField({ label, value, onChange, placeholder, secret = false }: AuthFieldProps) {
-  return <label>{label}<input autoComplete="off" onChange={(event) => onChange(event.target.value)} placeholder={placeholder} spellCheck={false} type={secret ? 'password' : 'text'} value={value} /></label>;
+export const authInputType = (secret: boolean, showPasswords: boolean, revealed: boolean): 'password' | 'text' => secret && !showPasswords && !revealed ? 'password' : 'text';
+
+function AuthField({ label, value, onChange, placeholder, secret = false, showPasswords }: AuthFieldProps) {
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => {
+    if (showPasswords) setRevealed(false);
+  }, [showPasswords]);
+  const inputType = authInputType(secret, showPasswords, revealed);
+  const masked = inputType === 'password';
+  return <label>{label}<span className={`auth-secret-field${secret && !showPasswords ? ' secret' : ''}`}><input autoComplete="off" onChange={(event) => onChange(event.target.value)} placeholder={placeholder} spellCheck={false} type={inputType} value={value} />{secret && !showPasswords ? <button aria-label={masked ? `Show ${label}` : `Hide ${label}`} onClick={() => setRevealed((current) => !current)} type="button">{masked ? 'Show' : 'Hide'}</button> : null}</span></label>;
 }
 
-export function AuthEditor({ request, environment, cookies, responses, requestContext, onChange }: AuthEditorProps) {
+export function AuthEditor({ request, environment, cookies, responses, requestContext, showPasswords, onChange }: AuthEditorProps) {
   const auth = request.auth;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const update = (patch: Partial<ApiRequest['auth']>) => onChange({ auth: { ...auth, ...patch } });
   const field = (key: keyof ApiRequest['auth'], label: string, options: Pick<AuthFieldProps, 'placeholder' | 'secret'> = {}) => (
-    <AuthField key={key} label={label} value={String(auth[key])} onChange={(value) => update({ [key]: value })} {...options} />
+    <AuthField key={`${request.id}:${key}`} label={label} showPasswords={showPasswords} value={String(auth[key])} onChange={(value) => update({ [key]: value })} {...options} />
   );
 
   const copyAuthorizationUrl = async () => {

@@ -199,6 +199,7 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     interfaceFontSize: Math.min(24, Math.max(8, Number(source?.interfaceFontSize) || defaultPreferences.interfaceFontSize)),
     fontInterface: stringValue(source?.fontInterface).replace(/[\r\n]/g, ' ').slice(0, 512),
     fontMonospace: stringValue(source?.fontMonospace).replace(/[\r\n]/g, ' ').slice(0, 512),
+    showPasswords: source?.showPasswords === true,
     preferredHttpVersion: source?.preferredHttpVersion === 'http1.0'
       || source?.preferredHttpVersion === 'http1.1'
       || source?.preferredHttpVersion === 'http2'
@@ -480,7 +481,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 21,
+    version: 22,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
