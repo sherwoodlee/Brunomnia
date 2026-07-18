@@ -527,7 +527,22 @@ Compatibility bounds remain explicit: browser engines own TLS validation, CLI No
 
 Compatibility bounds remain explicit: reqwest's discovery is not claimed to reproduce Electron session PAC resolution. Browser engines own development-mode proxy routing. gRPC and WebSocket proxy transport remain open, and the CLI deliberately refuses manual proxy execution instead of silently bypassing it. Brunomnia's request-level Custom/Direct modes are an additional local capability; current Insomnia exposes proxy selection globally.
 
-## Milestone 36 — remaining parity closure and release hardening
+## Milestone 36 — bulk request-header and query-parameter editors (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Separate device-local header and query-parameter bulk-mode settings default off, matching the current upstream settings model |
+| Request-pane switching | Complete | Headers and query parameters toggle directly between Bulk Edit and Regular Edit; the selected mode persists across requests on the device |
+| Bulk syntax | Complete baseline | One `name: value` pair is parsed per nonblank line, only the first colon separates the value, and duplicate order is retained |
+| Row semantics | Complete baseline | Enabled nonblank rows are serialized; editing bulk text replaces the list with enabled name/value rows, matching upstream omission of disabled rows and descriptions |
+| Protocol breadth | Complete baseline | HTTP, GraphQL, WebSocket, and SSE request headers share the bulk editor; query rows remain the common ordered request model while path parameters and gRPC metadata stay structured |
+| Device-local safety | Complete | Managed projects and encrypted-sync pulls preserve local choices, imports reset them off, malformed values cannot enable them, and workspace v17 and earlier data migrates to v18 defaults |
+| Executable coverage | Complete baseline | Focused tests cover formatting, first-colon parsing, duplicate order, blank/disabled omission, default/import normalization, preference preservation, and interchange versioning; rendered QA remains intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 36 verification](QA_MILESTONE_36.md) |
+
+Compatibility bounds remain explicit: bulk mode intentionally cannot represent disabled rows or descriptions, so the first text edit removes them as current Insomnia does. Brunomnia uses its bounded text editor rather than CodeMirror template highlighting/autocomplete. Path parameters, gRPC metadata, folder headers, and environment rows remain in their structured editors.
+
+## Milestone 37 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

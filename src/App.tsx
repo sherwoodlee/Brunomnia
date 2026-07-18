@@ -23,6 +23,7 @@ import { shortcutMatches } from './lib/preferences';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, moveWorkspaceResource, orderedCollectionChildren, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
 import type { WorkspaceResourceMove } from './lib/resources';
 import { retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
+import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -217,6 +218,23 @@ function KeyValueEditor({
       </button>
     </div>
   );
+}
+
+function BulkKeyValueEditor({ rows, onChange, ariaLabel }: { rows: KeyValue[]; onChange: (rows: KeyValue[]) => void; ariaLabel: string }) {
+  const formatted = formatBulkKeyValues(rows);
+  const [draft, setDraft] = useState(formatted);
+  const lastEmitted = useRef(formatted);
+  useEffect(() => {
+    if (formatted === lastEmitted.current) return;
+    lastEmitted.current = formatted;
+    setDraft(formatted);
+  }, [formatted]);
+  return <CodeEditor ariaLabel={ariaLabel} value={draft} onChange={(value) => {
+    setDraft(value);
+    const parsed = parseBulkKeyValues(value, (index) => rows[index]?.id ?? uid('field'));
+    lastEmitted.current = formatBulkKeyValues(parsed);
+    onChange(parsed);
+  }} />;
 }
 
 type CollectionSidebarProps = {
@@ -482,6 +500,8 @@ type RequestPanelProps = {
   workspaceCookies: CookieRecord[];
   storedResponses: StoredResponse[];
   requestContext: SendRequestContext;
+  useBulkHeaderEditor: boolean;
+  useBulkParametersEditor: boolean;
   activeTab: RequestTab;
   isSending: boolean;
   streamStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
@@ -497,6 +517,8 @@ type RequestPanelProps = {
   onLoadGraphqlSchema: () => void;
   onAddRequest: () => void;
   onGenerateCode: () => void;
+  onToggleBulkHeaderEditor: () => void;
+  onToggleBulkParametersEditor: () => void;
   scheduledSendLabel: string;
   urlInputRef: RefObject<HTMLInputElement | null>;
 };
@@ -525,6 +547,10 @@ function RequestPanel({
   workspaceCookies,
   storedResponses,
   requestContext,
+  useBulkHeaderEditor,
+  useBulkParametersEditor,
+  onToggleBulkHeaderEditor,
+  onToggleBulkParametersEditor,
 }: RequestPanelProps) {
   const streamProtocol = request.protocol === 'websocket' || request.protocol === 'sse';
   const actionLabel = streamProtocol
@@ -609,11 +635,11 @@ function RequestPanel({
         {activeTab === 'params' ? (
           <div className="parameter-editors">
             <section><header><strong>Path parameters</strong><small>Replace matching {'{name}'} segments in the URL.</small></header><KeyValueEditor detailed rows={request.pathParams} onChange={(pathParams) => onChange({ pathParams })} namePlaceholder="Path parameter" /></section>
-            <section><header><strong>Query parameters</strong><small>Enabled rows are appended in order; duplicate names are preserved.</small></header><KeyValueEditor detailed rows={request.params} onChange={(params) => onChange({ params })} namePlaceholder="Query parameter" /></section>
+            <section><header><strong>Query parameters</strong><small>Enabled rows are appended in order; duplicate names are preserved.</small><button onClick={onToggleBulkParametersEditor} type="button">{useBulkParametersEditor ? 'Regular Edit' : 'Bulk Edit'}</button></header>{useBulkParametersEditor ? <div className="bulk-parameter-editor"><BulkKeyValueEditor ariaLabel="Bulk query parameters" rows={request.params} onChange={(params) => onChange({ params })} /></div> : <KeyValueEditor detailed rows={request.params} onChange={(params) => onChange({ params })} namePlaceholder="Query parameter" />}</section>
           </div>
         ) : null}
         {activeTab === 'headers' && request.protocol !== 'grpc' ? (
-          <KeyValueEditor detailed rows={request.headers} onChange={(headers) => onChange({ headers })} namePlaceholder="Header" />
+          <div className="editor-stack bulk-key-value-stack"><div className="editor-toolbar"><span>Request headers</span><button onClick={onToggleBulkHeaderEditor} type="button">{useBulkHeaderEditor ? 'Regular Edit' : 'Bulk Edit'}</button></div>{useBulkHeaderEditor ? <BulkKeyValueEditor ariaLabel="Bulk request headers" rows={request.headers} onChange={(headers) => onChange({ headers })} /> : <div className="bulk-regular-editor"><KeyValueEditor detailed rows={request.headers} onChange={(headers) => onChange({ headers })} namePlaceholder="Header" /></div>}</div>
         ) : null}
         {activeTab === 'headers' && request.protocol === 'grpc' ? (
           <KeyValueEditor rows={request.grpc.metadata} onChange={(metadata) => onChange({ grpc: { ...request.grpc, metadata } })} namePlaceholder="Metadata" />
@@ -929,7 +955,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 17, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 13, preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30000, validateCertificates: true, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', scriptTimeoutMs: 10000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L', 'generate-code': 'Mod+Shift+G' } },
+    format: 'brunomnia', version: 18, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 13, preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30000, validateCertificates: true, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', useBulkHeaderEditor: false, useBulkParametersEditor: false, scriptTimeoutMs: 10000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L', 'generate-code': 'Mod+Shift+G' } },
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -1660,6 +1686,8 @@ export default function App() {
             onAddRequest={addRequest}
             onCancelScheduled={cancelScheduledSends}
             onGenerateCode={() => setShowCodeGeneration(true)}
+            onToggleBulkHeaderEditor={() => setWorkspace((current) => ({ ...current, preferences: { ...current.preferences, useBulkHeaderEditor: !current.preferences.useBulkHeaderEditor } }))}
+            onToggleBulkParametersEditor={() => setWorkspace((current) => ({ ...current, preferences: { ...current.preferences, useBulkParametersEditor: !current.preferences.useBulkParametersEditor } }))}
             onLoadGraphqlSchema={() => void loadActiveGraphqlSchema()}
             onLoadGrpcSchema={() => void loadActiveGrpcSchema()}
             onOpenSendOptions={() => setShowSendOptions(true)}
@@ -1672,6 +1700,8 @@ export default function App() {
             streamStatus={streamStatus}
             urlInputRef={urlInputRef}
             workspaceCookies={workspace.cookies}
+            useBulkHeaderEditor={workspace.preferences.useBulkHeaderEditor}
+            useBulkParametersEditor={workspace.preferences.useBulkParametersEditor}
           />
           <ResponsePanel
             activeTab={responseTab}

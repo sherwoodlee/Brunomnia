@@ -44,6 +44,7 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - a request timeout applied at execution time, defaulting to 30 seconds, with `0` disabling deadlines;
 - separate certificate-validation defaults for API requests and authentication flows;
 - system or manual HTTP/HTTPS proxy selection with a no-proxy list;
+- regular or bulk request-header and query-parameter editors;
 - a 1–60 second script deadline plus separate off-by-default secondary-request, local-file, and local-vault script authorities;
 - automatic GraphQL introspection;
 - request-deletion confirmation; and
@@ -52,6 +53,8 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 Click a shortcut field and press a combination. `Mod` maps to Command on macOS and Control elsewhere. Duplicate bindings are shown and only the first matching action runs. Press Backspace to clear a binding or use **Reset defaults**.
 
 Preferences stay on this device. Split-YAML folder/Git projects omit them, encrypted-sync pulls preserve the current device's values, and imported workspace files start with safe defaults. Plugin themes take precedence while active.
+
+Header and query-parameter tabs can switch between regular rows and the device-persistent bulk editor directly. Bulk mode uses one `name: value` pair per line, splits only at the first colon, and preserves duplicate order. Matching current Insomnia, disabled/blank rows are omitted from the bulk text and the first bulk edit replaces row descriptions; path parameters and gRPC metadata remain in their structured editors.
 
 The HTTP version, redirect, timeout, and API certificate-validation preferences reach ordinary HTTP/GraphQL, Event Streams, gRPC, collection runs, secondary script/plugin requests, artifact URL imports, and integrations. Native HTTP/GraphQL and Event Streams also resolve the proxy preference. OAuth token requests resolve the same proxy plus the separate authentication validation preference. Requests can inherit or override timeout, redirect, validation, and native HTTP proxy choices. Workspace v14 and earlier timeouts, v15 and earlier validation booleans, and v16 and earlier nonempty request proxies migrate to explicit modes so upgrades preserve behavior.
 

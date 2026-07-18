@@ -222,6 +222,8 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     httpProxy: stringValue(source?.httpProxy).slice(0, 4_096),
     httpsProxy: stringValue(source?.httpsProxy).slice(0, 4_096),
     noProxy: stringValue(source?.noProxy).slice(0, 20_000),
+    useBulkHeaderEditor: source?.useBulkHeaderEditor === true,
+    useBulkParametersEditor: source?.useBulkParametersEditor === true,
     scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
     allowScriptRequests: source?.allowScriptRequests === true,
     allowScriptFileAccess: source?.allowScriptFileAccess === true,
@@ -464,7 +466,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 17,
+    version: 18,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

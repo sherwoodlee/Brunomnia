@@ -384,7 +384,15 @@ kbd {
 .parameter-editors > section > header { align-items: baseline; border-bottom: 1px solid var(--border-soft); display: flex; gap: 10px; padding: 13px 18px 0; }
 .parameter-editors > section > header strong { font-size: 10px; }
 .parameter-editors > section > header small { color: var(--muted); font-size: 9px; }
+.parameter-editors > section > header button { background: transparent; border: 0; color: var(--muted); font-size: 10px; margin-left: auto; padding: 0 0 8px; }
+.parameter-editors > section > header button:hover { color: var(--text); }
 .parameter-editors > section + section { border-top: 1px solid var(--border); }
+.bulk-parameter-editor { min-height: 220px; }
+.bulk-parameter-editor .editable-code-surface { min-height: 220px; }
+.bulk-key-value-stack { min-height: 260px; }
+.bulk-key-value-stack .editor-toolbar button { background: transparent; border: 0; color: var(--muted); font-size: 10px; padding: 6px 8px; }
+.bulk-key-value-stack .editor-toolbar button:hover { color: var(--text); }
+.bulk-regular-editor { min-height: 0; overflow: auto; }
 .add-row { align-items: center; background: transparent; border: 0; color: var(--muted); display: flex; font-size: 11px; gap: 5px; margin-top: 8px; padding: 6px 4px; }
 .add-row:hover { color: var(--text); }
 

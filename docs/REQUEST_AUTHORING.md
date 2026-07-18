@@ -15,6 +15,12 @@ The **Params** tab has separate path and query sections:
 
 OpenAPI 3 generation now retains `{path}` syntax and creates explicit path rows using parameter examples/defaults and descriptions. Postman path variables and Insomnia v4/v5 `pathParameters` map to the same model. Insomnia compatibility exports preserve these rows, custom methods, descriptions, and multiline values.
 
+## Bulk header and query editing
+
+Use **Bulk Edit** in the Headers tab or beside Query parameters to switch the device preference from structured rows to plain text. Each nonblank line is one `name: value` pair. Only the first colon separates the name, so values such as `https://example.test:8443/path` remain intact, and duplicate names keep their visible order.
+
+The toggle is device-local and applies when another request opens. **Regular Edit** restores the structured controls. Matching current Insomnia's bulk editors, only enabled nonblank rows are serialized; editing the bulk text replaces the list with enabled name/value rows, so disabled rows and descriptions that are not represented in the text are removed. Path parameters and gRPC metadata stay structured. Workspace v17 and earlier data safely defaults both bulk modes off during v18 migration, while workspace imports reset the device choices.
+
 ## Body formatting
 
 For JSON or text bodies, choose **Beautify** in the body toolbar. Valid JSON receives two-space indentation. XML-looking text, or text with an XML content type, receives conservative structural indentation. Invalid JSON and unrecognized plain text are left unchanged; the formatter does not send content anywhere.

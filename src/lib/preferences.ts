@@ -45,6 +45,8 @@ export const defaultPreferences: AppPreferences = {
   httpProxy: '',
   httpsProxy: '',
   noProxy: '',
+  useBulkHeaderEditor: false,
+  useBulkParametersEditor: false,
   scriptTimeoutMs: 10_000,
   allowScriptRequests: false,
   allowScriptFileAccess: false,
