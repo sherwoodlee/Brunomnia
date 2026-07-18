@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
 import type { StoredResponse } from '../types';
-import { clearSavedResponseHistory, deleteSavedResponse, retainResponseHistory, visibleResponseHistory } from './responseHistory';
+import { restoreRequestSnapshot, restoreWorkspaceRequestSnapshot } from './historicalRequest';
+import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, retainResponseHistory, visibleResponseHistory } from './responseHistory';
 
 const response = (id: string, requestId: string, environmentId: string, receivedAt: string): StoredResponse => ({
   id,
@@ -64,5 +66,47 @@ describe('response history preferences', () => {
     expect(remaining.map(({ id }) => id)).toEqual(['prod', 'other']);
     expect(visibleResponseHistory(remaining, 'request-a', 'dev', false)[0]?.id).toBe('prod');
     expect(visibleResponseHistory(remaining, 'request-a', 'dev', true)).toEqual([]);
+  });
+
+  it('captures an independent request version for a saved response', () => {
+    const request = createBlankRequest('request-a');
+    request.url = 'https://example.test/original';
+    const snapshot = createRequestSnapshot(request);
+    request.url = 'https://example.test/changed';
+
+    expect(snapshot.url).toBe('https://example.test/original');
+  });
+
+  it('restores a matching historical request without moving its current tree position', () => {
+    const current = createBlankRequest('request-a');
+    current.name = 'Current';
+    current.folderId = 'current-folder';
+    const historical = createBlankRequest('request-a');
+    historical.name = 'Historical';
+    historical.url = 'https://example.test/historical';
+    historical.folderId = 'old-folder';
+    const saved = { ...response('saved', 'request-a', 'dev', '2026-07-17T01:00:00.000Z'), requestSnapshot: createRequestSnapshot(historical) };
+
+    expect(restoreRequestSnapshot(saved, current)).toMatchObject({ id: 'request-a', name: 'Historical', url: 'https://example.test/historical', folderId: 'current-folder' });
+  });
+
+  it('ignores missing, mismatched, and malformed request versions', () => {
+    const current = createBlankRequest('request-a');
+    const missing = response('missing', 'request-a', 'dev', '2026-07-17T01:00:00.000Z');
+    const mismatched = { ...missing, requestSnapshot: createBlankRequest('request-b') };
+    const malformed = { ...missing, requestSnapshot: { id: 'request-a', name: 'Malformed' } } as StoredResponse;
+
+    expect(restoreRequestSnapshot(missing, current)).toBe(current);
+    expect(restoreRequestSnapshot(mismatched, current)).toBe(current);
+    expect(restoreRequestSnapshot(malformed, current)).toBe(current);
+  });
+
+  it('aborts a late restore after the active request changes', () => {
+    const workspace = cloneSeedWorkspace();
+    const original = workspace.collections[0].requests[0];
+    const saved = { ...response('saved', original.id, 'dev', '2026-07-17T01:00:00.000Z'), requestSnapshot: createRequestSnapshot(original) };
+    workspace.activeRequestId = workspace.collections[0].requests[1].id;
+
+    expect(restoreWorkspaceRequestSnapshot(saved, workspace)).toBe(workspace);
   });
 });

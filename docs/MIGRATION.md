@@ -627,7 +627,22 @@ Compatibility bounds remain explicit: arbitrary MCP headers and ordinary request
 
 Compatibility bounds remain explicit: selecting an older response does not restore the request version that produced it. Response compare/export/search and WebSocket/SSE history actions remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 43 — remaining parity closure and release hardening
+## Milestone 43 — historical request versions (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Request snapshot capture | Complete baseline | Every newly persisted direct-send, collection-run, and script-subrequest response carries an independent structured clone of the editable request version |
+| Historical selection | Complete baseline | Selecting a saved response restores the matching request's authoring state while preserving its stable ID and current folder position |
+| Delete fallback | Complete baseline | Deleting the selected response activates and restores the newest remaining visible version when a valid snapshot exists |
+| Legacy and hostile-data safety | Complete | Missing snapshots, snapshots for another request ID, and malformed snapshots remain response-only; asynchronous restoration aborts if the user switches requests |
+| Device-local boundary | Complete | Snapshots travel only with the existing device-local response store and remain omitted from managed projects and encrypted-sync revisions |
+| Bundle boundary | Complete | Snapshot validation/restoration is lazy-loaded in a 939-byte chunk; the 499,964-byte main chunk remains below Vite's warning threshold |
+| Executable coverage | Complete baseline | Focused tests cover independent cloning, matching restoration, folder preservation, invalid/mismatched refusal, storage survival, and secondary-request capture |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 43 verification](QA_MILESTONE_43.md) |
+
+Compatibility bounds remain explicit: legacy response entries cannot reconstruct request versions they never stored. Restoring a request version does not restore its historical collection/folder placement, selected environment, cookies, plugin state, or vault contents. Response comparison/export/search and persistent streaming histories remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 44 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

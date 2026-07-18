@@ -306,6 +306,6 @@ describe('script sandbox source validation', () => {
       requestUrl: request.url,
     }, '2026-07-16T00:00:00.000Z');
     expect(state.cookies[0]).toMatchObject({ name: 'session', value: 'abc', domain: 'api.example.com', secure: true });
-    expect(state.responses[0]).toMatchObject({ requestId: 'script-secondary', requestName: 'secondary', requestUrl: request.url, receivedAt: '2026-07-16T00:00:00.000Z' });
+    expect(state.responses[0]).toMatchObject({ requestId: 'script-secondary', requestName: 'secondary', requestUrl: request.url, receivedAt: '2026-07-16T00:00:00.000Z', requestSnapshot: { id: 'script-secondary', name: 'secondary' } });
   });
 });

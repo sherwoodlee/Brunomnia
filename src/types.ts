@@ -197,6 +197,7 @@ export type StoredResponse = HttpResponse & {
   requestUrl: string;
   environmentId: string;
   receivedAt: string;
+  requestSnapshot?: ApiRequest;
 };
 
 export type ResponseTimelineEntry = {

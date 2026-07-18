@@ -1,7 +1,7 @@
 import { createBlankRequest } from '../data/seed';
 import type { ApiRequest, CookieRecord, FilePayload, HttpResponse, KeyValue, MultipartPart, ScriptRunResult, StoredResponse } from '../types';
 import { storeResponseCookies } from './cookies';
-import { retainResponseHistory } from './responseHistory';
+import { createRequestSnapshot, retainResponseHistory } from './responseHistory';
 import { createScriptExpect } from './scriptExpect';
 import { createScriptModules } from './scriptModules';
 
@@ -75,7 +75,7 @@ export const applyScriptSubresponse = (
 ): { cookies: CookieRecord[]; responses: StoredResponse[] } => {
   const requestUrl = response.requestUrl ?? request.url;
   const nextCookies = request.transport.storeCookies ? storeResponseCookies(cookies, requestUrl, response.setCookies ?? []) : cookies;
-  const stored: StoredResponse = { ...response, id: crypto.randomUUID(), requestId: request.id, requestName: request.name, requestUrl, environmentId, receivedAt };
+  const stored: StoredResponse = { ...response, id: crypto.randomUUID(), requestId: request.id, requestName: request.name, requestUrl, environmentId, receivedAt, requestSnapshot: createRequestSnapshot(request) };
   return { cookies: nextCookies, responses: retainResponseHistory(responses, stored, maxHistoryResponses, filterResponsesByEnv) };
 };
 
