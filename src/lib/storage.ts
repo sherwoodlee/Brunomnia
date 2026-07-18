@@ -195,7 +195,10 @@ const normalizePreferences = (value: unknown): AppPreferences => {
   return {
     theme: source?.theme === 'dark' || source?.theme === 'light' ? source.theme : 'system',
     density: source?.density === 'compact' ? 'compact' : 'comfortable',
-    fontSize: Math.min(20, Math.max(11, Number(source?.fontSize) || defaultPreferences.fontSize)),
+    fontSize: Math.min(24, Math.max(8, Number(source?.fontSize) || defaultPreferences.fontSize)),
+    interfaceFontSize: Math.min(24, Math.max(8, Number(source?.interfaceFontSize) || defaultPreferences.interfaceFontSize)),
+    fontInterface: stringValue(source?.fontInterface).replace(/[\r\n]/g, ' ').slice(0, 512),
+    fontMonospace: stringValue(source?.fontMonospace).replace(/[\r\n]/g, ' ').slice(0, 512),
     preferredHttpVersion: source?.preferredHttpVersion === 'http1.0'
       || source?.preferredHttpVersion === 'http1.1'
       || source?.preferredHttpVersion === 'http2'
@@ -471,7 +474,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 19,
+    version: 20,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

@@ -27,6 +27,8 @@ Preferences can force the request and response panels into a vertical stack; oth
 
 Press Tab in a code surface to insert a literal tab when **Indent with tabs** is enabled or the configured number of spaces when it is disabled. A multiline selection indents every selected line; Shift-Tab removes one tab or up to one configured space indentation level. Workspace v18 and earlier data migrates to the current-compatible defaults of responsive layout, wrapping on, tabs on, two-column indentation, and ligatures off.
 
+Interface and editor typography are independent. Each accepts an optional comma-separated CSS font-family list and an 8–24 px size; blank family fields restore Brunomnia's built-in sans-serif or monospace stack. New/imported data defaults to 13 px interface and 11 px editor text. Existing editor-size values remain editor sizes during workspace v20 migration.
+
 ## Body formatting
 
 For JSON or text bodies, choose **Beautify** in the body toolbar. Valid JSON receives two-space indentation. XML-looking text, or text with an XML content type, receives conservative structural indentation. Invalid JSON and unrecognized plain text are left unchanged; the formatter does not send content anywhere.
