@@ -802,6 +802,40 @@ fn operation(
     })
 }
 
+fn push_error(output: &Output) -> String {
+    let stdout = output_text(&output.stdout);
+    let stderr = output_text(&output.stderr);
+    let detail = if stderr.is_empty() { stdout } else { stderr };
+    let normalized = detail.to_ascii_lowercase();
+    if normalized.contains("non-fast-forward")
+        || normalized.contains("fetch first")
+        || normalized.contains("remote contains work that you do not have locally")
+    {
+        return "Push rejected because the remote branch has newer commits. Pull and resolve remote changes before pushing again.".into();
+    }
+    if normalized.contains("authentication failed")
+        || normalized.contains("could not read username")
+        || normalized.contains("permission denied")
+        || normalized.contains("publickey")
+        || normalized.contains("write access")
+        || normalized.contains("http 401")
+        || normalized.contains("http 403")
+    {
+        return "Push requires valid Git authentication and write permission. Update the installed Git credential helper or SSH agent, then retry.".into();
+    }
+    if normalized.contains("repository not found") {
+        return "The Git remote repository was not found or is not accessible with the installed credentials.".into();
+    }
+    format!(
+        "Push failed: {}",
+        if detail.is_empty() {
+            "Git returned no error details."
+        } else {
+            &detail
+        }
+    )
+}
+
 pub fn git_stage(path: String, paths: Vec<String>) -> Result<GitStatusOutput, String> {
     let root = project_root(&path, false)?;
     if paths.is_empty() {
@@ -1274,6 +1308,9 @@ pub fn git_push(input: GitPushPullInput) -> Result<GitOperationOutput, String> {
         "Validate branch name",
     )?;
     let output = git_output(&root, &["push", "-u", remote, &branch])?;
+    if !output.status.success() {
+        return Err(push_error(&output));
+    }
     operation(&root, output, "Push", false)
 }
 
@@ -1787,6 +1824,68 @@ mod tests {
         })
         .unwrap();
         assert!(!pushed.status.can_push);
+    }
+
+    #[test]
+    fn explains_non_fast_forward_push_rejections_without_rewriting_local_work() {
+        let remote = tempfile::tempdir().unwrap();
+        git(remote.path(), &["init", "--bare", "-b", "main"]);
+
+        let primary = tempfile::tempdir().unwrap();
+        let root = primary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Primary Push Test"]);
+        git(root, &["config", "user.email", "primary-push@example.com"]);
+        fs::write(root.join("request.yaml"), "value: base\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "base request"]);
+        let remote_path = remote.path().to_string_lossy().into_owned();
+        git(root, &["remote", "add", "origin", &remote_path]);
+        git(root, &["push", "-u", "origin", "main"]);
+
+        let secondary_parent = tempfile::tempdir().unwrap();
+        let secondary = secondary_parent.path().join("secondary");
+        git(
+            secondary_parent.path(),
+            &["clone", &remote_path, secondary.to_string_lossy().as_ref()],
+        );
+        git(&secondary, &["config", "user.name", "Secondary Push Test"]);
+        git(
+            &secondary,
+            &["config", "user.email", "secondary-push@example.com"],
+        );
+        fs::write(secondary.join("remote.yaml"), "remote: newer\n").unwrap();
+        git(&secondary, &["add", "remote.yaml"]);
+        git(&secondary, &["commit", "-m", "remote request"]);
+        git(&secondary, &["push", "origin", "main"]);
+
+        fs::write(root.join("local.yaml"), "local: pending\n").unwrap();
+        git(root, &["add", "local.yaml"]);
+        git(root, &["commit", "-m", "local request"]);
+        let error = git_push(GitPushPullInput {
+            path: root.to_string_lossy().into_owned(),
+            remote: "origin".into(),
+            branch: "main".into(),
+        })
+        .unwrap_err();
+        assert!(error.contains("remote branch has newer commits"));
+        assert!(error.contains("Pull and resolve"));
+        assert_eq!(
+            output_text(
+                &require_success(
+                    git_output(root, &["log", "-1", "--format=%s"]).unwrap(),
+                    "Read local tip",
+                )
+                .unwrap()
+                .stdout,
+            ),
+            "local request"
+        );
+        assert!(
+            git_status(root.to_string_lossy().into_owned())
+                .unwrap()
+                .can_push
+        );
     }
 
     #[test]

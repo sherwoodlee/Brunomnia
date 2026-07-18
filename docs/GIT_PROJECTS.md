@@ -45,6 +45,8 @@ History reads the current local `HEAD`; opening it never fetches or changes the 
 
 Git status also reports whether the current branch has a tip ready to push. A tracked branch is ready when it is ahead of its upstream; a committed branch without an upstream is shown as **Unpublished branch** when at least one remote exists. The standalone **Push** action is disabled for detached/unborn heads, missing configured remotes, equal/behind-only tracked branches, and otherwise empty push state. Commit-and-push controls remain available because their commit step creates new work before push.
 
+Push failures classify common native Git evidence before reaching the workbench. Non-fast-forward/fetch-first rejection tells the user to pull and resolve remote changes; authentication, SSH key, HTTP 401/403, and write-access failures point to the installed credential helper or SSH agent; missing repositories distinguish absent/inaccessible remotes. Unknown failures retain bounded Git details. No classifier retries, force-pushes, rewrites the local tip, or hides a successfully created commit.
+
 ## Remote branches
 
 **Fetch and prune branches** refreshes the configured remote's branch refs without downloading tags. Remote-only branches then appear separately from local branches. **Fetch + checkout** refreshes the selected branch again, verifies the exact remote-tracking ref, creates a same-named local branch with upstream tracking, and reloads the project YAML from that checkout. Existing local branches remain in the local selector instead of being duplicated in the remote list.
