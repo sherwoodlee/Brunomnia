@@ -1059,7 +1059,22 @@ Compatibility bounds remain explicit: `ls-remote` proves reachability and any ac
 
 Compatibility bounds remain explicit: grouped commits are sequential and non-atomic. Files omitted from the reviewed plan remain unstaged. A failure can occur after earlier groups have committed, and Brunomnia reports rather than rewrites that history. Groups cannot be manually reordered/edited as a table, and there is no hunk assignment, squash, amend, signing, automatic retry, or provider-native push-permission proof. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 70 — remaining parity closure and release hardening
+## Milestone 70 — Git push-readiness state (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` computes and persists whether the current Git repository has changes ready to push, separately from its local log |
+| Native status | Complete baseline | Every Git status result now carries `canPush`: tracked branches require a positive ahead count; an untracked local branch requires a valid `HEAD` plus at least one remote |
+| Unpublished evidence | Complete baseline | A committed branch with a remote but no upstream is identified as **Unpublished branch** instead of looking identical to an unborn/no-remote state |
+| Guarded standalone push | Complete | **Push** requires the exact configured remote, a named branch, computed ready state, no current operation, and the existing plaintext-secret policy |
+| Commit workflows | Complete | Commit-and-push and grouped commit-and-push remain available while the branch is currently even with its upstream because their commit step creates the new pushable tip |
+| Executable coverage | Complete baseline | A local bare-remote fixture proves no-remote, unpublished, equal-upstream, one-ahead, and post-push states without external network access |
+| Bundle boundary | Complete | Status/UI additions remain in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 70 verification](QA_MILESTONE_70.md) |
+
+Compatibility bounds remain explicit: readiness is local-ref evidence, not a live remote or permission check. Remote-tracking refs may be stale until fetch, and branch protection, authentication, write authorization, non-fast-forward races, and server availability are evaluated only by preflight/push. No force push, automatic fetch, background polling, provider account, or hosted entitlement is introduced. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 71 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

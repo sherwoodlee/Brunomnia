@@ -71,6 +71,7 @@ pub struct GitStatusOutput {
     pub upstream: String,
     pub ahead: usize,
     pub behind: usize,
+    pub can_push: bool,
     pub files: Vec<GitFileStatus>,
     pub branches: Vec<String>,
     pub remote_branches: Vec<GitRemoteBranch>,
@@ -752,11 +753,22 @@ pub fn git_status(path: String) -> Result<GitStatusOutput, String> {
     let git = git_dir(&root);
     let remotes = list_remotes(&root);
     let remote_branches = list_remote_branches(&root, &remotes);
+    let has_head = git_output(&root, &["rev-parse", "--verify", "HEAD"])
+        .is_ok_and(|output| output.status.success());
+    let can_push = branch != "HEAD"
+        && !branch.is_empty()
+        && !remotes.is_empty()
+        && if upstream.is_empty() {
+            has_head
+        } else {
+            ahead > 0
+        };
     Ok(GitStatusOutput {
         branch,
         upstream,
         ahead,
         behind,
+        can_push,
         files,
         branches: list_branches(&root),
         remote_branches,
@@ -1728,6 +1740,53 @@ mod tests {
                 .unwrap_err()
                 .contains("does not exist")
         );
+    }
+
+    #[test]
+    fn reports_when_the_current_branch_has_a_tip_ready_to_push() {
+        let remote = tempfile::tempdir().unwrap();
+        git(remote.path(), &["init", "--bare", "-b", "main"]);
+
+        let local = tempfile::tempdir().unwrap();
+        let root = local.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Push Readiness Test"]);
+        git(root, &["config", "user.email", "push-ready@example.com"]);
+        fs::write(root.join("request.yaml"), "value: one\n").unwrap();
+        git(root, &["add", "request.yaml"]);
+        git(root, &["commit", "-m", "first request"]);
+        assert!(
+            !git_status(root.to_string_lossy().into_owned())
+                .unwrap()
+                .can_push
+        );
+
+        let remote_path = remote.path().to_string_lossy().into_owned();
+        git(root, &["remote", "add", "origin", &remote_path]);
+        assert!(
+            git_status(root.to_string_lossy().into_owned())
+                .unwrap()
+                .can_push
+        );
+        git(root, &["push", "-u", "origin", "main"]);
+        assert!(
+            !git_status(root.to_string_lossy().into_owned())
+                .unwrap()
+                .can_push
+        );
+
+        fs::write(root.join("request.yaml"), "value: two\n").unwrap();
+        git(root, &["commit", "-am", "second request"]);
+        let status = git_status(root.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(status.ahead, 1);
+        assert!(status.can_push);
+        let pushed = git_push(GitPushPullInput {
+            path: root.to_string_lossy().into_owned(),
+            remote: "origin".into(),
+            branch: "main".into(),
+        })
+        .unwrap();
+        assert!(!pushed.status.can_push);
     }
 
     #[test]
