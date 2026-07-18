@@ -12,6 +12,7 @@ export type GitStatus = {
   upstream: string;
   ahead: number;
   behind: number;
+  canPush: boolean;
   files: GitFileStatus[];
   branches: string[];
   remoteBranches: GitRemoteBranch[];

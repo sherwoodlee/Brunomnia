@@ -43,6 +43,8 @@ Grouped commits are intentionally sequential rather than transactional. If a lat
 
 History reads the current local `HEAD`; opening it never fetches or changes the repository. A history request is capped at 100 entries and the UI requests 35. Selected patches retain the native 2 MB text-output cap. Patch lookup accepts only the full hexadecimal identifier returned by the history command, so branch names and arbitrary revision expressions cannot cross that boundary.
 
+Git status also reports whether the current branch has a tip ready to push. A tracked branch is ready when it is ahead of its upstream; a committed branch without an upstream is shown as **Unpublished branch** when at least one remote exists. The standalone **Push** action is disabled for detached/unborn heads, missing configured remotes, equal/behind-only tracked branches, and otherwise empty push state. Commit-and-push controls remain available because their commit step creates new work before push.
+
 ## Remote branches
 
 **Fetch and prune branches** refreshes the configured remote's branch refs without downloading tags. Remote-only branches then appear separately from local branches. **Fetch + checkout** refreshes the selected branch again, verifies the exact remote-tracking ref, creates a same-named local branch with upstream tracking, and reloads the project YAML from that checkout. Existing local branches remain in the local selector instead of being duplicated in the remote list.
