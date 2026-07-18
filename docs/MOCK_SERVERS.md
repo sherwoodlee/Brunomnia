@@ -19,13 +19,28 @@ Mock bodies support a safe Liquid-style output subset. Values are inserted as pl
 
 JSON is parsed for `application/json` and `+json` media types. URL-encoded fields are parsed for `application/x-www-form-urlencoded`. Duplicate query/form names currently use the last value. Multipart field parsing is not yet implemented.
 
+## Bounded control tags
+
+The same response body can use this deliberately small control-flow subset:
+
+| Control | Example |
+| --- | --- |
+| Local assignment | `{% assign greeting = "Hello" %}{{ greeting }}` |
+| Conditional branch | `{% if req.queryParams.role == "admin" %}allowed{% else %}denied{% endif %}` |
+| Inverted branch | `{% unless req.body.disabled %}enabled{% endunless %}` |
+| Literal template text | `{% raw %}{{ not_rendered }}{% endraw %}` |
+
+Conditions support truthiness plus `==` and `!=` comparisons against another known value, a quoted string, a number, `true`, `false`, `nil`, or `null`. Assignments accept an ASCII letter/number/underscore name up to 100 characters, values up to 10,000 bytes, and at most 100 distinct locals; they last only for that response render. Empty and `false` values are falsey; other non-empty values are truthy. `raw` copies everything through its matching `endraw` without interpreting outputs or nested tags.
+
 ## Bounds and compatibility
 
 - Request bodies are inspected only after a method/path route match and only up to 1,000,000 bytes.
 - A non-UTF-8 or oversized request body exposes an empty `req.body`; headers, query, path, static body text, and default values still work.
+- Each response evaluates at most 1,000 template-token operations and 20 nested conditional levels. The unprocessed remainder stays literal when either limit is reached.
+- Dynamically inserted values contribute at most 5,000,000 response bytes. Static route text does not consume this expansion budget; an output and the following remainder stay literal if it would cross the limit.
 - Missing known variables render as an empty string unless `default` is present.
-- Unsupported output variables and Liquid tag syntax remain literal. Brunomnia does not evaluate arbitrary filters or code.
-- `assign`, `if`, `unless`, `raw`, multipart fields, and Faker variables remain tracked parity work.
+- Unsupported output variables and Liquid tag syntax remain literal. Brunomnia does not evaluate arbitrary filters, loops, includes, or code.
+- Multipart fields, Faker variables, `elsif`, broader operators/filters, and full Liquid semantics remain tracked parity work.
 - Native mock CORS remains permissive for local front-end development. Do not place secrets in mock response bodies.
 
 The implemented contract is reconciled against Kong's current [dynamic mocking documentation](https://developer.konghq.com/insomnia/dynamic-mocking/). Brunomnia's mock server is local and account-free; it does not depend on Insomnia Mockbin or a hosted service.
