@@ -42,7 +42,22 @@ describe('multipart response preview', () => {
 
   it('creates safe exact-text artifacts for named and unnamed files', () => {
     const parts = parseMultipartPreview(body, 'multipart/mixed; boundary=AaB03x').parts;
-    expect(createMultipartPartArtifact(parts[0], 42)).toEqual({ contents: '{"ok":true}', fileName: 'meta-42.json', mimeType: 'application/json' });
+    expect(new TextDecoder().decode(createMultipartPartArtifact(parts[0], 42).contents)).toBe('{"ok":true}');
+    expect(createMultipartPartArtifact(parts[0], 42)).toMatchObject({ fileName: 'meta-42.json', mimeType: 'application/json' });
     expect(createMultipartPartArtifact({ ...parts[1], filename: '../unsafe report.csv' }, 42).fileName).toBe('.._unsafe_report.csv');
+  });
+
+  it('retains exact binary part bytes and decodes declared part charsets', () => {
+    const prefix = new TextEncoder().encode('--bin\r\nContent-Disposition: attachment; name="payload"\r\nContent-Type: application/octet-stream\r\n\r\n');
+    const suffix = new TextEncoder().encode('\r\n--bin\r\nContent-Disposition: form-data; name="legacy"\r\nContent-Type: text/plain; charset=windows-1252\r\n\r\ncaf');
+    const closing = new TextEncoder().encode('\r\n--bin--\r\n');
+    const bytes = Uint8Array.from([...prefix, 0x00, 0xff, 0x80, ...suffix, 0xe9, ...closing]);
+
+    const parts = parseMultipartPreview(bytes, 'multipart/mixed; boundary=bin').parts;
+    expect(parts[0]).toMatchObject({ name: 'payload', contentType: 'application/octet-stream', sizeBytes: 3 });
+    expect(parts[0].bodyBytes).toEqual(Uint8Array.from([0x00, 0xff, 0x80]));
+    expect(createMultipartPartArtifact(parts[0], 42)).toMatchObject({ contents: Uint8Array.from([0x00, 0xff, 0x80]), fileName: 'payload-42.bin' });
+    expect(parts[1]).toMatchObject({ name: 'legacy', contentType: 'text/plain; charset=windows-1252', body: 'café', sizeBytes: 4 });
+    expect(parts[1].bodyBytes).toEqual(Uint8Array.from([0x63, 0x61, 0x66, 0xe9]));
   });
 });

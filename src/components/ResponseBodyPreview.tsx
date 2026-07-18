@@ -3,6 +3,7 @@ import { applyResponseBodyFilter, responseFilterLanguage } from '../lib/response
 import { parseCsvPreview } from '../lib/csvPreview';
 import { createMultipartPartArtifact, parseMultipartPreview, type MultipartPreviewPart } from '../lib/multipartPreview';
 import { prettyBody } from '../lib/request';
+import { responseBodyBytes } from '../lib/responseBytes';
 import { createResponseMediaArtifact, responseMedia, type ResponseMedia } from '../lib/responseMedia';
 import { responseSizeBand } from '../lib/responseSize';
 import type { HttpResponse, ResponsePreviewMode } from '../types';
@@ -58,7 +59,7 @@ function ResponseMediaPreview({ media, response }: { media: ResponseMedia; respo
 
 const downloadMultipartPart = (part: MultipartPreviewPart) => {
   const artifact = createMultipartPartArtifact(part);
-  const url = URL.createObjectURL(new Blob([artifact.contents], { type: artifact.mimeType }));
+  const url = URL.createObjectURL(new Blob([new Uint8Array(artifact.contents).buffer], { type: artifact.mimeType }));
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = artifact.fileName;
@@ -66,8 +67,9 @@ const downloadMultipartPart = (part: MultipartPreviewPart) => {
   URL.revokeObjectURL(url);
 };
 
-function MultipartResponsePreview({ body, contentType }: { body: string; contentType: string }) {
-  const preview = useMemo(() => parseMultipartPreview(body, contentType), [body, contentType]);
+function MultipartResponsePreview({ contentType, response }: { contentType: string; response: HttpResponse }) {
+  const bytes = useMemo(() => responseBodyBytes(response), [response.body, response.bodyBase64]);
+  const preview = useMemo(() => parseMultipartPreview(bytes, contentType), [bytes, contentType]);
   const [selectedId, setSelectedId] = useState(0);
   const [showHeaders, setShowHeaders] = useState(false);
   const selected = preview.parts.find((part) => part.id === selectedId) ?? preview.parts[0];
@@ -81,7 +83,7 @@ function MultipartResponsePreview({ body, contentType }: { body: string; content
     {preview.truncated ? <div className="response-multipart-message">Part list truncated at 100 sections.</div> : null}
     {showHeaders ? <div className="response-multipart-headers">{selected.headers.map((header, index) => <div key={`${header.name}-${index}`}><strong>{header.name}</strong><span>{header.value}</span></div>)}</div> : null}
     <div className="code-viewer response-part-body">{displayBody.split('\n').map((line, index) => <div className="code-line" key={`${index}-${line}`}><span>{index + 1}</span><code>{line || ' '}</code></div>)}</div>
-    {truncatedBody ? <div className="response-multipart-message">Part preview truncated at 1,000,000 decoded characters; Save part retains the complete stored text.</div> : null}
+    {truncatedBody ? <div className="response-multipart-message">Part preview truncated at 1,000,000 decoded characters; Save part retains the complete original bytes.</div> : null}
   </div>;
 }
 
@@ -101,7 +103,7 @@ function FilteredResponseBody({ response, filter, filterHistory, onApplyFilter, 
     const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
     return <iframe className="response-html-preview" sandbox="" srcDoc={`${policy}${response.body}`} title="Response visual preview" />;
   }
-  if (previewMode === 'friendly' && contentType.includes('multipart/')) return <MultipartResponsePreview body={response.body} contentType={contentType} />;
+  if (previewMode === 'friendly' && contentType.includes('multipart/')) return <MultipartResponsePreview contentType={contentType} response={response} />;
   if (previewMode === 'friendly' && contentType.includes('csv')) return <CsvResponsePreview body={response.body} />;
 
   return <>

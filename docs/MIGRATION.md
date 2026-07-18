@@ -750,7 +750,7 @@ Compatibility bounds remain explicit: delimiter inference is a deterministic fou
 | Executable coverage | Complete baseline | Focused tests cover quoted boundaries, CRLF/LF, folded headers, names/filenames, multiple parts, invalid/incomplete input, part limits, exact artifact content, and filename safety |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 50 verification](QA_MILESTONE_50.md) |
 
-Compatibility bounds remain explicit: parsing operates on Brunomnia's decoded UTF-8 response string, so arbitrary binary part bytes may already be lossy. Part rendering is textual only and does not recursively invoke the HTML/CSV/image/PDF/audio viewers. Header count and part count are bounded; filename parameters do not yet implement RFC 5987/2231 extended encoding. Save part uses the browser/WebView download path rather than a native save dialog. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: parsing operated on the decoded UTF-8 response string, so arbitrary binary part bytes could be lossy. Milestone 54 later replaces that parser and Save part artifact with exact entity-byte slices plus per-part charset decoding. Part rendering remains textual and does not recursively invoke the HTML/CSV/image/PDF/audio viewers. Header count and part count are bounded; filename parameters do not yet implement RFC 5987/2231 extended encoding. Save part uses the browser/WebView download path rather than a native save dialog. Rendered/browser interaction QA remains omitted by standing direction.
 
 ## Milestone 51 — byte-preserving HTTP responses (complete baseline)
 
@@ -801,7 +801,23 @@ Compatibility bounds remain explicit: routing trusts the declared Content-Type r
 
 Compatibility bounds remain explicit: decoding follows the declared charset and does not sniff encodings. Available pass-through labels depend on the operating-system WebView's Encoding Standard implementation; invalid/unsupported labels fall back to UTF-8 rather than bundling an independent codec table. Text diagnostics contain the decoded inspection string, while raw export retains decoded entity bytes. Filesystem-backed bodies, byte-backed recursive multipart parsing, content sniffing, and raw wire evidence remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 54 — remaining parity closure and release hardening
+## Milestone 54 — byte-backed multipart responses (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Entity-byte parsing | Complete baseline | Boundary and header separators are located in a one-code-unit-per-byte index string, then every part is sliced from the exact Phase 51 entity buffer |
+| Framing continuity | Complete | Quoted/unquoted boundaries, CRLF/LF, closing markers, preambles/epilogues, line-boundary enforcement, folded headers, and existing malformed-input errors retain Phase 50 behavior |
+| Exact part evidence | Complete | Each part carries original bytes and true byte count alongside its bounded headers, disposition metadata, filename, and decoded inspection string |
+| Part charsets | Complete baseline | Declared part Content-Type charsets use the shared Phase 53 alias/fallback decoder without altering the stored bytes |
+| Exact part export | Complete baseline | Save part writes the original byte slice through Blob/object URL, preserves safe supplied filenames, and adds useful JSON/HTML/XML/CSV/PDF/bin fallbacks |
+| Preview bounds | Complete | Parsing stays behind the outer 5/100 MiB response guard, keeps the 100-part/100-header caps, and truncates only the displayed 1,000,000-character text, never exported bytes |
+| Bundle boundary | Complete | Parser/viewer changes remain in the lazy response-preview chunk; the main bundle grows only 18 bytes to 498,231 bytes and remains warning-free |
+| Executable coverage | Complete baseline | Focused tests cover binary NUL/`0xff`/`0x80` payloads, exact artifact bytes, Windows-1252 part text, original byte sizes, and every prior boundary/header/error/limit case |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 54 verification](QA_MILESTONE_54.md) |
+
+Compatibility bounds remain explicit: the dependency-free parser materializes a one-byte-index string in addition to the already buffered response, unlike upstream's streaming `multiparty` adapter. Part headers are treated as byte-preserving Latin-1-style code units rather than implementing RFC 2047, and filename parameters do not implement RFC 5987/2231. Selected parts remain textual instead of recursively using friendly viewers; that is the next response phase. Save part uses the browser/WebView path rather than a native dialog. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 55 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
