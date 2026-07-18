@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { resolveFollowRedirects, resolveRequestTimeout } from './transport';
+import { resolveCertificateValidation, resolveFollowRedirects, resolveRequestTimeout } from './transport';
 
 describe('resolveFollowRedirects', () => {
   it('inherits the device default in global mode', () => {
@@ -31,5 +31,21 @@ describe('resolveRequestTimeout', () => {
     transport.timeoutMs = 4_321;
     expect(resolveRequestTimeout(transport, 30_000)).toBe(4_321);
     expect(transport.timeoutMs).toBe(4_321);
+  });
+});
+
+describe('resolveCertificateValidation', () => {
+  it('inherits the device validation preference in global mode', () => {
+    const transport = createBlankRequest('global-certificates').transport;
+    expect(resolveCertificateValidation(transport, true)).toBe(true);
+    expect(resolveCertificateValidation(transport, false)).toBe(false);
+  });
+
+  it('gives explicit request modes precedence', () => {
+    const transport = createBlankRequest('certificate-override').transport;
+    transport.validateCertificatesMode = 'on';
+    expect(resolveCertificateValidation(transport, false)).toBe(true);
+    transport.validateCertificatesMode = 'off';
+    expect(resolveCertificateValidation(transport, true)).toBe(false);
   });
 });

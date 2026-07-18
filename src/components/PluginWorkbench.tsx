@@ -110,6 +110,8 @@ export function PluginWorkbench({ workspace, onChangeWorkspace }: PluginWorkbenc
       maxRedirects: workspace.preferences.maxRedirects,
       followRedirects: workspace.preferences.followRedirects,
       requestTimeoutMs: workspace.preferences.requestTimeoutMs,
+      validateCertificates: workspace.preferences.validateCertificates,
+      validateAuthCertificates: workspace.preferences.validateAuthCertificates,
       maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
       filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
     }),

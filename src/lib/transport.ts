@@ -14,3 +14,9 @@ export const normalizeRequestTimeout = (value: unknown, fallback = 30_000) => {
 export const resolveRequestTimeout = (transport: TransportConfig, globalDefault = 30_000) => (
   normalizeRequestTimeout(transport.timeoutMode === 'custom' ? transport.timeoutMs : globalDefault)
 );
+
+export const resolveCertificateValidation = (transport: TransportConfig, globalDefault = true) => {
+  if (transport.validateCertificatesMode === 'on') return true;
+  if (transport.validateCertificatesMode === 'off') return false;
+  return globalDefault;
+};

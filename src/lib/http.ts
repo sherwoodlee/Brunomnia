@@ -5,7 +5,7 @@ import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
 import { renderTemplate } from './templates';
 import { buildResponseTimeline } from './timeline';
-import { resolveFollowRedirects, resolveRequestTimeout } from './transport';
+import { resolveCertificateValidation, resolveFollowRedirects, resolveRequestTimeout } from './transport';
 
 export type SendRequestContext = {
   cookies?: CookieRecord[];
@@ -14,6 +14,8 @@ export type SendRequestContext = {
   maxRedirects?: number;
   followRedirects?: boolean;
   requestTimeoutMs?: number;
+  validateCertificates?: boolean;
+  validateAuthCertificates?: boolean;
   maxTimelineDataSizeKB?: number;
   filterResponsesByEnv?: boolean;
   vault?: Record<string, string>;
@@ -117,6 +119,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
   const prepared = await renderRequest(hooked, variables, renderContext);
   const followRedirects = resolveFollowRedirects(prepared.transport, context.followRedirects ?? true);
   const timeoutMs = resolveRequestTimeout(prepared.transport, context.requestTimeoutMs ?? 30_000);
+  const validateCertificates = resolveCertificateValidation(prepared.transport, context.validateCertificates ?? true);
   const graphqlPayload = prepared.protocol === 'graphql' ? graphqlBody(prepared, variables) : undefined;
   const finish = async (response: HttpResponse) => context.pluginRuntime
     ? context.pluginRuntime.afterResponse(prepared, response)
@@ -174,6 +177,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
           ...prepared.transport,
           followRedirects,
           timeoutMs,
+          validateCertificates,
           preferredHttpVersion: context.preferredHttpVersion ?? 'default',
           maxRedirects: context.maxRedirects ?? 10,
         },
@@ -260,10 +264,11 @@ export const fetchOAuth2Token = async (
     formBody: fields.filter(([, value]) => value !== '').map(([name, value], index) => ({ id: `oauth2-${index}`, name, value, enabled: true })),
     multipartBody: [],
     auth: { ...request.auth, type: auth.credentialsInBody ? 'none' : 'basic', username: auth.clientId, password: auth.clientSecret, disabled: false },
+    transport: { ...request.transport, validateCertificatesMode: 'global' },
     preRequestScript: '',
     tests: '',
   };
-  const response = await sendRequest(tokenRequest, environment, context);
+  const response = await sendRequest(tokenRequest, environment, { ...context, validateCertificates: context.validateAuthCertificates ?? true });
   let payload: Record<string, unknown>;
   try { payload = JSON.parse(response.body) as Record<string, unknown>; }
   catch { payload = Object.fromEntries(new URLSearchParams(response.body).entries()); }

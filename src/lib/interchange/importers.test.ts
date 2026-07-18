@@ -132,6 +132,7 @@ cookieJar:
 curl --get 'https://api.example.com/search' --data-urlencode 'q=two words'`, 'requests.sh');
     expect(result.format).toBe('curl');
     expect(result.collections[0].requests[0].transport.timeoutMode).toBe('global');
+    expect(result.collections[0].requests[0].transport.validateCertificatesMode).toBe('global');
     expect(result.collections[0].requests).toHaveLength(2);
     expect(result.collections[0].requests[0]).toMatchObject({ method: 'POST', bodyMode: 'json' });
     expect(result.collections[0].requests[1].url).toContain('q=two%20words');
@@ -140,6 +141,11 @@ curl --get 'https://api.example.com/search' --data-urlencode 'q=two words'`, 're
   it('keeps an explicit cURL max-time as a custom request timeout', () => {
     const result = importArtifact("curl --max-time 0 'https://api.example.com/events'", 'timeout.sh');
     expect(result.collections[0].requests[0].transport).toMatchObject({ timeoutMode: 'custom', timeoutMs: 0 });
+  });
+
+  it('keeps cURL insecure as an explicit certificate override', () => {
+    const result = importArtifact("curl --insecure 'https://dev.example.com'", 'insecure.sh');
+    expect(result.collections[0].requests[0].transport).toMatchObject({ validateCertificates: false, validateCertificatesMode: 'off' });
   });
 
   it('imports OpenAPI 3 and Swagger 2 documents', () => {
@@ -242,7 +248,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(15);
+    expect(second.version).toBe(16);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

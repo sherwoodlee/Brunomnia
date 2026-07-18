@@ -39,6 +39,8 @@ export const defaultPreferences: AppPreferences = {
   maxHistoryResponses: 20,
   filterResponsesByEnv: false,
   requestTimeoutMs: 30_000,
+  validateCertificates: true,
+  validateAuthCertificates: true,
   scriptTimeoutMs: 10_000,
   allowScriptRequests: false,
   allowScriptFileAccess: false,
