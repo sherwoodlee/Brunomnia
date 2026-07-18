@@ -1088,7 +1088,20 @@ Compatibility bounds remain explicit: readiness is local-ref evidence, not a liv
 
 Compatibility bounds remain explicit: classification uses stable native Git text patterns and cannot normalize every localized/version/provider-specific message. Branch pushes do not include tags, so upstream's tag-exists category is not applicable to this command. Brunomnia does not auto-pull, retry, force push, rebase, rewrite commits, or add provider credentials. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 72 — remaining parity closure and release hardening
+## Milestone 72 — native nothing-to-push defense (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` checks `canPush` inside its push action and returns **Nothing to push** before remote mutation |
+| Native recheck | Complete | Push independently reloads status after validating the exact remote/branch and rejects an equal or behind-only current branch targeting its own tracked remote |
+| Network avoidance | Complete | The no-op result is returned before spawning `git push`, complementing rather than trusting the renderer's disabled state |
+| Alternate targets | Complete | A different explicit branch or a current branch tracking another remote is not rejected using unrelated current-upstream readiness evidence |
+| Executable coverage | Complete baseline | The local bare-remote readiness fixture now repeats push after an equalized successful push and receives **Nothing to push** |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 72 verification](QA_MILESTONE_72.md) |
+
+Compatibility bounds remain explicit: readiness uses last-known local remote-tracking refs and can be stale until fetch. Alternate explicit branch/remote pushes proceed to native Git because current-branch status cannot prove they are empty. No background fetch, force push, retry, or provider call is added. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 73 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
