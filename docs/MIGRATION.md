@@ -1114,7 +1114,20 @@ Compatibility bounds remain explicit: readiness uses last-known local remote-tra
 
 Compatibility bounds remain explicit: redaction recognizes credential-shaped fields but is not a general data-loss-prevention system, so users must review domain data in the displayed context. URL fetching, direct response-to-route conversion without AI, binary response interpretation, `.gguf` loading, and hosted/self-host mock deployment remain open. No context is attached until selected. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 74 — remaining parity closure and release hardening
+## Milestone 74 — direct response-to-mock route creation (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes an active-response extractor that derives a URL pathname and omits `Content-Length` before creating or replacing a mock route |
+| Local direct conversion | Complete baseline | The selected local mock server can receive a new editable route from the active request's latest response without an account, model, network call, or entitlement check |
+| Route fidelity | Complete | Saved request method, response URL path/status/text body, and response headers are copied; decoded-body length, encoding, connection, and transfer headers are omitted |
+| Safety bounds | Complete | Binary responses are refused instead of lossy string conversion, text bodies are capped at 10,000,000 characters, unknown methods fall back to GET, and invalid URLs fall back to `/new-route` |
+| Executable coverage | Complete baseline | Focused tests prove method/path/status/body/header conversion, transport-header removal, non-UTF text support, invalid-source fallbacks, and binary/oversize refusal |
+| Documentation and evidence | Complete | Updated [AI integration guide](MCP_AI_KONNECT.md), [parity ledger](PARITY.md), and [Milestone 74 verification](QA_MILESTONE_74.md) |
+
+Compatibility bounds remain explicit: this phase creates a new route in the currently selected server; response-to-existing-route overwrite and server selection from the request response pane remain open. Mock routes remain text-backed, so binary bodies are refused. Running native mock instances still require restart to consume route edits. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 75 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

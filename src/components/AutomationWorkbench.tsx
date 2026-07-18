@@ -23,6 +23,7 @@ import { runStreamSample } from '../lib/protocol';
 import { resolveAuthorizedExternalSecret } from '../lib/security';
 import { generateMockWithAi } from '../lib/ai';
 import { buildMockAiContext, composeMockAiInput, findActiveRequest, findLatestResponseForActiveRequest, type MockAiContextSource } from '../lib/mockAiContext';
+import { createMockRouteFromResponse } from '../lib/mockRouteFromResponse';
 import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
 import { Icon } from './Icon';
 import { CodeEditor } from './ProtocolEditors';
@@ -347,6 +348,15 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setGenerating(false); }
   };
+  const createRouteFromLatestResponse = () => {
+    if (!server || !latestResponse) return;
+    setError('');
+    try {
+      const created = createMockRouteFromResponse(latestResponse);
+      updateServer({ routes: [...server.routes, created] });
+      setActiveRouteId(created.id);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+  };
 
   if (!server) return <AutomationEmpty title="No mock servers" action="Create local mock" onAction={() => {
     const created: MockServer = { id: uid('mock'), name: 'Local mock', host: '127.0.0.1', port: 4010, routes: [] };
@@ -359,6 +369,7 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
       <AutomationHeader eyebrow="Mock" title="Local mock servers" subtitle="Serve deterministic scenarios from this device with no account or hosted dependency.">
         <select aria-label="Mock server" value={server.id} onChange={(event) => { setActiveId(event.target.value); const next = workspace.mockServers.find((candidate) => candidate.id === event.target.value); setActiveRouteId(next?.routes[0]?.id ?? ''); }}>{workspace.mockServers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         <button className="secondary-action" disabled={!workspace.ai.enabled || !workspace.ai.mockGeneration} onClick={() => setShowAi((current) => !current)} type="button">AI generate</button>
+        <button className="secondary-action" disabled={!latestResponse} onClick={createRouteFromLatestResponse} title={latestResponse ? `Create a route from ${latestResponse.status} ${latestResponse.statusText}` : 'Send the active request first'} type="button">Response → route</button>
         <button className={activeRun ? 'danger-action' : 'primary-action'} onClick={() => void toggleServer()} type="button">{activeRun ? 'Stop server' : 'Start server'}</button>
       </AutomationHeader>
       <div className="mock-content">
