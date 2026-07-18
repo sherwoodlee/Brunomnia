@@ -12,7 +12,6 @@ import { readDesktopScriptFile } from './lib/scriptFiles';
 import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import { AuthEditor } from './components/AuthEditor';
-import { CodeGenerationDialog } from './components/CodeGenerationDialog';
 import { applyArtifactImport } from './lib/interchange/apply';
 import type { ArtifactImport } from './lib/interchange/types';
 import { writeProject } from './lib/project';
@@ -62,6 +61,7 @@ const PluginWorkbench = lazy(() => import('./components/PluginWorkbench').then((
 const SecurityWorkbench = lazy(() => import('./components/SecurityWorkbench').then((module) => ({ default: module.SecurityWorkbench })));
 const IntegrationWorkbench = lazy(() => import('./components/IntegrationWorkbench').then((module) => ({ default: module.IntegrationWorkbench })));
 const PreferencesWorkbench = lazy(() => import('./components/PreferencesWorkbench').then((module) => ({ default: module.PreferencesWorkbench })));
+const CodeGenerationDialog = lazy(() => import('./components/CodeGenerationDialog').then((module) => ({ default: module.CodeGenerationDialog })));
 
 const requestTabs: RequestTab[] = ['params', 'headers', 'auth', 'body', 'transport', 'scripts', 'tests', 'docs'];
 const responseTabs: ResponseTab[] = ['preview', 'headers', 'cookies', 'timeline', 'tests'];
@@ -690,6 +690,7 @@ type ResponsePanelProps = {
   onChangeCookies: (cookies: CookieRecord[]) => void;
   onClearHistory: () => void;
   onDeleteResponse: () => void;
+  onDownloadResponse: (prettify: boolean) => void;
   onSelectResponse: (id: string) => void;
   onTabChange: (tab: ResponseTab) => void;
   onStreamDraftChange: (value: string) => void;
@@ -743,6 +744,7 @@ function ResponsePanel({
   onChangeCookies,
   onClearHistory,
   onDeleteResponse,
+  onDownloadResponse,
   onSelectResponse,
   onTabChange,
   onStreamDraftChange,
@@ -752,6 +754,7 @@ function ResponsePanel({
   const streaming = protocol === 'websocket' || protocol === 'sse';
   const displayBody = prettyBody(response.body);
   const lines = displayBody.split('\n');
+  const canPrettify = Object.entries(response.headers).some(([name, value]) => name.toLowerCase() === 'content-type' && /json/i.test(value));
   const timelineEntries = response.timeline?.length ? response.timeline : [
     { name: 'Text' as const, value: 'Request started', elapsedMs: 0 },
     { name: 'Text' as const, value: `Response ${response.status} ${response.statusText}`, elapsedMs: response.durationMs },
@@ -809,6 +812,8 @@ function ResponsePanel({
       <div className="panel-footer response-footer">
         <span>{streaming ? 'EVENT LOG' : protocol === 'grpc' ? 'PROTO JSON' : 'JSON'}</span>
         {!streaming ? <button onClick={copyResponse} type="button"><Icon name="copy" size={14} /> Copy</button> : null}
+        {!streaming ? <button onClick={() => onDownloadResponse(false)} type="button"><Icon name="download" size={14} /> Export raw</button> : null}
+        {!streaming && canPrettify ? <button onClick={() => onDownloadResponse(true)} type="button"><Icon name="download" size={14} /> Export pretty</button> : null}
         <span className="footer-spacer" />
         <span>{streaming ? `${streamMessages.length} messages` : `${lines.length} lines`}</span>
       </div>
@@ -1096,6 +1101,9 @@ export default function App() {
     setSelectedResponseId(saved.id);
     setResponse(saved);
     restoreSavedRequestVersion(saved);
+  };
+  const downloadResponseBody = (prettify: boolean) => {
+    void import('./lib/responseDownload').then(({ downloadResponseBody }) => downloadResponseBody(active?.request.name ?? 'response', response, prettify), () => undefined);
   };
   const unlockedVault = useMemo(() => vaultVariables(vaultSession), [vaultSession]);
   const externalSecretResolver = useCallback((input: ExternalSecretInput) => resolveAuthorizedExternalSecret(workspace, input), [workspace]);
@@ -1758,6 +1766,7 @@ export default function App() {
             onChangeCookies={(cookies) => setWorkspace((current) => ({ ...current, cookies }))}
             onClearHistory={clearActiveEnvironmentHistory}
             onDeleteResponse={deleteSelectedSavedResponse}
+            onDownloadResponse={downloadResponseBody}
             onSelectResponse={(id) => { const saved = activeResponseHistory.find((candidate) => candidate.id === id); if (saved) selectSavedResponse(saved); }}
             onSendStreamMessage={() => void sendStreamMessage()}
             onStreamDraftChange={setStreamDraft}
@@ -1825,7 +1834,7 @@ export default function App() {
       </div> : null}
       {showImport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading import tools…</div></div>}><ImportDialog onApply={applyImport} onClose={() => setShowImport(false)} onFetchUrl={fetchImportUrl} /></Suspense> : null}
       {showExport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading export tools…</div></div>}><ExportDialog onClose={() => setShowExport(false)} workspace={workspace} /></Suspense> : null}
-      {showCodeGeneration ? <CodeGenerationDialog onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /> : null}
+      {showCodeGeneration ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading code generator…</div></div>}><CodeGenerationDialog onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /></Suspense> : null}
       {showPalette ? <CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => setWorkbenchSection('design')} onEnvironment={() => setShowEnvironment(true)} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => setWorkbenchSection('mocks')} onPreferences={() => setWorkbenchSection('preferences')} onRunner={() => setWorkbenchSection('runner')} /> : null}
     </main>
   );
