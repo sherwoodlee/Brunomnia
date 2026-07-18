@@ -80,7 +80,10 @@ fn script_file_mime(path: &std::path::Path) -> &'static str {
     }
 }
 
-fn read_script_file_path(path: String) -> Result<models::FilePayload, String> {
+fn read_script_file_path(
+    path: String,
+    allowed_roots: Vec<String>,
+) -> Result<models::FilePayload, String> {
     let source = std::path::PathBuf::from(path.trim());
     if source.as_os_str().is_empty() {
         return Err("Script file path cannot be empty.".into());
@@ -88,6 +91,31 @@ fn read_script_file_path(path: String) -> Result<models::FilePayload, String> {
     let canonical = source
         .canonicalize()
         .map_err(|error| format!("Unable to open script file {}: {error}", source.display()))?;
+    let canonical_roots = allowed_roots
+        .iter()
+        .filter_map(|root| {
+            let root = std::path::PathBuf::from(root.trim());
+            if root.as_os_str().is_empty() || !root.is_absolute() {
+                return None;
+            }
+            let canonical_root = root.canonicalize().ok()?;
+            canonical_root.is_dir().then_some(canonical_root)
+        })
+        .collect::<Vec<_>>();
+    if canonical_roots.is_empty() {
+        return Err(
+            "No valid allowed data folders are configured in Preferences → Request scripts.".into(),
+        );
+    }
+    if !canonical_roots
+        .iter()
+        .any(|root| canonical.starts_with(root))
+    {
+        return Err(format!(
+            "Script file is outside every allowed data folder: {}",
+            canonical.display()
+        ));
+    }
     let metadata = canonical.metadata().map_err(|error| {
         format!(
             "Unable to inspect script file {}: {error}",
@@ -128,8 +156,11 @@ fn read_script_file_path(path: String) -> Result<models::FilePayload, String> {
 }
 
 #[tauri::command]
-async fn script_read_file(path: String) -> Result<models::FilePayload, String> {
-    blocking(move || read_script_file_path(path)).await
+async fn script_read_file(
+    path: String,
+    allowed_roots: Vec<String>,
+) -> Result<models::FilePayload, String> {
+    blocking(move || read_script_file_path(path, allowed_roots)).await
 }
 
 async fn blocking<T, F>(operation: F) -> Result<T, String>
@@ -484,7 +515,12 @@ mod script_file_tests {
         let directory = tempfile::tempdir().unwrap();
         let payload_path = directory.path().join("payload.csv");
         fs::write(&payload_path, b"id,name\n1,Ada\n").unwrap();
-        let payload = read_script_file_path(payload_path.to_string_lossy().into_owned()).unwrap();
+        let allowed_roots = vec![directory.path().to_string_lossy().into_owned()];
+        let payload = read_script_file_path(
+            payload_path.to_string_lossy().into_owned(),
+            allowed_roots.clone(),
+        )
+        .unwrap();
         assert_eq!(payload.file_name, "payload.csv");
         assert_eq!(payload.mime_type, "text/csv");
         assert_eq!(payload.data_base64, BASE64.encode(b"id,name\n1,Ada\n"));
@@ -492,7 +528,59 @@ mod script_file_tests {
         let oversized_path = directory.path().join("oversized.bin");
         fs::write(&oversized_path, vec![0_u8; SCRIPT_FILE_LIMIT as usize + 1]).unwrap();
         let error =
-            read_script_file_path(oversized_path.to_string_lossy().into_owned()).unwrap_err();
+            read_script_file_path(oversized_path.to_string_lossy().into_owned(), allowed_roots)
+                .unwrap_err();
         assert!(error.contains("5 MB per-file limit"));
+    }
+
+    #[test]
+    fn rejects_script_files_outside_allowed_roots() {
+        let allowed = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let payload_path = outside.path().join("secret.txt");
+        fs::write(&payload_path, b"not allowed").unwrap();
+
+        let error = read_script_file_path(
+            payload_path.to_string_lossy().into_owned(),
+            vec![allowed.path().to_string_lossy().into_owned()],
+        )
+        .unwrap_err();
+        assert!(error.contains("outside every allowed data folder"));
+
+        let invalid_roots = [
+            vec![],
+            vec!["relative/folder".into()],
+            vec![allowed
+                .path()
+                .join("missing")
+                .to_string_lossy()
+                .into_owned()],
+            vec![payload_path.to_string_lossy().into_owned()],
+        ];
+        for roots in invalid_roots {
+            let error = read_script_file_path(payload_path.to_string_lossy().into_owned(), roots)
+                .unwrap_err();
+            assert!(error.contains("No valid allowed data folders"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinks_that_escape_allowed_roots() {
+        use std::os::unix::fs::symlink;
+
+        let allowed = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let payload_path = outside.path().join("secret.txt");
+        let link_path = allowed.path().join("linked-secret.txt");
+        fs::write(&payload_path, b"not allowed").unwrap();
+        symlink(&payload_path, &link_path).unwrap();
+
+        let error = read_script_file_path(
+            link_path.to_string_lossy().into_owned(),
+            vec![allowed.path().to_string_lossy().into_owned()],
+        )
+        .unwrap_err();
+        assert!(error.contains("outside every allowed data folder"));
     }
 }

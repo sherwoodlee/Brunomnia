@@ -571,7 +571,21 @@ Compatibility bounds remain explicit: Brunomnia's automatic vertical breakpoint 
 
 Compatibility bounds remain explicit: font family fields depend on fonts installed on the device and provide no discovery picker. The app-shell size affects inherited interface typography, but Brunomnia still has deliberately fixed pixel sizes in dense controls and does not claim a complete typographic scaling audit. Rendered verification remains omitted by standing direction.
 
-## Milestone 39 — remaining parity closure and release hardening
+## Milestone 39 — path-scoped script data folders (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | A device-local allowed-data-folder list complements the existing off-by-default script file grant, matching current Insomnia's explicit folder setting |
+| Native containment | Complete baseline | Rust canonicalizes the requested file and existing directory roots, requires component-aware containment, and rejects traversal, outside-root files, and symlink escapes before reading bytes |
+| Execution breadth | Complete | Primary requests, secondary requests, and collection-run scripting pass the same roots into body, multipart, and PEM attachment hydration |
+| Device-local safety | Complete | Folder roots and the file grant are omitted from managed projects/encrypted revisions, preserved across device-local upgrades, and reset on workspace import |
+| Input bounds | Complete baseline | Preferences retain at most 100 unique nonblank roots of at most 4,096 characters; empty, missing, and non-directory roots grant no access |
+| Executable coverage | Complete baseline | Frontend tests cover defaults, normalization, deduplication, import stripping, explicit preservation, and workspace v21 interchange; native tests cover allowed reads, limits, missing roots, outside roots, and symlink escape |
+| Documentation and evidence | Complete | Updated [scripting](SCRIPTING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 39 verification](QA_MILESTONE_39.md) |
+
+Compatibility bounds remain explicit: Brunomnia's desktop grant is read-only and applies to mediated script attachments; it does not implement upstream's described folder writes or automatically allow the OS temporary/application-data directories. Roots are typed rather than selected through a folder picker. The trusted CLI retains its separate invocation flag and does not consume the device list. Canonical checks close ordinary traversal and symlink escapes but do not claim a capability-secure directory handle against adversarial filesystem races.
+
+## Milestone 40 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

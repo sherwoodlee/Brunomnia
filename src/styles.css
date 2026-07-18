@@ -1041,7 +1041,10 @@ kbd {
 .preferences-card ul { display: flex; flex-direction: column; gap: 7px; margin: 2px 0; padding-left: 17px; }
 .preference-fields { display: grid; gap: 9px; grid-template-columns: repeat(3, minmax(120px, 1fr)); margin-bottom: 13px; }
 .preference-fields label { color: var(--muted); display: flex; flex-direction: column; font-size: 8px; gap: 6px; text-transform: uppercase; }
-.preference-fields input, .preference-fields select, .shortcut-list input { background: #0d1418; border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font: 9px var(--font-mono); height: 34px; min-width: 0; padding: 0 8px; text-transform: none; }
+.preference-fields input, .preference-fields select, .preference-fields textarea, .shortcut-list input { background: #0d1418; border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font: 9px var(--font-mono); height: 34px; min-width: 0; padding: 0 8px; text-transform: none; }
+.preference-fields .preference-data-folders { grid-column: 1 / -1; }
+.preference-data-folders textarea { min-height: 88px; padding: 8px; resize: vertical; }
+.preference-data-folders small { color: var(--muted); font-size: 8px; text-transform: none; }
 .preference-fields .preference-toggle { align-items: center; background: #0d1418; border: 1px solid var(--border-soft); flex-direction: row; gap: 8px; min-height: 43px; padding: 7px 9px; text-transform: none; }
 .preference-toggle input { accent-color: var(--accent); height: 13px; width: 13px; }
 .keyboard-card { margin-top: 18px; max-width: 930px; }
@@ -1191,7 +1194,7 @@ kbd {
 }
 .app-shell[data-theme="light"] :is(.topbar, .activity-rail, .statusbar) { background: var(--bg-deep); }
 .app-shell[data-theme="light"] :is(.collection-sidebar, .api-hero) { background: var(--panel-soft); }
-.app-shell[data-theme="light"] :is(.protocol-select, .method-select, .url-input, .editable-code-surface, .code-editor, .preference-fields input, .preference-fields select, .shortcut-list input, .plugin-card input, .plugin-card select, .plugin-card textarea, .integration-card input, .integration-card select, .integration-card textarea) { background: var(--panel); }
+.app-shell[data-theme="light"] :is(.protocol-select, .method-select, .url-input, .editable-code-surface, .code-editor, .preference-fields input, .preference-fields select, .preference-fields textarea, .shortcut-list input, .plugin-card input, .plugin-card select, .plugin-card textarea, .integration-card input, .integration-card select, .integration-card textarea) { background: var(--panel); }
 .app-shell[data-theme="light"] .request-row.selected { background: var(--panel-raised); }
 .app-shell[data-density="compact"] { grid-template-rows: 48px minmax(0, 1fr) 23px; }
 .app-shell[data-density="compact"] :is(.workspace-switcher, .command-trigger, .environment-switcher) { height: 32px; }
@@ -1219,7 +1222,7 @@ kbd {
   }
   .app-shell[data-theme="system"] :is(.topbar, .activity-rail, .statusbar) { background: var(--bg-deep); }
   .app-shell[data-theme="system"] :is(.collection-sidebar, .api-hero) { background: var(--panel-soft); }
-  .app-shell[data-theme="system"] :is(.protocol-select, .method-select, .url-input, .editable-code-surface, .code-editor, .preference-fields input, .preference-fields select, .shortcut-list input, .plugin-card input, .plugin-card select, .plugin-card textarea, .integration-card input, .integration-card select, .integration-card textarea) { background: var(--panel); }
+  .app-shell[data-theme="system"] :is(.protocol-select, .method-select, .url-input, .editable-code-surface, .code-editor, .preference-fields input, .preference-fields select, .preference-fields textarea, .shortcut-list input, .plugin-card input, .plugin-card select, .plugin-card textarea, .integration-card input, .integration-card select, .integration-card textarea) { background: var(--panel); }
   .app-shell[data-theme="system"] .request-row.selected { background: var(--panel-raised); }
 }
 

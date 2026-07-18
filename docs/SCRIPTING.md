@@ -40,7 +40,9 @@ These adapters do not load Chai plugins, expose `should`, support assertion over
 
 ## File-backed bodies and certificates
 
-**Preferences → General → Request scripts → Allow scripts to attach local body and certificate files** grants the documented `insomnia.request.body.update()` and `insomnia.sendRequest()` file modes plus PEM certificate source paths on this device. It is off by default, available only in the Tauri desktop app, omitted from folder/Git projects and encrypted revisions, and reset on workspace import. A script with this capability can name any readable local path and cause its contents to be sent through a primary or secondary request, so enable it only for workspaces you trust.
+Desktop file reads require two device-local choices under **Preferences → General → Request scripts**: add one absolute root per line to **Allowed data folders**, then enable **Allow scripts to attach local body and certificate files**. Together they grant the documented `insomnia.request.body.update()` and `insomnia.sendRequest()` file modes plus PEM certificate source paths. Both controls are off/empty by default, available only in the Tauri desktop app, omitted from folder/Git projects and encrypted revisions, and reset on workspace import.
+
+Before reading bytes, the Rust host canonicalizes the requested file and every existing directory root. The file must remain under at least one canonical root, so `..` traversal and symlinks resolving outside the root are rejected. Empty, missing, or non-directory roots do not grant access. Brunomnia does not automatically allow the OS temporary or application-data directories, and this grant is read-only; unlike current Insomnia's broader data-folder description, script file writes are not implemented.
 
 Supported body inputs are:
 
@@ -71,7 +73,7 @@ The bundled CLI uses Node's `vm` compatibility runtime, which is not a security 
 brunomnia run test workspace.json "Collection" --allow-scripts
 ```
 
-Local attachments additionally require `--allow-script-files`; secondary script requests require `--allow-script-requests`. A file-backed secondary request therefore requires all three flags, including `--allow-scripts`. The CLI does not expose the desktop local vault. These invocation flags are intentionally not read from workspace preference data, preventing an imported workspace from granting itself script authority.
+Local attachments additionally require `--allow-script-files`; secondary script requests require `--allow-script-requests`. A file-backed secondary request therefore requires all three flags, including `--allow-scripts`. The trusted CLI does not consume the desktop allowed-folder list or expose the desktop local vault. These invocation flags are intentionally not read from workspace preference data, preventing an imported workspace from granting itself script authority.
 
 ## Remaining compatibility limits
 

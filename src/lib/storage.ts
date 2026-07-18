@@ -235,6 +235,12 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
     allowScriptRequests: source?.allowScriptRequests === true,
     allowScriptFileAccess: source?.allowScriptFileAccess === true,
+    dataFolders: Array.isArray(source?.dataFolders)
+      ? [...new Set(source.dataFolders
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim().slice(0, 4_096))
+        .filter(Boolean))].slice(0, 100)
+      : [],
     enableVaultInScripts: source?.enableVaultInScripts === true,
     autoFetchGraphqlSchema: source?.autoFetchGraphqlSchema !== false,
     confirmDestructive: source?.confirmDestructive !== false,
@@ -474,7 +480,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 20,
+    version: 21,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

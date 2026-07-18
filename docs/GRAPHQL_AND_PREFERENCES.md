@@ -47,7 +47,7 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - separate certificate-validation defaults for API requests and authentication flows;
 - system or manual HTTP/HTTPS proxy selection with a no-proxy list;
 - regular or bulk request-header and query-parameter editors;
-- a 1–60 second script deadline plus separate off-by-default secondary-request, local-file, and local-vault script authorities;
+- a 1–60 second script deadline plus separate off-by-default secondary-request, local-file, and local-vault script authorities, with an explicit desktop data-folder allowlist for script attachments;
 - automatic GraphQL introspection;
 - request-deletion confirmation; and
 - eleven editable keyboard bindings.
@@ -55,6 +55,8 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 Click a shortcut field and press a combination. `Mod` maps to Command on macOS and Control elsewhere. Duplicate bindings are shown and only the first matching action runs. Press Backspace to clear a binding or use **Reset defaults**.
 
 Preferences stay on this device. Split-YAML folder/Git projects omit them, encrypted-sync pulls preserve the current device's values, and imported workspace files start with safe defaults. Plugin themes take precedence while active.
+
+Desktop script file attachments require both the off-by-default file authority and at least one allowed data folder. Enter one absolute root per line; the value is normalized when the field loses focus. The native host canonicalizes roots and requested files before reading and rejects traversal or symlink resolution outside every root. The grant covers read-only script body, multipart, and PEM attachment hydration, not ordinary user-selected payloads or file writes. The CLI keeps its separate explicit `--allow-script-files` trust flag and does not inherit this device list.
 
 Header and query-parameter tabs can switch between regular rows and the device-persistent bulk editor directly. Bulk mode uses one `name: value` pair per line, splits only at the first colon, and preserves duplicate order. Matching current Insomnia, disabled/blank rows are omitted from the bulk text and the first bulk edit replaces row descriptions; path parameters and gRPC metadata remain in their structured editors.
 
