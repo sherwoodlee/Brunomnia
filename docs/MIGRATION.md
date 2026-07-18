@@ -1101,7 +1101,20 @@ Compatibility bounds remain explicit: classification uses stable native Git text
 
 Compatibility bounds remain explicit: readiness uses last-known local remote-tracking refs and can be stale until fetch. Alternate explicit branch/remote pushes proceed to native Git because current-branch status cannot prove they are empty. No background fetch, force push, retry, or provider call is added. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 73 — remaining parity closure and release hardening
+## Milestone 73 — reviewable request/response AI mock context (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes active-response-to-route extraction and model-backed spec text/URL mock generation |
+| Explicit source selection | Complete baseline | The mock workbench keeps manual input and adds opt-in active-request and latest-active-response sources with optional additional instructions |
+| Disclosure boundary | Complete baseline | The exact prepared context is reviewable; configured credentials, credential-named values, URL user information, cookies, and binary bytes are redacted or omitted without resolving environment/vault values |
+| Bounded generation | Complete | Context and additional instructions are independently bounded, their composed input is capped at 190,000 characters, and existing structured-output validation remains unchanged |
+| Executable coverage | Complete baseline | Focused tests prove current-request extraction, active-environment latest-response selection, credential redaction, context-only generation, bounds, and missing-source errors |
+| Documentation and evidence | Complete | Updated [AI integration guide](MCP_AI_KONNECT.md), [parity ledger](PARITY.md), and [Milestone 73 verification](QA_MILESTONE_73.md) |
+
+Compatibility bounds remain explicit: redaction recognizes credential-shaped fields but is not a general data-loss-prevention system, so users must review domain data in the displayed context. URL fetching, direct response-to-route conversion without AI, binary response interpretation, `.gguf` loading, and hosted/self-host mock deployment remain open. No context is attached until selected. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 74 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
