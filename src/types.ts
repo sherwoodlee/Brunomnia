@@ -303,6 +303,7 @@ export type Workspace = {
   imports: ImportRecord[];
   cookies: CookieRecord[];
   responses: StoredResponse[];
+  responseFilters?: Record<string, { filter: string; history: string[] }>;
   project: ProjectConfig;
   plugins: PluginRecord[];
   pluginData: Record<string, Record<string, string>>;

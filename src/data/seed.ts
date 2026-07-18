@@ -253,6 +253,7 @@ paths:
   imports: [],
   cookies: [],
   responses: [],
+  responseFilters: {},
   project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
   plugins: [],
   pluginData: {},

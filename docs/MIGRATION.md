@@ -670,7 +670,23 @@ Compatibility bounds remain explicit: Brunomnia's response model currently store
 
 Compatibility bounds remain explicit: persisted responses contain decoded aggregate text and a header map, not raw libcurl events. The debug transcript therefore cannot preserve raw wire ordering, duplicate response-header fields, TLS diagnostics, redirect hops, or compressed/binary bytes. HAR request headers and bodies come from the saved editable request snapshot and cannot reconstruct transport-added headers, resolved secret values, request cookies, or multipart framing. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 46 — remaining parity closure and release hardening
+## Milestone 46 — response filters and history navigation (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| JSON response filtering | Complete baseline | Read-only JSON previews accept root, dot/bracket property, index, wildcard, and recursive-property JSONPath selectors and render the ordered result array |
+| XML response filtering | Complete baseline | XML previews use the WebView's standards-based DOM parser and XPath evaluator, wrapping serialized matches in a deterministic result element |
+| Filter history | Complete baseline | Current and ten unique newest-first filters persist per request, reload safely, reapply from a menu, clear without altering history, and discard stale request keys during normalization |
+| History chronology | Complete baseline | Saved responses group into the five current Insomnia time buckets using matching five-minute, two-hour, local-day, and local-week boundaries |
+| History evidence | Complete baseline | Every choice exposes receipt time, status, saved method where available, actual URL, duration, and stored body size before selection |
+| Preview isolation | Complete | Filtering never mutates the stored response or raw, pretty, debug, and HAR artifact inputs; invalid selectors return bounded visible errors |
+| Bundle boundary | Complete | The evaluator and filtered preview lazy-load in a 4,641-byte chunk while the main production bundle remains below the warning threshold |
+| Executable coverage | Complete baseline | Focused tests cover JSONPath traversal, wildcards, recursive descent, invalid selectors, language detection, filter-history bounds, chronological grouping, and hostile persisted metadata |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 46 verification](QA_MILESTONE_46.md) |
+
+Compatibility bounds remain explicit: the dependency-free JSONPath baseline does not yet implement predicates, unions, slices, or script expressions. XPath execution depends on the standards-based desktop/browser DOM rather than the Node-only test runner. Response filter metadata is bounded but remains part of the local workspace store. The pinned current Insomnia history component has no response-comparison action, so the earlier generic comparison gap is removed rather than implemented without source evidence. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 47 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -277,6 +277,22 @@ const normalizeStoredResponses = (value: unknown): StoredResponse[] => Array.isA
   } as StoredResponse];
 }) : [];
 
+const normalizeResponseFilters = (value: unknown, requestIds: Set<string>) => {
+  const source = record(value);
+  if (!source) return {};
+  return Object.fromEntries(Object.entries(source).flatMap(([requestId, entry]) => {
+    if (!requestIds.has(requestId)) return [];
+    const state = record(entry);
+    const filter = stringValue(state?.filter).trim().slice(0, 2_000);
+    const seen = new Set<string>();
+    const history = (Array.isArray(state?.history) ? state.history : []).flatMap((candidate): string[] => {
+      const normalized = stringValue(candidate).trim().slice(0, 2_000);
+      return normalized && !seen.has(normalized) && Boolean(seen.add(normalized)) ? [normalized] : [];
+    }).slice(0, 10);
+    return [[requestId, { filter, history }]];
+  }));
+};
+
 const normalizeFolders = (value: unknown, defaultAuth: AuthConfig): RequestFolder[] => {
   const source = !Array.isArray(value) ? [] : value.slice(0, 1_000);
   const folders = source.flatMap((item, index): RequestFolder[] => {
@@ -493,6 +509,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     imports: workspace.imports ?? [],
     cookies: workspace.cookies ?? [],
     responses: normalizeStoredResponses(workspace.responses),
+    responseFilters: normalizeResponseFilters(workspace.responseFilters, requestIds),
     project: { ...seed.project, ...workspace.project },
     plugins: normalizePlugins(workspace.plugins),
     pluginData: workspace.pluginData ?? {},

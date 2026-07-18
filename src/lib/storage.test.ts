@@ -36,6 +36,7 @@ describe('workspace migrations', () => {
     expect(migrated.imports).toEqual([]);
     expect(migrated.cookies).toEqual([]);
     expect(migrated.responses).toEqual([]);
+    expect(migrated.responseFilters).toEqual({});
     expect(migrated.mcpClients).toEqual([]);
     expect(migrated.ai.enabled).toBe(false);
     expect(migrated.konnect.baseUrl).toBe('https://us.api.konghq.com');
@@ -96,6 +97,21 @@ describe('workspace migrations', () => {
       respectServerRetry: false,
       sendLastEventId: false,
     });
+  });
+
+  it('bounds per-request response filters and discards stale request metadata', () => {
+    const workspace = cloneSeedWorkspace();
+    const requestId = workspace.collections[0].requests[0].id;
+    workspace.responseFilters = {
+      [requestId]: { filter: `  ${'$'.repeat(2_100)}  `, history: [' $.items[*] ', '$.items[*]', ...Array.from({ length: 15 }, (_, index) => `$.item${index}`)] },
+      missing: { filter: '$.secret', history: ['$.secret'] },
+    };
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.responseFilters?.[requestId].filter).toHaveLength(2_000);
+    expect(migrated.responseFilters?.[requestId].history).toHaveLength(10);
+    expect(migrated.responseFilters?.[requestId].history[0]).toBe('$.items[*]');
+    expect(migrated.responseFilters?.missing).toBeUndefined();
   });
 
   it('normalizes collection sub-environments and repairs a stale selection', () => {

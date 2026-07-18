@@ -21,7 +21,7 @@ import { fetchGraphqlSchema } from './lib/graphql';
 import { shortcutMatches } from './lib/preferences';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, moveWorkspaceResource, orderedCollectionChildren, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
 import type { WorkspaceResourceMove } from './lib/resources';
-import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
+import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
 import {
   CodeEditor,
@@ -62,6 +62,7 @@ const SecurityWorkbench = lazy(() => import('./components/SecurityWorkbench').th
 const IntegrationWorkbench = lazy(() => import('./components/IntegrationWorkbench').then((module) => ({ default: module.IntegrationWorkbench })));
 const PreferencesWorkbench = lazy(() => import('./components/PreferencesWorkbench').then((module) => ({ default: module.PreferencesWorkbench })));
 const CodeGenerationDialog = lazy(() => import('./components/CodeGenerationDialog').then((module) => ({ default: module.CodeGenerationDialog })));
+const ResponseBodyPreview = lazy(() => import('./components/ResponseBodyPreview'));
 
 const requestTabs: RequestTab[] = ['params', 'headers', 'auth', 'body', 'transport', 'scripts', 'tests', 'docs'];
 const responseTabs: ResponseTab[] = ['preview', 'headers', 'cookies', 'timeline', 'tests'];
@@ -79,6 +80,11 @@ const protocolLabel = (request: ApiRequest) => request.protocol === 'http' ? req
 const methodClass = (method: string) => methods.includes(method as HttpMethod) ? method.toLowerCase() : 'custom';
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+const rememberResponseFilter = (history: string[], filter: string) => {
+  const value = filter.trim().slice(0, 2_000);
+  return value ? [value, ...history.filter((candidate) => candidate !== value)].slice(0, 10) : history.slice(0, 10);
+};
 
 const scriptVariableRows = (values: Record<string, string>, existing: KeyValue[], prefix: string, disabled = existing.filter((row) => !row.enabled && row.name).map((row) => row.name)): KeyValue[] => {
   const names = new Set(Object.keys(values));
@@ -674,6 +680,8 @@ function RequestPanel({
 type ResponsePanelProps = {
   response: HttpResponse;
   responseHistory: StoredResponse[];
+  responseFilter: string;
+  responseFilterHistory: string[];
   selectedResponseId: string;
   activeEnvironmentHistoryCount: number;
   protocol: Protocol;
@@ -692,6 +700,7 @@ type ResponsePanelProps = {
   onDeleteResponse: () => void;
   onDownloadResponse: (prettify: boolean) => void;
   onExportResponseDiagnostic: (kind: 'debug' | 'har') => void;
+  onApplyResponseFilter: (filter: string, remember: boolean) => void;
   onSelectResponse: (id: string) => void;
   onTabChange: (tab: ResponseTab) => void;
   onStreamDraftChange: (value: string) => void;
@@ -729,6 +738,8 @@ function CookieEditor({ cookies, requestUrl, onChange }: { cookies: CookieRecord
 function ResponsePanel({
   response,
   responseHistory,
+  responseFilter,
+  responseFilterHistory,
   selectedResponseId,
   activeEnvironmentHistoryCount,
   protocol,
@@ -747,6 +758,7 @@ function ResponsePanel({
   onDeleteResponse,
   onDownloadResponse,
   onExportResponseDiagnostic,
+  onApplyResponseFilter,
   onSelectResponse,
   onTabChange,
   onStreamDraftChange,
@@ -758,6 +770,7 @@ function ResponsePanel({
   const lines = displayBody.split('\n');
   const canPrettify = Object.entries(response.headers).some(([name, value]) => name.toLowerCase() === 'content-type' && /json/i.test(value));
   const canExportHttpDiagnostics = protocol === 'http' || protocol === 'graphql';
+  const historySections = responseHistorySections(responseHistory);
   const timelineEntries = response.timeline?.length ? response.timeline : [
     { name: 'Text' as const, value: 'Request started', elapsedMs: 0 },
     { name: 'Text' as const, value: `Response ${response.status} ${response.statusText}`, elapsedMs: response.durationMs },
@@ -778,7 +791,7 @@ function ResponsePanel({
           {!streaming ? <span>{formatBytes(response.sizeBytes)}</span> : null}
           {!streaming && response.httpVersion ? <span>{response.httpVersion}</span> : null}
         </div>
-        {!streaming && responseHistory.length ? <div className="response-history-controls"><label className="response-history-picker"><Icon name="history" size={15} /><select aria-label="Saved response" onChange={(event) => onSelectResponse(event.target.value)} value={selectedResponseId}>{selectedResponseId ? null : <option value="">Live response</option>}{responseHistory.map((saved) => <option key={saved.id} value={saved.id}>{new Date(saved.receivedAt).toLocaleString()} · {saved.status || 'ERR'} · {saved.durationMs} ms</option>)}</select></label><button aria-label="Delete saved response" disabled={!selectedResponseId} onClick={onDeleteResponse} type="button"><Icon name="trash" size={14} /></button><button aria-label="Clear environment history" disabled={!activeEnvironmentHistoryCount} onClick={onClearHistory} type="button">Clear {activeEnvironmentHistoryCount}</button></div> : <button aria-label="Response source" className="icon-button subtle" disabled type="button"><Icon name="globe" size={18} /></button>}
+        {!streaming && responseHistory.length ? <div className="response-history-controls"><label className="response-history-picker"><Icon name="history" size={15} /><select aria-label="Saved response" onChange={(event) => onSelectResponse(event.target.value)} value={selectedResponseId}>{selectedResponseId ? null : <option value="">Live response</option>}{historySections.map((section) => <optgroup key={section.label} label={section.label}>{section.responses.map((saved) => <option key={saved.id} value={saved.id}>{new Date(saved.receivedAt).toLocaleTimeString()} · {saved.status || 'ERR'} · {saved.requestSnapshot?.method ?? ''} {saved.requestUrl} · {saved.durationMs} ms · {formatBytes(saved.sizeBytes)}</option>)}</optgroup>)}</select></label><button aria-label="Delete saved response" disabled={!selectedResponseId} onClick={onDeleteResponse} type="button"><Icon name="trash" size={14} /></button><button aria-label="Clear environment history" disabled={!activeEnvironmentHistoryCount} onClick={onClearHistory} type="button">Clear {activeEnvironmentHistoryCount}</button></div> : <button aria-label="Response source" className="icon-button subtle" disabled type="button"><Icon name="globe" size={18} /></button>}
       </div>
       <nav className="tab-strip response-tabs" aria-label="Response details">
         {responseTabs.map((tab) => <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">{titleCase(tab)}{tab === 'tests' && scriptTests.length ? <small>{scriptTests.filter((test) => test.passed).length}/{scriptTests.length}</small> : tab === 'cookies' && cookies.length ? <small>{cookies.length}</small> : null}</button>)}
@@ -788,11 +801,7 @@ function ResponsePanel({
           <StreamConsole connected={streamStatus === 'connected'} draft={streamDraft} frameKind={streamFrameKind} messages={streamMessages} onDraftChange={onStreamDraftChange} onFrameKindChange={onStreamFrameKindChange} onSend={onSendStreamMessage} protocol={protocol} />
         ) : null}
         {activeTab === 'preview' && !streaming ? (
-          <div className="code-viewer">
-            {lines.map((line, index) => (
-              <div className="code-line" key={`${index}-${line}`}><span>{index + 1}</span><code>{line || ' '}</code></div>
-            ))}
-          </div>
+          <Suspense fallback={<div className="dialog-loading">Loading response preview…</div>}><ResponseBodyPreview filter={responseFilter} filterHistory={responseFilterHistory} onApplyFilter={onApplyResponseFilter} response={response} /></Suspense>
         ) : null}
         {activeTab === 'headers' ? (
           <div className="response-table">{Object.entries(response.headers).map(([name, value]) => <div key={name}><strong>{name}</strong><span>{value}</span></div>)}</div>
@@ -974,7 +983,7 @@ function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment,
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 22, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 11, interfaceFontSize: 13, fontInterface: '', fontMonospace: '', showPasswords: false, preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30000, validateCertificates: true, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', useBulkHeaderEditor: false, useBulkParametersEditor: false, forceVerticalLayout: false, editorIndentWithTabs: true, editorIndentSize: 2, editorLineWrapping: true, fontVariantLigatures: false, scriptTimeoutMs: 10000, allowScriptRequests: false, allowScriptFileAccess: false, dataFolders: [], enableVaultInScripts: false, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L', 'generate-code': 'Mod+Shift+G' } },
+    format: 'brunomnia', version: 22, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], responseFilters: {}, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: { theme: 'system', density: 'comfortable', fontSize: 11, interfaceFontSize: 13, fontInterface: '', fontMonospace: '', showPasswords: false, preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30000, validateCertificates: true, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', useBulkHeaderEditor: false, useBulkParametersEditor: false, forceVerticalLayout: false, editorIndentWithTabs: true, editorIndentSize: 2, editorLineWrapping: true, fontVariantLigatures: false, scriptTimeoutMs: 10000, allowScriptRequests: false, allowScriptFileAccess: false, dataFolders: [], enableVaultInScripts: false, autoFetchGraphqlSchema: true, confirmDestructive: true, shortcuts: { palette: 'Mod+K', preferences: 'Mod+,', send: 'Mod+Enter', environment: 'Mod+E', history: 'Mod+Shift+H', 'toggle-sidebar': 'Mod+\\', 'new-request': 'Mod+N', 'duplicate-request': 'Mod+D', 'delete-request': 'Mod+Shift+Backspace', 'focus-url': 'Mod+L', 'generate-code': 'Mod+Shift+G' } },
   }));
   const [hydrated, setHydrated] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
@@ -1117,6 +1126,21 @@ export default function App() {
     void import('./lib/responseDownload').then(({ downloadResponseDiagnostic }) => {
       downloadResponseDiagnostic(request, response, kind, saved?.receivedAt);
     }, () => undefined);
+  };
+  const applyResponseFilter = (filter: string, remember: boolean) => {
+    if (!active) return;
+    const requestId = active.request.id;
+    const value = filter.trim().slice(0, 2_000);
+    setWorkspace((current) => {
+      const previous = current.responseFilters?.[requestId] ?? { filter: '', history: [] };
+      return {
+        ...current,
+        responseFilters: {
+          ...current.responseFilters,
+          [requestId]: { filter: value, history: remember ? rememberResponseFilter(previous.history, value) : previous.history },
+        },
+      };
+    });
   };
   const unlockedVault = useMemo(() => vaultVariables(vaultSession), [vaultSession]);
   const externalSecretResolver = useCallback((input: ExternalSecretInput) => resolveAuthorizedExternalSecret(workspace, input), [workspace]);
@@ -1781,6 +1805,7 @@ export default function App() {
             onDeleteResponse={deleteSelectedSavedResponse}
             onDownloadResponse={downloadResponseBody}
             onExportResponseDiagnostic={exportResponseDiagnostic}
+            onApplyResponseFilter={applyResponseFilter}
             onSelectResponse={(id) => { const saved = activeResponseHistory.find((candidate) => candidate.id === id); if (saved) selectSavedResponse(saved); }}
             onSendStreamMessage={() => void sendStreamMessage()}
             onStreamDraftChange={setStreamDraft}
@@ -1788,6 +1813,8 @@ export default function App() {
             onTabChange={setResponseTab}
             protocol={active.request.protocol}
             response={response}
+            responseFilter={workspace.responseFilters?.[active.request.id]?.filter ?? ''}
+            responseFilterHistory={workspace.responseFilters?.[active.request.id]?.history ?? []}
             responseHistory={activeResponseHistory}
             requestUrl={response.requestUrl ?? active.request.url}
             selectedResponseId={selectedResponseId}
