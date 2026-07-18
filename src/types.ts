@@ -509,6 +509,7 @@ export type HttpResponse = {
   statusText: string;
   headers: Record<string, string>;
   body: string;
+  bodyBase64?: string;
   durationMs: number;
   sizeBytes: number;
   setCookies?: string[];

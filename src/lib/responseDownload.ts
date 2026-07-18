@@ -1,6 +1,8 @@
 import type { ApiRequest, HttpResponse } from '../types';
+import { responseBodyBytes } from './responseBytes';
 
-export type ResponseBodyArtifact = { contents: string; fileName: string; mimeType: string };
+export type ResponseArtifact<T extends string | Uint8Array = string> = { contents: T; fileName: string; mimeType: string };
+export type ResponseBodyArtifact = ResponseArtifact<string | Uint8Array>;
 export type ResponseDiagnosticKind = 'debug' | 'har';
 
 const contentType = (response: HttpResponse) => Object.entries(response.headers)
@@ -82,9 +84,9 @@ export const createResponseBodyArtifact = (
   timestamp = Date.now(),
 ): ResponseBodyArtifact => {
   const mimeType = contentType(response);
-  let contents = response.body;
+  let contents: string | Uint8Array = response.bodyBase64 === undefined ? response.body : responseBodyBytes(response);
   if (prettify && mimeType.includes('json')) {
-    try { contents = JSON.stringify(JSON.parse(contents), null, 2); } catch { /* retain raw invalid JSON */ }
+    try { contents = JSON.stringify(JSON.parse(response.body), null, 2); } catch { /* retain exact raw body bytes */ }
   }
   return { contents, fileName: `${safeName(requestName)}-${timestamp}.${extension(mimeType)}`, mimeType };
 };
@@ -93,7 +95,7 @@ export const createResponseDebugArtifact = (
   requestName: string,
   response: HttpResponse,
   timestamp = Date.now(),
-): ResponseBodyArtifact => {
+): ResponseArtifact => {
   const version = response.httpVersion || 'HTTP/1.1';
   const headers = Object.entries(response.headers)
     .sort(([left], [right]) => left.localeCompare(right, undefined, { sensitivity: 'base' }))
@@ -111,7 +113,7 @@ export const createResponseHarArtifact = (
   response: HttpResponse,
   timestamp = Date.now(),
   receivedAt?: string,
-): ResponseBodyArtifact => {
+): ResponseArtifact => {
   const url = response.requestUrl || request.url;
   const postData = requestPostData(request);
   const responseHeaders = Object.entries(response.headers).map(([name, value]) => ({ name, value }));
@@ -158,7 +160,8 @@ export const createResponseHarArtifact = (
 };
 
 const downloadArtifact = (artifact: ResponseBodyArtifact) => {
-  const url = URL.createObjectURL(new Blob([artifact.contents], { type: artifact.mimeType }));
+  const contents = typeof artifact.contents === 'string' ? artifact.contents : new Uint8Array(artifact.contents).buffer;
+  const url = URL.createObjectURL(new Blob([contents], { type: artifact.mimeType }));
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = artifact.fileName;

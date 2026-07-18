@@ -98,7 +98,7 @@ export default function ResponseBodyPreview({ response, filter, filterHistory, o
     <div className="response-preview-toolbar"><span>Preview mode</span><select aria-label="Response preview mode" onChange={(event) => onModeChange(event.target.value as ResponsePreviewMode)} value={previewMode}><option value="friendly">Visual Preview</option><option value="source">Source Code</option><option value="raw">Raw Data</option></select></div>
     {blocked ? <div className="response-size-warning">
       <strong>{band === 'huge' ? 'Response over 100 MB cannot be shown' : 'Response over 5 MB hidden for performance'}</strong>
-      <span>{band === 'huge' ? 'Download the stored UTF-8 body to inspect it outside Brunomnia.' : 'Show this response once, always show large responses for this app session, or download the stored body.'}</span>
+      <span>{band === 'huge' ? 'Download the stored response bytes to inspect them outside Brunomnia.' : 'Show this response once, always show large responses for this app session, or download the stored body.'}</span>
       <div><button onClick={onDownload} type="button">Save response to file</button>{band === 'large' ? <><button onClick={() => setRevealedKey(responseKey)} type="button">Show anyway</button><button onClick={() => { alwaysShowLargeResponses = true; setRevealedKey(responseKey); }} type="button">Always show this session</button></> : null}</div>
     </div> : <FilteredResponseBody filter={filter} filterHistory={filterHistory} onApplyFilter={onApplyFilter} previewMode={previewMode} response={response} />}
   </div>;

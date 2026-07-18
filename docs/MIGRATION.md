@@ -654,7 +654,7 @@ Compatibility bounds remain explicit: legacy response entries cannot reconstruct
 | Executable coverage | Complete baseline | Focused tests cover raw fidelity, JSON formatting, invalid-JSON fallback, case-insensitive content types, safe filenames, and unknown-type fallback |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 44 verification](QA_MILESTONE_44.md) |
 
-Compatibility bounds remain explicit: Brunomnia's response model currently stores decoded UTF-8 text, not the upstream byte buffer, so byte-exact binary download is not claimed. Native save dialogs, response comparison/search, and persistent streaming history remain open. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: the response model stored decoded UTF-8 text, so byte-exact binary download was not yet claimed. Milestone 51 later resolves decoded entity-byte storage and raw export; native save dialogs and persistent streaming history remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
 ## Milestone 45 — selected-response diagnostics (complete baseline)
 
@@ -668,7 +668,7 @@ Compatibility bounds remain explicit: Brunomnia's response model currently store
 | Executable coverage | Complete baseline | Focused tests cover transcript ordering, status/header/body fidelity, single-entry HAR structure, historical metadata, duplicate query keys, payload sizing, redirects, and malformed URL/date fallbacks |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 45 verification](QA_MILESTONE_45.md) |
 
-Compatibility bounds remain explicit: persisted responses contain decoded aggregate text and a header map, not raw libcurl events. The debug transcript therefore cannot preserve raw wire ordering, duplicate response-header fields, TLS diagnostics, redirect hops, or compressed/binary bytes. HAR request headers and bodies come from the saved editable request snapshot and cannot reconstruct transport-added headers, resolved secret values, request cookies, or multipart framing. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: debug/HAR artifacts are textual diagnostics over decoded aggregate evidence and a header map, not raw libcurl events. Milestone 51 later preserves exact decoded entity bytes for raw download, but these diagnostics still cannot preserve raw wire ordering, duplicate response-header fields, TLS evidence, redirect hops, compressed bytes, or arbitrary binary representation. HAR request headers and bodies come from the saved editable request snapshot and cannot reconstruct transport-added headers, resolved secret values, request cookies, or multipart framing. Rendered/browser interaction QA remains omitted by standing direction.
 
 ## Milestone 46 — response filters and history navigation (complete baseline)
 
@@ -694,13 +694,13 @@ Compatibility bounds remain explicit: the dependency-free JSONPath baseline does
 | Large response guard | Complete baseline | Responses over 5 MiB avoid preview prettification, filter evaluation, line splitting, and DOM row construction until explicitly shown |
 | Session reveal | Complete baseline | Show anyway reveals only the current response; Always show applies to subsequent 5–100 MiB responses for the current renderer session |
 | Huge response guard | Complete baseline | Responses over 100 MiB remain hidden and cannot reach the filtered/pretty preview surface |
-| Download escape hatch | Complete baseline | Both guards expose the established raw UTF-8 response artifact without forcing a preview render |
+| Download escape hatch | Complete baseline | Both guards expose the established raw response artifact without forcing a preview render |
 | Non-preview isolation | Complete | Status, headers, cookies, timeline, tests, history selection, and explicit export actions remain available while Preview is blocked |
 | Bundle boundary | Complete | Threshold and guarded-preview logic stays in the lazy response-preview chunk; the main production bundle remains below the warning threshold |
 | Executable coverage | Complete baseline | Focused tests pin both byte constants, exact-boundary behavior, strict greater-than transitions, and invalid/negative normalization |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 47 verification](QA_MILESTONE_47.md) |
 
-Compatibility bounds remain explicit: Brunomnia currently loads decoded UTF-8 response text into its workspace state before the preview component receives it. This phase prevents expensive renderer transformations and rows but does not implement Insomnia's filesystem-backed body buffer, deferred body read, compressed/raw byte preservation, or byte-exact binary export. The 100 MiB guard remains absolute even after Always show. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: Brunomnia loaded decoded UTF-8 response text into workspace state before Preview received it. This phase prevented expensive renderer transformations but did not implement filesystem-backed/deferred bodies or byte-exact binary export. Milestone 51 later preserves decoded entity bytes and exact raw downloads; filesystem-backed/deferred reads, compressed wire bytes, and pre-allocation limits remain open. The 100 MiB guard remains absolute even after Always show. Rendered/browser interaction QA remains omitted by standing direction.
 
 ## Milestone 48 — response preview modes (complete baseline)
 
@@ -708,7 +708,7 @@ Compatibility bounds remain explicit: Brunomnia currently loads decoded UTF-8 re
 | --- | --- | --- |
 | Per-request mode selection | Complete baseline | The pinned friendly/source/raw values appear as Visual Preview, Source Code, and Raw Data and persist independently for each request |
 | Source mode | Complete baseline | Existing JSON/XML detection, JSONPath/XPath filtering, match evidence, and textual prettification remain available with line numbers |
-| Raw mode | Complete baseline | The exact stored UTF-8 string renders without prettification, active filters, or line numbers; Copy also uses the raw string |
+| Raw mode | Complete baseline | The stored UTF-8 inspection string renders without prettification, active filters, or line numbers; Copy also uses that string |
 | Visual JSON/text baseline | Complete baseline | JSON retains safe filtered/prettified presentation and other non-HTML text falls back to the established source renderer |
 | Visual HTML baseline | Complete baseline | `text/html` renders in a sandboxed iframe with no permissions and an injected default-deny CSP that permits only inline style and data-backed images/fonts |
 | Mode/filter isolation | Complete | Raw and HTML visual modes do not evaluate hidden filters; switching back restores the bounded per-request filter state without mutating the response |
@@ -717,7 +717,7 @@ Compatibility bounds remain explicit: Brunomnia currently loads decoded UTF-8 re
 | Executable coverage | Complete baseline | Storage tests cover valid raw persistence, invalid/legacy fallback to source, bounded filters, and stale-key removal; the clean TypeScript and app builds verify every mode branch |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 48 verification](QA_MILESTONE_48.md) |
 
-Compatibility bounds remain explicit: Visual Preview does not yet implement byte-backed image, PDF, audio, CSV-table, multipart, or charset-aware viewers. HTML visual mode intentionally blocks scripts, forms, privileged navigation, and remote resources; it is safer but less interactive than upstream's optional JavaScript WebView. Raw mode is exact only for Brunomnia's stored decoded UTF-8 string, not original response bytes. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: Visual Preview did not yet implement byte-backed image, PDF, audio, CSV-table, multipart, or charset-aware viewers. CSV and decoded-text multipart arrive in Milestones 49–50; Milestone 51 preserves underlying decoded entity bytes while Raw/Copy remain UTF-8 inspection surfaces. HTML visual mode intentionally blocks scripts, forms, privileged navigation, and remote resources; it is safer but less interactive than upstream's optional JavaScript WebView. Image/PDF/audio, charset-aware text, and byte-backed multipart viewers remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
 ## Milestone 49 — CSV response preview (complete baseline)
 
@@ -752,10 +752,26 @@ Compatibility bounds remain explicit: delimiter inference is a deterministic fou
 
 Compatibility bounds remain explicit: parsing operates on Brunomnia's decoded UTF-8 response string, so arbitrary binary part bytes may already be lossy. Part rendering is textual only and does not recursively invoke the HTML/CSV/image/PDF/audio viewers. Header count and part count are bounded; filename parameters do not yet implement RFC 5987/2231 extended encoding. Save part uses the browser/WebView download path rather than a native save dialog. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 51 — remaining parity closure and release hardening
+## Milestone 51 — byte-preserving HTTP responses (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Native response bytes | Complete baseline | Reqwest responses are consumed as decoded entity bytes, report the actual byte length, and keep the existing one-time content-decode fallback |
+| Browser response bytes | Complete baseline | Fetch consumes `arrayBuffer()` rather than lossy `text()` and applies the same deterministic UTF-8 inspection contract |
+| Compact persistence | Complete baseline | Valid UTF-8 is exactly reconstructable from the stored text; only lossy UTF-8 decoding adds a Base64 sidecar, which survives device-local response history normalization |
+| Byte-exact raw export | Complete baseline | Raw/download actions emit exact decoded entity bytes for live and selected historical responses while prettified JSON and diagnostic exports remain intentionally textual |
+| Plugin continuity | Complete baseline | Response plugins read exact buffers; binary replacement bodies retain bytes and text replacement bodies clear stale binary state |
+| Size evidence | Complete | Response size now records decoded entity bytes rather than the UTF-8 length of replacement-character display text |
+| Bundle boundary | Complete | Byte helpers add no dependency and the renderer remains below the production chunk warning threshold; response artifact UI stays lazy-loaded |
+| Executable coverage | Complete baseline | Focused Rust/browser/helper/download/storage/plugin tests cover valid UTF-8 deduplication, invalid UTF-8 preservation, corrupt persisted fallback, raw export, and plugin-source continuity |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 51 verification](QA_MILESTONE_51.md) |
+
+Compatibility bounds remain explicit: preserved bytes are the HTTP entity after reqwest/browser content decoding, not compressed wire bytes. Brunomnia still buffers bodies before applying preview limits and persists them in the device-local workspace instead of Insomnia's filesystem-backed/deferred body paths. Charset-aware text decoding, byte-backed multipart parsing, image/PDF/audio viewers, native save dialogs, and raw transport/header timelines remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 52 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
-- Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
+- Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
 - Cross-platform installers, signing/notarization guidance, accessibility audit, load/performance testing, and recovery tests
 - Declare parity only after every ledger row has reproducible evidence
 

@@ -29,6 +29,23 @@ describe('response body downloads', () => {
     expect(createResponseBodyArtifact('Orders', response('{invalid', 'application/json'), true, 42).contents).toBe('{invalid');
   });
 
+  it('exports the exact decoded entity bytes when display text was lossy', () => {
+    const artifact = createResponseBodyArtifact('Binary', {
+      ...response('f�o\0', 'application/octet-stream'),
+      bodyBase64: 'ZoBvAA==',
+      sizeBytes: 4,
+    }, false, 42);
+
+    expect(artifact.contents).toEqual(Uint8Array.from([0x66, 0x80, 0x6f, 0x00]));
+  });
+
+  it('prettifies decoded JSON text instead of emitting its byte container', () => {
+    expect(createResponseBodyArtifact('Orders', {
+      ...response('{"items":[1]}', 'application/json'),
+      bodyBase64: 'eyJpdGVtcyI6WzFdfQ==',
+    }, true, 42).contents).toBe('{\n  "items": [\n    1\n  ]\n}');
+  });
+
   it('uses a text fallback for missing or unknown content types', () => {
     expect(createResponseBodyArtifact('', response('hello'), false, 42)).toMatchObject({ fileName: 'response-42.txt', mimeType: 'text/plain' });
   });

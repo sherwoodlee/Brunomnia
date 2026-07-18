@@ -302,6 +302,18 @@ describe('workspace migrations', () => {
     expect(migrateWorkspace(workspace).responses[0].requestSnapshot?.url).toBe(requestSnapshot.url);
   });
 
+  it('preserves optional exact response bytes and rejects non-string containers', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.responses = [
+      { id: 'binary', requestId: 'request', requestName: 'Binary', requestUrl: 'https://example.test/file', environmentId: '', receivedAt: '2026-07-17T00:00:00.000Z', status: 200, statusText: 'OK', headers: {}, body: 'f�o', bodyBase64: 'ZoBv', durationMs: 1, sizeBytes: 3 },
+      { id: 'invalid', requestId: 'request', requestName: 'Invalid', requestUrl: 'https://example.test/file', environmentId: '', receivedAt: '2026-07-17T00:00:01.000Z', status: 200, statusText: 'OK', headers: {}, body: 'safe', bodyBase64: { bytes: [] }, durationMs: 1, sizeBytes: 4 },
+    ];
+
+    const responses = migrateWorkspace(workspace).responses;
+    expect(responses[0]).toMatchObject({ id: 'binary', body: 'f�o', bodyBase64: 'ZoBv' });
+    expect(responses[1]).not.toHaveProperty('bodyBase64');
+  });
+
   it('breaks malformed resource cycles and keeps private descendants device-local', () => {
     const workspace = cloneSeedWorkspace();
     workspace.collections[0].folders = [
