@@ -26,7 +26,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Permission-bounded pre-request scripts and async after-response tests with documented seven-level environment lookup, exact base/selected scope aliases, folder/query/auth helpers, shared Chai `assert` and chainable `expect` surfaces, bounded adapters for every documented bundled module name, path-scoped opt-in primary/secondary local body and PEM attachment, and mediated HTTP/vault capabilities
 - Selectable drag/keyboard-ordered collection runs with JSON/CSV iteration data, retries, bail/cancellation, cookie/response chaining, bounded WebSocket/SSE samples, redacted request metadata, size-limited response inspection, saved reports, and downloadable JSON/JUnit evidence
 - OpenAPI 3.x YAML/JSON editing, structural and safe Spectral-style custom linting, operation preview, formatting, and request generation
-- Native loopback mock servers with route parameters, delays, headers, CORS, dynamic response tokens, and direct latest-response route creation/overwrite
+- Native loopback mock servers with route parameters, delays, headers, CORS, request-aware header/query/path/JSON/form output templates, dynamic response tokens, and direct latest-response route creation/overwrite
 - A headless CLI for OpenAPI lint/generation/export and collection/test execution with regex test-name filtering, the documented Inso reporter names, and JSON/JUnit artifacts
 - File, pasted-text, and HTTP(S) URL imports with format detection and a warning preview
 - Insomnia JSON v4/v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports
@@ -64,6 +64,8 @@ npm run dev
 ```
 
 The browser development build uses deterministic protocol demos for the `*.acme.dev` examples. Other HTTP URLs use browser `fetch`; the Tauri build routes protocol execution through Rust, so browser CORS rules do not apply.
+
+See [local mock servers](docs/MOCK_SERVERS.md) for request-aware response-template syntax, bounds, and current compatibility limits.
 
 ## Use the CLI
 
