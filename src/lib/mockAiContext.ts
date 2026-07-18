@@ -1,6 +1,7 @@
-import type { ApiRequest, KeyValue, StoredResponse, Workspace } from '../types';
+import type { ApiRequest, HttpResponse, KeyValue, StoredResponse, Workspace } from '../types';
 
-export type MockAiContextSource = 'manual' | 'active-request' | 'latest-response';
+export type MockAiContextSource = 'manual' | 'active-request' | 'latest-response' | 'spec-url';
+export type WorkspaceMockAiContextSource = Extract<MockAiContextSource, 'active-request' | 'latest-response'>;
 
 export type MockAiContext = {
   label: string;
@@ -8,6 +9,7 @@ export type MockAiContext = {
 };
 
 export const MAX_MOCK_AI_INPUT_CHARS = 190_000;
+export const MAX_MOCK_SPEC_URL_BYTES = 5_000_000;
 const MAX_CONTEXT_CHARS = 94_000;
 const MAX_ADDITIONAL_INSTRUCTIONS_CHARS = 94_000;
 const REDACTED = '[REDACTED]';
@@ -111,7 +113,7 @@ export const findLatestResponseForActiveRequest = (workspace: Workspace): Stored
   }, undefined);
 };
 
-export const buildMockAiContext = (workspace: Workspace, source: Exclude<MockAiContextSource, 'manual'>): MockAiContext => {
+export const buildMockAiContext = (workspace: Workspace, source: WorkspaceMockAiContextSource): MockAiContext => {
   const activeRequest = findActiveRequest(workspace);
   if (!activeRequest) throw new Error('Select an active request before using request context.');
   if (source === 'active-request') {
@@ -134,6 +136,32 @@ export const buildMockAiContext = (workspace: Workspace, source: Exclude<MockAiC
         body: redactBody(response.body),
       },
     }, null, 2)}`, MAX_CONTEXT_CHARS),
+  };
+};
+
+export const validateMockSpecUrl = (value: string) => {
+  const source = value.trim();
+  if (!source) throw new Error('Enter a specification URL.');
+  if (source.length > 8_192) throw new Error('The specification URL exceeds 8,192 characters.');
+  let url: URL;
+  try { url = new URL(source); } catch { throw new Error('Enter a valid specification URL.'); }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Specification URLs must use HTTP or HTTPS.');
+  if (url.username || url.password) throw new Error('Specification URLs cannot include credentials.');
+  url.hash = '';
+  return url.toString();
+};
+
+export const buildMockSpecUrlContext = (url: string, response: Pick<HttpResponse, 'body' | 'bodyBase64' | 'headers' | 'sizeBytes'>): MockAiContext => {
+  if (response.sizeBytes > MAX_MOCK_SPEC_URL_BYTES) throw new Error('The specification URL response exceeds the 5 MB model-context limit.');
+  const contentType = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1] ?? '';
+  const mimeType = contentType.split(';', 1)[0].trim().toLowerCase();
+  const textLike = !mimeType || mimeType.startsWith('text/') || mimeType === 'application/x-yaml' || /(?:^|\/|\+)(?:json|xml|yaml)$/.test(mimeType);
+  if (!textLike || (response.bodyBase64 !== undefined && !mimeType)) throw new Error('The specification URL returned a binary response. Use JSON, YAML, XML, or text.');
+  if (!response.body.trim()) throw new Error('The specification URL returned an empty body.');
+  const safeUrl = redactUrl(validateMockSpecUrl(url));
+  return {
+    label: `Specification URL · ${new URL(safeUrl).hostname}`,
+    text: bounded(`The user explicitly fetched and selected this specification URL as mock-generation source material.\nSOURCE URL: ${safeUrl}\nCONTENT TYPE: ${contentType || 'not provided'}\n\nSPECIFICATION:\n${response.body}`, MAX_CONTEXT_CHARS),
   };
 };
 
