@@ -473,18 +473,31 @@ async fn read_response(
         .map(str::to_string)
         .collect();
     let headers = flatten_headers(response.headers());
-    let body = response.text().await?;
+    let bytes = response.bytes().await?;
+    let size_bytes = bytes.len();
+    let (body, body_base64) = response_body_fields(&bytes);
 
     Ok(HttpResponseOutput {
         status: status.as_u16(),
         status_text: status.canonical_reason().unwrap_or("Unknown").to_string(),
         headers,
-        size_bytes: body.len(),
+        size_bytes,
         body,
+        body_base64,
         duration_ms: started.elapsed().as_millis(),
         set_cookies,
         http_version,
     })
+}
+
+fn response_body_fields(bytes: &[u8]) -> (String, Option<String>) {
+    match std::str::from_utf8(bytes) {
+        Ok(body) => (body.to_string(), None),
+        Err(_) => (
+            String::from_utf8_lossy(bytes).into_owned(),
+            Some(STANDARD.encode(bytes)),
+        ),
+    }
 }
 
 pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
@@ -609,5 +622,17 @@ mod tests {
         assert_eq!(mode(true, -1), RedirectMode::Unlimited);
         assert_eq!(mode(true, 0), RedirectMode::Limited(0));
         assert_eq!(mode(true, 10), RedirectMode::Limited(10));
+    }
+
+    #[test]
+    fn preserves_exact_non_utf8_response_bytes() {
+        assert_eq!(
+            response_body_fields("héllo".as_bytes()),
+            ("héllo".into(), None)
+        );
+        assert_eq!(
+            response_body_fields(&[0x66, 0x80, 0x6f, 0x00]),
+            ("f�o\0".into(), Some("ZoBvAA==".into()))
+        );
     }
 }

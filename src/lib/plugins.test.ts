@@ -8,6 +8,8 @@ describe('permissioned plugin runtime source', () => {
     expect(source).toContain('requestHooks');
     expect(source).toContain("Plugin permission not granted");
     expect(source).toContain("'fetch', 'XMLHttpRequest', 'WebSocket'");
+    expect(source).toContain("response.bodyBase64 === undefined");
+    expect(source).toContain("delete response.bodyBase64");
   });
 
   it('rejects dynamic/static module imports and oversized sources', () => {

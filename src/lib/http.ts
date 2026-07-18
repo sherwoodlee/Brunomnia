@@ -5,6 +5,7 @@ import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
 import { renderTemplate } from './templates';
 import { buildResponseTimeline } from './timeline';
+import { responseBodyFromBytes } from './responseBytes';
 import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
 
 export type SendRequestContext = {
@@ -212,14 +213,15 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
     credentials: prepared.transport.sendCookies ? 'include' : 'omit',
   });
-  const body = await response.text();
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const responseBody = responseBodyFromBytes(bytes);
   return finish(withTimeline({
     status: response.status,
     statusText: response.statusText,
     headers: Object.fromEntries(response.headers.entries()),
-    body,
+    ...responseBody,
     durationMs: Math.round(performance.now() - startedAt),
-    sizeBytes: new Blob([body]).size,
+    sizeBytes: bytes.byteLength,
   }));
 };
 

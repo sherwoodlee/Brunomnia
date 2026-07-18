@@ -265,14 +265,18 @@ const normalizeResponseTimeline = (value: unknown): ResponseTimelineEntry[] => !
 const normalizeStoredResponses = (value: unknown): StoredResponse[] => Array.isArray(value) ? value.flatMap((entry, index) => {
   const source = record(entry);
   if (!source) return [];
+  const { bodyBase64: encodedBody, ...response } = source;
+  const bodyBase64 = typeof encodedBody === 'string' && encodedBody.length ? encodedBody : undefined;
   return [{
-    ...source,
+    ...response,
     id: stringValue(source.id, `legacy-response-${index}`),
     requestId: stringValue(source.requestId),
     requestName: stringValue(source.requestName),
     requestUrl: stringValue(source.requestUrl),
     environmentId: stringValue(source.environmentId),
     receivedAt: stringValue(source.receivedAt, new Date(0).toISOString()),
+    body: stringValue(source.body),
+    ...(bodyBase64 ? { bodyBase64 } : {}),
     timeline: normalizeResponseTimeline(source.timeline),
   } as StoredResponse];
 }) : [];
