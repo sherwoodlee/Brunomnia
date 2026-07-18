@@ -14,6 +14,12 @@ export const visibleResponseHistory = (
   .filter((response) => response.requestId === requestId && (!filterResponsesByEnv || response.environmentId === environmentId))
   .sort(newestFirst);
 
+export const deleteSavedResponse = (responses: StoredResponse[], responseId: string) => responses
+  .filter((response) => response.id !== responseId);
+
+export const clearSavedResponseHistory = (responses: StoredResponse[], requestId: string, environmentId: string) => responses
+  .filter((response) => response.requestId !== requestId || response.environmentId !== environmentId);
+
 export const retainResponseHistory = (
   responses: StoredResponse[],
   response: StoredResponse,

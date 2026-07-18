@@ -73,7 +73,7 @@ Each request chooses **Use Preferences**, **Custom**, or **Direct connection**. 
 
 ## Response history
 
-After a request completes, use the history selector in the response summary to reopen an earlier saved result. Saved entries retain the response body, headers, status, timing, negotiated protocol, request URL, request identity, active environment identity, and receipt time. Selecting another request restores its newest eligible response instead of leaving the previous request's result on screen.
+After a request completes, use the history selector in the response summary to reopen an earlier saved result. Delete removes the selected saved result; Clear removes every saved result for the active request and environment, matching current Insomnia's environment-scoped history action. Other requests and environments remain intact, and the response panel falls back to the newest remaining visible result or an empty state. Saved entries retain the response body, headers, status, timing, negotiated protocol, request URL, request identity, active environment identity, and receipt time. Selecting another request restores its newest eligible response instead of leaving the previous request's result on screen.
 
 Preferences defaults to 20 saved responses per request. Positive numbers keep that many, `0` keeps the just-completed result live without saving it, and `-1` retains all. **Filter response history by active environment** restricts both the selector and response template tags to the active global environment; future pruning then applies per request/environment pair. Existing entries are pruned only when that request next stores a response. Response history is omitted from project sharing and encrypted-sync payloads.
 

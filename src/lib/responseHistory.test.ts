@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StoredResponse } from '../types';
-import { retainResponseHistory, visibleResponseHistory } from './responseHistory';
+import { clearSavedResponseHistory, deleteSavedResponse, retainResponseHistory, visibleResponseHistory } from './responseHistory';
 
 const response = (id: string, requestId: string, environmentId: string, receivedAt: string): StoredResponse => ({
   id,
@@ -44,5 +44,25 @@ describe('response history preferences', () => {
 
     expect(retainResponseHistory([older], newer, 0, false)).toEqual([]);
     expect(retainResponseHistory([older], newer, -1, false).map(({ id }) => id)).toEqual(['newer', 'older']);
+  });
+
+  it('deletes only the selected saved response', () => {
+    const selected = response('selected', 'request-a', 'dev', '2026-07-17T02:00:00.000Z');
+    const kept = response('kept', 'request-a', 'dev', '2026-07-17T01:00:00.000Z');
+    const remaining = deleteSavedResponse([selected, kept], selected.id);
+
+    expect(remaining.map(({ id }) => id)).toEqual(['kept']);
+    expect(visibleResponseHistory(remaining, 'request-a', 'dev', true)[0]?.id).toBe('kept');
+  });
+
+  it('clears only the active request and environment history', () => {
+    const dev = response('dev', 'request-a', 'dev', '2026-07-17T03:00:00.000Z');
+    const prod = response('prod', 'request-a', 'prod', '2026-07-17T02:00:00.000Z');
+    const other = response('other', 'request-b', 'dev', '2026-07-17T01:00:00.000Z');
+    const remaining = clearSavedResponseHistory([dev, prod, other], 'request-a', 'dev');
+
+    expect(remaining.map(({ id }) => id)).toEqual(['prod', 'other']);
+    expect(visibleResponseHistory(remaining, 'request-a', 'dev', false)[0]?.id).toBe('prod');
+    expect(visibleResponseHistory(remaining, 'request-a', 'dev', true)).toEqual([]);
   });
 });
