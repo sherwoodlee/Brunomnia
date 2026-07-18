@@ -1715,6 +1715,44 @@ mod tests {
     }
 
     #[test]
+    fn stages_and_unstages_multiple_files_as_one_selection() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Bulk Stage Test"]);
+        git(root, &["config", "user.email", "bulk-stage@example.com"]);
+        fs::write(root.join("first.yaml"), "value: first base\n").unwrap();
+        fs::write(root.join("second.yaml"), "value: second base\n").unwrap();
+        git(root, &["add", "first.yaml", "second.yaml"]);
+        git(root, &["commit", "-m", "base files"]);
+
+        fs::write(root.join("first.yaml"), "value: first working\n").unwrap();
+        fs::write(root.join("second.yaml"), "value: second working\n").unwrap();
+        let staged = git_stage(
+            root.to_string_lossy().into_owned(),
+            vec!["first.yaml".into(), "second.yaml".into()],
+        )
+        .unwrap();
+        assert!(staged.files.iter().all(|file| file.staged));
+        let staged_diff = git_diff(root.to_string_lossy().into_owned(), true).unwrap();
+        assert!(staged_diff.contains("+value: first working"));
+        assert!(staged_diff.contains("+value: second working"));
+
+        let unstaged = git_unstage(
+            root.to_string_lossy().into_owned(),
+            vec!["first.yaml".into(), "second.yaml".into()],
+        )
+        .unwrap();
+        assert!(unstaged.files.iter().all(|file| !file.staged));
+        assert!(git_diff(root.to_string_lossy().into_owned(), true)
+            .unwrap()
+            .is_empty());
+        let working_diff = git_diff(root.to_string_lossy().into_owned(), false).unwrap();
+        assert!(working_diff.contains("+value: first working"));
+        assert!(working_diff.contains("+value: second working"));
+    }
+
+    #[test]
     fn returns_confined_per_file_diffs_including_untracked_text() {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path();

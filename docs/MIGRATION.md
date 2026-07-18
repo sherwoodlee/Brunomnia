@@ -1001,7 +1001,22 @@ Compatibility bounds remain explicit: this is a permanent discard after optional
 
 Compatibility bounds remain explicit: Brunomnia renders a unified textual patch/direct untracked preview rather than upstream's side-by-side semantic editor. Binary tracked changes use Git's ordinary binary diff marker; binary untracked files have no byte/hex viewer. Rename/copy presentation follows Git's path-filter behavior, and no syntax-aware diff or hunk staging is claimed. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 66 — remaining parity closure and release hardening
+## Milestone 66 — bulk staging and resilient commit-and-push (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes selected/all stage and unstage controls plus separate **Commit** and **Commit and push** actions in its Git staging modal |
+| Selected/all staging | Complete baseline | Git Sync filters current non-conflicted status into selected/all stageable and unstageable sets, with accurate disabled states and shared progress/error handling |
+| Secret/conflict safety | Complete | Every staging path still passes native relative-path validation, bulk staging observes the plaintext-secret policy, and conflicts remain owned by the explicit resolution workbench |
+| Commit-and-push | Complete baseline | The shared commit path clears stale suggestions/history, records the committed status first, and optionally pushes the resulting branch tip through the configured Git remote |
+| Partial-failure reporting | Complete | A rejected or unavailable push reports that the commit was created locally; Brunomnia neither claims atomicity nor attempts to rewrite the new local commit |
+| Executable coverage | Complete baseline | A two-file repository fixture proves one-call staging and unstaging, both staged patches, an empty index afterward, and preserved working-tree changes |
+| Bundle boundary | Complete | Bulk controls and commit orchestration remain in the lazy Git workbench while the main renderer stays below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 66 verification](QA_MILESTONE_66.md) |
+
+Compatibility bounds remain explicit: commit-and-push is a two-step local/network operation, not an atomic transaction. A successful local commit is intentionally preserved when authentication, connectivity, branch protection, non-fast-forward policy, or another remote rule rejects the push. Stage/unstage all omits conflicted files, and there is no hunk-level staging, commit amendment, signing UI, force push, or automatic retry. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 67 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
