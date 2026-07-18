@@ -1127,7 +1127,20 @@ Compatibility bounds remain explicit: redaction recognizes credential-shaped fie
 
 Compatibility bounds remain explicit: this phase creates a new route in the currently selected server; response-to-existing-route overwrite and server selection from the request response pane remain open. Mock routes remain text-backed, so binary bodies are refused. Running native mock instances still require restart to consume route edits. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 75 — remaining parity closure and release hardening
+## Milestone 75 — selected-route response overwrite (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` overwrites an existing mock route from the active response by patching body, status, MIME/header data only |
+| Selected-route action | Complete baseline | The mock route editor can explicitly replace the selected route's status, headers, and body from the active request's latest response |
+| Authored-field preservation | Complete | Route identity, name, method, path, enabled state, and delay remain untouched so hand-authored routing and scenario behavior are not discarded |
+| Shared safety boundary | Complete | Existing-route overwrite reuses text/binary detection, 10,000,000-character body bounds, decoded-body transport-header removal, and active-environment latest-response selection |
+| Executable coverage | Complete baseline | Focused tests prove response-field replacement, authored-field preservation, stable header IDs, and binary refusal on overwrite |
+| Documentation and evidence | Complete | Updated [AI integration guide](MCP_AI_KONNECT.md), [parity ledger](PARITY.md), and [Milestone 75 verification](QA_MILESTONE_75.md) |
+
+Compatibility bounds remain explicit: overwrite targets the selected route in the selected mock server; Brunomnia does not yet expose the server/route chooser inside the request response pane. Binary bodies remain refused, and a running native mock instance must be restarted to consume route edits. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 76 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

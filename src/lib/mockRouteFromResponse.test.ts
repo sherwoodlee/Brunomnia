@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StoredResponse } from '../types';
-import { createMockRouteFromResponse } from './mockRouteFromResponse';
+import { createMockRouteFromResponse, overwriteMockRouteFromResponse } from './mockRouteFromResponse';
 
 const response = (patch: Partial<StoredResponse> = {}): StoredResponse => ({
   id: 'response-one', requestId: 'request-one', requestName: 'Create order', requestUrl: 'https://api.example.test/orders/ord_1?expand=items', environmentId: 'environment-one', receivedAt: '2026-07-18T00:00:00.000Z',
@@ -36,5 +36,21 @@ describe('response-to-mock route conversion', () => {
   it('refuses binary and oversized bodies instead of corrupting saved bytes', () => {
     expect(() => createMockRouteFromResponse(response({ headers: { 'Content-Type': 'image/png' }, body: '�PNG', bodyBase64: 'iVBORw==' }))).toThrow('response is binary');
     expect(() => createMockRouteFromResponse(response({ body: 'x'.repeat(10_000_001) }))).toThrow('10,000,000-character');
+  });
+
+  it('overwrites only response fields on an existing route', () => {
+    const existing = createMockRouteFromResponse(response(), 'existing-route');
+    const customized = { ...existing, name: 'Reviewed scenario', method: 'PATCH' as const, path: '/reviewed/{id}', enabled: false, delayMs: 450 };
+    const updated = overwriteMockRouteFromResponse(customized, response({ status: 202, body: '{"queued":true}', headers: { 'Content-Type': 'application/json', 'X-Revision': 'two' } }));
+    expect(updated).toMatchObject({ id: 'existing-route', name: 'Reviewed scenario', method: 'PATCH', path: '/reviewed/{id}', enabled: false, delayMs: 450, status: 202, body: '{"queued":true}' });
+    expect(updated.headers).toEqual([
+      { id: 'existing-route-header-0', name: 'Content-Type', value: 'application/json', enabled: true },
+      { id: 'existing-route-header-1', name: 'X-Revision', value: 'two', enabled: true },
+    ]);
+  });
+
+  it('applies binary refusal to existing-route overwrite too', () => {
+    const existing = createMockRouteFromResponse(response(), 'existing-route');
+    expect(() => overwriteMockRouteFromResponse(existing, response({ headers: { 'Content-Type': 'application/zip' }, body: 'PK�', bodyBase64: 'UEsD' }))).toThrow('response is binary');
   });
 });

@@ -23,7 +23,7 @@ import { runStreamSample } from '../lib/protocol';
 import { resolveAuthorizedExternalSecret } from '../lib/security';
 import { generateMockWithAi } from '../lib/ai';
 import { buildMockAiContext, composeMockAiInput, findActiveRequest, findLatestResponseForActiveRequest, type MockAiContextSource } from '../lib/mockAiContext';
-import { createMockRouteFromResponse } from '../lib/mockRouteFromResponse';
+import { createMockRouteFromResponse, overwriteMockRouteFromResponse } from '../lib/mockRouteFromResponse';
 import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
 import { Icon } from './Icon';
 import { CodeEditor } from './ProtocolEditors';
@@ -357,6 +357,14 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
       setActiveRouteId(created.id);
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
   };
+  const overwriteRouteFromLatestResponse = () => {
+    if (!server || !route || !latestResponse) return;
+    setError('');
+    try {
+      const updated = overwriteMockRouteFromResponse(route, latestResponse);
+      updateServer({ routes: server.routes.map((candidate) => candidate.id === route.id ? updated : candidate) });
+    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+  };
 
   if (!server) return <AutomationEmpty title="No mock servers" action="Create local mock" onAction={() => {
     const created: MockServer = { id: uid('mock'), name: 'Local mock', host: '127.0.0.1', port: 4010, routes: [] };
@@ -388,7 +396,7 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
         </aside>
         {route ? <div className="mock-route-editor">
           <div className="mock-route-bar"><select aria-label="Mock method" value={route.method} onChange={(event) => updateRoute({ method: event.target.value as MockRoute['method'] })}>{['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE'].map((method) => <option key={method}>{method}</option>)}</select><input aria-label="Mock route path" value={route.path} onChange={(event) => updateRoute({ path: event.target.value })} /><label>Status<input aria-label="Mock status" min="100" max="599" type="number" value={route.status} onChange={(event) => updateRoute({ status: Number(event.target.value) })} /></label><label>Delay<input aria-label="Mock delay" min="0" max="30000" type="number" value={route.delayMs} onChange={(event) => updateRoute({ delayMs: Number(event.target.value) })} /></label></div>
-          <div className="mock-route-meta"><input aria-label="Mock route name" value={route.name} onChange={(event) => updateRoute({ name: event.target.value })} /><label><input checked={route.enabled} type="checkbox" onChange={(event) => updateRoute({ enabled: event.target.checked })} /> Route enabled</label><button onClick={() => updateServer({ routes: server.routes.filter((candidate) => candidate.id !== route.id) })} type="button"><Icon name="trash" size={14} /> Delete</button></div>
+          <div className="mock-route-meta"><input aria-label="Mock route name" value={route.name} onChange={(event) => updateRoute({ name: event.target.value })} /><label><input checked={route.enabled} type="checkbox" onChange={(event) => updateRoute({ enabled: event.target.checked })} /> Route enabled</label><button className="mock-response-action" disabled={!latestResponse} onClick={overwriteRouteFromLatestResponse} title={latestResponse ? 'Replace status, headers, and body from the latest response' : 'Send the active request first'} type="button"><Icon name="history" size={14} /> Use latest response</button><button onClick={() => updateServer({ routes: server.routes.filter((candidate) => candidate.id !== route.id) })} type="button"><Icon name="trash" size={14} /> Delete</button></div>
           <div className="mock-header-editor">
             <header><strong>Response headers</strong><button onClick={() => updateRoute({ headers: [...route.headers, { id: uid('mock-header'), name: '', value: '', enabled: true }] })} type="button"><Icon name="plus" size={13} /> Add header</button></header>
             {route.headers.map((header) => <div className="mock-header-row" key={header.id}><input aria-label="Enable mock response header" checked={header.enabled} type="checkbox" onChange={(event) => updateRoute({ headers: route.headers.map((candidate) => candidate.id === header.id ? { ...candidate, enabled: event.target.checked } : candidate) })} /><input aria-label="Mock response header name" placeholder="Header" value={header.name} onChange={(event) => updateRoute({ headers: route.headers.map((candidate) => candidate.id === header.id ? { ...candidate, name: event.target.value } : candidate) })} /><input aria-label="Mock response header value" placeholder="Value" value={header.value} onChange={(event) => updateRoute({ headers: route.headers.map((candidate) => candidate.id === header.id ? { ...candidate, value: event.target.value } : candidate) })} /><button aria-label="Remove mock response header" onClick={() => updateRoute({ headers: route.headers.filter((candidate) => candidate.id !== header.id) })} type="button"><Icon name="trash" size={13} /></button></div>)}

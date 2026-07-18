@@ -820,6 +820,7 @@ kbd {
 .mock-route-meta label { align-items: center; color: var(--muted); display: flex; font-size: 8px; gap: 5px; }
 .mock-route-meta label input { accent-color: var(--accent); }
 .mock-route-meta button { align-items: center; background: transparent; border: 0; color: var(--red); display: flex; font-size: 8px; gap: 4px; }
+.mock-route-meta button.mock-response-action { color: var(--accent); }
 .mock-header-editor { border-bottom: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 5px; padding: 7px 10px; }
 .mock-header-editor > header { align-items: center; display: flex; justify-content: space-between; }
 .mock-header-editor > header strong { color: var(--muted); font-size: 8px; text-transform: uppercase; }
