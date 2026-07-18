@@ -1194,7 +1194,21 @@ Compatibility bounds remain explicit: this is a documented safe subset rather th
 
 Compatibility bounds remain explicit: Brunomnia preserves the documented variable names and output categories, not FakerJS implementation identity. Its compact built-in English corpus, exact values, locale breadth, probability distributions, and date semantics can differ from upstream. Multipart field parsing, `elsif`, broader Liquid operators/filters, repeated-value arrays, percent-decoded path segments, and live route hot reload remain open. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 80 — remaining parity closure and release hardening
+## Milestone 80 — multipart mock request fields (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | The pinned [Mockbin body parser](https://github.com/Kong/insomnia-mockbin/blob/c2a388563ea8259f9b235e4b3dfe87f64d568014/lib/middleware/body-parser.js) accepts form-data/mixed/related/alternate bodies, exposes text-decoded part values by field name, and promotes repeats to arrays |
+| Media-type coverage | Complete baseline | `multipart/form-data`, `multipart/mixed`, `multipart/related`, and `multipart/alternate` accept case-insensitive media types and quoted or unquoted boundaries |
+| Field access | Complete baseline | Text and valid-UTF-8 file-part content render through `req.body.name`; repeated names render through zero-based dotted indices such as `req.body.tag.0` |
+| Structural fidelity | Complete | Preambles/epilogues, CRLF or LF framing, multiline values, filename-bearing parts, and boundary-looking content that is not a delimiter are handled without exposing multipart headers as values |
+| Resource limits | Complete | Existing 1 MB body inspection combines with 100 parts, 16,000 header bytes per part, 200 boundary bytes, and 1,000 field-name bytes; malformed/over-limit multipart produces no parsed field object |
+| Executable coverage | Complete baseline | Pure parser fixtures cover all four media types, quoted boundaries, repeats, file/multiline content, false delimiters, injection refusal, part/header caps, and an async handler-level render without binding a socket |
+| Documentation and evidence | Complete | Updated [local mock server guide](MOCK_SERVERS.md), [parity ledger](PARITY.md), and [Milestone 80 verification](QA_MILESTONE_80.md) |
+
+Compatibility bounds remain explicit: multipart content must fit the existing bounded valid-UTF-8 request body; binary file content therefore exposes no body context. Filenames, content types, and per-part headers are not template properties, matching the upstream simple-field surface. Repeated query and URL-encoded values remain last-value strings rather than arrays. Percent-decoded path segments and live route hot reload remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 81 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -16,6 +16,10 @@ const MAX_TEMPLATE_NESTING: usize = 20;
 const MAX_TEMPLATE_EXPANSION_BYTES: usize = 5_000_000;
 const MAX_TEMPLATE_LOCALS: usize = 100;
 const MAX_TEMPLATE_LOCAL_VALUE_BYTES: usize = 10_000;
+const MAX_MULTIPART_PARTS: usize = 100;
+const MAX_MULTIPART_HEADER_BYTES: usize = 16_000;
+const MAX_MULTIPART_BOUNDARY_BYTES: usize = 200;
+const MAX_MULTIPART_FIELD_NAME_BYTES: usize = 1_000;
 
 #[derive(Clone, Default)]
 pub struct MockServerState {
@@ -233,7 +237,173 @@ fn parse_body_fields(body: &str, content_type: &str) -> JsonValue {
             .collect::<JsonMap<String, JsonValue>>();
         return JsonValue::Object(fields);
     }
+    if matches!(
+        mime_type.as_str(),
+        "multipart/form-data" | "multipart/mixed" | "multipart/related" | "multipart/alternate"
+    ) {
+        return header_parameter(content_type, "boundary")
+            .filter(|boundary| {
+                !boundary.is_empty()
+                    && boundary.len() <= MAX_MULTIPART_BOUNDARY_BYTES
+                    && !boundary.contains(['\r', '\n', '\0'])
+            })
+            .and_then(|boundary| parse_multipart_fields(body, &boundary))
+            .unwrap_or(JsonValue::Null);
+    }
     JsonValue::Null
+}
+
+fn header_parameter(header: &str, target: &str) -> Option<String> {
+    let parameters_start = header.find(';')? + 1;
+    let mut segment_start = parameters_start;
+    let mut quote = false;
+    let mut escaped = false;
+    let bytes = header.as_bytes();
+    for index in parameters_start..=header.len() {
+        let character = bytes.get(index).copied();
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match character {
+            Some(b'\\') if quote => escaped = true,
+            Some(b'"') => quote = !quote,
+            Some(b';') | None if !quote => {
+                let segment = header[segment_start..index].trim();
+                if let Some((name, value)) = segment.split_once('=') {
+                    if name.trim().eq_ignore_ascii_case(target) {
+                        let value = value.trim();
+                        if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                            let mut unescaped = String::with_capacity(value.len() - 2);
+                            let mut escaped = false;
+                            for character in value[1..value.len() - 1].chars() {
+                                if escaped {
+                                    unescaped.push(character);
+                                    escaped = false;
+                                } else if character == '\\' {
+                                    escaped = true;
+                                } else {
+                                    unescaped.push(character);
+                                }
+                            }
+                            if escaped {
+                                return None;
+                            }
+                            return Some(unescaped);
+                        }
+                        return Some(value.to_string());
+                    }
+                }
+                segment_start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+struct MultipartBoundary {
+    start: usize,
+    after_line: usize,
+    closing: bool,
+}
+
+fn find_multipart_boundary(body: &str, delimiter: &str, from: usize) -> Option<MultipartBoundary> {
+    let mut cursor = from;
+    while let Some(relative_start) = body[cursor..].find(delimiter) {
+        let start = cursor + relative_start;
+        let at_line_start = start == 0 || body.as_bytes().get(start - 1) == Some(&b'\n');
+        let suffix = &body[start + delimiter.len()..];
+        let (after_line, closing) = if let Some(after_close) = suffix.strip_prefix("--") {
+            if after_close.is_empty() {
+                (body.len(), true)
+            } else if after_close.starts_with("\r\n") {
+                (start + delimiter.len() + 4, true)
+            } else if after_close.starts_with('\n') {
+                (start + delimiter.len() + 3, true)
+            } else {
+                cursor = start + delimiter.len();
+                continue;
+            }
+        } else if suffix.starts_with("\r\n") {
+            (start + delimiter.len() + 2, false)
+        } else if suffix.starts_with('\n') {
+            (start + delimiter.len() + 1, false)
+        } else {
+            cursor = start + delimiter.len();
+            continue;
+        };
+        if at_line_start {
+            return Some(MultipartBoundary {
+                start,
+                after_line,
+                closing,
+            });
+        }
+        cursor = start + delimiter.len();
+    }
+    None
+}
+
+fn multipart_part(section: &str) -> Option<(String, String)> {
+    let (headers, value) = section
+        .split_once("\r\n\r\n")
+        .or_else(|| section.split_once("\n\n"))?;
+    if headers.len() > MAX_MULTIPART_HEADER_BYTES {
+        return None;
+    }
+    let disposition = headers.lines().find_map(|line| {
+        let (name, value) = line.trim_end_matches('\r').split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case("content-disposition")
+            .then_some(value.trim())
+    })?;
+    let name = header_parameter(disposition, "name")?;
+    if name.is_empty()
+        || name.len() > MAX_MULTIPART_FIELD_NAME_BYTES
+        || name.contains(['\r', '\n', '\0'])
+    {
+        return None;
+    }
+    Some((name, value.to_string()))
+}
+
+fn insert_multipart_field(fields: &mut JsonMap<String, JsonValue>, name: String, value: String) {
+    let value = JsonValue::String(value);
+    if let Some(existing) = fields.get_mut(&name) {
+        if let JsonValue::Array(values) = existing {
+            values.push(value);
+        } else {
+            let previous = std::mem::replace(existing, JsonValue::Null);
+            *existing = JsonValue::Array(vec![previous, value]);
+        }
+    } else {
+        fields.insert(name, value);
+    }
+}
+
+fn parse_multipart_fields(body: &str, boundary: &str) -> Option<JsonValue> {
+    let delimiter = format!("--{boundary}");
+    let mut current = find_multipart_boundary(body, &delimiter, 0)?;
+    let mut fields = JsonMap::new();
+    let mut part_count = 0;
+    loop {
+        if current.closing {
+            return Some(JsonValue::Object(fields));
+        }
+        let next = find_multipart_boundary(body, &delimiter, current.after_line)?;
+        let section = body[current.after_line..next.start]
+            .strip_suffix("\r\n")
+            .or_else(|| body[current.after_line..next.start].strip_suffix('\n'))
+            .unwrap_or(&body[current.after_line..next.start]);
+        part_count += 1;
+        if part_count > MAX_MULTIPART_PARTS {
+            return None;
+        }
+        let (name, value) = multipart_part(section)?;
+        insert_multipart_field(&mut fields, name, value);
+        current = next;
+    }
 }
 
 fn match_path(pattern: &str, actual: &str) -> Option<HashMap<String, String>> {
@@ -769,6 +939,103 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parses_bounded_multipart_fields_and_repeated_values() {
+        let body = concat!(
+            "preamble\r\n",
+            "--AaB03x\r\n",
+            "Content-Disposition: form-data; name=\"tag\"\r\n\r\n",
+            "one\r\n",
+            "--AaB03x\r\n",
+            "Content-Disposition: form-data; name=\"tag\"\r\n\r\n",
+            "two\r\n",
+            "--AaB03x\r\n",
+            "Content-Disposition: form-data; name=\"upload\"; filename=\"hello.txt\"\r\n",
+            "Content-Type: text/plain\r\n\r\n",
+            "hello\n--AaB03x-not-a-boundary\nworld\r\n",
+            "--AaB03x--\r\n",
+            "epilogue"
+        );
+        for media_type in [
+            "multipart/form-data",
+            "multipart/mixed",
+            "multipart/related",
+            "multipart/alternate",
+        ] {
+            let fields = parse_body_fields(
+                body,
+                &format!("{media_type}; charset=utf-8; boundary=\"AaB03x\""),
+            );
+            assert_eq!(json_value_at_path(&fields, "tag.0"), "one");
+            assert_eq!(json_value_at_path(&fields, "tag.1"), "two");
+            assert_eq!(
+                json_value_at_path(&fields, "upload"),
+                "hello\n--AaB03x-not-a-boundary\nworld"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_malformed_or_over_limit_multipart_fields() {
+        assert_eq!(
+            parse_body_fields("--missing--", "multipart/form-data"),
+            JsonValue::Null
+        );
+        assert_eq!(
+            parse_body_fields("", "multipart/form-data; boundary=bad\r\nvalue"),
+            JsonValue::Null
+        );
+        assert_eq!(
+            parse_body_fields(
+                "",
+                &format!(
+                    "multipart/form-data; boundary={}",
+                    "x".repeat(MAX_MULTIPART_BOUNDARY_BYTES + 1)
+                )
+            ),
+            JsonValue::Null
+        );
+
+        let lf_only = "--line\nContent-Disposition: form-data; name=field\n\nvalue\n--line--\n";
+        assert_eq!(
+            json_value_at_path(
+                &parse_body_fields(lf_only, "multipart/form-data; boundary=line"),
+                "field"
+            ),
+            "value"
+        );
+
+        let mut too_many = String::new();
+        for index in 0..=MAX_MULTIPART_PARTS {
+            too_many.push_str(&format!(
+                "--limit\r\nContent-Disposition: form-data; name=\"field{index}\"\r\n\r\nvalue\r\n"
+            ));
+        }
+        too_many.push_str("--limit--\r\n");
+        assert_eq!(
+            parse_body_fields(&too_many, "multipart/form-data; boundary=limit"),
+            JsonValue::Null
+        );
+
+        let oversized_headers = format!(
+            "--limit\r\nContent-Disposition: form-data; name=\"field\"\r\nX-Padding: {}\r\n\r\nvalue\r\n--limit--\r\n",
+            "x".repeat(MAX_MULTIPART_HEADER_BYTES)
+        );
+        assert_eq!(
+            parse_body_fields(&oversized_headers, "multipart/form-data; boundary=limit"),
+            JsonValue::Null
+        );
+
+        let oversized_name = format!(
+            "--limit\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\nvalue\r\n--limit--\r\n",
+            "x".repeat(MAX_MULTIPART_FIELD_NAME_BYTES + 1)
+        );
+        assert_eq!(
+            parse_body_fields(&oversized_name, "multipart/form-data; boundary=limit"),
+            JsonValue::Null
+        );
+    }
+
     #[tokio::test]
     async fn renders_incoming_request_data_through_the_handler() {
         let state = RouteState {
@@ -802,6 +1069,45 @@ mod tests {
             String::from_utf8(body.to_vec()).unwrap(),
             r#"{"id":"ord_1","query":"full","segment":"orders","customer":"Ada","client":"desktop"}"#
         );
+    }
+
+    #[tokio::test]
+    async fn renders_multipart_fields_through_the_handler() {
+        let state = RouteState {
+            routes: Arc::new(vec![MockRouteInput {
+                id: "multipart-aware".into(),
+                name: "Multipart-aware route".into(),
+                enabled: true,
+                method: "POST".into(),
+                path: "/uploads".into(),
+                status: 200,
+                headers: vec![],
+                body: "{{ req.body.tag.0 }}|{{ req.body.tag.1 }}|{{ req.body.upload }}".into(),
+                delay_ms: 0,
+            }]),
+        };
+        let request = Request::builder()
+            .method("POST")
+            .uri("/uploads")
+            .header("content-type", "multipart/form-data; boundary=fixture")
+            .body(Body::from(concat!(
+                "--fixture\r\n",
+                "Content-Disposition: form-data; name=\"tag\"\r\n\r\n",
+                "one\r\n",
+                "--fixture\r\n",
+                "Content-Disposition: form-data; name=\"tag\"\r\n\r\n",
+                "two\r\n",
+                "--fixture\r\n",
+                "Content-Disposition: form-data; name=\"upload\"; filename=\"hello.txt\"\r\n",
+                "Content-Type: text/plain\r\n\r\n",
+                "hello\r\n",
+                "--fixture--\r\n"
+            )))
+            .unwrap();
+        let response = handle_request(State(state), request).await;
+        assert_eq!(response.status(), 200);
+        let body = to_bytes(response.into_body(), 10_000).await.unwrap();
+        assert_eq!(String::from_utf8(body.to_vec()).unwrap(), "one|two|hello");
     }
 
     #[tokio::test]
