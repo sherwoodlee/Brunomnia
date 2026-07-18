@@ -1208,7 +1208,21 @@ Compatibility bounds remain explicit: Brunomnia preserves the documented variabl
 
 Compatibility bounds remain explicit: multipart content must fit the existing bounded valid-UTF-8 request body; binary file content therefore exposes no body context. Filenames, content types, and per-part headers are not template properties, matching the upstream simple-field surface. Repeated query and URL-encoded values remain last-value strings rather than arrays. Percent-decoded path segments and live route hot reload remain open. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 81 — remaining parity closure and release hardening
+## Milestone 81 — request collections and decoded paths (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Mockbin passes Express `req.query`, Node `querystring.parse()` form data, and decoded wildcard path parameters into Liquid; Node's current [query-string contract](https://nodejs.org/api/querystring.html) promotes repeats to arrays and defaults to 1,000 parsed keys |
+| Repeated collections | Complete baseline | Query and URL-encoded form pairs preserve decoded insertion order, promote the second value to an array, and retain at most the first 1,000 pairs like the upstream parser |
+| Access syntax | Complete baseline | Dot properties, quoted bracket properties, numeric brackets, and numeric dotted indices compose across request query, path, JSON, form, and multipart values |
+| Key fidelity | Complete | Quoted brackets address keys containing dots; valid missing paths render empty/default, while malformed access syntax remains literal for review |
+| Path decoding | Complete baseline | Path segments and route `{parameter}` values decode valid UTF-8 percent octets, keep `+` literal, retain malformed/invalid-UTF-8 escapes, and allow encoded literals to match decoded route text |
+| Executable coverage | Complete baseline | Pure fixtures prove repeat ordering/indexing, dotted-key access, the exact 1,000-pair boundary, form `+` handling, encoded slash/non-ASCII paths, invalid UTF-8 preservation, and async handler-level query/path rendering |
+| Documentation and evidence | Complete | Updated [local mock server guide](MOCK_SERVERS.md), [parity ledger](PARITY.md), and [Milestone 81 verification](QA_MILESTONE_81.md) |
+
+Compatibility bounds remain explicit: bracket expressions support quoted literal properties and numeric indices, not dynamic index variables or arbitrary Liquid expressions. Multipart filename/content-type/header metadata, live route hot reload, and the response-pane server/route chooser remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 82 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

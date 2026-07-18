@@ -9,15 +9,18 @@ Mock bodies support a safe Liquid-style output subset. Values are inserted as pl
 | Input | Example |
 | --- | --- |
 | Case-insensitive header | `{{ req.headers['X-Client'] }}` or `{{ req.headers.x-client }}` |
-| Query parameter | `{{ req.queryParams.orderId }}` or `{{ req.queryParams['orderId'] }}` |
-| Zero-based path segment | `{{ req.pathSegments[0] }}` |
+| Query parameter | `{{ req.queryParams.orderId }}` or `{{ req.queryParams['order.id'] }}` |
+| Repeated query/form/multipart value | `{{ req.queryParams.tag[0] }}` or `{{ req.body.tag.1 }}` |
+| Zero-based decoded path segment | `{{ req.pathSegments[0] }}` |
 | Raw UTF-8 body | `{{ req.body }}` |
 | Parsed JSON/form/multipart field | `{{ req.body.customer.name }}` or `{{ req.body.items.0.id }}` |
 | Missing-value fallback | `{{ req.body.name | default: "Guest" }}` |
 | Route `{id}` parameter | `{{ request.path.id }}` |
 | Timestamp / UUID | `{{$timestamp}}` and `{{$randomUUID}}` |
 
-JSON is parsed for `application/json` and `+json` media types. URL-encoded fields are parsed for `application/x-www-form-urlencoded`. Multipart fields are parsed for `multipart/form-data`, `multipart/mixed`, `multipart/related`, and `multipart/alternate` when a valid boundary is present. Repeated multipart names become arrays, so two `tag` fields are available as `{{ req.body.tag.0 }}` and `{{ req.body.tag.1 }}`. UTF-8 file-part content is exposed under its field name like upstream Mockbin; filenames and per-part headers are not template properties. Duplicate query/URL-encoded names currently use the last value.
+JSON is parsed for `application/json` and `+json` media types. URL-encoded fields are parsed for `application/x-www-form-urlencoded`. Multipart fields are parsed for `multipart/form-data`, `multipart/mixed`, `multipart/related`, and `multipart/alternate` when a valid boundary is present. Repeated query, URL-encoded, or multipart names become ordered arrays. Dot segments, numeric brackets, numeric dotted indices, and quoted bracket keys can be combined, including `{{ req.body.items[0]['profile.name'] }}`. UTF-8 file-part content is exposed under its field name like upstream Mockbin; filenames and per-part headers are not template properties.
+
+Query/form percent encoding is decoded as UTF-8 and `+` represents a space. Path segments and `{parameter}` values decode valid UTF-8 `%HH` sequences, while a literal path `+` stays `+`. Invalid UTF-8 path escapes remain unchanged rather than producing replacement text.
 
 ## Bounded control tags
 
@@ -52,12 +55,13 @@ Every occurrence is generated independently for the response. Image variables re
 
 - Request bodies are inspected only after a method/path route match and only up to 1,000,000 bytes.
 - A non-UTF-8 or oversized request body exposes an empty `req.body`; headers, query, path, static body text, and default values still work.
+- Query strings and URL-encoded bodies retain at most the first 1,000 decoded pairs, matching Node's default query-string bound.
 - Multipart parsing accepts at most 100 parts, 16,000 header bytes per part, a 200-byte boundary, and 1,000-byte field names. Malformed or over-limit multipart exposes no parsed fields; its bounded valid-UTF-8 raw body remains available.
 - Each response evaluates at most 1,000 template-token operations and 20 nested conditional levels. The unprocessed remainder stays literal when either limit is reached.
 - Dynamically inserted values contribute at most 5,000,000 response bytes. Static route text does not consume this expansion budget; an output and the following remainder stay literal if it would cross the limit.
 - Missing known variables render as an empty string unless `default` is present.
 - Unsupported output variables and Liquid tag syntax remain literal. Brunomnia does not evaluate arbitrary filters, loops, includes, or code.
-- Repeated query/URL-encoded arrays, multipart metadata, `elsif`, broader operators/filters, full Liquid semantics, and exact FakerJS corpus/distribution identity remain tracked parity work.
+- Multipart metadata, `elsif`, broader operators/filters, full Liquid semantics, and exact FakerJS corpus/distribution identity remain tracked parity work.
 - Native mock CORS remains permissive for local front-end development. Do not place secrets in mock response bodies.
 
 The implemented contract is reconciled against Kong's current [dynamic mocking documentation](https://developer.konghq.com/insomnia/dynamic-mocking/). Brunomnia's mock server is local and account-free; it does not depend on Insomnia Mockbin or a hosted service.

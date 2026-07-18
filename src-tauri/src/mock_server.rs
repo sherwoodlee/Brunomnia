@@ -20,6 +20,7 @@ const MAX_MULTIPART_PARTS: usize = 100;
 const MAX_MULTIPART_HEADER_BYTES: usize = 16_000;
 const MAX_MULTIPART_BOUNDARY_BYTES: usize = 200;
 const MAX_MULTIPART_FIELD_NAME_BYTES: usize = 1_000;
+const MAX_REQUEST_COLLECTION_VALUES: usize = 1_000;
 
 #[derive(Clone, Default)]
 pub struct MockServerState {
@@ -172,8 +173,8 @@ async fn handle_request(State(state): State<RouteState>, request: Request<Body>)
 #[derive(Debug, Default)]
 struct RequestTemplateData {
     headers: HashMap<String, String>,
-    query_params: HashMap<String, String>,
-    path_segments: Vec<String>,
+    query_params: JsonValue,
+    path_segments: JsonValue,
     body: String,
     body_fields: JsonValue,
     path_parameters: HashMap<String, String>,
@@ -196,15 +197,20 @@ impl RequestTemplateData {
                     .map(|value| (name.as_str().to_lowercase(), value.to_string()))
             })
             .collect();
-        let query_params = url::form_urlencoded::parse(query.as_bytes())
-            .map(|(name, value)| (name.into_owned(), value.into_owned()))
-            .collect();
-        let path_segments = path
-            .trim_matches('/')
-            .split('/')
-            .filter(|segment| !segment.is_empty())
-            .map(str::to_string)
-            .collect();
+        let mut query_fields = JsonMap::new();
+        for (name, value) in
+            url::form_urlencoded::parse(query.as_bytes()).take(MAX_REQUEST_COLLECTION_VALUES)
+        {
+            insert_repeated_field(&mut query_fields, name.into_owned(), value.into_owned());
+        }
+        let query_params = JsonValue::Object(query_fields);
+        let path_segments = JsonValue::Array(
+            path.trim_matches('/')
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .map(|segment| JsonValue::String(percent_decode_path_segment(segment)))
+                .collect(),
+        );
         let content_type = headers
             .get("content-type")
             .map(String::as_str)
@@ -232,9 +238,12 @@ fn parse_body_fields(body: &str, content_type: &str) -> JsonValue {
         return serde_json::from_str(body).unwrap_or(JsonValue::Null);
     }
     if mime_type == "application/x-www-form-urlencoded" {
-        let fields = url::form_urlencoded::parse(body.as_bytes())
-            .map(|(name, value)| (name.into_owned(), JsonValue::String(value.into_owned())))
-            .collect::<JsonMap<String, JsonValue>>();
+        let mut fields = JsonMap::new();
+        for (name, value) in
+            url::form_urlencoded::parse(body.as_bytes()).take(MAX_REQUEST_COLLECTION_VALUES)
+        {
+            insert_repeated_field(&mut fields, name.into_owned(), value.into_owned());
+        }
         return JsonValue::Object(fields);
     }
     if matches!(
@@ -368,7 +377,7 @@ fn multipart_part(section: &str) -> Option<(String, String)> {
     Some((name, value.to_string()))
 }
 
-fn insert_multipart_field(fields: &mut JsonMap<String, JsonValue>, name: String, value: String) {
+fn insert_repeated_field(fields: &mut JsonMap<String, JsonValue>, name: String, value: String) {
     let value = JsonValue::String(value);
     if let Some(existing) = fields.get_mut(&name) {
         if let JsonValue::Array(values) = existing {
@@ -401,9 +410,41 @@ fn parse_multipart_fields(body: &str, boundary: &str) -> Option<JsonValue> {
             return None;
         }
         let (name, value) = multipart_part(section)?;
-        insert_multipart_field(&mut fields, name, value);
+        insert_repeated_field(&mut fields, name, value);
         current = next;
     }
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn percent_decode_path_segment(segment: &str) -> String {
+    if !segment.contains('%') {
+        return segment.to_string();
+    }
+    let bytes = segment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let (Some(high), Some(low)) =
+                (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+            {
+                decoded.push(high * 16 + low);
+                index += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8(decoded).unwrap_or_else(|_| segment.to_string())
 }
 
 fn match_path(pattern: &str, actual: &str) -> Option<HashMap<String, String>> {
@@ -414,12 +455,10 @@ fn match_path(pattern: &str, actual: &str) -> Option<HashMap<String, String>> {
     }
     let mut parameters = HashMap::new();
     for (expected, received) in pattern_parts.into_iter().zip(actual_parts) {
+        let decoded = percent_decode_path_segment(received);
         if expected.starts_with('{') && expected.ends_with('}') {
-            parameters.insert(
-                expected.trim_matches(['{', '}']).to_string(),
-                received.to_string(),
-            );
-        } else if expected != received {
+            parameters.insert(expected.trim_matches(['{', '}']).to_string(), decoded);
+        } else if expected != received && expected != decoded {
             return None;
         }
     }
@@ -437,24 +476,121 @@ fn bracket_or_dot_key<'a>(expression: &'a str, prefix: &str) -> Option<&'a str> 
         .map(|key| key.trim().trim_matches(['\'', '"']))
 }
 
-fn json_value_at_path(value: &JsonValue, path: &str) -> String {
-    let mut current = value;
-    for part in path.split('.').filter(|part| !part.is_empty()) {
-        current = match current {
-            JsonValue::Object(object) => object.get(part).unwrap_or(&JsonValue::Null),
-            JsonValue::Array(array) => part
-                .parse::<usize>()
-                .ok()
-                .and_then(|index| array.get(index))
-                .unwrap_or(&JsonValue::Null),
-            _ => &JsonValue::Null,
-        };
+fn access_path(suffix: &str) -> Option<Vec<String>> {
+    let bytes = suffix.as_bytes();
+    let mut cursor = 0;
+    let mut path = Vec::new();
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'.' => {
+                cursor += 1;
+                let start = cursor;
+                while cursor < bytes.len() && !matches!(bytes[cursor], b'.' | b'[') {
+                    cursor += 1;
+                }
+                if cursor == start {
+                    return None;
+                }
+                path.push(suffix[start..cursor].to_string());
+            }
+            b'[' => {
+                cursor += 1;
+                while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+                    cursor += 1;
+                }
+                let first = bytes.get(cursor).copied()?;
+                if matches!(first, b'\'' | b'"') {
+                    cursor += 1;
+                    let quote = first as char;
+                    let mut segment = String::new();
+                    let mut escaped = false;
+                    let mut closed = false;
+                    while cursor < suffix.len() {
+                        let character = suffix[cursor..].chars().next()?;
+                        cursor += character.len_utf8();
+                        if escaped {
+                            segment.push(character);
+                            escaped = false;
+                        } else if character == '\\' {
+                            escaped = true;
+                        } else if character == quote {
+                            closed = true;
+                            break;
+                        } else {
+                            segment.push(character);
+                        }
+                    }
+                    if !closed || escaped {
+                        return None;
+                    }
+                    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+                        cursor += 1;
+                    }
+                    if bytes.get(cursor) != Some(&b']') {
+                        return None;
+                    }
+                    cursor += 1;
+                    path.push(segment);
+                } else {
+                    let end = suffix[cursor..].find(']')? + cursor;
+                    let segment = suffix[cursor..end].trim();
+                    if segment.is_empty()
+                        || !segment.chars().all(|character| character.is_ascii_digit())
+                    {
+                        return None;
+                    }
+                    path.push(segment.to_string());
+                    cursor = end + 1;
+                }
+            }
+            _ => return None,
+        }
     }
-    match current {
+    (!path.is_empty()).then_some(path)
+}
+
+fn json_value_string(value: &JsonValue) -> String {
+    match value {
         JsonValue::Null => String::new(),
         JsonValue::String(value) => value.clone(),
         value => value.to_string(),
     }
+}
+
+fn json_value_at_access(value: &JsonValue, suffix: &str) -> Option<String> {
+    if suffix.is_empty() {
+        return Some(json_value_string(value));
+    }
+    if let (Some(exact), JsonValue::Object(object)) = (suffix.strip_prefix('.'), value) {
+        if let Some(value) = object.get(exact) {
+            return Some(json_value_string(value));
+        }
+    }
+    let path = access_path(suffix)?;
+    let mut current = value;
+    for part in path {
+        current = match current {
+            JsonValue::Object(object) => match object.get(&part) {
+                Some(value) => value,
+                None => return Some(String::new()),
+            },
+            JsonValue::Array(array) => match part
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| array.get(index))
+            {
+                Some(value) => value,
+                None => return Some(String::new()),
+            },
+            _ => return Some(String::new()),
+        };
+    }
+    Some(json_value_string(current))
+}
+
+#[cfg(test)]
+fn json_value_at_path(value: &JsonValue, path: &str) -> String {
+    json_value_at_access(value, &format!(".{path}")).unwrap_or_default()
 }
 
 fn variable_value(
@@ -485,21 +621,15 @@ fn variable_value(
                 .unwrap_or_default(),
         );
     }
-    if let Some(key) = bracket_or_dot_key(expression, "req.queryParams") {
-        return Some(data.query_params.get(key).cloned().unwrap_or_default());
+    if let Some(suffix) = expression.strip_prefix("req.queryParams") {
+        return json_value_at_access(&data.query_params, suffix);
     }
-    if let Some(key) = bracket_or_dot_key(expression, "req.pathSegments") {
-        return Some(
-            key.parse::<usize>()
-                .ok()
-                .and_then(|index| data.path_segments.get(index))
-                .cloned()
-                .unwrap_or_default(),
-        );
+    if let Some(suffix) = expression.strip_prefix("req.pathSegments") {
+        return json_value_at_access(&data.path_segments, suffix);
     }
     expression
-        .strip_prefix("req.body.")
-        .map(|path| json_value_at_path(&data.body_fields, path))
+        .strip_prefix("req.body")
+        .and_then(|suffix| json_value_at_access(&data.body_fields, suffix))
 }
 
 fn output_value(
@@ -810,6 +940,9 @@ mod tests {
     fn matches_parameterized_routes() {
         let parameters = match_path("/orders/{orderId}", "/orders/ord_123").unwrap();
         assert_eq!(parameters.get("orderId"), Some(&"ord_123".to_string()));
+        let decoded = match_path("/files/{name}", "/files/caf%C3%A9%20menu").unwrap();
+        assert_eq!(decoded.get("name"), Some(&"café menu".to_string()));
+        assert!(match_path("/café", "/caf%C3%A9").is_some());
         assert!(match_path("/orders/{orderId}", "/customers/ord_123").is_none());
     }
 
@@ -828,8 +961,8 @@ mod tests {
     fn renders_request_aware_outputs_and_defaults() {
         let data = RequestTemplateData {
             headers: HashMap::from([("content-type".into(), "application/json".into())]),
-            query_params: HashMap::from([("order".into(), "ord 42".into())]),
-            path_segments: vec!["v1".into(), "orders".into()],
+            query_params: serde_json::json!({ "order": "ord 42" }),
+            path_segments: serde_json::json!(["v1", "orders"]),
             body: r#"{"customer":{"name":"Ada"},"quantity":2}"#.into(),
             body_fields: serde_json::json!({ "customer": { "name": "Ada" }, "quantity": 2 }),
             path_parameters: HashMap::new(),
@@ -847,7 +980,7 @@ mod tests {
     #[test]
     fn renders_assign_conditionals_and_raw_blocks() {
         let data = RequestTemplateData {
-            query_params: HashMap::from([("role".into(), "admin".into())]),
+            query_params: serde_json::json!({ "role": "admin" }),
             body_fields: serde_json::json!({
                 "customer": { "name": "Ada" },
                 "disabled": false
@@ -923,13 +1056,19 @@ mod tests {
 
     #[test]
     fn parses_json_and_form_request_fields() {
-        assert_eq!(
-            json_value_at_path(
-                &parse_body_fields(r#"{"items":[{"id":"one"}]}"#, "application/problem+json"),
-                "items.0.id"
-            ),
-            "one"
+        let json = parse_body_fields(
+            r#"{"items":[{"id":"one"}],"profile.name":"Ada"}"#,
+            "application/problem+json",
         );
+        assert_eq!(
+            json_value_at_access(&json, ".items[0]['id']"),
+            Some("one".into())
+        );
+        assert_eq!(
+            json_value_at_access(&json, "['profile.name']"),
+            Some("Ada".into())
+        );
+        assert_eq!(json_value_at_path(&json, "items.0.id"), "one");
         assert_eq!(
             json_value_at_path(
                 &parse_body_fields("name=Ada+Lovelace", "application/x-www-form-urlencoded"),
@@ -937,6 +1076,51 @@ mod tests {
             ),
             "Ada Lovelace"
         );
+    }
+
+    #[test]
+    fn preserves_repeated_query_and_form_values_with_bounded_access() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "content-type",
+            "application/x-www-form-urlencoded".parse().unwrap(),
+        );
+        let data = RequestTemplateData::new(
+            &headers,
+            "tag=one&tag=two&na.me=query+value",
+            "/caf%C3%A9/a%2Fb/+",
+            "tag=red&tag=blue&profile.name=Ada+Lovelace".into(),
+            HashMap::new(),
+        );
+        let rendered = render_template(
+            "{{ req.queryParams.tag[0] }}|{{ req.queryParams.tag.1 }}|{{ req.queryParams['na.me'] }}|{{ req.body.tag[0] }}|{{ req.body['tag'][1] }}|{{ req.body['profile.name'] }}|{{ req.pathSegments[0] }}|{{ req.pathSegments.1 }}|{{ req.pathSegments[2] }}",
+            &data,
+        );
+        assert_eq!(
+            rendered,
+            "one|two|query value|red|blue|Ada Lovelace|café|a/b|+"
+        );
+
+        let repeated = (0..=MAX_REQUEST_COLLECTION_VALUES)
+            .map(|index| format!("item={index}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        let bounded = RequestTemplateData::new(
+            &HeaderMap::new(),
+            &repeated,
+            "/",
+            String::new(),
+            HashMap::new(),
+        );
+        assert_eq!(
+            json_value_at_access(&bounded.query_params, ".item[999]"),
+            Some("999".into())
+        );
+        assert_eq!(
+            json_value_at_access(&bounded.query_params, ".item[1000]"),
+            Some(String::new())
+        );
+        assert_eq!(percent_decode_path_segment("bad%FFvalue"), "bad%FFvalue");
     }
 
     #[test]
@@ -1051,13 +1235,13 @@ mod tests {
                     value: "application/json".into(),
                     enabled: true,
                 }],
-                body: r#"{"id":"{{ request.path.id }}","query":"{{ req.queryParams.expand }}","segment":"{{ req.pathSegments[0] }}","customer":"{{ req.body.customer.name }}","client":"{{ req.headers['X-Client'] }}"}"#.into(),
+                body: r#"{"id":"{{ request.path.id }}","query":"{{ req.queryParams.expand[1] }}","segment":"{{ req.pathSegments[0] }}","customer":"{{ req.body.customer.name }}","client":"{{ req.headers['X-Client'] }}"}"#.into(),
                 delay_ms: 0,
             }]),
         };
         let request = Request::builder()
             .method("POST")
-            .uri("/orders/ord_1?expand=full")
+            .uri("/orders/ord%201?expand=summary&expand=full")
             .header("content-type", "application/json")
             .header("x-client", "desktop")
             .body(Body::from(r#"{"customer":{"name":"Ada"}}"#))
@@ -1067,7 +1251,7 @@ mod tests {
         let body = to_bytes(response.into_body(), 10_000).await.unwrap();
         assert_eq!(
             String::from_utf8(body.to_vec()).unwrap(),
-            r#"{"id":"ord_1","query":"full","segment":"orders","customer":"Ada","client":"desktop"}"#
+            r#"{"id":"ord 1","query":"full","segment":"orders","customer":"Ada","client":"desktop"}"#
         );
     }
 
