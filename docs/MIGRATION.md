@@ -1016,7 +1016,20 @@ Compatibility bounds remain explicit: Brunomnia renders a unified textual patch/
 
 Compatibility bounds remain explicit: commit-and-push is a two-step local/network operation, not an atomic transaction. A successful local commit is intentionally preserved when authentication, connectivity, branch protection, non-fast-forward policy, or another remote rule rejects the push. Stage/unstage all omits conflicted files, and there is no hunk-level staging, commit amendment, signing UI, force push, or automatic retry. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 67 — remaining parity closure and release hardening
+## Milestone 67 — clean-tree branch-merge preflight (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` refuses branch-manager merges when its current changes query reports staged or unstaged work |
+| Native preflight | Complete | Brunomnia resolves an existing local target, then requires no staged, unstaged, untracked, conflicted, merge-in-progress, or rebase-in-progress state before invoking Git merge |
+| Preservation | Complete | A rejected preflight does not start a merge or rewrite the index/worktree; users explicitly commit or discard their current work first |
+| Existing merge flow | Complete baseline | Clean-tree merges retain the established no-fast-forward/no-autocommit invocation, three-way conflict resolution, binary side selection, and abort path |
+| Executable coverage | Complete baseline | A repository fixture proves both unstaged and staged work are rejected, local content/index evidence remains present, and no `MERGE_HEAD` is created |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 67 verification](QA_MILESTONE_67.md) |
+
+Compatibility bounds remain explicit: Brunomnia intentionally requires a completely clean tracked/untracked working state before branch merge even where native Git could merge non-overlapping local edits. This does not add stash, autostash, rebase, cherry-pick, hunk staging, force operations, or automatic conflict cleanup. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 68 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

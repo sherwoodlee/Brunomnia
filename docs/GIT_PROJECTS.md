@@ -51,6 +51,8 @@ Local branch deletion never targets the current branch and uses `git branch -d`,
 
 Text conflicts show the base, ours, and theirs versions next to an editable resolution. Binary conflicts offer complete **Use ours** and **Use theirs** choices, including deleted-side conflicts. A resolved file is staged explicitly. **Abort merge** delegates to `git merge --abort` and does not invent a replacement workspace.
 
+Starting a branch merge requires a clean index and working tree. Brunomnia checks status before invoking `git merge`, refuses staged, unstaged, untracked, merge-in-progress, and rebase-in-progress states, and leaves those files untouched. Commit or discard the existing work first; ahead/behind commits alone do not block a merge.
+
 Pulls, branch switches, clean merges, and final conflict resolutions reload managed YAML into the editor. Autosave is debounced and reports failures in the status bar. Project writes reject managed symlinks, use unique create-only temporary files, flush before replacement, and refuse paths that canonicalize outside the chosen project root.
 
 The `.git` directory is standard and remains usable from a terminal or another Git client. Force/local-remote branch deletion, rebase/cherry-pick, provider-specific onboarding, automatic project discovery, un-checked-out remote history, and cross-device collaboration are still tracked in [the parity ledger](PARITY.md).
