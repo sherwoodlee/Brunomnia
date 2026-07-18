@@ -11,12 +11,33 @@ const contentType = (response: HttpResponse) => Object.entries(response.headers)
   .trim()
   .toLowerCase() || 'text/plain';
 
+const mediaExtensions: Record<string, string> = {
+  'application/octet-stream': 'bin',
+  'application/pdf': 'pdf',
+  'audio/aac': 'aac',
+  'audio/flac': 'flac',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/ogg': 'oga',
+  'audio/wav': 'wav',
+  'audio/webm': 'weba',
+  'image/avif': 'avif',
+  'image/bmp': 'bmp',
+  'image/gif': 'gif',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/svg+xml': 'svg',
+  'image/tiff': 'tif',
+  'image/webp': 'webp',
+  'image/x-icon': 'ico',
+};
+
 const extension = (mimeType: string) => mimeType.includes('json') ? 'json'
   : mimeType.includes('xml') ? 'xml'
     : mimeType.includes('html') ? 'html'
-      : mimeType.includes('csv') ? 'csv'
-        : /ya?ml/.test(mimeType) ? 'yaml'
-          : 'txt';
+        : mimeType.includes('csv') ? 'csv'
+          : /ya?ml/.test(mimeType) ? 'yaml'
+            : mediaExtensions[mimeType] ?? 'txt';
 
 const safeName = (value: string) => value.trim().replace(/\s+/g, '_').replace(/[^a-z0-9._-]/gi, '_').replace(/_+/g, '_').slice(0, 120) || 'response';
 

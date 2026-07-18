@@ -622,6 +622,13 @@ kbd {
 .response-preview-shell .code-viewer { flex: 1; }
 .raw-response .code-line > span { display: none; }
 .response-html-preview { background: white; border: 0; flex: 1; min-height: 0; width: 100%; }
+.response-media-preview { flex: 1; min-height: 0; min-width: 0; }
+.response-media-preview.image { align-items: center; display: flex; justify-content: center; overflow: auto; padding: 12px; }
+.response-media-preview.image img { display: block; height: auto; margin: auto; max-height: 100%; max-width: 100%; object-fit: contain; }
+.response-media-preview.audio { align-items: center; display: flex; justify-content: center; padding: 20px; }
+.response-media-preview.audio audio { max-width: 720px; width: min(100%, 720px); }
+.response-media-preview.pdf { background: white; border: 0; width: 100%; }
+.response-media-message { color: var(--muted); font: 10px var(--font-mono); padding: 14px; }
 .response-csv-preview { flex: 1; overflow: auto; padding: 10px; }
 .response-csv-preview table { border-collapse: collapse; font: 11px var(--font-mono); min-width: 100%; width: max-content; }
 .response-csv-preview tr:nth-child(even) { background: var(--panel-soft); }

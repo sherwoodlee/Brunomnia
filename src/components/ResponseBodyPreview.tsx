@@ -3,6 +3,7 @@ import { applyResponseBodyFilter, responseFilterLanguage } from '../lib/response
 import { parseCsvPreview } from '../lib/csvPreview';
 import { createMultipartPartArtifact, parseMultipartPreview, type MultipartPreviewPart } from '../lib/multipartPreview';
 import { prettyBody } from '../lib/request';
+import { createResponseMediaArtifact, responseMedia, type ResponseMedia } from '../lib/responseMedia';
 import { responseSizeBand } from '../lib/responseSize';
 import type { HttpResponse, ResponsePreviewMode } from '../types';
 
@@ -27,6 +28,32 @@ function CsvResponsePreview({ body }: { body: string }) {
     {preview.truncated ? <div className="response-csv-message">Preview truncated at the local row, column, or cell safety limit.</div> : null}
     {!preview.rows.length ? <div className="response-csv-message">No CSV rows to display.</div> : null}
   </div>;
+}
+
+function ResponseMediaPreview({ media, response }: { media: ResponseMedia; response: HttpResponse }) {
+  const artifact = useMemo(() => createResponseMediaArtifact(response, media), [media.mimeType, response.body, response.bodyBase64]);
+  const [url, setUrl] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    setUrl('');
+    setError('');
+    if (!artifact.bytes.byteLength) return;
+    try {
+      const objectUrl = URL.createObjectURL(artifact.blob);
+      setUrl(objectUrl);
+      return () => URL.revokeObjectURL(objectUrl);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, [artifact]);
+
+  if (!artifact.bytes.byteLength) return <div className="response-media-message">No body returned for this {media.kind} response.</div>;
+  if (error) return <div className="response-media-message bad">Unable to display the local {media.kind} preview: {error}</div>;
+  if (!url) return <div className="response-media-message">Preparing local {media.kind} preview…</div>;
+  const decodeError = () => setError(`The desktop WebView could not decode the ${media.mimeType} body.`);
+  if (media.kind === 'image') return <div className="response-media-preview image"><img alt="Response body preview" onError={decodeError} src={url} /></div>;
+  if (media.kind === 'audio') return <div className="response-media-preview audio"><audio aria-label="Response audio preview" controls onError={decodeError} src={url} /></div>;
+  return <iframe className="response-media-preview pdf" onError={decodeError} src={url} title="PDF response preview" />;
 }
 
 const downloadMultipartPart = (part: MultipartPreviewPart) => {
@@ -67,7 +94,9 @@ function FilteredResponseBody({ response, filter, filterHistory, onApplyFilter, 
   const [draft, setDraft] = useState(filter);
   useEffect(() => setDraft(filter), [filter]);
   const contentType = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1].toLowerCase() ?? '';
+  const media = responseMedia(contentType);
 
+  if (previewMode === 'friendly' && media) return <ResponseMediaPreview media={media} response={response} />;
   if (previewMode === 'friendly' && contentType.includes('html')) {
     const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
     return <iframe className="response-html-preview" sandbox="" srcDoc={`${policy}${response.body}`} title="Response visual preview" />;
@@ -100,6 +129,6 @@ export default function ResponseBodyPreview({ response, filter, filterHistory, o
       <strong>{band === 'huge' ? 'Response over 100 MB cannot be shown' : 'Response over 5 MB hidden for performance'}</strong>
       <span>{band === 'huge' ? 'Download the stored response bytes to inspect them outside Brunomnia.' : 'Show this response once, always show large responses for this app session, or download the stored body.'}</span>
       <div><button onClick={onDownload} type="button">Save response to file</button>{band === 'large' ? <><button onClick={() => setRevealedKey(responseKey)} type="button">Show anyway</button><button onClick={() => { alwaysShowLargeResponses = true; setRevealedKey(responseKey); }} type="button">Always show this session</button></> : null}</div>
-    </div> : <FilteredResponseBody filter={filter} filterHistory={filterHistory} onApplyFilter={onApplyFilter} previewMode={previewMode} response={response} />}
+    </div> : <FilteredResponseBody filter={filter} filterHistory={filterHistory} key={responseKey} onApplyFilter={onApplyFilter} previewMode={previewMode} response={response} />}
   </div>;
 }

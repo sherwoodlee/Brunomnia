@@ -37,6 +37,7 @@ describe('response body downloads', () => {
     }, false, 42);
 
     expect(artifact.contents).toEqual(Uint8Array.from([0x66, 0x80, 0x6f, 0x00]));
+    expect(artifact.fileName).toBe('Binary-42.bin');
   });
 
   it('prettifies decoded JSON text instead of emitting its byte container', () => {
