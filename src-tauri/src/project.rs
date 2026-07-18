@@ -1862,6 +1862,96 @@ mod tests {
     }
 
     #[test]
+    fn creates_ordered_commits_from_reviewed_file_groups() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.name", "Grouped Commit Test"]);
+        git(
+            root,
+            &["config", "user.email", "grouped-commit@example.com"],
+        );
+        fs::write(root.join("first.yaml"), "value: first base\n").unwrap();
+        fs::write(root.join("second.yaml"), "value: second base\n").unwrap();
+        git(root, &["add", "first.yaml", "second.yaml"]);
+        git(root, &["commit", "-m", "base files"]);
+
+        fs::write(root.join("first.yaml"), "value: first grouped\n").unwrap();
+        fs::write(root.join("second.yaml"), "value: second grouped\n").unwrap();
+        git_stage(
+            root.to_string_lossy().into_owned(),
+            vec!["first.yaml".into(), "second.yaml".into()],
+        )
+        .unwrap();
+        git_unstage(
+            root.to_string_lossy().into_owned(),
+            vec!["first.yaml".into(), "second.yaml".into()],
+        )
+        .unwrap();
+
+        git_stage(
+            root.to_string_lossy().into_owned(),
+            vec!["first.yaml".into()],
+        )
+        .unwrap();
+        git_commit(GitCommitInput {
+            path: root.to_string_lossy().into_owned(),
+            message: "feat: first group".into(),
+            author_name: String::new(),
+            author_email: String::new(),
+        })
+        .unwrap();
+        git_stage(
+            root.to_string_lossy().into_owned(),
+            vec!["second.yaml".into()],
+        )
+        .unwrap();
+        git_commit(GitCommitInput {
+            path: root.to_string_lossy().into_owned(),
+            message: "test: second group".into(),
+            author_name: String::new(),
+            author_email: String::new(),
+        })
+        .unwrap();
+
+        let messages = output_text(
+            &require_success(
+                git_output(root, &["log", "-2", "--format=%s"]).unwrap(),
+                "Read grouped history",
+            )
+            .unwrap()
+            .stdout,
+        );
+        assert_eq!(messages, "test: second group\nfeat: first group");
+        assert_eq!(
+            output_text(
+                &require_success(
+                    git_output(root, &["show", "HEAD^:first.yaml"]).unwrap(),
+                    "Read first group",
+                )
+                .unwrap()
+                .stdout,
+            ),
+            "value: first grouped"
+        );
+        assert_eq!(
+            output_text(
+                &require_success(
+                    git_output(root, &["show", "HEAD^:second.yaml"]).unwrap(),
+                    "Read uncommitted second group",
+                )
+                .unwrap()
+                .stdout,
+            ),
+            "value: second base"
+        );
+        assert!(git_status(root.to_string_lossy().into_owned())
+            .unwrap()
+            .files
+            .is_empty());
+    }
+
+    #[test]
     fn returns_confined_per_file_diffs_including_untracked_text() {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path();
