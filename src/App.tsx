@@ -766,8 +766,6 @@ function ResponsePanel({
   onSendStreamMessage,
 }: ResponsePanelProps) {
   const streaming = protocol === 'websocket' || protocol === 'sse';
-  const displayBody = prettyBody(response.body);
-  const lines = displayBody.split('\n');
   const canPrettify = Object.entries(response.headers).some(([name, value]) => name.toLowerCase() === 'content-type' && /json/i.test(value));
   const canExportHttpDiagnostics = protocol === 'http' || protocol === 'graphql';
   const historySections = responseHistorySections(responseHistory);
@@ -777,7 +775,7 @@ function ResponsePanel({
     ...(response.httpVersion ? [{ name: 'Text' as const, value: `Negotiated ${response.httpVersion}`, elapsedMs: response.durationMs }] : []),
     { name: 'Text' as const, value: 'Response body decoded', elapsedMs: response.durationMs },
   ];
-  const copyResponse = () => void navigator.clipboard.writeText(displayBody);
+  const copyResponse = () => void navigator.clipboard.writeText(prettyBody(response.body));
   return (
     <section className="response-panel">
       <div className="response-document-spacer" />
@@ -801,7 +799,7 @@ function ResponsePanel({
           <StreamConsole connected={streamStatus === 'connected'} draft={streamDraft} frameKind={streamFrameKind} messages={streamMessages} onDraftChange={onStreamDraftChange} onFrameKindChange={onStreamFrameKindChange} onSend={onSendStreamMessage} protocol={protocol} />
         ) : null}
         {activeTab === 'preview' && !streaming ? (
-          <Suspense fallback={<div className="dialog-loading">Loading response preview…</div>}><ResponseBodyPreview filter={responseFilter} filterHistory={responseFilterHistory} onApplyFilter={onApplyResponseFilter} response={response} /></Suspense>
+          <Suspense fallback={<div className="dialog-loading">Loading response preview…</div>}><ResponseBodyPreview filter={responseFilter} filterHistory={responseFilterHistory} onApplyFilter={onApplyResponseFilter} onDownload={() => onDownloadResponse(false)} response={response} responseKey={selectedResponseId || `${response.status}:${response.durationMs}:${response.sizeBytes}:${response.requestUrl ?? requestUrl}`} /></Suspense>
         ) : null}
         {activeTab === 'headers' ? (
           <div className="response-table">{Object.entries(response.headers).map(([name, value]) => <div key={name}><strong>{name}</strong><span>{value}</span></div>)}</div>
@@ -829,7 +827,7 @@ function ResponsePanel({
         {canExportHttpDiagnostics ? <button onClick={() => onExportResponseDiagnostic('debug')} type="button"><Icon name="download" size={14} /> Export debug</button> : null}
         {canExportHttpDiagnostics ? <button onClick={() => onExportResponseDiagnostic('har')} type="button"><Icon name="download" size={14} /> Export HAR</button> : null}
         <span className="footer-spacer" />
-        <span>{streaming ? `${streamMessages.length} messages` : `${lines.length} lines`}</span>
+        <span>{streaming ? `${streamMessages.length} messages` : `${formatBytes(response.sizeBytes)} stored`}</span>
       </div>
     </section>
   );

@@ -85,6 +85,8 @@ JSON and XML previews expose a response-body filter below the viewer. Enter a JS
 
 Saved response choices are grouped as Just Now, Less Than Two Hours Ago, Today, This Week, or Older Than This Week. Each entry includes its receipt time, status, restored method when a request snapshot exists, actual URL, duration, and stored body size. The current pinned Insomnia response-history surface has selection, chronological grouping, request-version restoration, delete-current, and clear-history actions; it does not expose a separate response-comparison action, so comparison is not treated as a current parity requirement.
 
+Response previews larger than 5 MiB are hidden before Brunomnia prettifies, filters, splits, or renders their lines. Choose **Show anyway** for the current response, **Always show this session** for subsequent 5–100 MiB responses until the app reloads, or **Save response to file** to use the raw body download. Responses larger than 100 MiB remain hidden and expose download only. These thresholds match the pinned Insomnia source and compare strictly greater sizes, so exactly 5 MiB remains normal and exactly 100 MiB remains in the showable large band. Brunomnia's current workspace contract still loads and persists decoded UTF-8 response text in memory; the gate protects renderer work but does not claim upstream file-backed, load-on-demand body storage or a byte-exact binary download.
+
 ## Timeline evidence
 
 The Timeline tab persists prepared request and aggregate response evidence with each saved response. It records the resolved method and URL, eligible outgoing data, status and decoded response size, negotiated native protocol when available, and completion timing.
