@@ -679,6 +679,7 @@ function RequestPanel({
 }
 
 type ResponsePanelProps = {
+  allowHtmlPreviewRemoteResources: boolean;
   allowHtmlPreviewScripts: boolean;
   disableResponsePreviewLinks: boolean;
   response: HttpResponse;
@@ -741,6 +742,7 @@ function CookieEditor({ cookies, requestUrl, onChange }: { cookies: CookieRecord
 }
 
 function ResponsePanel({
+  allowHtmlPreviewRemoteResources,
   allowHtmlPreviewScripts,
   disableResponsePreviewLinks,
   response,
@@ -808,7 +810,7 @@ function ResponsePanel({
           <StreamConsole connected={streamStatus === 'connected'} draft={streamDraft} frameKind={streamFrameKind} messages={streamMessages} onDraftChange={onStreamDraftChange} onFrameKindChange={onStreamFrameKindChange} onSend={onSendStreamMessage} protocol={protocol} />
         ) : null}
         {activeTab === 'preview' && !streaming ? (
-          <Suspense fallback={<div className="dialog-loading">Loading response preview…</div>}><ResponseBodyPreview allowHtmlPreviewScripts={allowHtmlPreviewScripts} disableResponsePreviewLinks={disableResponsePreviewLinks} filter={responseFilter} filterHistory={responseFilterHistory} onApplyFilter={onApplyResponseFilter} onDownload={() => onDownloadResponse(false)} onModeChange={onChangeResponsePreviewMode} previewMode={responsePreviewMode} response={response} responseKey={selectedResponseId || `${response.status}:${response.durationMs}:${response.sizeBytes}:${response.requestUrl ?? requestUrl}`} responseUrl={response.requestUrl ?? requestUrl} /></Suspense>
+          <Suspense fallback={<div className="dialog-loading">Loading response preview…</div>}><ResponseBodyPreview allowHtmlPreviewRemoteResources={allowHtmlPreviewRemoteResources} allowHtmlPreviewScripts={allowHtmlPreviewScripts} disableResponsePreviewLinks={disableResponsePreviewLinks} filter={responseFilter} filterHistory={responseFilterHistory} onApplyFilter={onApplyResponseFilter} onDownload={() => onDownloadResponse(false)} onModeChange={onChangeResponsePreviewMode} previewMode={responsePreviewMode} response={response} responseKey={selectedResponseId || `${response.status}:${response.durationMs}:${response.sizeBytes}:${response.requestUrl ?? requestUrl}`} responseUrl={response.requestUrl ?? requestUrl} /></Suspense>
         ) : null}
         {activeTab === 'headers' ? (
           <div className="response-table">{Object.entries(response.headers).map(([name, value]) => <div key={name}><strong>{name}</strong><span>{value}</span></div>)}</div>
@@ -1813,6 +1815,7 @@ export default function App() {
           <ResponsePanel
             activeTab={responseTab}
             activeEnvironmentHistoryCount={activeEnvironmentHistoryCount}
+            allowHtmlPreviewRemoteResources={workspace.preferences.allowHtmlPreviewRemoteResources}
             allowHtmlPreviewScripts={workspace.preferences.allowHtmlPreviewScripts}
             disableResponsePreviewLinks={workspace.preferences.disableResponsePreviewLinks}
             cookies={workspace.cookies}

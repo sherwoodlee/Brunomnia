@@ -901,9 +901,27 @@ Compatibility bounds at this milestone were explicit: this remained a Tauri ifra
 | Bundle boundary | Complete | Link logic remains in the lazy response-preview graph; the main renderer is 497,677 bytes without a chunk warning |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [preferences](GRAPHQL_AND_PREFERENCES.md), [parity ledger](PARITY.md), and [Milestone 59 verification](QA_MILESTONE_59.md) |
 
-Compatibility bounds remain explicit: Brunomnia's dependency-free tokenizer is not CodeMirror's link extension and does not claim every URL grammar or editor gesture. It recognizes absolute HTTP(S) text only, opens links in the default browser, and intentionally leaves Raw Data inert. The native opener has compile/test coverage on macOS; Windows `rundll32` and Linux `xdg-open` branches still need release-host integration fixtures. Rendered link interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: Brunomnia's dependency-free tokenizer was not CodeMirror's link extension and did not claim every URL grammar or editor gesture. It recognized absolute HTTP(S) text only, opened links in the default browser, and intentionally left Raw Data inert. The native opener had compile/test coverage on macOS; Windows `rundll32` and Linux `xdg-open` branches still needed release-host integration fixtures. Automatic original-document remote resources remained open until Milestone 60. Rendered link interaction QA remained omitted by standing direction.
 
-## Milestone 60 — remaining parity closure and release hardening
+## Milestone 60 — opt-in HTML remote resources (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` loads response HTML in an unrestricted Electron WebView with its response URL as base and JavaScript controlled separately |
+| User-visible authority | Complete baseline | Preferences exposes a free, device-local **Allow remote resources in HTML response previews** grant; Brunomnia deliberately defaults it off instead of upstream's implicit enabled behavior |
+| Static remote content | Complete baseline | Remote-only mode permits HTTP(S) CSS, images, fonts, media, and frames plus local data/blob media while scripts and network APIs stay blocked |
+| Dual-grant active content | Complete baseline | External HTTP(S) scripts, HTTP(S)/WebSocket connections, and blob/HTTP(S) workers require both remote-resource and JavaScript grants |
+| Constrained authority | Complete | Every mode blocks forms, popups, modals, downloads, same-origin/parent/top access, objects, and `eval`; ordinary CORS and mixed-content rules remain active |
+| Recursive continuity | Complete | Live, saved-history, content-detected, and recursively selected multipart HTML share the same two grants and response URL base |
+| Device boundary | Complete | Strict boolean normalization, import reset, folder/Git omission, encrypted-pull preservation, defaults reset, and the loading workspace keep the grant device-local |
+| Visible state | Complete | Remote-only, script-only, and dual-grant modes show authority-specific warnings outside the iframe |
+| Executable coverage | Complete baseline | Focused tests cover all four policy combinations, base continuity, forbidden sources, strict preference normalization/import reset, and supported local persistence |
+| Bundle boundary | Complete | Policy composition stays in the lazy response-preview graph; the main renderer is 497,969 bytes without a chunk warning |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [preferences](GRAPHQL_AND_PREFERENCES.md), [parity ledger](PARITY.md), and [Milestone 60 verification](QA_MILESTONE_60.md) |
+
+Compatibility bounds remain explicit: this is an explicit two-grant CSP/sandbox model rather than upstream's implicit unrestricted response WebView. It does not grant forms, popups, downloads, same-origin access, objects, `eval`, parent/top navigation, non-HTTP(S) resources, or WebView-level certificate/proxy overrides. Cross-origin and mixed-content failures remain platform policy. Rendered network/interaction QA remains omitted by standing direction.
+
+## Milestone 61 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
