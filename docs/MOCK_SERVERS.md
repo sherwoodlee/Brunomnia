@@ -32,6 +32,22 @@ The same response body can use this deliberately small control-flow subset:
 
 Conditions support truthiness plus `==` and `!=` comparisons against another known value, a quoted string, a number, `true`, `false`, `nil`, or `null`. Assignments accept an ASCII letter/number/underscore name up to 100 characters, values up to 10,000 bytes, and at most 100 distinct locals; they last only for that response render. Empty and `false` values are falsey; other non-empty values are truthy. `raw` copies everything through its matching `endraw` without interpreting outputs or nested tags.
 
+## Faker values
+
+All 118 names in Kong's current [Faker variables list](https://developer.konghq.com/insomnia/faker-variables/) render locally with `{{ faker.<variable-name> }}`. This covers identifiers, booleans, timestamps, colors, text, dates, internet/address/job values, image references, finance/company/database values, files, and products. Examples include:
+
+```liquid
+{
+  "id": "{{ faker.randomUUID }}",
+  "name": "{{ faker.randomFullName }}",
+  "email": "{{ faker.randomExampleEmail }}",
+  "createdAt": "{{ faker.isoTimestamp }}",
+  "enabled": {{ faker.randomBoolean }}
+}
+```
+
+Every occurrence is generated independently for the response. Image variables return a URL or self-contained SVG data URI as documented; rendering never downloads an image. Unknown Faker names remain literal. Brunomnia uses a compact built-in English test-data corpus, so exact strings, locale breadth, and probability distributions intentionally differ from the upstream FakerJS package.
+
 ## Bounds and compatibility
 
 - Request bodies are inspected only after a method/path route match and only up to 1,000,000 bytes.
@@ -40,7 +56,7 @@ Conditions support truthiness plus `==` and `!=` comparisons against another kno
 - Dynamically inserted values contribute at most 5,000,000 response bytes. Static route text does not consume this expansion budget; an output and the following remainder stay literal if it would cross the limit.
 - Missing known variables render as an empty string unless `default` is present.
 - Unsupported output variables and Liquid tag syntax remain literal. Brunomnia does not evaluate arbitrary filters, loops, includes, or code.
-- Multipart fields, Faker variables, `elsif`, broader operators/filters, and full Liquid semantics remain tracked parity work.
+- Multipart fields, `elsif`, broader operators/filters, full Liquid semantics, and exact FakerJS corpus/distribution identity remain tracked parity work.
 - Native mock CORS remains permissive for local front-end development. Do not place secrets in mock response bodies.
 
 The implemented contract is reconciled against Kong's current [dynamic mocking documentation](https://developer.konghq.com/insomnia/dynamic-mocking/). Brunomnia's mock server is local and account-free; it does not depend on Insomnia Mockbin or a hosted service.

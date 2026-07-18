@@ -3,6 +3,7 @@ mod external_vault;
 mod grpc_client;
 mod http_client;
 mod mcp_stdio;
+mod mock_faker;
 mod mock_server;
 mod models;
 mod plugin;

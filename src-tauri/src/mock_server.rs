@@ -295,6 +295,9 @@ fn variable_value(
     if let Some(value) = locals.get(expression) {
         return Some(value.clone());
     }
+    if let Some(name) = expression.strip_prefix("faker.") {
+        return crate::mock_faker::value(name);
+    }
     match expression {
         "$timestamp" => return Some(chrono::Utc::now().to_rfc3339()),
         "$randomUUID" => return Some(uuid::Uuid::new_v4().to_string()),
@@ -689,6 +692,20 @@ mod tests {
             rendered,
             "Hello Ada!|Hello|enabled|{{ req.body.customer.name }} {% if future.value %}"
         );
+    }
+
+    #[test]
+    fn renders_faker_outputs_and_preserves_unknown_names() {
+        let rendered = render_template(
+            "{{ faker.guid }}|{{ faker.randomFullName }}|{{ faker.randomBoolean }}|{{ faker.notDocumented }}",
+            &RequestTemplateData::default(),
+        );
+        let values = rendered.split('|').collect::<Vec<_>>();
+        assert_eq!(values.len(), 4);
+        assert!(uuid::Uuid::parse_str(values[0]).is_ok());
+        assert!(!values[1].is_empty());
+        assert!(matches!(values[2], "true" | "false"));
+        assert_eq!(values[3], "{{ faker.notDocumented }}");
     }
 
     #[test]

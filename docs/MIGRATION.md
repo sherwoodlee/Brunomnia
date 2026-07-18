@@ -1180,7 +1180,21 @@ Compatibility bounds remain explicit: conditional `assign`/`if`/`unless`/`raw` t
 
 Compatibility bounds remain explicit: this is a documented safe subset rather than a general Liquid engine. Multipart field parsing, Faker variables, `elsif`, loops/includes, broader operators/filters, repeated-value arrays, percent-decoded path segments, and live route hot reload remain open. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 79 — remaining parity closure and release hardening
+## Milestone 79 — complete documented mock Faker surface (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Kong's current [Faker variables list](https://developer.konghq.com/insomnia/faker-variables/) and [pinned Mockbin allowlist](https://github.com/Kong/insomnia-mockbin/blob/c2a388563ea8259f9b235e4b3dfe87f64d568014/lib/routes/bins/run.js) expose 118 property-style names through `faker` |
+| Name coverage | Complete baseline | Every currently documented identifier, color, text/date, network, name/address, job, image, finance, company, database, file, and commerce name renders through `{{ faker.name }}` |
+| Local generation | Complete | Values are generated in the native process without an account, hosted mock service, network fetch, JavaScript engine, or new dependency |
+| Template continuity | Complete | Faker values work in output, assignments, and conditions, use the existing token/expansion limits, and leave unknown names literal |
+| Output safety | Complete | Image variables return strings only; no remote image is fetched. Every generated value is non-empty and remains below 1,000 bytes in executable coverage |
+| Executable coverage | Complete baseline | A table-driven native test evaluates all 118 names, focused shape checks cover representative types, and the response renderer proves known/unknown Faker handling |
+| Documentation and evidence | Complete | Updated [local mock server guide](MOCK_SERVERS.md), [parity ledger](PARITY.md), and [Milestone 79 verification](QA_MILESTONE_79.md) |
+
+Compatibility bounds remain explicit: Brunomnia preserves the documented variable names and output categories, not FakerJS implementation identity. Its compact built-in English corpus, exact values, locale breadth, probability distributions, and date semantics can differ from upstream. Multipart field parsing, `elsif`, broader Liquid operators/filters, repeated-value arrays, percent-decoded path segments, and live route hot reload remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 80 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
