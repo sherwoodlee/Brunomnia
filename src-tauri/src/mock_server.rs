@@ -11,6 +11,11 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{oneshot, Mutex};
 
 const MAX_TEMPLATE_REQUEST_BODY_BYTES: usize = 1_000_000;
+const MAX_TEMPLATE_TOKENS: usize = 1_000;
+const MAX_TEMPLATE_NESTING: usize = 20;
+const MAX_TEMPLATE_EXPANSION_BYTES: usize = 5_000_000;
+const MAX_TEMPLATE_LOCALS: usize = 100;
+const MAX_TEMPLATE_LOCAL_VALUE_BYTES: usize = 10_000;
 
 #[derive(Clone, Default)]
 pub struct MockServerState {
@@ -282,7 +287,14 @@ fn json_value_at_path(value: &JsonValue, path: &str) -> String {
     }
 }
 
-fn variable_value(expression: &str, data: &RequestTemplateData) -> Option<String> {
+fn variable_value(
+    expression: &str,
+    data: &RequestTemplateData,
+    locals: &HashMap<String, String>,
+) -> Option<String> {
+    if let Some(value) = locals.get(expression) {
+        return Some(value.clone());
+    }
     match expression {
         "$timestamp" => return Some(chrono::Utc::now().to_rfc3339()),
         "$randomUUID" => return Some(uuid::Uuid::new_v4().to_string()),
@@ -317,12 +329,16 @@ fn variable_value(expression: &str, data: &RequestTemplateData) -> Option<String
         .map(|path| json_value_at_path(&data.body_fields, path))
 }
 
-fn output_value(expression: &str, data: &RequestTemplateData) -> Option<String> {
+fn output_value(
+    expression: &str,
+    data: &RequestTemplateData,
+    locals: &HashMap<String, String>,
+) -> Option<String> {
     let (variable, filter) = expression
         .split_once('|')
         .map(|(variable, filter)| (variable.trim(), Some(filter.trim())))
         .unwrap_or((expression.trim(), None));
-    let value = variable_value(variable, data)?;
+    let value = variable_value(variable, data, locals)?;
     if !value.is_empty() {
         return Some(value);
     }
@@ -337,28 +353,279 @@ fn output_value(expression: &str, data: &RequestTemplateData) -> Option<String> 
     Some(default)
 }
 
-fn render_template(body: &str, data: &RequestTemplateData) -> String {
-    let mut output = String::with_capacity(body.len());
-    let mut remaining = body;
-    while let Some(start) = remaining.find("{{") {
-        output.push_str(&remaining[..start]);
-        let token = &remaining[start + 2..];
-        let Some(end) = token.find("}}") else {
-            output.push_str(&remaining[start..]);
-            return output;
-        };
-        let expression = &token[..end];
-        if let Some(value) = output_value(expression, data) {
-            output.push_str(&value);
-        } else {
-            output.push_str("{{");
-            output.push_str(expression);
-            output.push_str("}}");
-        }
-        remaining = &token[end + 2..];
+fn expression_value(
+    expression: &str,
+    data: &RequestTemplateData,
+    locals: &HashMap<String, String>,
+) -> Option<String> {
+    let expression = expression.trim();
+    if expression.len() >= 2
+        && ((expression.starts_with('"') && expression.ends_with('"'))
+            || (expression.starts_with('\'') && expression.ends_with('\'')))
+    {
+        return Some(expression[1..expression.len() - 1].to_string());
     }
-    output.push_str(remaining);
+    match expression {
+        "true" => Some("true".into()),
+        "false" | "nil" | "null" => Some(String::new()),
+        value if value.parse::<f64>().is_ok() => Some(value.to_string()),
+        value => output_value(value, data, locals),
+    }
+}
+
+fn condition_value(
+    expression: &str,
+    data: &RequestTemplateData,
+    locals: &HashMap<String, String>,
+) -> bool {
+    if let Some((left, right)) = expression.split_once("!=") {
+        return expression_value(left, data, locals).unwrap_or_default()
+            != expression_value(right, data, locals).unwrap_or_default();
+    }
+    if let Some((left, right)) = expression.split_once("==") {
+        return expression_value(left, data, locals).unwrap_or_default()
+            == expression_value(right, data, locals).unwrap_or_default();
+    }
+    expression_value(expression, data, locals)
+        .map(|value| !value.is_empty() && value != "false")
+        .unwrap_or(false)
+}
+
+struct ConditionalParts<'a> {
+    when_true: &'a str,
+    when_false: &'a str,
+    remaining: &'a str,
+}
+
+struct RawParts<'a> {
+    body: &'a str,
+    remaining: &'a str,
+}
+
+fn raw_parts<'a>(template: &'a str, token_budget: &mut usize) -> Option<RawParts<'a>> {
+    let mut cursor = 0;
+    while let Some(relative_start) = template[cursor..].find("{%") {
+        if *token_budget == 0 {
+            return None;
+        }
+        *token_budget -= 1;
+        let tag_start = cursor + relative_start;
+        let tag_body = &template[tag_start + 2..];
+        let tag_end = tag_body.find("%}")?;
+        let after_tag = tag_start + 2 + tag_end + 2;
+        if tag_body[..tag_end].trim() == "endraw" {
+            return Some(RawParts {
+                body: &template[..tag_start],
+                remaining: &template[after_tag..],
+            });
+        }
+        cursor = after_tag;
+    }
+    None
+}
+
+fn conditional_parts<'a>(
+    template: &'a str,
+    closing_tag: &'static str,
+    token_budget: &mut usize,
+) -> Option<ConditionalParts<'a>> {
+    let mut cursor = 0;
+    let mut closing_tags = vec![closing_tag];
+    let mut in_raw = false;
+    let mut else_start = None;
+    let mut else_body_start = None;
+    while let Some(relative_start) = template[cursor..].find("{%") {
+        if *token_budget == 0 {
+            return None;
+        }
+        *token_budget -= 1;
+        let tag_start = cursor + relative_start;
+        let tag_body = &template[tag_start + 2..];
+        let tag_end = tag_body.find("%}")?;
+        let after_tag = tag_start + 2 + tag_end + 2;
+        let tag = tag_body[..tag_end].trim();
+        if in_raw {
+            if tag == "endraw" {
+                in_raw = false;
+            }
+            cursor = after_tag;
+            continue;
+        }
+        match tag.split_whitespace().next().unwrap_or_default() {
+            "raw" => in_raw = true,
+            "if" => closing_tags.push("endif"),
+            "unless" => closing_tags.push("endunless"),
+            "endif" | "endunless" if closing_tags.last() == Some(&tag) => {
+                closing_tags.pop();
+                if closing_tags.is_empty() {
+                    let true_end = else_start.unwrap_or(tag_start);
+                    return Some(ConditionalParts {
+                        when_true: &template[..true_end],
+                        when_false: else_body_start
+                            .map(|start| &template[start..tag_start])
+                            .unwrap_or_default(),
+                        remaining: &template[after_tag..],
+                    });
+                }
+            }
+            "else" if closing_tags.len() == 1 && else_start.is_none() => {
+                else_start = Some(tag_start);
+                else_body_start = Some(after_tag);
+            }
+            _ => {}
+        }
+        cursor = after_tag;
+    }
+    None
+}
+
+fn render_fragment(
+    template: &str,
+    data: &RequestTemplateData,
+    locals: &mut HashMap<String, String>,
+    depth: usize,
+    token_budget: &mut usize,
+    expansion_budget: &mut usize,
+) -> String {
+    if depth > MAX_TEMPLATE_NESTING || *token_budget == 0 || *expansion_budget == 0 {
+        return template.to_string();
+    }
+    let mut output = String::with_capacity(template.len());
+    let mut remaining = template;
+    loop {
+        let output_start = remaining.find("{{");
+        let tag_start = remaining.find("{%");
+        let next = match (output_start, tag_start) {
+            (None, None) => {
+                output.push_str(remaining);
+                break;
+            }
+            (Some(output_start), None) => (output_start, true),
+            (None, Some(tag_start)) => (tag_start, false),
+            (Some(output_start), Some(tag_start)) if output_start <= tag_start => {
+                (output_start, true)
+            }
+            (Some(_), Some(tag_start)) => (tag_start, false),
+        };
+        if *token_budget == 0 || *expansion_budget == 0 {
+            output.push_str(remaining);
+            break;
+        }
+        *token_budget -= 1;
+        output.push_str(&remaining[..next.0]);
+        if next.1 {
+            let token = &remaining[next.0 + 2..];
+            let Some(end) = token.find("}}") else {
+                output.push_str(&remaining[next.0..]);
+                break;
+            };
+            let expression = &token[..end];
+            if let Some(value) = output_value(expression, data, locals) {
+                if value.len() <= *expansion_budget {
+                    output.push_str(&value);
+                    *expansion_budget -= value.len();
+                } else {
+                    output.push_str("{{");
+                    output.push_str(expression);
+                    output.push_str("}}");
+                    *expansion_budget = 0;
+                }
+            } else {
+                output.push_str("{{");
+                output.push_str(expression);
+                output.push_str("}}");
+            }
+            remaining = &token[end + 2..];
+            continue;
+        }
+
+        let tag_body = &remaining[next.0 + 2..];
+        let Some(end) = tag_body.find("%}") else {
+            output.push_str(&remaining[next.0..]);
+            break;
+        };
+        let tag = tag_body[..end].trim();
+        let after_tag = &tag_body[end + 2..];
+        if tag == "raw" {
+            if let Some(parts) = raw_parts(after_tag, token_budget) {
+                output.push_str(parts.body);
+                remaining = parts.remaining;
+            } else {
+                output.push_str(&remaining[next.0..]);
+                break;
+            }
+            continue;
+        }
+        if let Some(assignment) = tag.strip_prefix("assign ") {
+            if let Some((name, expression)) = assignment.split_once('=') {
+                let name = name.trim();
+                if !name.is_empty()
+                    && name.len() <= 100
+                    && name
+                        .chars()
+                        .all(|character| character.is_ascii_alphanumeric() || character == '_')
+                {
+                    if let Some(value) = expression_value(expression, data, locals) {
+                        if value.len() <= MAX_TEMPLATE_LOCAL_VALUE_BYTES
+                            && (locals.contains_key(name) || locals.len() < MAX_TEMPLATE_LOCALS)
+                        {
+                            locals.insert(name.to_string(), value);
+                            remaining = after_tag;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        let conditional = tag
+            .strip_prefix("if ")
+            .map(|condition| (condition, false, "endif"))
+            .or_else(|| {
+                tag.strip_prefix("unless ")
+                    .map(|condition| (condition, true, "endunless"))
+            });
+        if let Some((condition, invert, closing_tag)) = conditional {
+            if depth >= MAX_TEMPLATE_NESTING {
+                output.push_str(&remaining[next.0..]);
+                break;
+            }
+            if let Some(parts) = conditional_parts(after_tag, closing_tag, token_budget) {
+                let matches = condition_value(condition, data, locals) != invert;
+                output.push_str(&render_fragment(
+                    if matches {
+                        parts.when_true
+                    } else {
+                        parts.when_false
+                    },
+                    data,
+                    locals,
+                    depth + 1,
+                    token_budget,
+                    expansion_budget,
+                ));
+                remaining = parts.remaining;
+                continue;
+            }
+        }
+        output.push_str("{%");
+        output.push_str(&tag_body[..end]);
+        output.push_str("%}");
+        remaining = after_tag;
+    }
     output
+}
+
+fn render_template(body: &str, data: &RequestTemplateData) -> String {
+    let mut token_budget = MAX_TEMPLATE_TOKENS;
+    let mut expansion_budget = MAX_TEMPLATE_EXPANSION_BYTES;
+    render_fragment(
+        body,
+        data,
+        &mut HashMap::new(),
+        0,
+        &mut token_budget,
+        &mut expansion_budget,
+    )
 }
 
 #[cfg(test)]
@@ -401,6 +668,69 @@ mod tests {
         assert_eq!(
             rendered,
             "application/json ord 42 orders Ada 2 fallback XY {{ future.value }}"
+        );
+    }
+
+    #[test]
+    fn renders_assign_conditionals_and_raw_blocks() {
+        let data = RequestTemplateData {
+            query_params: HashMap::from([("role".into(), "admin".into())]),
+            body_fields: serde_json::json!({
+                "customer": { "name": "Ada" },
+                "disabled": false
+            }),
+            ..Default::default()
+        };
+        let rendered = render_template(
+            r#"{% if req.queryParams.role == "admin" %}{% assign greeting = "Hello" %}{{ greeting }} {{ req.body.customer.name }}{% unless req.body.disabled %}!{% endunless %}{% else %}denied{% endif %}|{{ greeting }}|{% unless req.body.disabled %}enabled{% endunless %}|{% raw %}{{ req.body.customer.name }} {% if future.value %}{%   endraw   %}"#,
+            &data,
+        );
+        assert_eq!(
+            rendered,
+            "Hello Ada!|Hello|enabled|{{ req.body.customer.name }} {% if future.value %}"
+        );
+    }
+
+    #[test]
+    fn bounds_nested_and_total_control_evaluation() {
+        let nested = format!(
+            "{}value{}",
+            "{% if true %}".repeat(MAX_TEMPLATE_NESTING + 1),
+            "{% endif %}".repeat(MAX_TEMPLATE_NESTING + 1)
+        );
+        let nested_rendered = render_template(&nested, &RequestTemplateData::default());
+        assert!(nested_rendered.contains("{% if true %}value{% endif %}"));
+
+        let repeated = "{{ req.queryParams.missing }}".repeat(MAX_TEMPLATE_TOKENS + 1);
+        let repeated_rendered = render_template(&repeated, &RequestTemplateData::default());
+        assert_eq!(repeated_rendered, "{{ req.queryParams.missing }}");
+
+        let expansion_data = RequestTemplateData {
+            body: "x".repeat(MAX_TEMPLATE_REQUEST_BODY_BYTES),
+            ..Default::default()
+        };
+        let expansion = "{{ req.body }}".repeat(6);
+        let expansion_rendered = render_template(&expansion, &expansion_data);
+        assert_eq!(
+            expansion_rendered.len(),
+            MAX_TEMPLATE_EXPANSION_BYTES + "{{ req.body }}".len()
+        );
+        assert!(expansion_rendered.ends_with("{{ req.body }}"));
+
+        let oversized_local_data = RequestTemplateData {
+            body: "x".repeat(MAX_TEMPLATE_LOCAL_VALUE_BYTES + 1),
+            ..Default::default()
+        };
+        let oversized_assignment = "{% assign copy = req.body %}{{ copy }}";
+        assert_eq!(
+            render_template(oversized_assignment, &oversized_local_data),
+            oversized_assignment
+        );
+
+        let unsupported = "{% for item in items %}x{% endfor %}";
+        assert_eq!(
+            render_template(unsupported, &RequestTemplateData::default()),
+            unsupported
         );
     }
 

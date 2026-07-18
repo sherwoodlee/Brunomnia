@@ -1166,7 +1166,21 @@ Compatibility bounds remain explicit: fetch response size is checked after the s
 
 Compatibility bounds remain explicit: conditional `assign`/`if`/`unless`/`raw` tags, multipart field parsing, Faker variables, additional Liquid filters, repeated-value arrays, percent-decoded path segments, and live route hot reload remain open. Unknown output syntax remains literal for later phases. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 78 — remaining parity closure and release hardening
+## Milestone 78 — bounded Liquid mock controls (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Local values | Complete baseline | `{% assign name = expression %}` stores up to 100 response-local values of 10,000 bytes each for later output or conditions |
+| Conditional output | Complete baseline | Nested `if`/`unless`, optional `else`, truthiness, and `==`/`!=` comparisons select response fragments without evaluating JavaScript or shell code |
+| Literal regions | Complete baseline | `raw`/`endraw` copies template-looking text unchanged and accepts whitespace-normalized tag delimiters |
+| Resource limits | Complete | Evaluation stops after 1,000 template-token operations, before a 21st nested conditional, or after 5,000,000 dynamically inserted bytes; the unprocessed remainder stays literal |
+| Failure posture | Complete | Unknown filters/tags, invalid assignments, unmatched controls, and over-limit content remain reviewable text instead of acquiring broader execution semantics |
+| Executable coverage | Complete baseline | Native fixtures prove assignment, comparisons, nested/inverted branches, `else`, raw output, unsupported-tag preservation, and both evaluation limits |
+| Documentation and evidence | Complete | Updated [local mock server guide](MOCK_SERVERS.md), [parity ledger](PARITY.md), and [Milestone 78 verification](QA_MILESTONE_78.md) |
+
+Compatibility bounds remain explicit: this is a documented safe subset rather than a general Liquid engine. Multipart field parsing, Faker variables, `elsif`, loops/includes, broader operators/filters, repeated-value arrays, percent-decoded path segments, and live route hot reload remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 79 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
