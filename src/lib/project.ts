@@ -19,6 +19,8 @@ export type GitStatus = {
 };
 export type GitOperation = { summary: string; stdout: string; stderr: string; status: GitStatus };
 export type GitConflict = { path: string; base: string; ours: string; theirs: string; working: string; binary: boolean };
+export type GitCommitSummary = { oid: string; shortOid: string; message: string; authorName: string; authorEmail: string; authoredAt: string; parents: string[]; refs: string[] };
+export type GitCommitPatch = { oid: string; patch: string };
 export type LocalPluginSource = { source: string; name: string; version: string; description: string; path: string };
 
 const nativeOnly = () => {
@@ -72,6 +74,8 @@ export const getGitStatus = async (path: string) => {
 export const stageGitFiles = async (path: string, paths: string[]) => invoke<GitStatus>('project_git_stage', { path, paths });
 export const unstageGitFiles = async (path: string, paths: string[]) => invoke<GitStatus>('project_git_unstage', { path, paths });
 export const getGitDiff = async (path: string, staged: boolean) => invoke<string>('project_git_diff', { path, staged });
+export const getGitHistory = async (path: string, limit = 35) => invoke<GitCommitSummary[]>('project_git_history', { path, limit });
+export const getGitCommitPatch = async (path: string, oid: string) => invoke<GitCommitPatch>('project_git_commit_patch', { path, oid });
 export const commitGitChanges = async (path: string, message: string, authorName: string, authorEmail: string) => invoke<GitOperation>('project_git_commit', { input: { path, message, authorName, authorEmail } });
 export const checkoutGitBranch = async (path: string, branch: string, create = false) => invoke<GitOperation>('project_git_checkout', { path, branch, create });
 export const setGitRemote = async (path: string, name: string, url: string) => invoke<GitStatus>('project_git_set_remote', { path, name, url });

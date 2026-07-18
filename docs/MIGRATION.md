@@ -921,7 +921,23 @@ Compatibility bounds at this milestone were explicit: Brunomnia's dependency-fre
 
 Compatibility bounds remain explicit: this is an explicit two-grant CSP/sandbox model rather than upstream's implicit unrestricted response WebView. It does not grant forms, popups, downloads, same-origin access, objects, `eval`, parent/top navigation, non-HTTP(S) resources, or WebView-level certificate/proxy overrides. Cross-origin and mixed-content failures remain platform policy. Rendered network/interaction QA remains omitted by standing direction.
 
-## Milestone 61 — remaining parity closure and release hardening
+## Milestone 61 — bounded Git commit history (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes a History table with message, relative time, author name, and author-email tooltip; its local Git layer requests 35 entries and may fetch the current remote first |
+| History list | Complete baseline | Git Sync exposes the 35 newest commits reachable from local `HEAD`, with full/short IDs, subject, author identity, strict ISO author time, parents, and local ref decorations |
+| Commit inspection | Complete baseline | Selecting a commit renders its metadata, file statistics, rename/copy-aware patch, and root/merge parents without mutating the working tree |
+| Bounded native boundary | Complete | Requests clamp to 1–100 commits, text remains capped at 2 MB, Git uses direct argument arrays, and patch lookup accepts only a full hexadecimal SHA-1/SHA-256 identifier verified as a commit object |
+| Empty repository | Complete | An unborn repository returns an ordinary empty history instead of surfacing Git's missing-`HEAD` failure |
+| Network behavior | Complete | History is deliberately local and side-effect-free; unlike upstream, opening it never performs an implicit fetch or credential prompt |
+| Executable coverage | Complete baseline | Native fixtures verify newest-first limits, author/parent/ref parsing, patch contents, malicious revision rejection, and unborn repositories |
+| Bundle boundary | Complete | History stays in the existing lazy Git workbench; the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 61 verification](QA_MILESTONE_61.md) |
+
+Compatibility bounds remain explicit: the history follows local `HEAD`, not every local/remote branch, and does not fetch. Commit-message bodies, signatures, graph lanes, searching, pagination beyond the bounded request, checkout/revert/reset actions, and binary patch rendering remain outside this baseline. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 62 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

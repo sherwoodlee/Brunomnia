@@ -7,7 +7,9 @@ import {
   cloneGitProject,
   commitGitChanges,
   getGitConflicts,
+  getGitCommitPatch,
   getGitDiff,
+  getGitHistory,
   getGitStatus,
   initGitProject,
   mergeGitBranch,
@@ -21,6 +23,7 @@ import {
   unstageGitFiles,
   writeProject,
   type GitConflict,
+  type GitCommitSummary,
   type GitStatus,
 } from '../lib/project';
 import { Icon } from './Icon';
@@ -44,6 +47,10 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
   const [selected, setSelected] = useState<string[]>([]);
   const [diff, setDiff] = useState('');
   const [showStagedDiff, setShowStagedDiff] = useState(false);
+  const [reviewMode, setReviewMode] = useState<'changes' | 'history'>('changes');
+  const [history, setHistory] = useState<GitCommitSummary[]>([]);
+  const [activeCommitOid, setActiveCommitOid] = useState('');
+  const [commitPatch, setCommitPatch] = useState('');
   const [commitMessage, setCommitMessage] = useState('');
   const [aiGroups, setAiGroups] = useState<AiCommitGroup[]>([]);
   const [branchName, setBranchName] = useState('');
@@ -56,6 +63,7 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
   const [error, setError] = useState('');
   const native = isTauri();
   const activeConflict = conflicts.find((conflict) => conflict.path === activeConflictPath) ?? conflicts[0];
+  const activeCommit = history.find((commit) => commit.oid === activeCommitOid) ?? history[0];
   const currentRemote = status.remotes.find((remote) => remote.name === workspace.project.remoteName) ?? status.remotes[0];
   const unstaged = status.files.filter((file) => !file.staged || file.worktreeStatus !== ' ');
   const staged = status.files.filter((file) => file.staged);
@@ -94,6 +102,25 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
     setMessage(`Git status refreshed on ${next.branch || 'HEAD'}.`);
   });
 
+  const openHistory = () => {
+    setReviewMode('history');
+    setCommitPatch('');
+    void run('Loading history', async () => {
+      const next = await getGitHistory(path);
+      const nextOid = next.some((commit) => commit.oid === activeCommitOid) ? activeCommitOid : next[0]?.oid ?? '';
+      setHistory(next);
+      setActiveCommitOid(nextOid);
+      setCommitPatch(nextOid ? (await getGitCommitPatch(path, nextOid)).patch : '');
+      setMessage(next.length ? `Loaded ${next.length} recent commit${next.length === 1 ? '' : 's'}.` : 'This repository has no commits yet.');
+    });
+  };
+
+  const selectCommit = (oid: string) => run('Loading commit', async () => {
+    setActiveCommitOid(oid);
+    setCommitPatch('');
+    setCommitPatch((await getGitCommitPatch(path, oid)).patch);
+  });
+
   useEffect(() => {
     if (!native || workspace.project.mode !== 'git' || !workspace.project.path) return;
     let cancelled = false;
@@ -104,6 +131,13 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
     // Opening the workbench should inspect the configured repository once; manual refresh owns later updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [native, workspace.project.mode, workspace.project.path]);
+
+  useEffect(() => {
+    setReviewMode('changes');
+    setHistory([]);
+    setActiveCommitOid('');
+    setCommitPatch('');
+  }, [workspace.project.path]);
 
   useEffect(() => {
     if (!native || workspace.project.mode !== 'git' || !path) { setDiff(''); return; }
@@ -186,7 +220,7 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
 
   return (
     <section className="project-workbench git-workbench">
-      <header className="project-header"><div><small>Git Sync</small><h1>{workspace.name}</h1><p>{path}{plaintextSecrets.length ? ` · ${plaintextSecrets.length} plaintext secret candidate${plaintextSecrets.length === 1 ? '' : 's'} blocked by policy` : ''}</p></div><div className="git-branch-summary"><strong>{status.branch || 'HEAD'}</strong><span>{status.upstream || 'No upstream'}</span>{status.ahead || status.behind ? <small>↑ {status.ahead} · ↓ {status.behind}</small> : null}</div><div className="project-header-actions"><button disabled={Boolean(busy)} onClick={refresh} type="button">Refresh</button><button disabled={Boolean(busy)} onClick={() => run('Saving YAML', async () => { requireShareableSafety(); const result = await writeProject(path, workspace); updateProject({ lastSavedAt: new Date().toISOString() }); await setNextStatus(await getGitStatus(path)); setMessage(`${result.filesWritten} files updated · ${result.filesUnchanged} unchanged.`); })} type="button">Save YAML</button><button disabled={Boolean(busy)} onClick={() => run('Pulling', async () => { const result = await pullGitProject(path, workspace.project.remoteName, status.branch); await setNextStatus(result.status); await reloadGitWorkspace(result.status); setMessage(result.stderr || result.stdout || 'Pull complete.'); })} type="button">Pull</button><button disabled={Boolean(busy)} onClick={() => run('Pushing', async () => { requireShareableSafety(); const result = await pushGitProject(path, workspace.project.remoteName, status.branch); await setNextStatus(result.status); setMessage(result.stderr || result.stdout || 'Push complete.'); })} type="button">Push</button></div></header>
+      <header className="project-header"><div><small>Git Sync</small><h1>{workspace.name}</h1><p>{path}{plaintextSecrets.length ? ` · ${plaintextSecrets.length} plaintext secret candidate${plaintextSecrets.length === 1 ? '' : 's'} blocked by policy` : ''}</p></div><div className="git-branch-summary"><strong>{status.branch || 'HEAD'}</strong><span>{status.upstream || 'No upstream'}</span>{status.ahead || status.behind ? <small>↑ {status.ahead} · ↓ {status.behind}</small> : null}</div><div className="project-header-actions"><button disabled={Boolean(busy)} onClick={refresh} type="button">Refresh</button><button disabled={Boolean(busy)} onClick={openHistory} type="button">History</button><button disabled={Boolean(busy)} onClick={() => run('Saving YAML', async () => { requireShareableSafety(); const result = await writeProject(path, workspace); updateProject({ lastSavedAt: new Date().toISOString() }); await setNextStatus(await getGitStatus(path)); setMessage(`${result.filesWritten} files updated · ${result.filesUnchanged} unchanged.`); })} type="button">Save YAML</button><button disabled={Boolean(busy)} onClick={() => run('Pulling', async () => { const result = await pullGitProject(path, workspace.project.remoteName, status.branch); await setNextStatus(result.status); await reloadGitWorkspace(result.status); setMessage(result.stderr || result.stdout || 'Pull complete.'); })} type="button">Pull</button><button disabled={Boolean(busy)} onClick={() => run('Pushing', async () => { requireShareableSafety(); const result = await pushGitProject(path, workspace.project.remoteName, status.branch); await setNextStatus(result.status); setMessage(result.stderr || result.stdout || 'Push complete.'); })} type="button">Push</button></div></header>
 
       <div className="git-layout">
         <aside className="git-sidebar">
@@ -198,6 +232,7 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
 
         <div className="git-main">
           {conflicts.length ? <div className="conflict-workbench"><header><div><small>Merge conflict</small><h2>{activeConflict?.path}</h2></div><select value={activeConflict?.path ?? ''} onChange={(event) => { const conflict = conflicts.find((candidate) => candidate.path === event.target.value); setActiveConflictPath(event.target.value); setResolution(conflict?.working ?? ''); }}>{conflicts.map((conflict) => <option key={conflict.path}>{conflict.path}</option>)}</select><button onClick={() => run('Aborting merge', async () => setNextStatus(await abortGitMerge(path)))} type="button">Abort merge</button></header>{activeConflict?.binary ? <div className="empty-state"><strong>Binary conflict</strong><span>Choose and stage one complete binary version.</span><div className="git-row-actions"><button disabled={!activeConflict || Boolean(busy)} onClick={() => run('Choosing ours', async () => { const next = await resolveGitConflictSide(path, activeConflict!.path, 'ours'); await setNextStatus(next); await reloadGitWorkspace(next); })} type="button">Use ours</button><button disabled={!activeConflict || Boolean(busy)} onClick={() => run('Choosing theirs', async () => { const next = await resolveGitConflictSide(path, activeConflict!.path, 'theirs'); await setNextStatus(next); await reloadGitWorkspace(next); })} type="button">Use theirs</button></div></div> : <><div className="conflict-columns"><ConflictPane title="Base" value={activeConflict?.base ?? ''} /><ConflictPane title="Ours" value={activeConflict?.ours ?? ''} /><ConflictPane title="Theirs" value={activeConflict?.theirs ?? ''} /></div><div className="resolution-editor"><header><strong>Resolution</strong><div><button onClick={() => setResolution(activeConflict?.ours ?? '')} type="button">Use ours</button><button onClick={() => setResolution(activeConflict?.theirs ?? '')} type="button">Use theirs</button><button onClick={() => setResolution(`${activeConflict?.ours ?? ''}\n${activeConflict?.theirs ?? ''}`)} type="button">Keep both</button></div></header><textarea value={resolution} onChange={(event) => setResolution(event.target.value)} /></div><button className="resolve-button" disabled={!activeConflict || Boolean(busy)} onClick={() => run('Resolving conflict', async () => { const next = await resolveGitConflict(path, activeConflict!.path, resolution); await setNextStatus(next); await reloadGitWorkspace(next); })} type="button">Mark resolved and stage</button></>}</div>
+            : reviewMode === 'history' ? <div className="git-history-workbench"><header><div><small>Repository</small><h2>Commit history</h2></div><div className="git-history-actions"><button disabled={Boolean(busy)} onClick={openHistory} type="button">Refresh history</button><button onClick={() => setReviewMode('changes')} type="button">Review changes</button></div></header><div className="git-history-layout"><nav aria-label="Recent commits" className="git-history-list">{history.map((commit) => <button aria-current={activeCommit?.oid === commit.oid ? 'true' : undefined} className={activeCommit?.oid === commit.oid ? 'active' : ''} key={commit.oid} onClick={() => void selectCommit(commit.oid)} type="button"><span className="git-history-node" /><span><strong>{commit.message || '(no subject)'}</strong><small>{commit.shortOid} · {formatCommitTime(commit.authoredAt)}</small><em title={commit.authorEmail}>{commit.authorName || commit.authorEmail || 'Unknown author'}</em>{commit.refs.length ? <span className="git-ref-list">{commit.refs.map((reference) => <code key={reference}>{reference}</code>)}</span> : null}</span></button>)}{!history.length ? <p>No history available. The first commit will appear here.</p> : null}</nav><section className="git-commit-detail">{activeCommit ? <><header><div><small>{activeCommit.shortOid}</small><h3>{activeCommit.message || '(no subject)'}</h3></div><dl><div><dt>Author</dt><dd>{activeCommit.authorName} &lt;{activeCommit.authorEmail}&gt;</dd></div><div><dt>Authored</dt><dd>{formatCommitTime(activeCommit.authoredAt)}</dd></div><div><dt>Parents</dt><dd>{activeCommit.parents.map((parent) => parent.slice(0, 8)).join(' · ') || 'Root commit'}</dd></div></dl></header><pre>{commitPatch || 'Loading commit patch…'}</pre></> : <div className="empty-state"><strong>No commit selected</strong><span>Create a commit or refresh this repository’s history.</span></div>}</section></div></div>
             : <div className="diff-workbench"><header><div><small>Review</small><h2>{showStagedDiff ? 'Staged diff' : 'Working tree diff'}</h2></div><div className="segmented-control"><button className={!showStagedDiff ? 'active' : ''} onClick={() => setShowStagedDiff(false)} type="button">Unstaged {unstaged.length}</button><button className={showStagedDiff ? 'active' : ''} onClick={() => setShowStagedDiff(true)} type="button">Staged {staged.length}</button></div></header><pre>{diff || (showStagedDiff ? 'No staged diff.' : 'No unstaged diff.')}</pre></div>}
         </div>
       </div>
@@ -208,4 +243,9 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
 
 function ConflictPane({ title, value }: { title: string; value: string }) {
   return <article><header>{title}</header><pre>{value || 'File absent in this revision.'}</pre></article>;
+}
+
+function formatCommitTime(value: string) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : value;
 }

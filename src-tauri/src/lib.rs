@@ -234,6 +234,22 @@ async fn project_git_diff(path: String, staged: bool) -> Result<String, String> 
 }
 
 #[tauri::command]
+async fn project_git_history(
+    path: String,
+    limit: Option<usize>,
+) -> Result<Vec<project::GitCommitSummary>, String> {
+    blocking(move || project::git_history(path, limit)).await
+}
+
+#[tauri::command]
+async fn project_git_commit_patch(
+    path: String,
+    oid: String,
+) -> Result<project::GitCommitPatch, String> {
+    blocking(move || project::git_commit_patch(path, oid)).await
+}
+
+#[tauri::command]
 async fn project_git_commit(
     input: project::GitCommitInput,
 ) -> Result<project::GitOperationOutput, String> {
@@ -478,6 +494,8 @@ pub fn run() {
             project_git_stage,
             project_git_unstage,
             project_git_diff,
+            project_git_history,
+            project_git_commit_patch,
             project_git_commit,
             project_git_checkout,
             project_git_set_remote,
