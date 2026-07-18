@@ -5,7 +5,7 @@ import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
 import { renderTemplate } from './templates';
 import { buildResponseTimeline } from './timeline';
-import { responseBodyFromBytes } from './responseBytes';
+import { decodeHttpResponseBody, responseBodyFromBytes, responseCharset } from './responseBytes';
 import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
 
 export type SendRequestContext = {
@@ -196,7 +196,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         },
       },
     });
-    return finish(withTimeline(output));
+    return finish(withTimeline(decodeHttpResponseBody(output)));
   }
 
   if (new URL(url).hostname === 'api.acme.dev') {
@@ -214,11 +214,12 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     credentials: prepared.transport.sendCookies ? 'include' : 'omit',
   });
   const bytes = new Uint8Array(await response.arrayBuffer());
-  const responseBody = responseBodyFromBytes(bytes);
+  const responseHeaders = Object.fromEntries(response.headers.entries());
+  const responseBody = responseBodyFromBytes(bytes, responseCharset(responseHeaders));
   return finish(withTimeline({
     status: response.status,
     statusText: response.statusText,
-    headers: Object.fromEntries(response.headers.entries()),
+    headers: responseHeaders,
     ...responseBody,
     durationMs: Math.round(performance.now() - startedAt),
     sizeBytes: bytes.byteLength,

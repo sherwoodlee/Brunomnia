@@ -35,4 +35,18 @@ describe('browser HTTP response bytes', () => {
     expect(response.sizeBytes).toBe(6);
     expect(response).not.toHaveProperty('bodyBase64');
   });
+
+  it('decodes a declared legacy charset and retains exact raw bytes', async () => {
+    const bytes = Uint8Array.from([0x63, 0x61, 0x66, 0xe9]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(bytes.buffer as ArrayBuffer, {
+      status: 200,
+      headers: { 'Content-Type': 'text/plain; charset=windows-1252' },
+    })));
+    const request = createBlankRequest('browser-charset-response');
+    request.url = 'https://example.test/legacy-text';
+
+    const response = await sendRequest(request, undefined, { requestTimeoutMs: 0 });
+
+    expect(response).toMatchObject({ body: 'café', bodyBase64: 'Y2Fm6Q==', sizeBytes: 4 });
+  });
 });

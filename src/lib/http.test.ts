@@ -30,6 +30,16 @@ describe('GraphQL request serialization', () => {
 });
 
 describe('native HTTP transport preferences', () => {
+  it('decodes native response bytes with the declared charset before hooks and previews', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: { 'content-type': 'text/plain; charset=windows-1252' }, body: 'caf�', bodyBase64: 'Y2Fm6Q==', durationMs: 1, sizeBytes: 4, setCookies: [], httpVersion: 'HTTP/1.1' });
+    const request = createBlankRequest('native-response-charset');
+    request.url = 'https://example.test/legacy-text';
+
+    const response = await sendRequest(request, undefined);
+
+    expect(response).toMatchObject({ body: 'café', bodyBase64: 'Y2Fm6Q==', sizeBytes: 4 });
+  });
+
   it('passes device HTTP and redirect preferences without changing saved request transport', async () => {
     tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/2.0' });
     const request = createBlankRequest('preferred-http-version');
