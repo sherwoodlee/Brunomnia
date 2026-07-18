@@ -41,7 +41,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - End-to-end encrypted shared-file revisions with optimistic conflict checks, explicit force, device-local data filtering, and self-hosted filesystem/WebDAV compatibility
 - Local owner/admin/editor/viewer metadata, storage and plaintext-secret policies, bounded audit records, and governance migration hardening
 - Project-scoped MCP clients over Streamable HTTP/JSON-RPC and native STDIO, with cached tools, prompts, resources, resource templates, roots, invocation, and an event console
-- Optional OpenAI, Anthropic, Gemini, and custom/local OpenAI-compatible providers with vault-only credential execution, AI mock generation, and reviewable ordered Git commit groups with optional push
+- Optional OpenAI, Anthropic, Gemini, and custom/local OpenAI-compatible providers with vault-only credential execution, AI mock generation from manual or explicitly selected active-request/latest-response context, and reviewable ordered Git commit groups with optional push
 - Pull-only Konnect control-plane discovery and Gateway Service/HTTP Route mapping that preserves local request work and isolates unsupported routes
 - Workspace v22 migrations, device-local bulk/editor/layout/typography/password-visibility/HTML-script and script-data-folder preferences, legacy-safe timeout/certificate/proxy overrides, bounded resource hierarchy and request-row normalization, collection sub-environment repair, private-global publication filtering, split-YAML serialization, import-time authority stripping, and device-local integration/script permissions
 - Atomic persistence in the OS application-data directory

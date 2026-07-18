@@ -787,12 +787,16 @@ kbd {
 
 .mock-content { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
 .mock-grid { display: grid; flex: 1; grid-template-columns: 260px minmax(500px, 1fr) 250px; min-height: 0; min-width: 960px; overflow: auto; }
-.ai-mock-generator { align-items: end; background: #0d1418; border-bottom: 1px solid var(--border); display: grid; flex: 0 0 auto; gap: 9px; grid-template-columns: minmax(320px, 1fr) 100px auto minmax(180px, .55fr); padding: 10px 14px; }
+.ai-mock-generator { align-items: end; background: #0d1418; border-bottom: 1px solid var(--border); display: grid; flex: 0 0 auto; gap: 9px; grid-template-columns: 150px minmax(280px, 1fr) 100px auto minmax(180px, .55fr); padding: 10px 14px; }
 .ai-mock-generator label { color: var(--muted); display: flex; flex-direction: column; font-size: 8px; gap: 5px; text-transform: uppercase; }
-.ai-mock-generator textarea, .ai-mock-generator input { background: var(--panel-soft); border: 1px solid var(--border); color: var(--text-soft); font: 9px var(--font-mono); min-height: 34px; padding: 7px; resize: vertical; }
+.ai-mock-generator textarea, .ai-mock-generator input, .ai-mock-generator select { background: var(--panel-soft); border: 1px solid var(--border); color: var(--text-soft); font: 9px var(--font-mono); min-height: 34px; padding: 7px; resize: vertical; }
 .ai-mock-generator textarea { max-height: 110px; min-height: 52px; }
 .ai-mock-generator button { background: var(--accent); border: 0; border-radius: 3px; color: white; font-size: 9px; min-height: 34px; padding: 0 12px; }
 .ai-mock-generator p { color: var(--faint); font-size: 8px; line-height: 1.4; margin: 0; }
+.ai-mock-context { grid-column: 1 / -1; min-width: 0; }
+.ai-mock-context summary { color: var(--muted); cursor: pointer; font-size: 8px; }
+.ai-mock-context pre { background: var(--panel-soft); border: 1px solid var(--border); color: var(--text-soft); font: 8px/1.45 var(--font-mono); margin: 7px 0 0; max-height: 150px; overflow: auto; padding: 9px; white-space: pre-wrap; word-break: break-word; }
+.ai-mock-context-error { color: var(--red) !important; grid-column: 1 / -1; }
 .mock-routes { border-right: 1px solid var(--border); display: grid; grid-template-rows: 43px minmax(0, 1fr); }
 .mock-routes > header { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 0 11px; }
 .mock-routes > header strong { font-size: 10px; }

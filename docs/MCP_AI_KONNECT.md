@@ -72,9 +72,11 @@ Remote endpoints require HTTPS. Plain HTTP is allowed only for `localhost`, `127
 
 ### AI mock generation
 
-The mock workbench sends only the prompt, OpenAPI text, example response, or other source pasted into its AI panel. Output is parsed as data, never evaluated as code. Generated mocks are bound to `127.0.0.1`; methods, paths, status codes, string headers, delays, route count, and port range are validated before the mock is saved.
+The mock workbench accepts a pasted prompt, OpenAPI text, or example response. It can instead attach the configured active request or that request's latest saved response, with optional additional instructions. A non-manual source must be explicitly selected, and the exact prepared context is reviewable before generation. When response-history environment filtering is enabled, latest-response selection stays inside the active environment.
 
-Input is capped at 200 KB, output at 10 MB after transport buffering, routes at 500, headers per route at 100, and delay at 60 seconds. Brunomnia does not automatically fetch a URL or inspect an existing response for this workflow; paste the relevant material explicitly.
+Prepared context uses configured request values rather than resolving environment or vault references. Authentication values, credential-named headers/query/body fields, URL user information, cookies, and file bytes are redacted or omitted; arbitrary domain data in request/response bodies is still model input, so the preview remains the final disclosure check. The composed workbench input is capped at 190,000 characters and the provider adapter retains its 200,000-character hard cap. Output is parsed as data, never evaluated as code. Generated mocks are bound to `127.0.0.1`; methods, paths, status codes, string headers, delays, route count, and port range are validated before the mock is saved.
+
+Output remains capped at 10 MB after transport buffering, routes at 500, headers per route at 100, and delay at 60 seconds. Brunomnia does not automatically fetch a specification URL or create a route directly from a response without the configured AI provider.
 
 ### Git suggestions
 

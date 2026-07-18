@@ -22,6 +22,7 @@ import { startMockServer, stopMockServer, type RunningMock } from '../lib/mock';
 import { runStreamSample } from '../lib/protocol';
 import { resolveAuthorizedExternalSecret } from '../lib/security';
 import { generateMockWithAi } from '../lib/ai';
+import { buildMockAiContext, composeMockAiInput, findActiveRequest, findLatestResponseForActiveRequest, type MockAiContextSource } from '../lib/mockAiContext';
 import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
 import { Icon } from './Icon';
 import { CodeEditor } from './ProtocolEditors';
@@ -302,10 +303,17 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
   const [error, setError] = useState('');
   const [showAi, setShowAi] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
+  const [aiContextSource, setAiContextSource] = useState<MockAiContextSource>('manual');
   const [aiPort, setAiPort] = useState(4020);
   const [generating, setGenerating] = useState(false);
   const server = workspace.mockServers.find((candidate) => candidate.id === activeId) ?? workspace.mockServers[0];
   const route = server?.routes.find((candidate) => candidate.id === activeRouteId) ?? server?.routes[0];
+  const activeRequest = useMemo(() => findActiveRequest(workspace), [workspace]);
+  const latestResponse = useMemo(() => findLatestResponseForActiveRequest(workspace), [workspace]);
+  const selectedAiContext = useMemo(() => {
+    if (aiContextSource === 'manual') return undefined;
+    try { return buildMockAiContext(workspace, aiContextSource); } catch { return undefined; }
+  }, [aiContextSource, workspace]);
 
   const updateServer = (patch: Partial<MockServer>) => {
     if (!server) return;
@@ -332,7 +340,8 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     if (generating) return;
     setGenerating(true); setError('');
     try {
-      const generated = await generateMockWithAi(workspace.ai, aiPrompt, aiPort, activeEnvironment, { preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
+      const input = composeMockAiInput(aiPrompt, selectedAiContext);
+      const generated = await generateMockWithAi(workspace.ai, input, aiPort, activeEnvironment, { preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
       onChangeWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, generated] }));
       setActiveId(generated.id); setActiveRouteId(generated.routes[0]?.id ?? ''); setShowAi(false); setAiPrompt('');
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
@@ -353,7 +362,14 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
         <button className={activeRun ? 'danger-action' : 'primary-action'} onClick={() => void toggleServer()} type="button">{activeRun ? 'Stop server' : 'Start server'}</button>
       </AutomationHeader>
       <div className="mock-content">
-        {showAi ? <div className="ai-mock-generator"><label>Prompt, OpenAPI, or example response<textarea value={aiPrompt} onChange={(event) => setAiPrompt(event.target.value)} placeholder="Create an orders API with list, create, and status endpoints…" /></label><label>Local port<input min="1024" max="65535" type="number" value={aiPort} onChange={(event) => setAiPort(Number(event.target.value))} /></label><button disabled={!aiPrompt.trim() || generating} onClick={() => void generateAiMock()} type="button">{generating ? 'Generating…' : 'Create editable local mock'}</button><p>Only this input is sent to your configured model. Generated routes are validated locally and remain editable.</p></div> : null}
+        {showAi ? <div className="ai-mock-generator">
+          <label>Context source<select aria-label="AI mock context source" value={aiContextSource} onChange={(event) => setAiContextSource(event.target.value as MockAiContextSource)}><option value="manual">Manual input</option><option disabled={!activeRequest} value="active-request">Active request</option><option disabled={!latestResponse} value="latest-response">Latest response</option></select></label>
+          <label>{aiContextSource === 'manual' ? 'Prompt, OpenAPI, or example response' : 'Additional instructions (optional)'}<textarea value={aiPrompt} onChange={(event) => setAiPrompt(event.target.value)} placeholder={aiContextSource === 'manual' ? 'Create an orders API with list, create, and status endpoints…' : 'Add edge cases or describe the routes you want…'} /></label>
+          <label>Local port<input min="1024" max="65535" type="number" value={aiPort} onChange={(event) => setAiPort(Number(event.target.value))} /></label>
+          <button disabled={generating || (aiContextSource === 'manual' ? !aiPrompt.trim() : !selectedAiContext)} onClick={() => void generateAiMock()} type="button">{generating ? 'Generating…' : 'Create editable local mock'}</button>
+          <p>Only the prompt and explicitly selected, reviewable context are sent to your configured model. Credential fields are redacted; vault values and resolved environment values are never added.</p>
+          {selectedAiContext ? <details className="ai-mock-context"><summary>Review model context · {selectedAiContext.label}</summary><pre>{selectedAiContext.text}</pre></details> : aiContextSource !== 'manual' ? <p className="ai-mock-context-error">{aiContextSource === 'active-request' ? 'Select an active request first.' : 'Send the active request first.'}</p> : null}
+        </div> : null}
         <div className="mock-grid">
         <aside className="mock-routes">
           <header><strong>Routes</strong><button onClick={() => { const created: MockRoute = { id: uid('route'), name: 'New scenario', enabled: true, method: 'GET', path: '/resource', status: 200, headers: [], body: '{}', delayMs: 0 }; updateServer({ routes: [...server.routes, created] }); setActiveRouteId(created.id); }} type="button"><Icon name="plus" size={14} /> New route</button></header>
