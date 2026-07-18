@@ -1,3 +1,4 @@
+mod external_url;
 mod external_vault;
 mod grpc_client;
 mod http_client;
@@ -54,6 +55,11 @@ fn save_workspace(app: AppHandle, workspace: Value) -> Result<(), String> {
 #[tauri::command]
 async fn send_http_request(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
     http_client::send(input).await
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    external_url::open(&url)
 }
 
 const SCRIPT_FILE_LIMIT: u64 = 5_000_000;
@@ -462,6 +468,7 @@ pub fn run() {
             load_workspace,
             save_workspace,
             send_http_request,
+            open_external_url,
             script_read_file,
             project_write,
             project_read,

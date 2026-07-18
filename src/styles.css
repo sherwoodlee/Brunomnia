@@ -626,6 +626,9 @@ kbd {
 .response-html-warning { background: color-mix(in srgb, var(--amber) 12%, var(--panel)); border-bottom: 1px solid color-mix(in srgb, var(--amber) 40%, var(--border)); color: var(--amber); font: 10px var(--font-mono); padding: 7px 10px; }
 .response-html-navigation { align-items: center; background: var(--panel); border-bottom: 1px solid var(--border); color: var(--muted); display: flex; font: 10px var(--font-mono); justify-content: space-between; min-height: 30px; padding: 4px 8px 4px 10px; }
 .response-html-navigation button { font-size: 10px; padding: 4px 8px; }
+.response-viewer-link { background: none; border: 0; color: var(--accent); cursor: pointer; display: inline; font: inherit; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+.response-viewer-link:hover { color: var(--text); }
+.response-link-error { background: color-mix(in srgb, var(--red) 10%, var(--panel)); border-top: 1px solid color-mix(in srgb, var(--red) 35%, var(--border)); color: var(--red); font: 10px var(--font-mono); padding: 7px 10px; }
 .response-media-preview { flex: 1; min-height: 0; min-width: 0; }
 .response-media-preview.image { align-items: center; display: flex; justify-content: center; overflow: auto; padding: 12px; }
 .response-media-preview.image img { display: block; height: auto; margin: auto; max-height: 100%; max-width: 100%; object-fit: contain; }
