@@ -35,17 +35,17 @@ describe('native HTTP transport preferences', () => {
     const request = createBlankRequest('preferred-http-version');
     request.url = 'https://example.test/status';
 
-    const response = await sendRequest(request, undefined, { preferredHttpVersion: 'http2', maxRedirects: -1, followRedirects: false, requestTimeoutMs: 0, validateCertificates: false });
+    const response = await sendRequest(request, undefined, { preferredHttpVersion: 'http2', maxRedirects: -1, followRedirects: false, requestTimeoutMs: 0, validateCertificates: false, proxy: { enabled: true, httpProxy: 'http://http-proxy.test:8080', httpsProxy: 'http://https-proxy.test:8443', noProxy: 'localhost' } });
 
     expect(response.httpVersion).toBe('HTTP/2.0');
     expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({
       input: expect.objectContaining({
-        transport: expect.objectContaining({ preferredHttpVersion: 'http2', maxRedirects: -1, followRedirects: false, timeoutMs: 0, validateCertificates: false }),
+        transport: expect.objectContaining({ preferredHttpVersion: 'http2', maxRedirects: -1, followRedirects: false, timeoutMs: 0, validateCertificates: false, proxyMode: 'custom', proxyUrl: 'http://https-proxy.test:8443', proxyExclusions: 'localhost' }),
       }),
     }));
     expect(request.transport).not.toHaveProperty('preferredHttpVersion');
     expect(request.transport).not.toHaveProperty('maxRedirects');
-    expect(request.transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global', timeoutMode: 'global', timeoutMs: 60_000, validateCertificates: true, validateCertificatesMode: 'global' });
+    expect(request.transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global', timeoutMode: 'global', timeoutMs: 60_000, validateCertificates: true, validateCertificatesMode: 'global', proxyMode: 'global', proxyUrl: '' });
   });
 
   it('honors explicit request certificate-validation modes over the device preference', async () => {
@@ -74,6 +74,20 @@ describe('native HTTP transport preferences', () => {
 
     expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({ validateCertificates: false }) }) }));
     expect(request.transport.validateCertificatesMode).toBe('global');
+  });
+
+  it('honors explicit request proxy modes over the device preference', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
+    const request = createBlankRequest('proxy-override');
+    request.url = 'https://example.test/status';
+    request.transport.proxyMode = 'custom';
+    request.transport.proxyUrl = 'http://request-proxy.test:9000';
+    await sendRequest(request, undefined, { proxy: { enabled: false, httpProxy: '', httpsProxy: '', noProxy: '' } });
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({ proxyMode: 'custom', proxyUrl: 'http://request-proxy.test:9000' }) }) }));
+
+    request.transport.proxyMode = 'disabled';
+    await sendRequest(request, undefined, { proxy: { enabled: true, httpProxy: 'http://global', httpsProxy: 'http://global', noProxy: '' } });
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({ proxyMode: 'disabled', proxyUrl: '' }) }) }));
   });
 
   it('honors an explicit request timeout over the device preference', async () => {

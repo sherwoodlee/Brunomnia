@@ -511,7 +511,23 @@ Compatibility bounds remain explicit: WebSocket connection APIs do not expose th
 
 Compatibility bounds remain explicit: browser engines own TLS validation, CLI Node Fetch cannot safely disable it per request, and OAuth authorization-window/callback capture is not implemented. Brunomnia's request-level Always/Never modes are an additional local capability; current Insomnia exposes the API and authentication choices globally.
 
-## Milestone 35 — remaining parity closure and release hardening
+## Milestone 35 — proxy defaults and request inheritance (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current preference surface | Complete baseline | Device-local manual proxy enablement, separate HTTP/HTTPS URLs, and a no-proxy list match the current upstream setting shape; manual mode defaults off |
+| Request inheritance | Complete | New requests persist Use Preferences; Custom and Direct explicitly override the device preference |
+| Legacy safety | Complete | Workspace v16 and earlier requests with a saved proxy URL/exclusion list migrate to Custom, while empty legacy proxy fields adopt inheritance |
+| Native execution | Complete baseline | Native HTTP, GraphQL, OAuth, integration, secondary-request, and Event Stream setup resolve the effective proxy after URL templating; protocol-specific manual URLs and no-proxy exclusions reach reqwest |
+| System behavior | Complete baseline | With manual mode off, reqwest uses its supported system/environment proxy discovery; Direct disables proxy discovery for the request |
+| Import and script behavior | Complete baseline | Ordinary cURL imports inherit preferences; explicit cURL/script proxy changes become Custom overrides |
+| Browser/CLI safety | Complete baseline | Browser development mode retains browser-owned routing; the CLI refuses an effective manual proxy because its bundled Node Fetch transport has no scoped proxy agent |
+| Executable coverage | Complete baseline | Frontend tests cover system/manual protocol selection, no-proxy forwarding, both overrides, legacy migration, native invocation, stream input, and cURL behavior; native compile/lint passes and rendered/live proxy fixtures remain intentionally omitted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 35 verification](QA_MILESTONE_35.md) |
+
+Compatibility bounds remain explicit: reqwest's discovery is not claimed to reproduce Electron session PAC resolution. Browser engines own development-mode proxy routing. gRPC and WebSocket proxy transport remain open, and the CLI deliberately refuses manual proxy execution instead of silently bypassing it. Brunomnia's request-level Custom/Direct modes are an additional local capability; current Insomnia exposes proxy selection globally.
+
+## Milestone 36 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

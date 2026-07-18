@@ -160,7 +160,7 @@ const parseCurlCommand = (tokens: string[], commandIndex: number, warnings: Impo
   } else request.bodyMode = 'none';
   if (bearer) request.auth = { ...request.auth, type: 'bearer', token: bearer };
   else if (username || password) request.auth = { ...request.auth, type: 'basic', username, password };
-  request.transport = { ...request.transport, validateCertificates, validateCertificatesMode: customCertificateValidation ? 'off' : 'global', timeoutMode: customTimeout ? 'custom' : 'global', timeoutMs, proxyUrl };
+  request.transport = { ...request.transport, validateCertificates, validateCertificatesMode: customCertificateValidation ? 'off' : 'global', timeoutMode: customTimeout ? 'custom' : 'global', timeoutMs, proxyMode: proxyUrl ? 'custom' : 'global', proxyUrl };
   request.source = sourceMetadata('curl', `command-${commandIndex + 1}`, Object.keys(unsupported).length ? unsupported : undefined);
   if (!url) warnings.push({ code: 'missing-url', message: 'A cURL command had no URL.', resource: request.name });
   return request;

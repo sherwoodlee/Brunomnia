@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { resolveCertificateValidation, resolveFollowRedirects, resolveRequestTimeout } from './transport';
+import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout } from './transport';
 
 describe('resolveFollowRedirects', () => {
   it('inherits the device default in global mode', () => {
@@ -47,5 +47,25 @@ describe('resolveCertificateValidation', () => {
     expect(resolveCertificateValidation(transport, false)).toBe(true);
     transport.validateCertificatesMode = 'off';
     expect(resolveCertificateValidation(transport, true)).toBe(false);
+  });
+});
+
+describe('resolveProxyTransport', () => {
+  it('uses system discovery by default and selects a manual proxy by request protocol', () => {
+    const transport = createBlankRequest('global-proxy').transport;
+    expect(resolveProxyTransport(transport, 'https://example.test')).toEqual({ proxyMode: 'system', proxyUrl: '', proxyExclusions: '' });
+    const preferences = { enabled: true, httpProxy: 'http://http-proxy.test:8080', httpsProxy: 'http://https-proxy.test:8443', noProxy: 'localhost,.internal' };
+    expect(resolveProxyTransport(transport, 'http://example.test', preferences)).toEqual({ proxyMode: 'custom', proxyUrl: preferences.httpProxy, proxyExclusions: preferences.noProxy });
+    expect(resolveProxyTransport(transport, 'https://example.test', preferences)).toEqual({ proxyMode: 'custom', proxyUrl: preferences.httpsProxy, proxyExclusions: preferences.noProxy });
+  });
+
+  it('gives custom and direct request modes precedence', () => {
+    const transport = createBlankRequest('proxy-override').transport;
+    transport.proxyMode = 'custom';
+    transport.proxyUrl = 'http://request-proxy.test:9000';
+    transport.proxyExclusions = 'localhost';
+    expect(resolveProxyTransport(transport, 'https://example.test', { enabled: false, httpProxy: '', httpsProxy: '', noProxy: '' })).toEqual({ proxyMode: 'custom', proxyUrl: transport.proxyUrl, proxyExclusions: 'localhost' });
+    transport.proxyMode = 'disabled';
+    expect(resolveProxyTransport(transport, 'https://example.test', { enabled: true, httpProxy: 'http://global', httpsProxy: 'http://global', noProxy: '' })).toEqual({ proxyMode: 'disabled', proxyUrl: '', proxyExclusions: '' });
   });
 });

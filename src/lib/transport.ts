@@ -20,3 +20,27 @@ export const resolveCertificateValidation = (transport: TransportConfig, globalD
   if (transport.validateCertificatesMode === 'off') return false;
   return globalDefault;
 };
+
+export type ProxyPreferences = {
+  enabled: boolean;
+  httpProxy: string;
+  httpsProxy: string;
+  noProxy: string;
+};
+
+export const resolveProxyTransport = (transport: TransportConfig, requestUrl: string, preferences: ProxyPreferences = { enabled: false, httpProxy: '', httpsProxy: '', noProxy: '' }) => {
+  if (transport.proxyMode === 'custom') {
+    const proxyUrl = transport.proxyUrl.trim();
+    return proxyUrl
+      ? { proxyMode: 'custom' as const, proxyUrl, proxyExclusions: transport.proxyExclusions.trim() }
+      : { proxyMode: 'disabled' as const, proxyUrl: '', proxyExclusions: '' };
+  }
+  if (transport.proxyMode === 'disabled') return { proxyMode: 'disabled' as const, proxyUrl: '', proxyExclusions: '' };
+  if (!preferences.enabled) return { proxyMode: 'system' as const, proxyUrl: '', proxyExclusions: '' };
+  let protocol = '';
+  try { protocol = new URL(requestUrl).protocol; } catch { /* URL validation reports the actionable error later. */ }
+  const proxyUrl = (protocol === 'http:' ? preferences.httpProxy : preferences.httpsProxy).trim();
+  return proxyUrl
+    ? { proxyMode: 'custom' as const, proxyUrl, proxyExclusions: preferences.noProxy.trim() }
+    : { proxyMode: 'disabled' as const, proxyUrl: '', proxyExclusions: '' };
+};

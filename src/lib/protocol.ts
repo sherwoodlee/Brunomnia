@@ -9,7 +9,7 @@ import type {
   StreamMessage,
 } from '../types';
 import { buildHeaders, environmentMap, resolveTemplate } from './request';
-import { resolveCertificateValidation, resolveFollowRedirects, resolveRequestTimeout } from './transport';
+import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
 
 type GrpcCallOutput = {
   status: string;
@@ -46,11 +46,12 @@ export const sseConnectConfig = (request: ApiRequest) => ({
   sendLastEventId: request.sse?.sendLastEventId !== false,
 });
 
-export const streamTransportConfig = (request: ApiRequest, preferredHttpVersion: PreferredHttpVersion, maxRedirects = 10, followRedirects = true, requestTimeoutMs = 30_000, validateCertificates = true) => ({
+export const streamTransportConfig = (request: ApiRequest, preferredHttpVersion: PreferredHttpVersion, maxRedirects = 10, followRedirects = true, requestTimeoutMs = 30_000, validateCertificates = true, proxy?: ProxyPreferences, requestUrl = request.url) => ({
   ...request.transport,
   followRedirects: resolveFollowRedirects(request.transport, followRedirects),
   timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs),
   validateCertificates: resolveCertificateValidation(request.transport, validateCertificates),
+  ...resolveProxyTransport(request.transport, requestUrl, proxy),
   preferredHttpVersion,
   maxRedirects,
 });
@@ -65,13 +66,15 @@ export const connectStream = async (
   followRedirects = true,
   requestTimeoutMs = 30_000,
   validateCertificates = true,
+  proxy?: ProxyPreferences,
 ) => {
   const variables = environmentMap(environment);
+  const url = resolveTemplate(request.url, variables);
   const input = {
     sessionId,
-    url: resolveTemplate(request.url, variables),
+    url,
     headers: resolvedHeaders(request, environment),
-    transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates),
+    transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, url),
     sse: sseConnectConfig(request),
   };
   if (isTauri()) {
@@ -133,6 +136,7 @@ export const runStreamSample = async (
   followRedirects = true,
   requestTimeoutMs = 30_000,
   validateCertificates = true,
+  proxy?: ProxyPreferences,
 ): Promise<HttpResponse> => {
   if (request.protocol !== 'websocket' && request.protocol !== 'sse') throw new Error('Stream sampling only supports WebSocket and SSE requests.');
   const sessionId = `runner-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -144,7 +148,7 @@ export const runStreamSample = async (
     messages.push(message);
     if (message.direction === 'incoming') resolveIncoming?.();
   };
-  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates);
+  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy);
   try {
     const variables = environmentMap(environment);
     const startupFrame = resolveTemplate(request.body, variables);

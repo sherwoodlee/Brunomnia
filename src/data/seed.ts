@@ -65,6 +65,7 @@ message Order { string id = 1; string status = 2; double total = 3; }`,
     timeoutMs: 60000,
     validateCertificatesMode: 'global',
     validateCertificates: true,
+    proxyMode: 'global',
     proxyUrl: '',
     proxyExclusions: '',
     clientCertificatePem: '',
@@ -113,7 +114,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 16,
+  version: 17,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
