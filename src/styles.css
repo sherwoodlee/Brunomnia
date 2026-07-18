@@ -627,6 +627,15 @@ kbd {
 .response-csv-preview tr:nth-child(even) { background: var(--panel-soft); }
 .response-csv-preview td { border: 1px solid var(--border); max-width: 420px; padding: 5px 8px; white-space: pre-wrap; word-break: break-word; }
 .response-csv-message { color: var(--muted); font: 10px var(--font-mono); padding: 10px; }
+.response-multipart-preview { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.response-multipart-toolbar { align-items: center; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
+.response-multipart-toolbar select { background: var(--input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); flex: 1; font: 10px var(--font-mono); min-width: 180px; padding: 6px; }
+.response-multipart-toolbar button { background: var(--button); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 10px; padding: 6px 8px; }
+.response-multipart-headers { border-bottom: 1px solid var(--border); max-height: 180px; overflow: auto; padding: 6px 10px; }
+.response-multipart-headers > div { display: grid; font: 10px var(--font-mono); gap: 10px; grid-template-columns: minmax(100px, 0.35fr) minmax(0, 1fr); padding: 3px 0; }
+.response-multipart-headers span { color: var(--muted); overflow-wrap: anywhere; }
+.response-multipart-message { color: var(--muted); font: 10px var(--font-mono); padding: 8px 10px; }
+.response-part-body { flex: 1; }
 .footer-spacer { flex: 1; }
 
 .test-results { padding: 16px; }

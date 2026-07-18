@@ -735,7 +735,24 @@ Compatibility bounds remain explicit: Visual Preview does not yet implement byte
 
 Compatibility bounds remain explicit: delimiter inference is a deterministic four-candidate baseline rather than Papa Parse's complete dialect inference. The viewer does not infer headers, column types, encodings, or formulas and does not virtualize table rows. The upstream keyboard-select-all behavior is left to ordinary browser/table selection because rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 50 — remaining parity closure and release hardening
+## Milestone 50 — multipart response preview (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| MIME boundary parsing | Complete baseline | Visual Preview accepts quoted/unquoted boundaries, CRLF/LF framing, final closing delimiters, preambles/epilogues, and boundary-like non-delimiter content |
+| Part metadata | Complete baseline | Up to 100 parts retain disposition name/filename, deterministic title, decoded UTF-8 size, content type, and up to 100 unfolded headers |
+| Part navigation | Complete baseline | A selector changes the active part without leaving Preview and shows its name/filename plus stored decoded size |
+| Header inspection | Complete baseline | Each selected part can toggle a bounded case-preserving header table |
+| Textual part preview | Complete baseline | JSON parts prettify and other parts render decoded source text with line numbers; preview caps at 1,000,000 characters with a visible notice |
+| Part export | Complete baseline | Save part writes the complete stored decoded text with a bounded safe filename and content-type-derived extension when no filename exists |
+| Error/limit safety | Complete | Missing, overlong, incomplete, or malformed boundary/header evidence yields visible errors; excess parts are ignored with an explicit truncation notice |
+| Bundle boundary | Complete | MIME parsing, part actions, and viewer UI stay in the lazy response-preview chunk; the main production bundle is unchanged |
+| Executable coverage | Complete baseline | Focused tests cover quoted boundaries, CRLF/LF, folded headers, names/filenames, multiple parts, invalid/incomplete input, part limits, exact artifact content, and filename safety |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 50 verification](QA_MILESTONE_50.md) |
+
+Compatibility bounds remain explicit: parsing operates on Brunomnia's decoded UTF-8 response string, so arbitrary binary part bytes may already be lossy. Part rendering is textual only and does not recursively invoke the HTML/CSV/image/PDF/audio viewers. Header count and part count are bounded; filename parameters do not yet implement RFC 5987/2231 extended encoding. Save part uses the browser/WebView download path rather than a native save dialog. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 51 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

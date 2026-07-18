@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { applyResponseBodyFilter, responseFilterLanguage } from '../lib/responseFilter';
 import { parseCsvPreview } from '../lib/csvPreview';
+import { createMultipartPartArtifact, parseMultipartPreview, type MultipartPreviewPart } from '../lib/multipartPreview';
 import { prettyBody } from '../lib/request';
 import { responseSizeBand } from '../lib/responseSize';
 import type { HttpResponse, ResponsePreviewMode } from '../types';
@@ -28,6 +29,35 @@ function CsvResponsePreview({ body }: { body: string }) {
   </div>;
 }
 
+const downloadMultipartPart = (part: MultipartPreviewPart) => {
+  const artifact = createMultipartPartArtifact(part);
+  const url = URL.createObjectURL(new Blob([artifact.contents], { type: artifact.mimeType }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = artifact.fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
+function MultipartResponsePreview({ body, contentType }: { body: string; contentType: string }) {
+  const preview = useMemo(() => parseMultipartPreview(body, contentType), [body, contentType]);
+  const [selectedId, setSelectedId] = useState(0);
+  const [showHeaders, setShowHeaders] = useState(false);
+  const selected = preview.parts.find((part) => part.id === selectedId) ?? preview.parts[0];
+  if (preview.error) return <div className="response-multipart-message bad">Failed to parse multipart response: {preview.error}</div>;
+  if (!selected) return <div className="response-multipart-message">No multipart sections to display.</div>;
+  const truncatedBody = selected.body.length > 1_000_000;
+  const partBody = selected.body.slice(0, 1_000_000);
+  const displayBody = selected.contentType.includes('json') ? prettyBody(partBody) : partBody;
+  return <div className="response-multipart-preview">
+    <div className="response-multipart-toolbar"><select aria-label="Multipart response part" onChange={(event) => { setSelectedId(Number(event.target.value)); setShowHeaders(false); }} value={selected.id}>{preview.parts.map((part) => <option key={part.id} value={part.id}>{part.title} · {part.sizeBytes} B</option>)}</select><button onClick={() => setShowHeaders((value) => !value)} type="button">{showHeaders ? 'Hide' : 'View'} headers</button><button onClick={() => downloadMultipartPart(selected)} type="button">Save part</button></div>
+    {preview.truncated ? <div className="response-multipart-message">Part list truncated at 100 sections.</div> : null}
+    {showHeaders ? <div className="response-multipart-headers">{selected.headers.map((header, index) => <div key={`${header.name}-${index}`}><strong>{header.name}</strong><span>{header.value}</span></div>)}</div> : null}
+    <div className="code-viewer response-part-body">{displayBody.split('\n').map((line, index) => <div className="code-line" key={`${index}-${line}`}><span>{index + 1}</span><code>{line || ' '}</code></div>)}</div>
+    {truncatedBody ? <div className="response-multipart-message">Part preview truncated at 1,000,000 decoded characters; Save part retains the complete stored text.</div> : null}
+  </div>;
+}
+
 function FilteredResponseBody({ response, filter, filterHistory, onApplyFilter, previewMode }: Pick<ResponseBodyPreviewProps, 'response' | 'filter' | 'filterHistory' | 'onApplyFilter' | 'previewMode'>) {
   const language = responseFilterLanguage(response);
   const result = useMemo(() => previewMode === 'raw'
@@ -42,6 +72,7 @@ function FilteredResponseBody({ response, filter, filterHistory, onApplyFilter, 
     const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
     return <iframe className="response-html-preview" sandbox="" srcDoc={`${policy}${response.body}`} title="Response visual preview" />;
   }
+  if (previewMode === 'friendly' && contentType.includes('multipart/')) return <MultipartResponsePreview body={response.body} contentType={contentType} />;
   if (previewMode === 'friendly' && contentType.includes('csv')) return <CsvResponsePreview body={response.body} />;
 
   return <>
