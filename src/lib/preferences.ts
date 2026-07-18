@@ -36,6 +36,7 @@ export const defaultPreferences: AppPreferences = {
   fontInterface: '',
   fontMonospace: '',
   showPasswords: false,
+  allowHtmlPreviewScripts: false,
   preferredHttpVersion: 'default',
   maxRedirects: 10,
   followRedirects: true,
