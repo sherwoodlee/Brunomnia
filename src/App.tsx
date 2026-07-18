@@ -691,6 +691,7 @@ type ResponsePanelProps = {
   onClearHistory: () => void;
   onDeleteResponse: () => void;
   onDownloadResponse: (prettify: boolean) => void;
+  onExportResponseDiagnostic: (kind: 'debug' | 'har') => void;
   onSelectResponse: (id: string) => void;
   onTabChange: (tab: ResponseTab) => void;
   onStreamDraftChange: (value: string) => void;
@@ -745,6 +746,7 @@ function ResponsePanel({
   onClearHistory,
   onDeleteResponse,
   onDownloadResponse,
+  onExportResponseDiagnostic,
   onSelectResponse,
   onTabChange,
   onStreamDraftChange,
@@ -755,6 +757,7 @@ function ResponsePanel({
   const displayBody = prettyBody(response.body);
   const lines = displayBody.split('\n');
   const canPrettify = Object.entries(response.headers).some(([name, value]) => name.toLowerCase() === 'content-type' && /json/i.test(value));
+  const canExportHttpDiagnostics = protocol === 'http' || protocol === 'graphql';
   const timelineEntries = response.timeline?.length ? response.timeline : [
     { name: 'Text' as const, value: 'Request started', elapsedMs: 0 },
     { name: 'Text' as const, value: `Response ${response.status} ${response.statusText}`, elapsedMs: response.durationMs },
@@ -814,6 +817,8 @@ function ResponsePanel({
         {!streaming ? <button onClick={copyResponse} type="button"><Icon name="copy" size={14} /> Copy</button> : null}
         {!streaming ? <button onClick={() => onDownloadResponse(false)} type="button"><Icon name="download" size={14} /> Export raw</button> : null}
         {!streaming && canPrettify ? <button onClick={() => onDownloadResponse(true)} type="button"><Icon name="download" size={14} /> Export pretty</button> : null}
+        {canExportHttpDiagnostics ? <button onClick={() => onExportResponseDiagnostic('debug')} type="button"><Icon name="download" size={14} /> Export debug</button> : null}
+        {canExportHttpDiagnostics ? <button onClick={() => onExportResponseDiagnostic('har')} type="button"><Icon name="download" size={14} /> Export HAR</button> : null}
         <span className="footer-spacer" />
         <span>{streaming ? `${streamMessages.length} messages` : `${lines.length} lines`}</span>
       </div>
@@ -1104,6 +1109,14 @@ export default function App() {
   };
   const downloadResponseBody = (prettify: boolean) => {
     void import('./lib/responseDownload').then(({ downloadResponseBody }) => downloadResponseBody(active?.request.name ?? 'response', response, prettify), () => undefined);
+  };
+  const exportResponseDiagnostic = (kind: 'debug' | 'har') => {
+    if (!active) return;
+    const saved = selectedResponseId ? activeResponseHistory.find((candidate) => candidate.id === selectedResponseId) : undefined;
+    const request = saved?.requestSnapshot?.id === active.request.id ? saved.requestSnapshot : active.request;
+    void import('./lib/responseDownload').then(({ downloadResponseDiagnostic }) => {
+      downloadResponseDiagnostic(request, response, kind, saved?.receivedAt);
+    }, () => undefined);
   };
   const unlockedVault = useMemo(() => vaultVariables(vaultSession), [vaultSession]);
   const externalSecretResolver = useCallback((input: ExternalSecretInput) => resolveAuthorizedExternalSecret(workspace, input), [workspace]);
@@ -1767,6 +1780,7 @@ export default function App() {
             onClearHistory={clearActiveEnvironmentHistory}
             onDeleteResponse={deleteSelectedSavedResponse}
             onDownloadResponse={downloadResponseBody}
+            onExportResponseDiagnostic={exportResponseDiagnostic}
             onSelectResponse={(id) => { const saved = activeResponseHistory.find((candidate) => candidate.id === id); if (saved) selectSavedResponse(saved); }}
             onSendStreamMessage={() => void sendStreamMessage()}
             onStreamDraftChange={setStreamDraft}

@@ -79,6 +79,8 @@ Preferences defaults to 20 saved responses per request. Positive numbers keep th
 
 Use **Export raw** in the response footer to download the displayed response body without modification. JSON responses also expose **Export pretty**, which uses two-space formatting when the body parses and preserves the raw text when it does not. Filenames combine a filesystem-safe request name, timestamp, and content-type extension. Brunomnia's current response contract is UTF-8 text, so this milestone does not claim byte-exact binary response export.
 
+HTTP and GraphQL responses also expose **Export debug** and **Export HAR**. Debug export writes a status line, the displayed response headers in deterministic order, a blank line, and the displayed body. HAR export writes one HAR 1.2 entry for the selected response, including its receipt time, duration, negotiated protocol, actual request URL and query keys, editable request headers/body metadata, response headers/body, redirect location, and size. A selected saved response uses its matching request-version snapshot when one exists. The current persistence contract does not retain raw wire headers, duplicate response-header fields, TLS/redirect traces, transport-added request headers, request cookies, compressed bytes, or binary response bytes; these exports do not reconstruct evidence that was never stored.
+
 ## Timeline evidence
 
 The Timeline tab persists prepared request and aggregate response evidence with each saved response. It records the resolved method and URL, eligible outgoing data, status and decoded response size, negotiated native protocol when available, and completion timing.
