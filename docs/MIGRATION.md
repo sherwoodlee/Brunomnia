@@ -985,7 +985,23 @@ Compatibility bounds remain explicit: Brunomnia does not expose force deletion, 
 
 Compatibility bounds remain explicit: this is a permanent discard after optional confirmation, with no trash/recovery layer. It does not discard staged changes, ignored files, active conflicts, submodule internals, or arbitrary directories as a unit. Git and filesystem errors may leave an earlier path group applied before a later group fails; no cross-file transaction is claimed. Rendered confirmation/interaction QA remains omitted by standing direction.
 
-## Milestone 65 — remaining parity closure and release hardening
+## Milestone 65 — confined per-file Git diff review (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` lets the staging workflow select one staged/unstaged file and compare its before/after content |
+| File selector | Complete baseline | The diff header lists only files relevant to the current **Unstaged** or **Staged** mode and retains an aggregate-all option |
+| Tracked files | Complete baseline | Native Git returns an exact file-scoped unified diff against the index or `HEAD`, preserving staged-versus-working semantics and deletion evidence |
+| Untracked text | Complete baseline | Safe UTF-8 untracked files receive a direct text preview under the shared 2 MB Git output cap instead of an empty aggregate diff |
+| Binary/large handling | Complete | Binary untracked files fail explicitly; oversized files show a bounded size notice; symlinks and escaping paths are rejected before reads |
+| Stale/mode protection | Complete | The native command requires a current status entry and the requested staged/unstaged state; changing modes clears the file selection |
+| Executable coverage | Complete baseline | A repository fixture covers tracked working/staged patches, untracked UTF-8 content, binary refusal, mode mismatch, and traversal rejection |
+| Bundle boundary | Complete | Per-file review stays in the lazy Git workbench and the main renderer remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 65 verification](QA_MILESTONE_65.md) |
+
+Compatibility bounds remain explicit: Brunomnia renders a unified textual patch/direct untracked preview rather than upstream's side-by-side semantic editor. Binary tracked changes use Git's ordinary binary diff marker; binary untracked files have no byte/hex viewer. Rename/copy presentation follows Git's path-filter behavior, and no syntax-aware diff or hunk staging is claimed. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 66 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

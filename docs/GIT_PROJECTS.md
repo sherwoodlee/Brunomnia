@@ -24,12 +24,14 @@ History, response bodies, cookies, runner reports, installed plugin source/data,
 Open **Git Sync** in the desktop app to:
 
 1. Open or create a split-YAML folder, initialize Git, or clone an existing repository.
-2. Save editor state to YAML, inspect the working or staged diff, and select files to stage or unstage.
+2. Save editor state to YAML, inspect all or one working/staged diff, and select files to stage or unstage.
 3. Commit with the repository identity or optional per-commit author name/email.
 4. Browse the 35 most recent commits, including message, author, date, parent IDs, local decorations, file statistics, and the bounded patch for a selected commit.
 5. Create, switch, or safely delete local branches; fetch/prune configured remotes; turn a remote-only branch into a local tracking branch; pull, push, or merge another local branch.
 
 Brunomnia invokes the installed `git` executable directly with an argument array; it never constructs a shell command from repository values. Remote credentials remain the responsibility of Git's configured credential helper or SSH agent.
+
+The diff file selector follows the active **Unstaged** or **Staged** mode. Tracked files use Git's index-aware unified diff. Untracked UTF-8 text receives a bounded direct preview; binary/symlink/unreadable files fail explicitly, and files above the 2 MB text cap show a size notice. Every selected path must be a safe current repository change.
 
 **Discard selected unstaged** and **Discard all unstaged** permanently restore tracked working-tree files to their index versions and remove selected untracked files. Staged changes remain staged. Discard refuses staged-only paths, paths outside the repository, and every file while a merge/rebase/conflict is active. When **Confirm destructive actions** is enabled, Brunomnia asks for confirmation before invoking Git, then reloads managed YAML after success.
 

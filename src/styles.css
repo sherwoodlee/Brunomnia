@@ -895,6 +895,8 @@ kbd {
 .diff-workbench > header, .conflict-workbench > header { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 11px 16px; }
 .diff-workbench h2, .conflict-workbench h2 { font-size: 14px; margin: 3px 0 0; }
 .diff-workbench > pre { color: #c8d3d9; font: 9px/1.55 var(--font-mono); margin: 0; overflow: auto; padding: 15px; tab-size: 2; white-space: pre; }
+.git-diff-controls { align-items: center; display: flex; gap: 8px; min-width: 0; }
+.git-diff-controls > select { background: #0d1418; border: 1px solid var(--border); color: var(--text-soft); font: 8px var(--font-mono); height: 31px; max-width: 270px; min-width: 150px; padding: 0 7px; }
 .git-history-workbench { display: grid; grid-template-rows: 66px minmax(0, 1fr); height: 100%; min-height: 0; }
 .git-history-workbench > header { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 11px 16px; }
 .git-history-workbench h2 { font-size: 14px; margin: 3px 0 0; }

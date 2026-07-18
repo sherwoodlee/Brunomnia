@@ -242,6 +242,11 @@ async fn project_git_diff(path: String, staged: bool) -> Result<String, String> 
 }
 
 #[tauri::command]
+async fn project_git_file_diff(path: String, staged: bool, file: String) -> Result<String, String> {
+    blocking(move || project::git_file_diff(path, staged, file)).await
+}
+
+#[tauri::command]
 async fn project_git_history(
     path: String,
     limit: Option<usize>,
@@ -528,6 +533,7 @@ pub fn run() {
             project_git_unstage,
             project_git_discard,
             project_git_diff,
+            project_git_file_diff,
             project_git_history,
             project_git_commit_patch,
             project_git_commit,
