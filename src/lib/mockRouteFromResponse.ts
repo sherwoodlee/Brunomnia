@@ -23,25 +23,36 @@ const isTextResponse = (response: StoredResponse) => {
     || ['application/graphql', 'application/javascript', 'application/x-javascript', 'application/x-www-form-urlencoded'].includes(mimeType);
 };
 
-export const createMockRouteFromResponse = (response: StoredResponse, routeId = `response-route-${crypto.randomUUID()}`): MockRoute => {
+const responseRouteFields = (response: StoredResponse, routeId: string): Pick<MockRoute, 'status' | 'headers' | 'body'> => {
   if (!isTextResponse(response)) throw new Error('This response is binary. Brunomnia mock routes currently store text bodies only.');
   if (response.body.length > MAX_MOCK_RESPONSE_BODY_CHARS) throw new Error('This response body exceeds the 10,000,000-character mock route limit.');
-  const method = (response.requestSnapshot?.method ?? 'GET').toUpperCase();
-  const safeMethod: HttpMethod = supportedMethods.has(method) ? method as HttpMethod : 'GET';
-  const path = responsePath(response.requestUrl || response.requestSnapshot?.url || '');
   const headers = Object.entries(response.headers)
     .filter(([name]) => !omittedHeaders.has(name.toLowerCase()))
     .slice(0, 1_000)
     .map(([name, value], index) => ({ id: `${routeId}-header-${index}`, name, value, enabled: true }));
+  return {
+    status: Math.min(599, Math.max(100, Math.round(response.status) || 200)),
+    headers,
+    body: response.body,
+  };
+};
+
+export const createMockRouteFromResponse = (response: StoredResponse, routeId = `response-route-${crypto.randomUUID()}`): MockRoute => {
+  const method = (response.requestSnapshot?.method ?? 'GET').toUpperCase();
+  const safeMethod: HttpMethod = supportedMethods.has(method) ? method as HttpMethod : 'GET';
+  const path = responsePath(response.requestUrl || response.requestSnapshot?.url || '');
   return {
     id: routeId,
     name: `${safeMethod} ${path} · ${response.status}`,
     enabled: true,
     method: safeMethod,
     path,
-    status: Math.min(599, Math.max(100, Math.round(response.status) || 200)),
-    headers,
-    body: response.body,
+    ...responseRouteFields(response, routeId),
     delayMs: 0,
   };
 };
+
+export const overwriteMockRouteFromResponse = (route: MockRoute, response: StoredResponse): MockRoute => ({
+  ...route,
+  ...responseRouteFields(response, route.id),
+});
