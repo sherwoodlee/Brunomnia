@@ -882,6 +882,7 @@ kbd {
 .git-file-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-file-list p { color: var(--mint); font-size: 8px; }
 .git-row-actions, .git-inline { display: grid; gap: 6px; grid-template-columns: 1fr 1fr; }
+.git-row-actions .git-discard-button { grid-column: 1 / -1; }
 .git-author-grid { display: grid; gap: 5px; grid-template-columns: 1fr 1fr; }
 .ai-commit-groups { display: flex; flex-direction: column; gap: 5px; max-height: 220px; overflow: auto; }
 .ai-commit-groups button { align-items: flex-start; display: flex; flex-direction: column; gap: 3px; height: auto; min-height: 48px; padding: 7px 8px; text-align: left; }

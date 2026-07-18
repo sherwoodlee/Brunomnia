@@ -229,6 +229,14 @@ async fn project_git_unstage(
 }
 
 #[tauri::command]
+async fn project_git_discard(
+    path: String,
+    paths: Vec<String>,
+) -> Result<project::GitStatusOutput, String> {
+    blocking(move || project::git_discard(path, paths)).await
+}
+
+#[tauri::command]
 async fn project_git_diff(path: String, staged: bool) -> Result<String, String> {
     blocking(move || project::git_diff(path, staged)).await
 }
@@ -518,6 +526,7 @@ pub fn run() {
             project_git_status,
             project_git_stage,
             project_git_unstage,
+            project_git_discard,
             project_git_diff,
             project_git_history,
             project_git_commit_patch,
