@@ -14,9 +14,9 @@ export const responseMedia = (contentType: string): ResponseMedia | null => {
 };
 
 export const createResponseMediaArtifact = (
-  response: Pick<HttpResponse, 'body' | 'bodyBase64'>,
+  source: Pick<HttpResponse, 'body' | 'bodyBase64'> | Uint8Array,
   media: ResponseMedia,
 ): ResponseMediaArtifact => {
-  const bytes = responseBodyBytes(response);
+  const bytes = source instanceof Uint8Array ? source : responseBodyBytes(source);
   return { bytes, blob: new Blob([new Uint8Array(bytes).buffer], { type: media.mimeType }) };
 };

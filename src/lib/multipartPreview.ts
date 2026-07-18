@@ -13,6 +13,15 @@ export type MultipartPreviewPart = {
 };
 
 export type MultipartPreview = { error: string; parts: MultipartPreviewPart[]; truncated: boolean };
+export type MultipartNestedPreviewBlock = '' | 'depth' | 'size';
+
+export const MAX_MULTIPART_PREVIEW_DEPTH = 5;
+export const MAX_NESTED_MULTIPART_BYTES = 5 * 1024 * 1024;
+
+export const multipartNestedPreviewBlock = (depth: number, sizeBytes: number): MultipartNestedPreviewBlock => {
+  if (depth >= MAX_MULTIPART_PREVIEW_DEPTH) return 'depth';
+  return sizeBytes > MAX_NESTED_MULTIPART_BYTES ? 'size' : '';
+};
 
 const BYTE_STRING_CHUNK = 8_192;
 const textEncoder = new TextEncoder();
@@ -64,7 +73,7 @@ export const parseMultipartPreview = (body: string | Uint8Array, contentType: st
     const disposition = headers.find((header) => header.name.toLowerCase() === 'content-disposition')?.value ?? '';
     const name = dispositionValue(disposition, 'name') || `part-${index + 1}`;
     const filename = dispositionValue(disposition, 'filename');
-    const partContentType = headers.find((header) => header.name.toLowerCase() === 'content-type')?.value.trim().toLowerCase() || 'text/plain';
+    const partContentType = headers.find((header) => header.name.toLowerCase() === 'content-type')?.value.trim() || 'text/plain';
     const headerMap = Object.fromEntries(headers.map((header) => [header.name, header.value]));
     const partBody = responseBodyFromBytes(partBodyBytes, responseCharset(headerMap)).body;
     parts.push({
