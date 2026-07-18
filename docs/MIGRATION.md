@@ -1074,7 +1074,21 @@ Compatibility bounds remain explicit: grouped commits are sequential and non-ato
 
 Compatibility bounds remain explicit: readiness is local-ref evidence, not a live remote or permission check. Remote-tracking refs may be stale until fetch, and branch protection, authentication, write authorization, non-fast-forward races, and server availability are evaluated only by preflight/push. No force push, automatic fetch, background polling, provider account, or hosted entitlement is introduced. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 71 — remaining parity closure and release hardening
+## Milestone 71 — actionable Git push failures (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` distinguishes non-fast-forward, authentication-required, tag-exists, HTTP, and generic push rejection paths |
+| Non-fast-forward | Complete baseline | Native `non-fast-forward`, `fetch first`, and remote-newer evidence becomes a stable instruction to pull and resolve before retrying |
+| Authentication/access | Complete baseline | Common HTTPS credential, HTTP 401/403, SSH public-key/permission, write-access, and repository-not-found evidence receives actionable installed-Git guidance |
+| Unknown failures | Complete | Unclassified failures retain Git's bounded stderr/stdout instead of collapsing to an ambiguous boolean or empty message |
+| Local preservation | Complete | Classification occurs after a failed non-force push and never mutates refs, index, worktree, or an earlier commit-and-push/grouped-commit result |
+| Executable coverage | Complete baseline | Two local clones produce a real divergent bare remote; the rejected primary push reports pull/resolve guidance, keeps its local tip, and remains ready to push |
+| Documentation and evidence | Complete | Updated [Git projects](GIT_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 71 verification](QA_MILESTONE_71.md) |
+
+Compatibility bounds remain explicit: classification uses stable native Git text patterns and cannot normalize every localized/version/provider-specific message. Branch pushes do not include tags, so upstream's tag-exists category is not applicable to this command. Brunomnia does not auto-pull, retry, force push, rebase, rewrite commits, or add provider credentials. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 72 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
