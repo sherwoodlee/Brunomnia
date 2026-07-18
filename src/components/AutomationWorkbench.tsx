@@ -222,7 +222,9 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
         return result;
       }, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => runBrowserScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
         ...scriptOptions,
-        readFile: workspace.preferences.allowScriptFileAccess ? readDesktopScriptFile : undefined,
+        readFile: workspace.preferences.allowScriptFileAccess
+          ? (path) => readDesktopScriptFile(path, workspace.preferences.dataFolders)
+          : undefined,
         vault: workspace.preferences.enableVaultInScripts ? vault : undefined,
         sendRequest: workspace.preferences.allowScriptRequests ? async (subrequest, subrequestVariables) => {
           const subresponse = await sendRequest(subrequest, {

@@ -289,7 +289,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 20;
+  version: 21;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -348,6 +348,7 @@ export type AppPreferences = {
   scriptTimeoutMs: number;
   allowScriptRequests: boolean;
   allowScriptFileAccess: boolean;
+  dataFolders: string[];
   enableVaultInScripts: boolean;
   autoFetchGraphqlSchema: boolean;
   confirmDestructive: boolean;

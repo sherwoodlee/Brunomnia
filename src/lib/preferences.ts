@@ -58,6 +58,7 @@ export const defaultPreferences: AppPreferences = {
   scriptTimeoutMs: 10_000,
   allowScriptRequests: false,
   allowScriptFileAccess: false,
+  dataFolders: [],
   enableVaultInScripts: false,
   autoFetchGraphqlSchema: true,
   confirmDestructive: true,
