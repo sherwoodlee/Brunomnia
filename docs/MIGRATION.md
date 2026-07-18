@@ -717,7 +717,7 @@ Compatibility bounds at this milestone were explicit: Brunomnia loaded decoded U
 | Executable coverage | Complete baseline | Storage tests cover valid raw persistence, invalid/legacy fallback to source, bounded filters, and stale-key removal; the clean TypeScript and app builds verify every mode branch |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 48 verification](QA_MILESTONE_48.md) |
 
-Compatibility bounds at this milestone were explicit: Visual Preview did not yet implement byte-backed image, PDF, audio, CSV-table, multipart, or charset-aware viewers. CSV and decoded-text multipart arrive in Milestones 49–50; Milestone 51 preserves underlying decoded entity bytes; and Milestone 52 adds image/PDF/audio viewers while Raw/Copy remain UTF-8 inspection surfaces. HTML visual mode intentionally blocks scripts, forms, privileged navigation, and remote resources; it is safer but less interactive than upstream's optional JavaScript WebView. Charset-aware text and byte-backed multipart viewers remain open. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: Visual Preview did not yet implement byte-backed image, PDF, audio, CSV-table, multipart, or charset-aware viewers. CSV and decoded-text multipart arrive in Milestones 49–50; Milestone 51 preserves underlying decoded entity bytes; Milestone 52 adds image/PDF/audio viewers; and Milestone 53 resolves declared charsets while Raw/Copy remain inspection-string surfaces. HTML visual mode intentionally blocks scripts, forms, privileged navigation, and remote resources; it is safer but less interactive than upstream's optional JavaScript WebView. Byte-backed multipart viewers remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
 ## Milestone 49 — CSV response preview (complete baseline)
 
@@ -785,7 +785,23 @@ Compatibility bounds remain explicit: preserved bytes are the HTTP entity after 
 
 Compatibility bounds remain explicit: routing trusts the declared Content-Type rather than sniffing media signatures. Actual image/audio codecs and embedded PDF controls depend on the operating-system WebView, and corrupt-media load events vary by engine. Viewers still require the complete body in memory and do not implement zoom/waveform/transcript tooling. Charset-aware text, byte-backed/recursive multipart parsing, filesystem-backed response bodies, and interactive HTML remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 53 — remaining parity closure and release hardening
+## Milestone 53 — charset-aware response text (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Charset parsing | Complete baseline | Content-Type lookup is case-insensitive, accepts quoted/unquoted parameters, bounds labels, and defaults missing values to UTF-8 |
+| Current aliases | Complete | `utf8`, `utf16le`, `ucs2`, `ucs-2`, `latin1`, `binary`, and `win1250` through `win1258` map to the pinned Insomnia labels; other WebView-supported labels pass through |
+| Transport parity | Complete baseline | Native and browser HTTP responses decode from the same exact entity-byte helper before timelines, plugins, scripts, filters, previews, or text exports consume the body |
+| Byte continuity | Complete | Legacy single-byte, UTF-16, malformed UTF-8, and leading-BOM bodies retain a Base64 sidecar whenever the decoded inspection string cannot reconstruct the original bytes |
+| Fallback safety | Complete | Unsupported decoder labels fall back to the prior UTF-8 replacement behavior without discarding raw bytes |
+| Downstream continuity | Complete | JSON/XML/CSV/multipart text, Raw/Source/Copy, templates, plugins, scripts, HAR/debug, history, and media all receive the appropriate decoded text or exact-byte surface |
+| Bundle boundary | Complete | The dependency-free decoder adds 868 bytes to the main renderer, which remains below the warning threshold at 498,213 bytes |
+| Executable coverage | Complete baseline | Focused tests cover aliases, quoted/case-insensitive parameters, Windows-1252, UTF-16LE valid-byte edge cases, UTF-8 BOM preservation, browser/native integration, corrupt Base64 fallback, and ordinary UTF-8 deduplication |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 53 verification](QA_MILESTONE_53.md) |
+
+Compatibility bounds remain explicit: decoding follows the declared charset and does not sniff encodings. Available pass-through labels depend on the operating-system WebView's Encoding Standard implementation; invalid/unsupported labels fall back to UTF-8 rather than bundling an independent codec table. Text diagnostics contain the decoded inspection string, while raw export retains decoded entity bytes. Filesystem-backed bodies, byte-backed recursive multipart parsing, content sniffing, and raw wire evidence remain open. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 54 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
