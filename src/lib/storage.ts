@@ -200,6 +200,7 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     fontInterface: stringValue(source?.fontInterface).replace(/[\r\n]/g, ' ').slice(0, 512),
     fontMonospace: stringValue(source?.fontMonospace).replace(/[\r\n]/g, ' ').slice(0, 512),
     showPasswords: source?.showPasswords === true,
+    allowHtmlPreviewScripts: source?.allowHtmlPreviewScripts === true,
     preferredHttpVersion: source?.preferredHttpVersion === 'http1.0'
       || source?.preferredHttpVersion === 'http1.1'
       || source?.preferredHttpVersion === 'http2'

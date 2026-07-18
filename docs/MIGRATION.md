@@ -848,9 +848,26 @@ Compatibility bounds at this milestone were explicit: recursive routing still tr
 | Executable coverage | Complete baseline | Focused tests cover misleading image/text types, JSON scalars, doctype position, non-doctype markup, empty bodies, and exact boundary-parameter preservation |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 56 verification](QA_MILESTONE_56.md) |
 
-Compatibility bounds remain explicit: JSON detection decodes the complete entity as UTF-8 and parses it, matching upstream rather than performing streaming or charset-statistical detection. HTML detection requires a doctype inside the first 100 bytes; bare markup, XML, media signatures, and other file formats are not sniffed. Safe HTML remains non-interactive. Detection changes only the viewer route and never rewrites stored Content-Type evidence.
+Compatibility bounds at this milestone were explicit: JSON detection decoded the complete entity as UTF-8 and parsed it, matching upstream rather than performing streaming or charset-statistical detection. HTML detection required a doctype inside the first 100 bytes; bare markup, XML, media signatures, and other file formats were not sniffed. Milestone 57 later adds opt-in isolated inline scripts. Detection changes only the viewer route and never rewrites stored Content-Type evidence.
 
-## Milestone 57 — remaining parity closure and release hardening
+## Milestone 57 — opt-in HTML preview JavaScript (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| User-visible preference | Complete baseline | Preferences exposes the pinned HTML JavaScript choice without an account or entitlement; Brunomnia keeps the authority off by default instead of upstream's enabled default |
+| Inline interaction | Complete baseline | Opt-in HTML previews receive `sandbox="allow-scripts"` and a CSP `script-src 'unsafe-inline'`, enabling ordinary inline DOM interaction without same-origin authority |
+| Constrained authority | Complete | External scripts, `eval`, fetch/XHR/WebSocket/EventSource, subresource network loads, forms, popups, modals, downloads, parent DOM access, and top navigation stay ungranted |
+| Safe-default continuity | Complete | With the grant off, the prior empty sandbox and script-blocking CSP remain byte-for-byte policy equivalents |
+| Recursive continuity | Complete | Top-level, content-detected, saved-history, and selected multipart HTML use the same preference and preview component |
+| Device boundary | Complete | Strict boolean normalization, import reset, folder/Git omission, encrypted-pull preservation, defaults reset, and the loading workspace all keep authority device-local |
+| Visible state | Complete | Every script-enabled HTML surface shows an amber warning naming the retained restrictions |
+| Bundle hygiene | Complete | Canonical loading-state defaults remove a duplicate preferences literal; the main renderer shrinks to 497,440 bytes and remains warning-free while preview/settings code stays lazy |
+| Executable coverage | Complete baseline | Focused tests assert safe/scripted CSP and sandbox output plus false-default, strict normalization, import reset, and true-value persistence |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [preferences](GRAPHQL_AND_PREFERENCES.md), [parity ledger](PARITY.md), and [Milestone 57 verification](QA_MILESTONE_57.md) |
+
+Compatibility bounds remain explicit: this is a safer iframe composition rather than Electron's dedicated response WebView. Brunomnia does not inject the response URL as a base, provide a remote-resource mode, or add same-origin/form/popup/download/top-navigation tokens. CSP blocks subresource network APIs, but same-frame link or script navigation remains operating-system WebView behavior; navigated content stays in the opaque sandbox. Inline script CPU/memory use is not preempted, so the preference is for trusted responses only. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 58 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -621,7 +621,9 @@ kbd {
 .response-preview-toolbar select { background: transparent; border: 0; color: var(--text); font: 10px var(--font-mono); outline: 0; }
 .response-preview-shell .code-viewer { flex: 1; }
 .raw-response .code-line > span { display: none; }
+.response-html-shell { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .response-html-preview { background: white; border: 0; flex: 1; min-height: 0; width: 100%; }
+.response-html-warning { background: color-mix(in srgb, var(--amber) 12%, var(--panel)); border-bottom: 1px solid color-mix(in srgb, var(--amber) 40%, var(--border)); color: var(--amber); font: 10px var(--font-mono); padding: 7px 10px; }
 .response-media-preview { flex: 1; min-height: 0; min-width: 0; }
 .response-media-preview.image { align-items: center; display: flex; justify-content: center; overflow: auto; padding: 12px; }
 .response-media-preview.image img { display: block; height: auto; margin: auto; max-height: 100%; max-width: 100%; object-fit: contain; }

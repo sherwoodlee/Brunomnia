@@ -44,6 +44,7 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - a maximum outgoing timeline chunk size in KiB, defaulting to 10;
 - a per-request response history limit, where `0` keeps only the live result and `-1` retains all saved responses;
 - optional response-history filtering by active environment;
+- an off-by-default inline-JavaScript mode for isolated HTML response previews;
 - a request timeout applied at execution time, defaulting to 30 seconds, with `0` disabling deadlines;
 - separate certificate-validation defaults for API requests and authentication flows;
 - system or manual HTTP/HTTPS proxy selection with a no-proxy list;

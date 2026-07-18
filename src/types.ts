@@ -328,6 +328,7 @@ export type AppPreferences = {
   fontInterface: string;
   fontMonospace: string;
   showPasswords: boolean;
+  allowHtmlPreviewScripts: boolean;
   preferredHttpVersion: PreferredHttpVersion;
   maxRedirects: number;
   followRedirects: boolean;
