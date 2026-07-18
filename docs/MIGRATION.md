@@ -654,9 +654,23 @@ Compatibility bounds remain explicit: legacy response entries cannot reconstruct
 | Executable coverage | Complete baseline | Focused tests cover raw fidelity, JSON formatting, invalid-JSON fallback, case-insensitive content types, safe filenames, and unknown-type fallback |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 44 verification](QA_MILESTONE_44.md) |
 
-Compatibility bounds remain explicit: Brunomnia's response model currently stores decoded UTF-8 text, not the upstream byte buffer, so byte-exact binary download is not claimed. Native save dialogs, HAR/debug exports for the selected response, response comparison/search, and persistent streaming history remain open. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: Brunomnia's response model currently stores decoded UTF-8 text, not the upstream byte buffer, so byte-exact binary download is not claimed. Native save dialogs, response comparison/search, and persistent streaming history remain open. Rendered/browser interaction QA remains omitted by standing direction.
 
-## Milestone 45 — remaining parity closure and release hardening
+## Milestone 45 — selected-response diagnostics (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| HTTP debug export | Complete baseline | HTTP and GraphQL responses export a deterministic status line, displayed response headers, blank separator, and displayed UTF-8 body as text |
+| Selected-response HAR | Complete baseline | The displayed live or saved response exports as one HAR 1.2 entry with request/response metadata, duration, size, protocol, redirect target, and body content |
+| Historical request fidelity | Complete baseline | A selected saved response uses its matching structured request snapshot, including historical URL, method, configured headers, and supported body metadata |
+| Query and payload breadth | Complete baseline | Actual URL query pairs retain order and duplicates; JSON, text, GraphQL, URL-encoded, and multipart metadata map to HAR post data without inventing binary bytes |
+| Deterministic artifact boundary | Complete | Files use bounded safe request names and timestamps; invalid receipt dates fall back deterministically; export is local and lazy-loaded |
+| Executable coverage | Complete baseline | Focused tests cover transcript ordering, status/header/body fidelity, single-entry HAR structure, historical metadata, duplicate query keys, payload sizing, redirects, and malformed URL/date fallbacks |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 45 verification](QA_MILESTONE_45.md) |
+
+Compatibility bounds remain explicit: persisted responses contain decoded aggregate text and a header map, not raw libcurl events. The debug transcript therefore cannot preserve raw wire ordering, duplicate response-header fields, TLS diagnostics, redirect hops, or compressed/binary bytes. HAR request headers and bodies come from the saved editable request snapshot and cannot reconstruct transport-added headers, resolved secret values, request cookies, or multipart framing. Rendered/browser interaction QA remains omitted by standing direction.
+
+## Milestone 46 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
