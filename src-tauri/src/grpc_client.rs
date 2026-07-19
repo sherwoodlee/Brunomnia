@@ -185,12 +185,34 @@ fn apply_metadata<T>(request: &mut Request<T>, metadata: &[KeyValue]) -> Result<
     Ok(())
 }
 
+fn tonic_endpoint(endpoint: &str) -> Result<(String, bool), String> {
+    let url =
+        url::Url::parse(endpoint).map_err(|error| format!("Invalid gRPC endpoint: {error}"))?;
+    let (scheme, secure) = match url.scheme() {
+        "grpc" | "http" => ("http", false),
+        "grpcs" | "https" => ("https", true),
+        scheme => return Err(format!("Unsupported gRPC endpoint scheme: {scheme}")),
+    };
+    if url.host_str().is_none() {
+        return Err("The gRPC endpoint requires a hostname.".into());
+    }
+    let normalized = if url.scheme() == scheme {
+        url.to_string()
+    } else {
+        let (_, remainder) = endpoint
+            .split_once("://")
+            .ok_or_else(|| "The gRPC endpoint requires an authority.".to_string())?;
+        url::Url::parse(&format!("{scheme}://{remainder}"))
+            .map_err(|error| format!("Invalid gRPC endpoint: {error}"))?
+            .to_string()
+    };
+    Ok((normalized, secure))
+}
+
 async fn connect_channel(endpoint: &str, transport: &TransportConfig) -> Result<Channel, String> {
-    let mut builder = Endpoint::from_shared(endpoint.to_string())
+    let (tonic_endpoint, secure) = tonic_endpoint(endpoint)?;
+    let mut builder = Endpoint::from_shared(tonic_endpoint)
         .map_err(|error| format!("Invalid gRPC endpoint: {error}"))?;
-    let secure = url::Url::parse(endpoint)
-        .ok()
-        .is_some_and(|url| url.scheme() == "https");
     if transport.timeout_ms > 0 {
         let timeout = std::time::Duration::from_millis(transport.timeout_ms);
         builder = builder.connect_timeout(timeout).timeout(timeout);
@@ -501,6 +523,22 @@ mod tests {
         let messages = deserialize_messages(r#"{"name":"Ada"}"#, descriptor, false)
             .expect("JSON maps to proto");
         assert_eq!(messages.len(), 1);
+    }
+
+    #[test]
+    fn normalizes_grpc_endpoint_schemes_for_tonic() {
+        assert_eq!(
+            tonic_endpoint("grpc://api.example.test:50051/orders?tenant=one").unwrap(),
+            (
+                "http://api.example.test:50051/orders?tenant=one".into(),
+                false
+            )
+        );
+        assert_eq!(
+            tonic_endpoint("grpcs://api.example.test").unwrap(),
+            ("https://api.example.test/".into(), true)
+        );
+        assert!(tonic_endpoint("ws://api.example.test").is_err());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

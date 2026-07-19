@@ -1700,7 +1700,11 @@ Compatibility bounds remain explicit: PAC-authenticated system proxy discovery, 
 
 Compatibility bounds remain explicit: importable proto trees, custom CA/PFX identity, gRPC proxy transport, richer reflection/schema workflows, interactive streaming lifecycle controls, and broad third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 113 — remaining parity closure and release hardening
+## Milestone 113 — authored gRPC URL schemes (complete)
+
+Brunomnia now accepts pinned-compatible `grpc://` and `grpcs://` endpoints, normalizes them internally to Tonic's HTTP/HTTPS schemes, preserves authority/path/query, and keeps the authored request URL unchanged. HTTP/HTTPS aliases continue to work, unsupported ambient schemes fail explicitly, and the secure classification feeds Milestone 112 validation/identity behavior. See [Milestone 113 verification](QA_MILESTONE_113.md).
+
+## Milestone 114 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
