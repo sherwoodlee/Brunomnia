@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { RunnerItemResult, RunnerLiveItem } from '../types';
+import { formatRunnerResponseStats, getRunnerStatusTag } from '../lib/runnerFeedback';
 import { scriptTestPassed, type ScriptTestFilter } from '../lib/scriptTests';
 import { Icon } from './Icon';
 import { RunnerAssertionEvidence } from './RunnerAssertionEvidence';
@@ -13,26 +14,20 @@ type RunnerAttemptCardProps = {
   onSkip?: () => void;
 };
 
-const responseStats = (item: RunnerLiveItem) => [
-  item.responseTime === undefined ? '' : `${Math.round(item.responseTime)} ms`,
-  item.responseSize === undefined ? '' : item.responseSize < 1024 ? `${item.responseSize} B` : `${(item.responseSize / 1024).toFixed(item.responseSize < 10_240 ? 1 : 0)} KiB`,
-].filter(Boolean).join(' · ');
-
 export function RunnerAttemptCard({ item, result, defaultExpanded, statusFilter, nameFilter, onSkip }: RunnerAttemptCardProps) {
   const canExpand = Boolean(result) && (item.status === 'completed' || item.status === 'failed');
   const [isExpanded, setIsExpanded] = useState(defaultExpanded && canExpand);
   const tests = result?.tests ?? item.tests ?? [];
   const passedTests = tests.filter(scriptTestPassed).length;
-  const statusLabel = item.statusCode && item.statusCode > 0 ? `${item.statusCode}${item.statusMessage ? ` ${item.statusMessage}` : ''}` : item.status.toUpperCase();
-  const statusTone = item.statusCode && item.statusCode > 0 ? item.statusCode < 300 ? 'http-success' : item.statusCode < 400 ? 'http-warning' : 'http-error' : item.status;
-  const stats = responseStats(item);
+  const statusTag = getRunnerStatusTag(item);
+  const stats = formatRunnerResponseStats(item);
   const showSkip = Boolean(onSkip) && (item.status === 'pending' || item.status === 'running');
   const showError = (item.status === 'failed' || item.status === 'canceled') && Boolean(item.errorMessage);
 
   return (
     <article className={`runner-attempt-card${isExpanded ? ' expanded' : ''}`}>
       <header>
-        <span className={`runner-status status-${statusTone}`}>{statusLabel}</span>
+        <span className={`runner-status status-${statusTag.tone}`}>{statusTag.label}</span>
         <div className="runner-attempt-identity"><strong>{item.requestName}</strong><small title={item.requestUrl}>{item.requestUrl || 'Prepared request'}</small>{!isExpanded && tests.length ? <small>{passedTests}/{tests.length} tests passed</small> : null}{isExpanded && stats ? <small>{stats}</small> : null}{showError ? <small className="error">{item.errorMessage}</small> : null}</div>
         <div className="runner-attempt-meta"><span>Iteration {item.iteration}</span><span>Attempt {item.attempt ?? '—'}</span></div>
         <div className="runner-attempt-actions">{showSkip ? <button className="runner-skip" onClick={onSkip} type="button">Skip</button> : null}{canExpand ? <button aria-expanded={isExpanded} aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${item.requestName} attempt evidence`} onClick={() => setIsExpanded((current) => !current)} type="button"><Icon name={isExpanded ? 'chevron-down' : 'chevron-right'} size={13} /></button> : null}</div>

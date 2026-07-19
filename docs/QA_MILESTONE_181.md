@@ -9,7 +9,7 @@ Scope: replace Brunomnia's flat, single-selected Runner attempt detail with pinn
 - Kong/insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` remains the pinned clean-room reference.
 - Pinned `packages/insomnia/src/ui/components/panes/runner-live-progress-pane.tsx` groups live request cards by iteration, keys each card with `${item.key}-${isRunning}`, and passes `defaultExpanded={!isRunning}` so in-flight cards stay compact and remount expanded when execution finishes.
 - Pinned `packages/insomnia/src/ui/components/panes/runner-test-result-pane.tsx` renders every saved request result as a card with `defaultExpanded`, rather than exposing one separately selected request detail.
-- Pinned `packages/insomnia/src/ui/components/panes/request-result-card.tsx` offers Skip only for pending/running items and expansion only for completed/failed items. Expanded cards retain request identity, status, assertion rows, and request/response evidence.
+- Pinned `packages/insomnia/src/ui/components/panes/request-result-card.tsx` offers Skip only for pending/running items and expansion only for completed/failed items. Expanded cards retain request identity, status, inline response statistics, errors, and assertion rows; Brunomnia's bounded request/response snapshots are the adaptation recorded below.
 - Brunomnia retains its bounded device-local request/response snapshots, aggregate header, history, console, and global assertion controls as compatible account-free adaptations; no source code, cloud entitlement, or account dependency is copied.
 
 ## Automated gates

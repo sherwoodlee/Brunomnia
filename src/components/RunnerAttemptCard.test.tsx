@@ -25,6 +25,7 @@ describe('Runner attempt card', () => {
 
     expect(markup).toContain('201 Created');
     expect(markup).toContain('Iteration 2');
+    expect(markup).toContain('12ms - 42 bytes');
     expect(markup).toContain('Attempt evidence');
     expect(markup).toContain('created');
     expect(markup).toContain('POST · http');
