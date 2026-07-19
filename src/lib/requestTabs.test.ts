@@ -111,4 +111,20 @@ describe('request document tabs', () => {
     expect(reopened.tabs.at(-1)).toEqual({ requestId: 'folder', type: 'folder', temporary: false });
     expect(reconcileRequestTabState(reopened, [{ id: 'request', type: 'request' }, { id: 'folder', type: 'folder' }]).tabs.map((tab) => tab.requestId)).toEqual(['request', 'folder']);
   });
+
+  it('persists synthetic runner tabs in the shared document lifecycle', () => {
+    let state = openDocumentTab(emptyRequestTabState(), 'runner_workspace', 'runner');
+    expect(parseRequestTabState(JSON.stringify(state)).tabs).toEqual([{ requestId: 'runner_workspace', type: 'runner', temporary: true }]);
+    state = promoteRequestTab(state, 'runner_workspace');
+    state = openDocumentTab(state, 'runner_folder', 'runner');
+    const reconciled = reconcileRequestTabState(state, [
+      { id: 'runner_workspace', type: 'runner' },
+      { id: 'runner_folder', type: 'runner' },
+    ]);
+    expect(reconciled.tabs).toEqual([
+      { requestId: 'runner_workspace', type: 'runner', temporary: false },
+      { requestId: 'runner_folder', type: 'runner', temporary: true },
+    ]);
+    expect(reopenClosedDocumentTab(closeRequestTab(reconciled, 'runner_folder'), [{ id: 'runner_folder', type: 'runner' }]).tabs.at(-1)).toEqual({ requestId: 'runner_folder', type: 'runner', temporary: false });
+  });
 });

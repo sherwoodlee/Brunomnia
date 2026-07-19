@@ -52,6 +52,8 @@ Selecting a request normally opens one temporary tab; selecting another unopened
 
 Folders participate in the same temporary/permanent strip and single temporary slot. Select a folder name to open its full Variables, Headers, Auth, Scripts, and Docs pane; Command/Ctrl-click, middle-click, or double-click opens it permanently. Folder edits promote temporary tabs, and the settings control retains duplicate, delete, and parent-management actions. Request and folder tabs can be mixed, reordered, closed, reopened, and restored after restart without changing collection hierarchy.
 
+The activity rail and command palette open a workspace-wide **Runner** document in the same strip. **Run folder** opens a distinct synthetic Runner tab for that folder; its request plan includes direct and nested descendants only, locks the owning collection/folder target, and promotes the temporary tab when execution starts. Deleting the target folder removes both its folder and Runner documents during reconciliation.
+
 Close uses recent active-tab history before falling back to the preceding tab. Middle-click closes a document tab. Closing the final tab or choosing **Close All** stores every closed document and opens the project resource dashboard; **Close Other Tabs** preserves and activates its selected tab. Command/Ctrl+Tab and Command/Ctrl+Shift+Tab cycle tabs, Command/Ctrl+W closes the active tab, and Command/Ctrl+Shift+T or the dashboard/history controls reopen the latest valid closed tab. Selecting a sidebar resource, project card, or new request leaves the dashboard and opens its document tab.
 
 ## Request pins

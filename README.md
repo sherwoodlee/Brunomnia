@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the one-hundred-fifty-fifth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the one-hundred-fifty-sixth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -20,7 +20,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Device-local redirect, request-timeout, API/authentication certificate-validation, workspace CA/PEM/PFX multi-identity management, and system/manual proxy defaults; per-request inheritance/overrides; `0`-disabled deadlines; a finite or unlimited native redirect ceiling; no-proxy lists; and host/port-scoped client-certificate controls
 - Device-local Default, HTTP 1.0, HTTP 1.1, HTTP/2, and HTTP/2 Prior Knowledge preferences with the negotiated native version in response evidence
 - Transparent native gzip, Brotli, deflate, and zstd response decoding with one decode-error-only raw fallback
-- Local collections with persistent mixed folder/request drag and Option/Alt-keyboard ordering, indent/outdent, cross-collection moves, deep folder-subtree duplication, a device-local pinned-request list, persistent temporary/permanent request and folder document tabs with shared close/reopen/history/cycling/drag order, exact Close All/Close Other Tabs actions, a persistent project dashboard after final-tab closure, full folder configuration panes, nested request folders, request/collection/folder documentation, and inherited folder headers, authentication, variables, and scripts
+- Local collections with persistent mixed folder/request drag and Option/Alt-keyboard ordering, indent/outdent, cross-collection moves, deep folder-subtree duplication, a device-local pinned-request list, persistent temporary/permanent request, folder, workspace Runner, and folder Runner document tabs with shared close/reopen/history/cycling/drag order, exact Close All/Close Other Tabs actions, a persistent project dashboard after final-tab closure, full folder configuration panes, nested request folders, request/collection/folder documentation, and inherited folder headers, authentication, variables, and scripts
 - Distinct global-base/selected-global and collection-base/selected-collection environments, persistent sub-environment drag and Option/Alt-keyboard ordering, collision-safe duplication, device-local private global sub-environments, folder/iteration/request-local variables, dynamic aliases, and template tags for UUIDs, time, Faker values, encoding, hashing, JSONPath, cookies, prompts, requests, and chained responses
 - Basic, Digest, OAuth 1.0/2.0, NTLM, AWS IAM v4, Bearer, API key, Hawk, Atlassian ASAP, and Netrc authentication, including cancellable system-browser OAuth 2 loopback callbacks across direct, runner, script/plugin, and user-triggered integration sends, generated state/PKCE/nonce, authorization-code exchange, implicit access/identity tokens, send-time acquisition, and expiry-aware refresh
 - Persistent editable cookie jar with per-request send/store controls

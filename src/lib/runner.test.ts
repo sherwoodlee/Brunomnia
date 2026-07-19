@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, parseRunnerData, runCollection, validateTestNamePattern } from './runner';
+import type { Workspace } from '../types';
+import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, parseRunnerData, resolveRunnerTarget, runCollection, validateTestNamePattern } from './runner';
 
 describe('collection runner', () => {
+  it('resolves workspace and nested folder runner targets', () => {
+    const root = createBlankRequest('root');
+    const direct = { ...createBlankRequest('direct'), folderId: 'folder' };
+    const nested = { ...createBlankRequest('nested'), folderId: 'child' };
+    const other = { ...createBlankRequest('other'), folderId: 'other-folder' };
+    const workspace = {
+      collections: [{ id: 'collection', name: 'Collection', expanded: true, requests: [root, direct, nested, other], folders: [{ id: 'folder', name: 'Folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }, { id: 'child', name: 'Child', parentId: 'folder', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }, { id: 'other-folder', name: 'Other', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }] }],
+    } as unknown as Workspace;
+    expect(resolveRunnerTarget(workspace).requests.map((request) => request.id)).toEqual(['root', 'direct', 'nested', 'other']);
+    expect(resolveRunnerTarget(workspace, { collectionId: 'collection', folderId: 'folder' })).toMatchObject({ folder: { id: 'folder' }, requests: [{ id: 'direct' }, { id: 'nested' }] });
+    expect(resolveRunnerTarget(workspace, { collectionId: 'collection', folderId: 'missing' }).requests).toEqual([]);
+  });
   it('parses JSON and quoted CSV iteration data', () => {
     expect(parseRunnerData('[{"id":1}]')).toEqual([{ id: '1' }]);
     expect(parseRunnerData('id,name\n1,"Ada, L."')).toEqual([{ id: '1', name: 'Ada, L.' }]);

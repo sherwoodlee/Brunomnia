@@ -8,9 +8,10 @@ import type {
   RunnerRequestSnapshot,
   RunnerResponseSnapshot,
   ScriptRunResult,
+  Workspace,
 } from '../types';
 import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, type ScriptEnvironmentScopes } from './resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, type ScriptEnvironmentScopes } from './resources';
 import type { ScriptRunOptions } from './scriptSandbox';
 
 export type RequestExecutor = (request: ApiRequest, variables: Record<string, string>) => Promise<HttpResponse>;
@@ -37,6 +38,17 @@ export type RunnerOptions = {
   bail?: boolean;
   shouldCancel?: () => boolean;
   onResult?: (result: RunnerItemResult) => void;
+};
+
+export type RunnerTarget = { collectionId?: string; folderId?: string };
+
+export const resolveRunnerTarget = (workspace: Workspace, target?: RunnerTarget) => {
+  const collection = workspace.collections.find((candidate) => candidate.id === target?.collectionId) ?? workspace.collections[0];
+  const folder = target?.folderId ? collection?.folders?.find((candidate) => candidate.id === target.folderId) : undefined;
+  const requests = target?.folderId
+    ? folder && collection ? collection.requests.filter((request) => folderAncestors(collection, request.folderId).some((candidate) => candidate.id === folder.id)) : []
+    : collection?.requests ?? [];
+  return { collection, folder, requests };
 };
 
 const runId = () => `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;

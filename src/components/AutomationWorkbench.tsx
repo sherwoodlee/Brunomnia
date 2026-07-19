@@ -13,7 +13,7 @@ import type {
   WorkbenchSection,
 } from '../types';
 import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
-import { parseRunnerData, runCollection } from '../lib/runner';
+import { parseRunnerData, resolveRunnerTarget, runCollection } from '../lib/runner';
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
 import { applyCollectionConfiguration, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
 import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
@@ -46,6 +46,8 @@ type AutomationWorkbenchProps = {
   onStartMock: (serverId: string, runningMock: RunningMock) => void;
   onStopMock: (serverId: string) => void;
   templatePrompt: SendRequestContext['prompt'];
+  runnerTarget?: { collectionId: string; folderId?: string };
+  onRunnerStart?: () => void;
 };
 
 const workspaceProxyPreferences = (workspace: Workspace) => ({
@@ -133,7 +135,7 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection }: Aut
   );
 }
 
-function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, templatePrompt }: AutomationWorkbenchProps) {
+function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, templatePrompt, runnerTarget, onRunnerStart }: AutomationWorkbenchProps) {
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
     certificates: workspace.certificates,
     prompt: templatePrompt,
@@ -143,7 +145,10 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
     requestAncestors: requestAncestorNames(workspace.collections, request),
     ...context,
   });
-  const [collectionId, setCollectionId] = useState(workspace.collections[0]?.id ?? '');
+  const initialTarget = resolveRunnerTarget(workspace, runnerTarget);
+  const initialCollection = initialTarget.collection;
+  const targetFolderId = runnerTarget?.folderId ?? '';
+  const [collectionId, setCollectionId] = useState(initialCollection?.id ?? '');
   const [environmentId, setEnvironmentId] = useState(activeEnvironment.id);
   const [iterations, setIterations] = useState(1);
   const [retries, setRetries] = useState(0);
@@ -156,11 +161,12 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const [selectedResultId, setSelectedResultId] = useState('');
   const [error, setError] = useState('');
   const [oauthAuthorization, setOAuthAuthorization] = useState<OAuthAuthorizationStatus>();
-  const [requestPlan, setRequestPlan] = useState<Array<{ id: string; enabled: boolean }>>(() => (workspace.collections[0]?.requests ?? []).map((request) => ({ id: request.id, enabled: true })));
+  const [requestPlan, setRequestPlan] = useState<Array<{ id: string; enabled: boolean }>>(() => initialTarget.requests.map((request) => ({ id: request.id, enabled: true })));
   const cancelled = useRef(false);
   const oauthFlowId = useRef('');
   const draggedRequestId = useRef('');
-  const collection = workspace.collections.find((candidate) => candidate.id === collectionId) ?? workspace.collections[0];
+  const resolvedTarget = useMemo(() => resolveRunnerTarget(workspace, { collectionId, folderId: targetFolderId }), [collectionId, targetFolderId, workspace]);
+  const { collection, folder: targetFolder, requests: runnerRequests } = resolvedTarget;
   const selectedEnvironment = workspace.environments.find((candidate) => candidate.id === environmentId) ?? activeEnvironment;
   const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
 
@@ -185,14 +191,14 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const latestReport = workspace.runnerReports.find((report) => report.collectionId === collection?.id);
 
   useEffect(() => {
-    const ids = new Set((collection?.requests ?? []).map((request) => request.id));
+    const ids = new Set(runnerRequests.map((request) => request.id));
     setRequestPlan((current) => {
       const retained = current.filter((item) => ids.has(item.id));
       const retainedIds = new Set(retained.map((item) => item.id));
-      const added = (collection?.requests ?? []).filter((request) => !retainedIds.has(request.id)).map((request) => ({ id: request.id, enabled: true }));
+      const added = runnerRequests.filter((request) => !retainedIds.has(request.id)).map((request) => ({ id: request.id, enabled: true }));
       return [...retained, ...added];
     });
-  }, [collection]);
+  }, [runnerRequests]);
 
   const moveRequest = (id: string, offset: number) => setRequestPlan((current) => {
     const from = current.findIndex((item) => item.id === id);
@@ -228,6 +234,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
 
   const start = async () => {
     if (!collection || running) return;
+    onRunnerStart?.();
     const requestIds = requestPlan.filter((item) => item.enabled).map((item) => item.id);
     if (!requestIds.length) { setError('Select at least one request for this run.'); return; }
     setRunning(true); setResults([]); setSelectedResultId(''); setError(''); cancelled.current = false;
@@ -426,15 +433,16 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const selectedResult = visibleResults.find((result) => result.id === selectedResultId);
   return (
     <section className="automation-workbench runner-workbench">
-      <AutomationHeader eyebrow="Test" title="Collection runner" subtitle="Run requests in order with iteration data, scripts, assertions, delays, and retries.">
+      <AutomationHeader eyebrow="Test" title={targetFolder ? `Runner · ${targetFolder.name}` : 'Collection runner'} subtitle="Run requests in order with iteration data, scripts, assertions, delays, and retries.">
         {latestReport && !running ? <button className="secondary-action" onClick={() => downloadReport('json')} type="button">Export JSON</button> : null}
         {latestReport && !running ? <button className="secondary-action" onClick={() => downloadReport('junit')} type="button">Export JUnit</button> : null}
         {running ? <button className="danger-action" onClick={() => { cancelled.current = true; void cancelRunnerOAuthAuthorization(); }} type="button">Cancel run</button>
-          : <button className="primary-action" disabled={!collection} onClick={() => void start()} type="button">Run collection</button>}
+          : <button className="primary-action" disabled={!collection} onClick={() => void start()} type="button">{targetFolder ? 'Run folder' : 'Run collection'}</button>}
       </AutomationHeader>
       <div className="runner-grid">
         <aside className="runner-config">
-          <label>Collection<select aria-label="Runner collection" value={collection?.id ?? ''} onChange={(event) => setCollectionId(event.target.value)}>{workspace.collections.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.requests.length}</option>)}</select></label>
+          <label>Collection<select aria-label="Runner collection" disabled={Boolean(runnerTarget?.collectionId)} value={collection?.id ?? ''} onChange={(event) => setCollectionId(event.target.value)}>{workspace.collections.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.requests.length}</option>)}</select></label>
+          {targetFolder ? <label>Folder<input aria-label="Runner folder" disabled value={targetFolder.name} /></label> : null}
           <label>Environment<select aria-label="Runner environment" value={environment.id} onChange={(event) => setEnvironmentId(event.target.value)}>{workspace.environments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <fieldset className="runner-plan"><legend>Request order</legend>{requestPlan.map((item, index) => {
             const request = collection?.requests.find((candidate) => candidate.id === item.id);

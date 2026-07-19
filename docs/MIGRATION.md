@@ -2283,7 +2283,20 @@ Compatibility bounds remain explicit: this dashboard adapts pinned project-file 
 
 Compatibility bounds remain explicit: environment, collection/design, mock-server/route, runner, and test-suite resources still do not participate in the shared strip. Folder pane field labels adapt Brunomnia's existing `Variables` name where pinned currently says `Environment`, but the same inherited key/value scope is edited. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 156 — remaining parity closure and release hardening
+## Milestone 156 — workspace and folder Runner document tabs (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned Runner audit | Complete | Pinned tabs use `runner_<workspaceId>` or `runner_<folderId>`, create through ordinary route synchronization, promote when a run starts, and retain per-runner context keyed by the synthetic ID |
+| Shared tab lifecycle | Complete baseline | Typed Runner tabs persist beside request/folder documents and share the one temporary slot, explicit keep, run promotion, active history, cycling, drag order, middle/ordinary/final/all/other close, reopen, and dashboard behavior |
+| Workspace launch | Complete | Activity rail and command-palette Runner actions open or activate the workspace synthetic tab rather than bypassing document state through a separate workbench section |
+| Folder launch | Complete baseline | Every folder pane exposes Run folder; its synthetic tab locks the owning collection and folder, includes direct plus nested descendants in collection order, and cannot silently broaden a deleted/missing target to the full collection |
+| Embedded workbench | Complete baseline | The existing account-free runner UI renders beneath the shared strip with collection/environment selection, request order, iterations, retries, delay, bail, data, protocol samples, result evidence, and JSON/JUnit exports intact |
+| Executable evidence | Complete baseline | Focused synthetic-tab and target-resolution tests, strict React/TypeScript compilation, full frontend/native suites, CLI/audit gates, and a rebuilt macOS app verify the milestone without rendered Browser QA |
+
+Compatibility bounds remain explicit: pinned Runner context retains unsaved per-runner controls while switching tabs; Brunomnia currently retains persisted reports but remounts unsaved controls when leaving the Runner pane. Environment, collection/design, mock-server/route, and test-suite resources still do not participate in the shared strip. Collections and Collection runner stay `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 157 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
