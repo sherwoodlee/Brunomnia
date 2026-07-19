@@ -2179,7 +2179,20 @@ Compatibility bounds remain explicit: pinned Insomnia exposes these actions only
 
 Compatibility bounds remain explicit: this milestone closes request pin metadata and its sidebar projection, not Insomnia's separate persistent temporary/permanent document-tab context, tab history, close/reopen behavior, or tab drag ordering. Multi-select/bulk resource actions, document-tab state, collected-data breadth, legacy-version reconstruction, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 148 — remaining parity closure and release hardening
+## Milestone 148 — persistent request document tabs (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Temporary navigation | Complete | Ordinary request selection opens or replaces one italic temporary tab; existing open tabs activate without duplication |
+| Permanent tabs | Complete | Command/Ctrl-click, middle-click, double-click, explicit keep, editing, and sending promote or open permanent request tabs |
+| Persistent lifecycle | Complete | Bounded per-project local state preserves tab order, temporary status, active ID, recent active history, and recently closed IDs without entering workspace/project/export/sync data |
+| Close/reopen/navigation | Complete | Closing the active tab prefers recent valid history then the preceding tab; latest-valid reopen, Command/Ctrl+Tab cycling, reverse cycling, and Command/Ctrl+W/Shift+T shortcuts work |
+| Ordering and reconciliation | Complete | Native pointer drag persists before/after tab order; duplicate/malformed/deleted/stale IDs are bounded and repaired while request names, methods, and protocols remain live workspace projections |
+| Executable evidence | Complete | Pure tests prove parsing, single-temporary enforcement, replacement, promotion, close history, reopen, cycle, drag order, deletion repair, and fallback creation; strict TypeScript proves the full request-tab strip |
+
+Compatibility bounds remain explicit: pinned Insomnia can close its final tab and navigate to a separate project dashboard, while Brunomnia's always-present request workbench deliberately keeps one request tab open. This milestone covers request documents, not Insomnia's broader folder/environment/mock/spec/runner tab types or close-all/close-others context menu. Multi-select/bulk resource actions, collected-data breadth, legacy-version reconstruction, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 149 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -12,7 +12,7 @@ const workspaceRequestIds = (workspace: Workspace): Set<string> => new Set(
 );
 
 export const parsePinnedRequestIds = (value: string | null): string[] => {
-  if (!value) return [];
+  if (!value || value.length > 1_000_000) return [];
   try {
     const parsed = JSON.parse(value);
     if (!Array.isArray(parsed)) return [];

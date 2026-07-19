@@ -7,6 +7,7 @@ describe('request pins', () => {
     expect(parsePinnedRequestIds('["first","first",42,"second"]')).toEqual(['first', 'second']);
     expect(parsePinnedRequestIds('{"first":true}')).toEqual([]);
     expect(parsePinnedRequestIds('not json')).toEqual([]);
+    expect(parsePinnedRequestIds('x'.repeat(1_000_001))).toEqual([]);
   });
 
   it('reconciles and toggles pins only for current workspace requests', () => {

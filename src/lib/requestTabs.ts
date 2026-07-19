@@ -1,0 +1,154 @@
+export type RequestDocumentTab = {
+  requestId: string;
+  temporary: boolean;
+};
+
+export type RequestTabState = {
+  tabs: RequestDocumentTab[];
+  activeRequestId: string;
+  history: string[];
+  closed: string[];
+};
+
+export type RequestTabPlacement = 'before' | 'after';
+
+const MAX_OPEN_TABS = 100;
+const MAX_TAB_HISTORY = 100;
+const MAX_CLOSED_TABS = 50;
+
+export const emptyRequestTabState = (): RequestTabState => ({ tabs: [], activeRequestId: '', history: [], closed: [] });
+
+const uniqueIds = (value: unknown, limit: number): string[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 500 && !seen.has(id) && Boolean(seen.add(id))).slice(0, limit);
+};
+
+export const parseRequestTabState = (value: string | null): RequestTabState => {
+  if (!value || value.length > 1_000_000) return emptyRequestTabState();
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const seen = new Set<string>();
+    let temporarySeen = false;
+    const tabs = (Array.isArray(parsed.tabs) ? parsed.tabs : []).flatMap((value): RequestDocumentTab[] => {
+      if (!value || typeof value !== 'object') return [];
+      const tab = value as Record<string, unknown>;
+      const requestId = typeof tab.requestId === 'string' ? tab.requestId : '';
+      if (!requestId || requestId.length > 500 || seen.has(requestId)) return [];
+      seen.add(requestId);
+      const temporary = tab.temporary === true && !temporarySeen;
+      temporarySeen ||= temporary;
+      return [{ requestId, temporary }];
+    }).slice(0, MAX_OPEN_TABS);
+    return {
+      tabs,
+      activeRequestId: typeof parsed.activeRequestId === 'string' ? parsed.activeRequestId : '',
+      history: uniqueIds(parsed.history, MAX_TAB_HISTORY),
+      closed: uniqueIds(parsed.closed, MAX_CLOSED_TABS),
+    };
+  } catch {
+    return emptyRequestTabState();
+  }
+};
+
+const activate = (state: RequestTabState, requestId: string): RequestTabState => {
+  if (!state.tabs.some((tab) => tab.requestId === requestId)) return state;
+  if (state.activeRequestId === requestId) return { ...state, closed: state.closed.filter((id) => id !== requestId) };
+  const history = state.activeRequestId && state.tabs.some((tab) => tab.requestId === state.activeRequestId)
+    ? [state.activeRequestId, ...state.history.filter((id) => id !== state.activeRequestId && id !== requestId)]
+    : state.history.filter((id) => id !== requestId);
+  return { ...state, activeRequestId: requestId, history: history.slice(0, MAX_TAB_HISTORY), closed: state.closed.filter((id) => id !== requestId) };
+};
+
+export const reconcileRequestTabState = (state: RequestTabState, validRequestIds: string[], fallbackRequestId = ''): RequestTabState => {
+  const validIds = new Set(validRequestIds);
+  const seen = new Set<string>();
+  let temporarySeen = false;
+  const tabs = state.tabs.flatMap((tab): RequestDocumentTab[] => {
+    if (!validIds.has(tab.requestId) || seen.has(tab.requestId)) return [];
+    seen.add(tab.requestId);
+    const temporary = tab.temporary && !temporarySeen;
+    temporarySeen ||= temporary;
+    return [{ requestId: tab.requestId, temporary }];
+  }).slice(0, MAX_OPEN_TABS);
+  if (!tabs.length && validIds.has(fallbackRequestId)) tabs.push({ requestId: fallbackRequestId, temporary: true });
+  const tabIds = new Set(tabs.map((tab) => tab.requestId));
+  const activeRequestId = tabIds.has(state.activeRequestId)
+    ? state.activeRequestId
+    : tabIds.has(fallbackRequestId) ? fallbackRequestId : tabs[0]?.requestId ?? '';
+  return {
+    tabs,
+    activeRequestId,
+    history: uniqueIds(state.history, MAX_TAB_HISTORY).filter((id) => tabIds.has(id) && id !== activeRequestId),
+    closed: uniqueIds(state.closed, MAX_CLOSED_TABS).filter((id) => validIds.has(id) && !tabIds.has(id)),
+  };
+};
+
+export const openRequestTab = (state: RequestTabState, requestId: string, permanent = false): RequestTabState => {
+  if (!requestId) return state;
+  const existing = state.tabs.find((tab) => tab.requestId === requestId);
+  if (existing) {
+    const tabs = permanent ? state.tabs.map((tab) => tab.requestId === requestId ? { ...tab, temporary: false } : tab) : state.tabs;
+    return activate({ ...state, tabs }, requestId);
+  }
+  let tabs = [...state.tabs];
+  let history = state.history;
+  const temporaryIndex = permanent ? -1 : tabs.findIndex((tab) => tab.temporary);
+  if (temporaryIndex >= 0) {
+    const replacedId = tabs[temporaryIndex].requestId;
+    tabs[temporaryIndex] = { requestId, temporary: true };
+    history = history.filter((id) => id !== replacedId);
+  } else if (tabs.length < MAX_OPEN_TABS) {
+    tabs.push({ requestId, temporary: !permanent });
+  } else {
+    return state;
+  }
+  return activate({ ...state, tabs, history }, requestId);
+};
+
+export const promoteRequestTab = (state: RequestTabState, requestId: string): RequestTabState => (
+  state.tabs.some((tab) => tab.requestId === requestId && tab.temporary)
+    ? { ...state, tabs: state.tabs.map((tab) => tab.requestId === requestId ? { ...tab, temporary: false } : tab) }
+    : state
+);
+
+export const closeRequestTab = (state: RequestTabState, requestId: string): RequestTabState => {
+  const index = state.tabs.findIndex((tab) => tab.requestId === requestId);
+  if (index < 0 || state.tabs.length <= 1) return state;
+  const tabs = state.tabs.filter((tab) => tab.requestId !== requestId);
+  const tabIds = new Set(tabs.map((tab) => tab.requestId));
+  const history = state.history.filter((id) => id !== requestId && tabIds.has(id));
+  const activeRequestId = state.activeRequestId === requestId
+    ? history[0] ?? tabs[Math.max(0, index - 1)]?.requestId ?? tabs[0].requestId
+    : state.activeRequestId;
+  return {
+    tabs,
+    activeRequestId,
+    history: history.filter((id) => id !== activeRequestId),
+    closed: [...state.closed.filter((id) => id !== requestId), requestId].slice(-MAX_CLOSED_TABS),
+  };
+};
+
+export const reopenClosedRequestTab = (state: RequestTabState, validRequestIds: string[]): RequestTabState => {
+  const validIds = new Set(validRequestIds);
+  const requestId = [...state.closed].reverse().find((id) => validIds.has(id) && !state.tabs.some((tab) => tab.requestId === id));
+  if (!requestId) return state;
+  return openRequestTab({ ...state, closed: state.closed.filter((id) => id !== requestId) }, requestId, true);
+};
+
+export const cycleRequestTab = (state: RequestTabState, direction: 'next' | 'previous'): RequestTabState => {
+  if (state.tabs.length < 2) return state;
+  const index = state.tabs.findIndex((tab) => tab.requestId === state.activeRequestId);
+  const offset = direction === 'next' ? 1 : -1;
+  const target = state.tabs[(Math.max(index, 0) + offset + state.tabs.length) % state.tabs.length];
+  return target ? activate(state, target.requestId) : state;
+};
+
+export const moveRequestTab = (state: RequestTabState, requestId: string, targetRequestId: string, placement: RequestTabPlacement): RequestTabState => {
+  const tab = state.tabs.find((candidate) => candidate.requestId === requestId);
+  if (!tab || requestId === targetRequestId || !state.tabs.some((candidate) => candidate.requestId === targetRequestId)) return state;
+  const tabs = state.tabs.filter((candidate) => candidate.requestId !== requestId);
+  const targetIndex = tabs.findIndex((candidate) => candidate.requestId === targetRequestId);
+  tabs.splice(targetIndex + (placement === 'after' ? 1 : 0), 0, tab);
+  return { ...state, tabs };
+};

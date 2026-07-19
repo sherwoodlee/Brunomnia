@@ -21,6 +21,8 @@ import type { WorkspaceEnvironmentMove, WorkspaceResourceKeyboardAction, Workspa
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
 import { parsePinnedRequestIds, pinnedWorkspaceRequests, reconcilePinnedRequestIds, togglePinnedRequestId } from './lib/requestPins';
+import { closeRequestTab, cycleRequestTab, emptyRequestTabState, moveRequestTab, openRequestTab, parseRequestTabState, promoteRequestTab, reconcileRequestTabState, reopenClosedRequestTab } from './lib/requestTabs';
+import type { RequestTabPlacement, RequestTabState } from './lib/requestTabs';
 import type { AppliedResponseMockTarget } from './lib/mockRouteFromResponse';
 import type { OAuthAuthorizationStatus } from './components/OAuthAuthorizationDialog';
 import { withoutOAuth2RuntimeCredentials } from './lib/oauth2Tokens';
@@ -101,6 +103,7 @@ type PendingTemplatePrompt = { id: string; input: TemplatePromptInput; resolve: 
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const requestPinsStorageKey = (workspaceId: string) => `brunomnia-request-pins:${workspaceId}`;
+const requestTabsStorageKey = (workspaceId: string) => `brunomnia-request-tabs:${workspaceId}`;
 const workspaceCatalogApi = () => import('./lib/workspaceCatalog');
 
 const visibleStreamSessions = (sessions: StoredStreamSession[], requestId: string, environmentId: string, filterResponsesByEnv: boolean) => sessions
@@ -288,7 +291,7 @@ type CollectionSidebarProps = {
   search: string;
   mode: SidebarMode;
   onSearch: (value: string) => void;
-  onSelectRequest: (id: string) => void;
+  onSelectRequest: (id: string, permanent?: boolean) => void;
   onToggleRequestPin: (id: string) => void;
   onToggleCollection: (id: string) => void;
   onAddRequest: () => void;
@@ -465,7 +468,7 @@ function CollectionSidebar({
 
       <div className="collection-scroll">
         {mode === 'collections' ? <>
-          {pinnedRequests.length ? <section className="pinned-requests"><header><Icon name="pin" size={12} /><span>Pinned requests</span><small>{pinnedRequests.length}</small></header>{pinnedRequests.map(({ collectionId, request }) => <div className="pinned-request-row" key={request.id}><button onClick={() => onSelectRequest(request.id)} type="button"><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span><strong>{request.name}</strong><small>{workspace.collections.find((collection) => collection.id === collectionId)?.name}</small></span></button><button aria-label={`Unpin ${request.name}`} onClick={() => onToggleRequestPin(request.id)} title="Unpin request" type="button"><Icon name="pin" size={12} /></button></div>)}</section> : null}
+          {pinnedRequests.length ? <section className="pinned-requests"><header><Icon name="pin" size={12} /><span>Pinned requests</span><small>{pinnedRequests.length}</small></header>{pinnedRequests.map(({ collectionId, request }) => <div className="pinned-request-row" key={request.id}><button onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); onSelectRequest(request.id, true); } }} onClick={(event) => onSelectRequest(request.id, event.metaKey || event.ctrlKey)} onDoubleClick={() => onSelectRequest(request.id, true)} type="button"><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span><strong>{request.name}</strong><small>{workspace.collections.find((collection) => collection.id === collectionId)?.name}</small></span></button><button aria-label={`Unpin ${request.name}`} onClick={() => onToggleRequestPin(request.id)} title="Unpin request" type="button"><Icon name="pin" size={12} /></button></div>)}</section> : null}
           {workspace.collections.map((collection) => {
           const visibleRequests = collection.requests.filter((request) =>
             `${request.name} ${request.method} ${request.protocol} ${request.url}`.toLowerCase().includes(normalizedSearch),
@@ -491,10 +494,12 @@ function CollectionSidebar({
             onDragOver={(event) => dropOnRequest(event, collection.id, request, false)}
             onDragStart={(event) => beginDrag(event, source)}
             onDrop={(event) => dropOnRequest(event, collection.id, request, true)}
-            onClick={() => onSelectRequest(request.id)}
+            onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); onSelectRequest(request.id, true); } }}
+            onClick={(event) => onSelectRequest(request.id, event.metaKey || event.ctrlKey)}
+            onDoubleClick={() => onSelectRequest(request.id, true)}
             onKeyDown={(event) => keyboardMove(event, source)}
             style={{ '--resource-depth': depth } as CSSProperties}
-            title={normalizedSearch ? 'Clear search to reorder' : 'Drag to move · Option/Alt+Arrows reorder, indent, or outdent · Option/Alt+Home/End moves first or last'}
+            title={normalizedSearch ? 'Clear search to reorder' : 'Drag to move · Option/Alt+Arrows reorder, indent, or outdent · Option/Alt+Home/End moves first or last · Command/Ctrl-click or middle-click opens a permanent tab'}
             aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight Alt+Home Alt+End"
             type="button"
           ><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span>{request.name}</span>{pinnedIds.has(request.id) ? <Icon name="pin" size={12} /> : null}</button>;
@@ -569,6 +574,8 @@ function CollectionSidebar({
 
 type RequestPanelProps = {
   request: ApiRequest;
+  documentTabs: Array<{ request: ApiRequest; temporary: boolean }>;
+  canReopenDocumentTab: boolean;
   collection: Workspace['collections'][number];
   environment: Environment;
   workspaceCookies: CookieRecord[];
@@ -595,7 +602,12 @@ type RequestPanelProps = {
   onLoadGraphqlSchema: (includeInputValueDeprecation: boolean) => void;
   onSocketIoListenerToggle: (eventName: string, enabled: boolean) => void;
   onAddRequest: () => void;
+  onCloseDocumentTab: (requestId: string) => void;
   onGenerateCode: () => void;
+  onMoveDocumentTab: (requestId: string, targetRequestId: string, placement: RequestTabPlacement) => void;
+  onPromoteDocumentTab: (requestId: string) => void;
+  onReopenDocumentTab: () => void;
+  onSelectDocumentTab: (requestId: string) => void;
   onTogglePin: () => void;
   onToggleBulkHeaderEditor: () => void;
   onToggleBulkParametersEditor: () => void;
@@ -605,6 +617,8 @@ type RequestPanelProps = {
 
 function RequestPanel({
   request,
+  documentTabs,
+  canReopenDocumentTab,
   collection,
   activeTab,
   isSending,
@@ -622,7 +636,12 @@ function RequestPanel({
   onLoadGraphqlSchema,
   onSocketIoListenerToggle,
   onAddRequest,
+  onCloseDocumentTab,
   onGenerateCode,
+  onMoveDocumentTab,
+  onPromoteDocumentTab,
+  onReopenDocumentTab,
+  onSelectDocumentTab,
   scheduledSendLabel,
   urlInputRef,
   environment,
@@ -639,6 +658,9 @@ function RequestPanel({
   onTogglePin,
 }: RequestPanelProps) {
   const [showTemplateTags, setShowTemplateTags] = useState(false);
+  const documentDragRef = useRef<string | undefined>(undefined);
+  const [draggedDocumentId, setDraggedDocumentId] = useState('');
+  const [documentDrop, setDocumentDrop] = useState<{ id: string; placement: RequestTabPlacement }>();
   const streamProtocol = isStreamingRequest(request);
   const changeHeaders = (headers: KeyValue[]) => onChange({
     headers,
@@ -648,21 +670,47 @@ function RequestPanel({
   const actionLabel = streamProtocol
     ? streamStatus === 'connected' ? 'Disconnect' : streamStatus === 'reconnecting' ? 'Stop reconnecting' : streamStatus === 'connecting' ? 'Connecting' : 'Connect'
     : request.protocol === 'grpc' ? 'Invoke' : 'Send';
+  const clearDocumentDrag = () => {
+    documentDragRef.current = undefined;
+    setDraggedDocumentId('');
+    setDocumentDrop(undefined);
+  };
+  const beginDocumentDrag = (event: ReactDragEvent<HTMLDivElement>, requestId: string) => {
+    documentDragRef.current = requestId;
+    setDraggedDocumentId(requestId);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', 'brunomnia-request-tab');
+  };
+  const dropOnDocument = (event: ReactDragEvent<HTMLDivElement>, targetRequestId: string, commit: boolean) => {
+    const requestId = documentDragRef.current;
+    if (!requestId || requestId === targetRequestId) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const placement = event.clientX < bounds.left + bounds.width / 2 ? 'before' : 'after';
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'move';
+    setDocumentDrop({ id: targetRequestId, placement });
+    if (commit) {
+      onMoveDocumentTab(requestId, targetRequestId, placement);
+      clearDocumentDrag();
+    }
+  };
   return (
     <section className="request-panel">
       <div className="document-tabs">
-        <div className="document-tab active">
-          <span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span>
-          <input
-            aria-label="Request name"
-            onChange={(event) => onChange({ name: event.target.value })}
-            spellCheck={false}
-            value={request.name}
-          />
-          <span className="dirty-dot" />
-          <button aria-label={pinned ? 'Unpin request' : 'Pin request'} className={pinned ? 'active' : ''} onClick={onTogglePin} title={pinned ? 'Unpin request' : 'Pin request'} type="button"><Icon name="pin" size={13} /></button>
-        </div>
+        <div aria-label="Open request tabs" className="document-tab-list" role="tablist">{documentTabs.map((document) => {
+          const activeDocument = document.request.id === request.id;
+          const dropClass = documentDrop?.id === document.request.id ? ` drop-${documentDrop.placement}` : '';
+          return <div aria-selected={activeDocument} className={`document-tab${activeDocument ? ' active' : ''}${document.temporary ? ' temporary' : ''}${draggedDocumentId === document.request.id ? ' is-dragging' : ''}${dropClass}`} draggable key={document.request.id} onClick={() => onSelectDocumentTab(document.request.id)} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('button,input')) onPromoteDocumentTab(document.request.id); }} onDragEnd={clearDocumentDrag} onDragOver={(event) => dropOnDocument(event, document.request.id, false)} onDragStart={(event) => beginDocumentDrag(event, document.request.id)} onDrop={(event) => dropOnDocument(event, document.request.id, true)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) onSelectDocumentTab(document.request.id); }} role="tab" tabIndex={0} title={document.temporary ? 'Temporary tab · Double-click to keep open' : document.request.name}>
+            <span className={`method method-${methodClass(document.request.method)} protocol-${document.request.protocol}`}>{protocolLabel(document.request)}</span>
+            {activeDocument ? <input aria-label="Request name" onChange={(event) => onChange({ name: event.target.value })} onClick={(event) => event.stopPropagation()} spellCheck={false} value={request.name} /> : <span className="document-tab-name">{document.request.name}</span>}
+            {document.temporary ? <button aria-label={`Keep ${document.request.name} tab open`} onClick={(event) => { event.stopPropagation(); onPromoteDocumentTab(document.request.id); }} title="Keep tab open" type="button"><Icon name="check" size={11} /></button> : null}
+            {activeDocument ? <button aria-label={pinned ? 'Unpin request' : 'Pin request'} className={pinned ? 'active' : ''} onClick={(event) => { event.stopPropagation(); onTogglePin(); }} title={pinned ? 'Unpin request' : 'Pin request'} type="button"><Icon name="pin" size={13} /></button> : null}
+            <button aria-label={`Close ${document.request.name}`} disabled={documentTabs.length <= 1} onClick={(event) => { event.stopPropagation(); onCloseDocumentTab(document.request.id); }} title={documentTabs.length <= 1 ? 'The request workbench keeps one tab open' : 'Close tab'} type="button"><Icon name="x" size={12} /></button>
+          </div>;
+        })}</div>
         <select aria-label="Request folder" className="request-folder-select" onChange={(event) => onChange({ folderId: event.target.value })} value={request.folderId ?? ''}><option value="">Collection root</option>{(collection.folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folderPath(collection, folder.id)}</option>)}</select>
+        <button aria-label="Reopen closed request tab" className="tab-plus" disabled={!canReopenDocumentTab} onClick={onReopenDocumentTab} title="Reopen closed tab · Command/Ctrl+Shift+T" type="button"><Icon name="history" size={15} /></button>
         <button aria-label="New request" className="tab-plus" onClick={onAddRequest} type="button"><Icon name="plus" size={16} /></button>
       </div>
 
@@ -1109,6 +1157,7 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [requestTab, setRequestTab] = useState<RequestTab>('body');
   const [requestPinState, setRequestPinState] = useState<{ workspaceId: string; ids: string[] }>({ workspaceId: '', ids: [] });
+  const [requestDocumentState, setRequestDocumentState] = useState<{ workspaceId: string; state: RequestTabState }>({ workspaceId: '', state: emptyRequestTabState() });
   const [responseTab, setResponseTab] = useState<ResponseTab>('preview');
   const [response, setResponse] = useState<HttpResponse>(() => mockResponse());
   const [selectedResponseId, setSelectedResponseId] = useState('');
@@ -1216,6 +1265,32 @@ export default function App() {
   }, [activeWorkspaceId, hydrated, requestPinState, workspace.collections]);
 
   useEffect(() => {
+    if (!hydrated || !activeWorkspaceId) return;
+    let stored: string | null = null;
+    try { stored = window.localStorage.getItem(requestTabsStorageKey(activeWorkspaceId)); } catch { stored = null; }
+    const validRequestIds = workspace.collections.flatMap((collection) => collection.requests.map((request) => request.id));
+    const state = reconcileRequestTabState(parseRequestTabState(stored), validRequestIds, workspace.activeRequestId);
+    setRequestDocumentState({ workspaceId: activeWorkspaceId, state });
+    if (state.activeRequestId && state.activeRequestId !== workspace.activeRequestId) {
+      setWorkspace((current) => ({ ...current, activeRequestId: state.activeRequestId }));
+    }
+  }, [activeWorkspaceId, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !activeWorkspaceId || requestDocumentState.workspaceId !== activeWorkspaceId) return;
+    const validRequestIds = workspace.collections.flatMap((collection) => collection.requests.map((request) => request.id));
+    let state = reconcileRequestTabState(requestDocumentState.state, validRequestIds, workspace.activeRequestId);
+    if (workspace.activeRequestId && validRequestIds.includes(workspace.activeRequestId) && state.activeRequestId !== workspace.activeRequestId) {
+      state = openRequestTab(state, workspace.activeRequestId);
+    }
+    if (JSON.stringify(state) !== JSON.stringify(requestDocumentState.state)) {
+      setRequestDocumentState({ workspaceId: activeWorkspaceId, state });
+      return;
+    }
+    try { window.localStorage.setItem(requestTabsStorageKey(activeWorkspaceId), JSON.stringify(state)); } catch {}
+  }, [activeWorkspaceId, hydrated, requestDocumentState, workspace.activeRequestId, workspace.collections]);
+
+  useEffect(() => {
     if (!hydrated || !activeWorkspaceId || (workspaceRecovery?.kind === 'workspace-backup' && workspaceRecovery.workspaceId === activeWorkspaceId)) return;
     const timeout = window.setTimeout(() => {
       void workspaceCatalogApi().then(({ saveCatalogWorkspace }) => saveCatalogWorkspace(activeWorkspaceId, workspace)).then(() => {
@@ -1252,6 +1327,14 @@ export default function App() {
 
   const active = useMemo(() => findRequest(workspace), [workspace]);
   const activePinnedRequestIds = requestPinState.workspaceId === activeWorkspaceId ? requestPinState.ids : [];
+  const requestsById = useMemo(() => new Map(workspace.collections.flatMap((collection) => collection.requests.map((request) => [request.id, request] as const))), [workspace.collections]);
+  const activeRequestDocumentState = requestDocumentState.workspaceId === activeWorkspaceId
+    ? requestDocumentState.state
+    : reconcileRequestTabState(emptyRequestTabState(), [...requestsById.keys()], workspace.activeRequestId);
+  const requestDocumentTabs = activeRequestDocumentState.tabs.flatMap((tab) => {
+    const request = requestsById.get(tab.requestId);
+    return request ? [{ request, temporary: tab.temporary }] : [];
+  });
   const activeStreaming = active ? isStreamingRequest(active.request) : false;
   const activeCollection = workspace.collections.find((collection) => collection.id === active?.collectionId);
   activeRequestIdRef.current = workspace.activeRequestId;
@@ -1520,7 +1603,60 @@ export default function App() {
     setScriptLogs([]);
   }, [activeStreaming, activeWorkspaceId, workspace.activeRequestId, workspace.activeEnvironmentId, workspace.preferences.filterResponsesByEnv, active?.request.protocol]);
 
-  const updateActiveRequest = useCallback((patch: Partial<ApiRequest>) => {
+  const applyRequestDocumentState = (state: RequestTabState) => {
+    if (!activeWorkspaceId) return;
+    setRequestDocumentState({ workspaceId: activeWorkspaceId, state });
+    if (state.activeRequestId && state.activeRequestId !== workspace.activeRequestId) {
+      setWorkspace((current) => ({ ...current, activeRequestId: state.activeRequestId }));
+    }
+  };
+
+  const openRequestDocument = (requestId: string, permanent = false) => {
+    const state = openRequestTab(activeRequestDocumentState, requestId, permanent);
+    applyRequestDocumentState(state);
+    setWorkbenchSection('requests');
+  };
+
+  const promoteRequestDocument = (requestId: string) => {
+    applyRequestDocumentState(promoteRequestTab(activeRequestDocumentState, requestId));
+  };
+
+  const closeRequestDocument = (requestId: string) => {
+    applyRequestDocumentState(closeRequestTab(activeRequestDocumentState, requestId));
+  };
+
+  const reopenRequestDocument = () => {
+    applyRequestDocumentState(reopenClosedRequestTab(activeRequestDocumentState, [...requestsById.keys()]));
+  };
+
+  const cycleRequestDocument = (direction: 'next' | 'previous') => {
+    applyRequestDocumentState(cycleRequestTab(activeRequestDocumentState, direction));
+  };
+
+  const reorderRequestDocument = (requestId: string, targetRequestId: string, placement: RequestTabPlacement) => {
+    applyRequestDocumentState(moveRequestTab(activeRequestDocumentState, requestId, targetRequestId, placement));
+  };
+
+  useEffect(() => {
+    const handleDocumentTabShortcut = (event: KeyboardEvent) => {
+      if (workbenchSection !== 'requests' || (!event.metaKey && !event.ctrlKey) || event.altKey) return;
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        cycleRequestDocument(event.shiftKey ? 'previous' : 'next');
+      } else if (event.key.toLowerCase() === 'w' && !event.shiftKey) {
+        event.preventDefault();
+        closeRequestDocument(activeRequestDocumentState.activeRequestId);
+      } else if (event.key.toLowerCase() === 't' && event.shiftKey) {
+        event.preventDefault();
+        reopenRequestDocument();
+      }
+    };
+    window.addEventListener('keydown', handleDocumentTabShortcut);
+    return () => window.removeEventListener('keydown', handleDocumentTabShortcut);
+  }, [activeRequestDocumentState, workbenchSection]);
+
+  const updateActiveRequest = (patch: Partial<ApiRequest>) => {
+    promoteRequestDocument(workspace.activeRequestId);
     setWorkspace((current) => ({
       ...current,
       collections: current.collections.map((collection) => ({
@@ -1528,7 +1664,7 @@ export default function App() {
         requests: collection.requests.map((request) => request.id === current.activeRequestId ? { ...request, ...patch } : request),
       })),
     }));
-  }, []);
+  };
 
   const toggleRequestPin = (requestId: string) => {
     if (!activeWorkspaceId) return;
@@ -1899,6 +2035,7 @@ export default function App() {
 
   const executeRequest = async () => {
     if (!active || !activeEnvironment || !selectedEnvironment || isSending) return;
+    promoteRequestDocument(active.request.id);
     const collection = workspace.collections.find((candidate) => candidate.id === active.collectionId);
     if (!collection) return;
     const configured = applyCollectionConfiguration(collection, active.request, activeEnvironment);
@@ -2555,7 +2692,7 @@ export default function App() {
           onMoveResource={moveResource}
           onAddRequest={addRequest}
           onSearch={setSearch}
-          onSelectRequest={(id) => setWorkspace((current) => ({ ...current, activeRequestId: id }))}
+          onSelectRequest={openRequestDocument}
           onToggleRequestPin={toggleRequestPin}
           onToggleCollection={(id) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === id ? { ...collection, expanded: !collection.expanded } : collection) }))}
           onToggleFolder={(collectionId, folderId) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === collectionId ? { ...collection, folders: (collection.folders ?? []).map((folder) => folder.id === folderId ? { ...folder, expanded: !folder.expanded } : folder) } : collection) }))}
@@ -2567,7 +2704,9 @@ export default function App() {
         {workbenchSection === 'requests' ? <div className="workbench">
           <RequestPanel
             activeTab={requestTab}
+            canReopenDocumentTab={activeRequestDocumentState.closed.some((requestId) => requestsById.has(requestId))}
             collection={activeCollection}
+            documentTabs={requestDocumentTabs}
             environment={activeEnvironment}
             grpcSchema={grpcSchemas[active.request.id]}
             graphqlSchemaError={graphqlSchemaError?.requestId === active.request.id ? graphqlSchemaError.message : ''}
@@ -2577,7 +2716,12 @@ export default function App() {
             onChange={updateActiveRequest}
             onAddRequest={addRequest}
             onCancelScheduled={cancelScheduledSends}
+            onCloseDocumentTab={closeRequestDocument}
             onGenerateCode={() => setShowCodeGeneration(true)}
+            onMoveDocumentTab={reorderRequestDocument}
+            onPromoteDocumentTab={promoteRequestDocument}
+            onReopenDocumentTab={reopenRequestDocument}
+            onSelectDocumentTab={(requestId) => openRequestDocument(requestId)}
             onTogglePin={() => toggleRequestPin(active.request.id)}
             onToggleBulkHeaderEditor={() => setWorkspace((current) => ({ ...current, preferences: { ...current.preferences, useBulkHeaderEditor: !current.preferences.useBulkHeaderEditor } }))}
             onToggleBulkParametersEditor={() => setWorkspace((current) => ({ ...current, preferences: { ...current.preferences, useBulkParametersEditor: !current.preferences.useBulkParametersEditor } }))}

@@ -44,6 +44,12 @@ Headers override by case-insensitive name. A request inherits authentication onl
 
 Collection, folder, and request documentation is stored as Markdown source. This milestone provides a safe plain-text preview; rendered Markdown and attachment handling remain open parity work.
 
+## Request tabs
+
+Selecting a request normally opens one temporary tab; selecting another unopened request replaces that temporary tab. Command/Ctrl-click, middle-click, or double-click opens a permanent tab, while double-clicking a temporary tab or using its check control keeps it open. Editing or sending a temporary request also promotes it. Tabs persist per local project, follow request renames/methods directly from the workspace, support pointer drag ordering, and reconcile deleted request IDs without entering workspace data.
+
+Close uses recent active-tab history before falling back to the preceding tab. Command/Ctrl+Tab and Command/Ctrl+Shift+Tab cycle tabs, Command/Ctrl+W closes the active tab, and Command/Ctrl+Shift+T or the history control reopens the latest valid closed tab. Brunomnia's request workbench keeps one tab open because it does not navigate to Insomnia's separate project-dashboard route when the last tab closes.
+
 ## Request pins
 
 Use the pin control in the active request tab to add or remove that request from the separate **Pinned requests** list above the collection tree. The pinned list follows persisted collection resource order and the current sidebar search, while the ordinary hierarchy remains unchanged. Pin IDs are bounded device-local metadata, matching pinned Insomnia's non-sync `RequestMeta`; they are not added to workspace exports, split-YAML/Git projects, compatibility exports, or collaboration payloads. Missing and deleted requests are removed during reconciliation.
