@@ -8,20 +8,37 @@ const javascriptInlineBytes = (code: string) => {
   return { bytes: Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0)), encoded };
 };
 
+const cInlineBytes = (bytes: Uint8Array) => Array.from(bytes, (byte) => `0x${byte.toString(16).padStart(2, '0')}`).join(', ');
+const ocamlInlineBytes = (bytes: Uint8Array) => `"${Array.from(bytes, (byte) => {
+  if (byte === 34) return '\\"';
+  if (byte === 92) return '\\\\';
+  if (byte >= 32 && byte <= 126) return String.fromCharCode(byte);
+  return `\\${byte.toString(10).padStart(3, '0')}`;
+}).join('')}"`;
+
 describe('local client code generation', () => {
-  it('exposes the expanded pinned target set in stable order', () => {
+  it('exposes one selected client in pinned target-family registry order', () => {
     expect(clientCodeTargets.map((target) => target.id)).toEqual([
-      'curl',
-      'javascript-fetch',
-      'node-native',
-      'python-requests',
-      'php-curl',
-      'ruby-native',
-      'go',
-      'java-httpclient',
+      'c-libcurl',
+      'clojure-clj-http',
+      'crystal-native',
       'csharp-httpclient',
-      'swift-urlsession',
+      'go',
+      'http-1.1',
+      'java-httpclient',
+      'javascript-fetch',
+      'kotlin-okhttp',
+      'node-native',
+      'objc-nsurlsession',
+      'ocaml-cohttp',
+      'php-curl',
+      'powershell-webrequest',
+      'python-requests',
+      'r-httr',
+      'ruby-native',
       'rust-reqwest',
+      'curl',
+      'swift-urlsession',
     ]);
   });
 
@@ -34,8 +51,9 @@ describe('local client code generation', () => {
     request.headers = [{ id: 'accept', name: 'Accept', value: 'application/json', enabled: true }];
     for (const target of clientCodeTargets) {
       const snippet = generateClientCode(target.id, request, { baseUrl: 'https://api.example.com' });
-      expect(snippet.code).toContain('PROPFIND');
-      expect(snippet.code).toContain('https://api.example.com/files/team%20docs?depth=1');
+      expect(snippet.code.toUpperCase()).toContain('PROPFIND');
+      if (target.id === 'http-1.1') expect(snippet.code).toContain('/files/team%20docs?depth=1 HTTP/1.1');
+      else expect(snippet.code).toContain('https://api.example.com/files/team%20docs?depth=1');
       expect(snippet.warnings).toEqual([]);
     }
   });
@@ -120,8 +138,11 @@ describe('local client code generation', () => {
 
     for (const target of clientCodeTargets) {
       const snippet = generateClientCode(target.id, request, variables);
-      expect(snippet.warnings).toEqual([]);
-      expect(snippet.code).toContain(encoded);
+      if (target.id === 'http-1.1') expect(snippet.warnings).toContain('Raw HTTP/1.1 cannot carry arbitrary bytes in a text preview; the exact body is shown as Base64 and must be decoded before sending.');
+      else expect(snippet.warnings).toEqual([]);
+      if (target.id === 'c-libcurl') expect(snippet.code).toContain(cInlineBytes(bytes));
+      else if (target.id === 'ocaml-cohttp') expect(snippet.code).toContain(ocamlInlineBytes(bytes));
+      else expect(snippet.code).toContain(encoded);
       expect(snippet.code).toContain(`multipart/form-data; boundary=${boundary}`);
       expect(snippet.code).not.toContain('boundary=stale');
     }
@@ -134,11 +155,15 @@ describe('local client code generation', () => {
     request.headers = [];
     request.bodyMode = 'binary';
     request.binaryBody = { fileName: 'archive.bin', mimeType: 'application/x-archive', dataBase64: 'AAEC/w==' };
+    const binaryBytes = Uint8Array.from([0, 1, 2, 255]);
 
     for (const target of clientCodeTargets) {
       const snippet = generateClientCode(target.id, request, {});
-      expect(snippet.warnings).toEqual([]);
-      expect(snippet.code).toContain('AAEC/w==');
+      if (target.id === 'http-1.1') expect(snippet.warnings).toContain('Raw HTTP/1.1 cannot carry arbitrary bytes in a text preview; the exact body is shown as Base64 and must be decoded before sending.');
+      else expect(snippet.warnings).toEqual([]);
+      if (target.id === 'c-libcurl') expect(snippet.code).toContain(cInlineBytes(binaryBytes));
+      else if (target.id === 'ocaml-cohttp') expect(snippet.code).toContain(ocamlInlineBytes(binaryBytes));
+      else expect(snippet.code).toContain('AAEC/w==');
       expect(snippet.code).toContain('application/x-archive');
     }
   });
@@ -164,6 +189,33 @@ describe('local client code generation', () => {
       expect(snippet.warnings).toEqual([]);
       expect(snippet.code).toContain('REPORT');
       expect(snippet.code).toContain('https://api.example.com/reports?scope=team%20docs');
+      expected.forEach((marker) => expect(snippet.code).toContain(marker));
+    }
+  });
+
+  it('renders every remaining target-family default with exact UTF-8 bytes and safe literals', () => {
+    const request = createBlankRequest('complete-target-families');
+    request.method = 'REPORT';
+    request.url = 'https://api.example.com/reports?scope=team%20docs';
+    request.headers = [{ id: 'quoted', name: 'X-Quoted', value: "one'\\two", enabled: true }];
+    request.bodyMode = 'text';
+    request.body = 'line one\nπ and \u0000';
+    const encoded = 'bGluZSBvbmUKz4AgYW5kIAA=';
+    const markers = {
+      'c-libcurl': ['#include <curl/curl.h>', 'CURLOPT_POSTFIELDSIZE_LARGE', '0xcf, 0x80'],
+      'clojure-clj-http': ["require '[clj-http.client :as client]", '(keyword "report")', encoded, `"X-Quoted" "one'\\\\two"`],
+      'crystal-native': ['HTTP::Client.exec', 'Base64.decode', encoded, `"X-Quoted" => "one'\\\\two"`],
+      'http-1.1': ['REPORT /reports?scope=team%20docs HTTP/1.1\r\n', 'Host: api.example.com\r\n', 'Content-Length: 17\r\n', request.body],
+      'kotlin-okhttp': ['OkHttpClient()', '.method("REPORT", requestBody)', encoded, `"X-Quoted", "one'\\\\two"`],
+      'objc-nsurlsession': ['#import <Foundation/Foundation.h>', 'dataTaskWithRequest', encoded, `@"X-Quoted": @"one'\\\\two"`],
+      'ocaml-cohttp': ['Cohttp_lwt_unix.Client.call', 'Cohttp.Code.method_of_string', '\\207\\128', `("X-Quoted", "one'\\\\two")`],
+      'powershell-webrequest': ['Invoke-WebRequest @parameters', "'CustomMethod'", encoded, "'X-Quoted' = 'one''\\two'"],
+      'r-httr': ['library(httr)', 'VERB("REPORT"', encoded, `"X-Quoted" = "one'\\\\two"`],
+    } as const;
+
+    for (const [target, expected] of Object.entries(markers)) {
+      const snippet = generateClientCode(target as keyof typeof markers, request, {});
+      expect(snippet.warnings).toEqual([]);
       expected.forEach((marker) => expect(snippet.code).toContain(marker));
     }
   });

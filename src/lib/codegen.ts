@@ -1,20 +1,49 @@
 import type { ApiRequest, KeyValue } from '../types';
 import { buildHeaders, buildRequestUrl, resolveTemplate } from './request';
 
-export type ClientCodeTarget = 'curl' | 'javascript-fetch' | 'node-native' | 'python-requests' | 'php-curl' | 'ruby-native' | 'go' | 'java-httpclient' | 'csharp-httpclient' | 'swift-urlsession' | 'rust-reqwest';
+export type ClientCodeTarget =
+  | 'curl'
+  | 'javascript-fetch'
+  | 'node-native'
+  | 'python-requests'
+  | 'php-curl'
+  | 'ruby-native'
+  | 'go'
+  | 'java-httpclient'
+  | 'csharp-httpclient'
+  | 'swift-urlsession'
+  | 'rust-reqwest'
+  | 'c-libcurl'
+  | 'clojure-clj-http'
+  | 'crystal-native'
+  | 'http-1.1'
+  | 'kotlin-okhttp'
+  | 'objc-nsurlsession'
+  | 'ocaml-cohttp'
+  | 'powershell-webrequest'
+  | 'r-httr';
 
 export const clientCodeTargets: Array<{ id: ClientCodeTarget; label: string }> = [
-  { id: 'curl', label: 'cURL' },
-  { id: 'javascript-fetch', label: 'JavaScript · Fetch' },
-  { id: 'node-native', label: 'Node.js · Native' },
-  { id: 'python-requests', label: 'Python · Requests' },
-  { id: 'php-curl', label: 'PHP · cURL' },
-  { id: 'ruby-native', label: 'Ruby · Net::HTTP' },
-  { id: 'go', label: 'Go · net/http' },
-  { id: 'java-httpclient', label: 'Java · HttpClient' },
+  { id: 'c-libcurl', label: 'C · libcurl' },
+  { id: 'clojure-clj-http', label: 'Clojure · clj-http' },
+  { id: 'crystal-native', label: 'Crystal · HTTP::Client' },
   { id: 'csharp-httpclient', label: 'C# · HttpClient' },
-  { id: 'swift-urlsession', label: 'Swift · URLSession' },
+  { id: 'go', label: 'Go · net/http' },
+  { id: 'http-1.1', label: 'HTTP · HTTP/1.1' },
+  { id: 'java-httpclient', label: 'Java · HttpClient' },
+  { id: 'javascript-fetch', label: 'JavaScript · Fetch' },
+  { id: 'kotlin-okhttp', label: 'Kotlin · OkHttp' },
+  { id: 'node-native', label: 'Node.js · Native' },
+  { id: 'objc-nsurlsession', label: 'Objective-C · NSURLSession' },
+  { id: 'ocaml-cohttp', label: 'OCaml · CoHTTP' },
+  { id: 'php-curl', label: 'PHP · cURL' },
+  { id: 'powershell-webrequest', label: 'PowerShell · Invoke-WebRequest' },
+  { id: 'python-requests', label: 'Python · Requests' },
+  { id: 'r-httr', label: 'R · httr' },
+  { id: 'ruby-native', label: 'Ruby · Net::HTTP' },
   { id: 'rust-reqwest', label: 'Rust · Reqwest' },
+  { id: 'curl', label: 'Shell · cURL' },
+  { id: 'swift-urlsession', label: 'Swift · URLSession' },
 ];
 
 export type ClientCodeSnippet = {
@@ -253,6 +282,20 @@ const rustRaw = (value: string) => {
   while (value.includes(`"${hashes}`)) hashes += '#';
   return `r${hashes}"${value}"${hashes}`;
 };
+const bodyBytes = (body: MaterializedBody) => body.kind === 'bytes' ? decodeBase64(body.dataBase64) : encoder.encode(body.value);
+const escapedByteString = (bytes: Uint8Array, escapeByte: (byte: number) => string) => `"${Array.from(bytes, (byte) => {
+  if (byte === 34) return '\\"';
+  if (byte === 92) return '\\\\';
+  if (byte >= 32 && byte <= 126) return String.fromCharCode(byte);
+  return escapeByte(byte);
+}).join('')}"`;
+const cString = (value: string) => escapedByteString(encoder.encode(value), (byte) => `\\${byte.toString(8).padStart(3, '0')}`);
+const ocamlBytes = (value: Uint8Array) => escapedByteString(value, (byte) => `\\${byte.toString(10).padStart(3, '0')}`);
+const ocamlString = (value: string) => ocamlBytes(encoder.encode(value));
+const kotlinString = (value: string) => json(value).replace(/\$/g, '\\$');
+const crystalString = (value: string) => json(value).replace(/#\{/g, '\\#{');
+const objcString = (value: string) => `@${json(value)}`;
+const powershellString = (value: string) => `'${value.replace(/'/g, "''")}'`;
 
 const curlSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
   const parts = [`curl --request ${method}`, `  --url ${shell(url)}`];
@@ -470,6 +513,163 @@ ${Object.entries(headers).map(([name, value]) => `    request = request.header($
 }
 `;
 
+const cSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const bytes = body ? bodyBytes(body) : undefined;
+  const payload = bytes ? `    static const unsigned char payload[] = { ${bytes.byteLength ? Array.from(bytes, (byte) => `0x${byte.toString(16).padStart(2, '0')}`).join(', ') : '0x00'} };
+` : '';
+  const headerSetup = Object.entries(headers).map(([name, value]) => `    request_headers = curl_slist_append(request_headers, ${cString(`${name}: ${value}`)});`).join('\n');
+  return `#include <curl/curl.h>
+#include <stdio.h>
+
+int main(void) {
+    CURL *client = curl_easy_init();
+    if (client == NULL) return 1;
+${Object.keys(headers).length ? '    struct curl_slist *request_headers = NULL;\n' : ''}${payload}
+    curl_easy_setopt(client, CURLOPT_CUSTOMREQUEST, ${cString(method)});
+    curl_easy_setopt(client, CURLOPT_URL, ${cString(url)});
+${headerSetup}${headerSetup ? '\n    curl_easy_setopt(client, CURLOPT_HTTPHEADER, request_headers);\n' : ''}${bytes ? `    curl_easy_setopt(client, CURLOPT_POSTFIELDS, payload);
+    curl_easy_setopt(client, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)${bytes.byteLength});
+` : ''}
+    CURLcode result = curl_easy_perform(client);
+    if (result != CURLE_OK) fprintf(stderr, "%s\\n", curl_easy_strerror(result));
+${Object.keys(headers).length ? '    curl_slist_free_all(request_headers);\n' : ''}    curl_easy_cleanup(client);
+    return result == CURLE_OK ? 0 : 1;
+}`;
+};
+
+const clojureSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const headerEntries = Object.entries(headers).map(([name, value]) => `${json(name)} ${json(value)}`).join(' ');
+  return `(require '[clj-http.client :as client])
+${body ? "(import '[java.util Base64])\n" : ''}
+${body ? `(def payload (.decode (Base64/getDecoder) ${json(bodyBase64(body))}))\n` : ''}(def response
+  (client/request
+    {:method (keyword ${json(method.toLowerCase())})
+     :url ${json(url)}
+     :headers {${headerEntries}}${body ? '\n     :body payload' : ''}
+     :as :text}))
+
+(println (:status response) (:body response))`;
+};
+
+const crystalSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const headerEntries = Object.entries(headers).map(([name, value]) => `  ${crystalString(name)} => ${crystalString(value)},`).join('\n');
+  return `require "http/client"
+${body ? 'require "base64"\n' : ''}
+
+url = ${crystalString(url)}
+headers = HTTP::Headers{${headerEntries ? `\n${headerEntries}\n` : ''}}
+${body ? `payload = Base64.decode(${json(bodyBase64(body))})\n` : ''}
+response = HTTP::Client.exec(${crystalString(method)}, url, headers: headers${body ? ', body: payload' : ''})
+puts "#{response.status_code} #{response.body}"`;
+};
+
+const http11Snippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  let requestTarget = url;
+  let host = '';
+  try {
+    const parsed = new URL(url);
+    requestTarget = `${parsed.pathname || '/'}${parsed.search}`;
+    host = parsed.host;
+  } catch {}
+  const lines = [`${method} ${requestTarget} HTTP/1.1`, ...Object.entries(headers).map(([name, value]) => `${name}: ${value}`)];
+  if (host && !Object.keys(headers).some((name) => name.toLowerCase() === 'host')) lines.push(`Host: ${host}`);
+  if (body && !Object.keys(headers).some((name) => name.toLowerCase() === 'content-length')) lines.push(`Content-Length: ${bodyBytes(body).byteLength}`);
+  const renderedBody = body?.kind === 'bytes'
+    ? `[Brunomnia binary body Base64; decode before sending]\r\n${body.dataBase64}`
+    : body?.value ?? '';
+  return `${lines.join('\r\n')}\r\n\r\n${renderedBody}`;
+};
+
+const kotlinSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const needsRequestBody = body !== undefined || !['GET', 'HEAD'].includes(method.toUpperCase());
+  const requestBody = body
+    ? `val payload = Base64.getDecoder().decode(${kotlinString(bodyBase64(body))})
+val requestBody = payload.toRequestBody(null)
+`
+    : needsRequestBody
+      ? 'val requestBody = ByteArray(0).toRequestBody(null)\n'
+      : '';
+  return `${body ? 'import java.util.Base64\n' : ''}import okhttp3.OkHttpClient
+import okhttp3.Request
+${needsRequestBody ? 'import okhttp3.RequestBody.Companion.toRequestBody\n' : ''}
+val client = OkHttpClient()
+${requestBody}
+val request = Request.Builder()
+    .url(${kotlinString(url)})
+    .method(${kotlinString(method)}, ${needsRequestBody ? 'requestBody' : 'null'})
+${Object.entries(headers).map(([name, value]) => `    .addHeader(${kotlinString(name)}, ${kotlinString(value)})`).join('\n')}${Object.keys(headers).length ? '\n' : ''}    .build()
+
+client.newCall(request).execute().use { response ->
+    println("${'$'}{response.code} ${'$'}{response.body?.string().orEmpty()}")
+}`;
+};
+
+const objcSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const headerEntries = Object.entries(headers).map(([name, value]) => `            ${objcString(name)}: ${objcString(value)},`).join('\n');
+  return `#import <Foundation/Foundation.h>
+
+int main(void) {
+    @autoreleasepool {
+        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:${objcString(url)}]];
+        [request setHTTPMethod:${objcString(method)}];
+${headerEntries ? `        NSDictionary<NSString *, NSString *> *headers = @{\n${headerEntries}\n        };\n        [request setAllHTTPHeaderFields:headers];\n` : ''}${body ? `        NSData *payload = [[NSData alloc] initWithBase64EncodedString:${objcString(bodyBase64(body))} options:0];
+        [request setHTTPBody:payload];
+` : ''}        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+        NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            if (error != nil) {
+                NSLog(@"%@", error);
+            } else {
+                NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+                NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+                NSLog(@"%ld %@", (long)httpResponse.statusCode, text ?: @"");
+            }
+            dispatch_semaphore_signal(semaphore);
+        }];
+        [task resume];
+        dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+    }
+    return 0;
+}`;
+};
+
+const ocamlSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const headerEntries = Object.entries(headers).map(([name, value]) => `      (${ocamlString(name)}, ${ocamlString(value)});`).join('\n');
+  return `open Lwt.Infix
+
+let () =
+  Lwt_main.run (
+    let uri = Uri.of_string ${ocamlString(url)} in
+    let headers = Cohttp.Header.of_list [${headerEntries ? `\n${headerEntries}\n    ` : ''}] in
+${body ? `    let body = Cohttp_lwt.Body.of_string ${ocamlBytes(bodyBytes(body))} in
+` : ''}    Cohttp_lwt_unix.Client.call ~headers ${body ? '~body ' : ''}(Cohttp.Code.method_of_string ${ocamlString(method)}) uri
+    >>= fun (response, response_body) ->
+    Cohttp_lwt.Body.to_string response_body >|= fun text ->
+    Printf.printf "%d %s\\n" (Cohttp.Response.status response |> Cohttp.Code.code_of_status) text
+  )`;
+};
+
+const powershellSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const headerEntries = Object.entries(headers).map(([name, value]) => `    ${powershellString(name)} = ${powershellString(value)}`).join('\n');
+  const standardMethod = ['DEFAULT', 'DELETE', 'GET', 'HEAD', 'MERGE', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE'].includes(method.toUpperCase());
+  return `${headerEntries ? `$headers = @{\n${headerEntries}\n}\n` : ''}${body ? `$payload = [Convert]::FromBase64String(${powershellString(bodyBase64(body))})\n` : ''}$parameters = @{
+    Uri = ${powershellString(url)}
+${headerEntries ? '    Headers = $headers\n' : ''}${body ? '    Body = $payload\n' : ''}}
+$parameters[${powershellString(standardMethod ? 'Method' : 'CustomMethod')}] = ${powershellString(method)}
+
+$response = Invoke-WebRequest @parameters
+Write-Output "$($response.StatusCode) $($response.Content)"`;
+};
+
+const rSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const headerEntries = Object.entries(headers).map(([name, value]) => `${json(name)} = ${json(value)}`).join(', ');
+  return `library(httr)
+
+url <- ${json(url)}
+${headerEntries ? `headers <- add_headers(.headers = c(${headerEntries}))\n` : ''}${body ? `payload <- jsonlite::base64_dec(${json(bodyBase64(body))})\n` : ''}
+response <- VERB(${json(method)}, url${headerEntries ? ', headers' : ''}${body ? ', body = payload, encode = "raw"' : ''})
+cat(status_code(response), content(response, "text", encoding = "UTF-8"))`;
+};
+
 export const generateClientCode = (target: ClientCodeTarget, request: ApiRequest, variables: Record<string, string>): ClientCodeSnippet => {
   const prepared = materialize(request, variables);
   const generators: Record<ClientCodeTarget, (input: MaterializedRequest) => string> = {
@@ -484,6 +684,18 @@ export const generateClientCode = (target: ClientCodeTarget, request: ApiRequest
     'csharp-httpclient': csharpSnippet,
     'swift-urlsession': swiftSnippet,
     'rust-reqwest': rustSnippet,
+    'c-libcurl': cSnippet,
+    'clojure-clj-http': clojureSnippet,
+    'crystal-native': crystalSnippet,
+    'http-1.1': http11Snippet,
+    'kotlin-okhttp': kotlinSnippet,
+    'objc-nsurlsession': objcSnippet,
+    'ocaml-cohttp': ocamlSnippet,
+    'powershell-webrequest': powershellSnippet,
+    'r-httr': rSnippet,
   };
-  return { code: generators[target](prepared), warnings: prepared.warnings };
+  const targetWarnings = target === 'http-1.1' && prepared.body?.kind === 'bytes'
+    ? ['Raw HTTP/1.1 cannot carry arbitrary bytes in a text preview; the exact body is shown as Base64 and must be decoded before sending.']
+    : [];
+  return { code: generators[target](prepared), warnings: [...prepared.warnings, ...targetWarnings] };
 };

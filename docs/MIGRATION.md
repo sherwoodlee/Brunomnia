@@ -1883,9 +1883,24 @@ Compatibility bounds remain explicit: WebSocket and Socket.IO calculated handsha
 | Executable coverage | Complete | Stable target order, all-target generation, exact UTF-8 body bytes, escaped metadata, exact multipart/binary identity, malformed-file warnings, and four target-language parser checks pass |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 126 verification](QA_MILESTONE_126.md) |
 
-Compatibility bounds remain explicit: nine HTTPSnippet target families and alternate clients remain open, as do runtime-only advanced signing, dependency installation, comprehensive target-language validation, and generated-code execution. The Client code generation ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: Milestone 127 later closes the nine-family gap, while alternate clients remain open alongside runtime-only advanced signing, dependency installation, comprehensive target-language validation, and generated-code execution. The Client code generation ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 127 — remaining parity closure and release hardening
+## Milestone 127 — complete HTTPSnippet target-family coverage (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | HTTPSnippet 3.0.10 registers twenty target families in a deterministic order; eight remaining families declare one functional default client, while HTTP declares default key `1.1` but registers only client key `http1.1`, which makes pinned Insomnia's default lookup fail for that target |
+| Family coverage | Complete baseline | C libcurl, Clojure clj-http, Crystal native, HTTP/1.1, Kotlin OkHttp, Objective-C NSURLSession, OCaml CoHTTP, PowerShell Invoke-WebRequest, and R httr complete one selected client for every pinned target family in registry order |
+| Request fidelity | Complete | Every new emitter consumes the shared inherited/environment-resolved method, URL, headers, supported static authentication, body, MIME, warning, and exact multipart materialization contract |
+| Executable byte fidelity | Complete | C emits bounded hexadecimal arrays, OCaml emits byte-exact decimal escapes, and Clojure/Crystal/Kotlin/Objective-C/PowerShell/R decode the same UTF-8 or multipart/binary Base64 bytes in memory |
+| Raw HTTP representation | Complete baseline | HTTP/1.1 emits CRLF origin-form requests with calculated Host and UTF-8 Content-Length; arbitrary bytes remain exact Base64 with an explicit warning because a Unicode text preview cannot directly carry every octet |
+| Account-free presentation | Complete | The local Code dialog exposes all twenty families with no login, organization, plan, telemetry, hosted conversion, or entitlement check |
+| Executable coverage | Complete | Stable pinned-family ordering, custom methods, resolved URLs, exact multipart/binary/UTF-8 bytes, MIME, escaped metadata, raw HTTP framing/warnings, and available C/Objective-C parser checks pass |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 127 verification](QA_MILESTONE_127.md) |
+
+Compatibility bounds remain explicit: HTTPSnippet's alternate clients and pinned two-level target/client selection persistence remain open, as do runtime-only advanced signing, dependency installation, comprehensive target-language validation, and generated-code execution. The Client code generation ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 128 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

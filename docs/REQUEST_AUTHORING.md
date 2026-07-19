@@ -233,24 +233,33 @@ Brunomnia's Rust and Fetch transports do not expose libcurl-style debug callback
 
 Choose **Code** beside the request URL or use `Mod+Shift+G`. The preview uses the effective request after collection/folder inheritance plus the resolved active environment. Available targets are:
 
-- cURL;
-- JavaScript Fetch;
-- Node.js native HTTP;
-- Python Requests;
-- PHP cURL;
-- Ruby `Net::HTTP`;
-- Go `net/http`;
-- Java `HttpClient`;
+- C libcurl;
+- Clojure clj-http;
+- Crystal `HTTP::Client`;
 - C# `HttpClient`;
-- Swift `URLSession`; and
-- Rust Reqwest.
+- Go `net/http`;
+- raw HTTP/1.1;
+- Java `HttpClient`;
+- JavaScript Fetch;
+- Kotlin OkHttp;
+- Node.js native HTTP;
+- Objective-C `NSURLSession`;
+- OCaml CoHTTP;
+- PHP cURL;
+- PowerShell `Invoke-WebRequest`;
+- Python Requests;
+- R httr;
+- Ruby `Net::HTTP`;
+- Rust Reqwest;
+- Shell cURL; and
+- Swift `URLSession`.
 
 Bearer, Basic, header/query API keys, and an existing OAuth 2 access token are materialized. JSON, text, GraphQL, URL-encoded, multipart, and binary bodies are included. Multipart generation resolves active environment values in field names, text values, filenames, and content types; preserves duplicate fields, optional text-part content types, file metadata, and exact file bytes; replaces any stale authored multipart boundary; and chooses a generated boundary that does not occur in part metadata or data. Standalone binary bodies retain their exact bytes and default MIME type.
 
-Byte bodies are serialized once and embedded as Base64 so all eleven targets send the same payload without depending on a source file path that the WebView cannot retain. The cURL target decodes into a temporary file with GNU/BSD `base64` compatibility; the other targets decode in memory. This makes the copied snippet self-contained but also makes its text grow with the selected files. Copying is the only dialog side effect: opening the preview does not decode bytes, create a temporary file, execute the request, or run the generated program.
+Byte bodies are serialized once so all nineteen executable targets preserve the same payload without depending on a source file path that the WebView cannot retain. C and OCaml emit exact byte literals, Shell cURL decodes into a temporary file with GNU/BSD `base64` compatibility, and the other executable targets decode Base64 in memory. Raw HTTP/1.1 is a text representation rather than an executable client: text bodies remain inline with UTF-8 Content-Length, while arbitrary multipart/binary bytes appear as exact Base64 with a visible decode-before-sending warning. This makes copied snippets self-contained but also makes their text grow with selected files. Copying is the only dialog side effect: opening the preview does not decode bytes, create a temporary file, execute the request, or run the generated program.
 
 Warnings are part of the result, not hidden conversion failures. The dialog identifies unresolved template/path values, collapsed duplicate headers in object-oriented targets, unattached or invalid saved file bytes, sanitized multipart header line breaks, and runtime-specific signing schemes that cannot be safely reproduced as static text. Target-language package availability and syntax/runtime validation remain the user's responsibility.
 
 ## Compatibility boundary
 
-This milestone does not claim a universal code-generation engine. Brunomnia represents eleven of the pinned HTTPSnippet release's twenty target families with one selected client each; the other nine families, alternate clients, advanced dynamic signing, target dependency installation, comprehensive syntax/runtime validation, and execution remain open work. The unrestricted upstream scripting API is also deliberately separate because expanding script network, module, and storage authority requires its own security review. Those gaps remain in the [feature-parity ledger](PARITY.md).
+This milestone does not claim a universal code-generation engine. Brunomnia represents all twenty target families from the pinned HTTPSnippet release with one selected client each, but alternate clients, separate target/client choice persistence, advanced dynamic signing, target dependency installation, comprehensive syntax/runtime validation, and execution remain open work. The unrestricted upstream scripting API is also deliberately separate because expanding script network, module, and storage authority requires its own security review. Those gaps remain in the [feature-parity ledger](PARITY.md).
