@@ -16,7 +16,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - gRPC reflection, pasted `.proto` compilation, dynamic JSON messages, and unary/client/server/bidirectional streaming calls
 - JSON, text, URL-encoded, multipart file/part-metadata, and binary request bodies
 - Standard or custom HTTP methods, explicit encoded path parameters, repeated query keys, regular or device-persistent bulk query/header editing, row descriptions, multiline values, and local JSON/XML body beautification
-- Local client-code generation for cURL, JavaScript Fetch, Python Requests, Go `net/http`, Java `HttpClient`, and C# `HttpClient`
+- Local client-code generation for cURL, JavaScript Fetch, Python Requests, Go `net/http`, Java `HttpClient`, and C# `HttpClient`, including self-contained multipart and binary bytes
 - Device-local redirect, request-timeout, API/authentication certificate-validation, and system/manual proxy defaults; per-request inheritance/overrides; `0`-disabled deadlines; a finite or unlimited native redirect ceiling; no-proxy lists; and domain-scoped client-certificate controls
 - Device-local Default, HTTP 1.0, HTTP 1.1, HTTP/2, and HTTP/2 Prior Knowledge preferences with the negotiated native version in response evidence
 - Transparent native gzip, Brotli, deflate, and zstd response decoding with one decode-error-only raw fallback

@@ -163,12 +163,12 @@ Compatibility bounds remain explicit: bulk folder actions, rendered Markdown, en
 | HTTP methods | Complete baseline | Standard-method suggestions plus bounded, token-valid custom methods through desktop, native transport, import/export, history, runner, and CLI models |
 | Request parameters | Complete baseline | Explicit `{name}` path rows with encoded substitution, ordered repeated query keys, row enablement, descriptions, and multiline values |
 | Body authoring | Complete baseline | Local JSON and conservative XML beautification without network calls or silent modification of unrecognized text |
-| Client code generation | Complete baseline | Local previews for cURL, JavaScript Fetch, Python Requests, Go `net/http`, Java `HttpClient`, and C# `HttpClient`, using effective inherited configuration and the active environment |
+| Client code generation | Complete baseline | Local previews for cURL, JavaScript Fetch, Python Requests, Go `net/http`, Java `HttpClient`, and C# `HttpClient`, using effective inherited configuration and the active environment; exact multipart and binary embedding was added in Milestone 106 |
 | Interchange | Complete baseline | OpenAPI path parameter generation plus Insomnia v4/v5 and Postman import/export preservation for custom methods, path rows, descriptions, and multiline values |
 | Workspace migration | Complete | Versions 1–10 migrate to v11 bounded method tokens, normalized path/query/header/form/metadata rows, descriptions, and the Generate Code shortcut |
 | Documentation and evidence | Complete | [Request authoring and client-code guide](REQUEST_AUTHORING.md) and [Milestone 11 verification](QA_MILESTONE_11.md) |
 
-Compatibility bounds remain explicit: generated snippets do not yet embed multipart or binary bytes, reproduce runtime-specific Digest/OAuth 1/IAM/Hawk/ASAP/NTLM/Netrc signing, validate target-language syntax, or run generated code. Those omissions produce visible warnings. The local XML formatter is intentionally conservative rather than a schema-aware canonicalizer. The scripting expansion is recorded separately in Milestone 12.
+Compatibility bounds remain explicit: exact multipart and binary embedding was completed in Milestone 106, while generated snippets still do not reproduce runtime-specific Digest/OAuth 1/IAM/Hawk/ASAP/NTLM/Netrc signing, validate every target language, install dependencies, or run generated code. Those omissions produce visible warnings. The local XML formatter is intentionally conservative rather than a schema-aware canonicalizer. The scripting expansion is recorded separately in Milestone 12.
 
 ## Milestone 12 — permission-bounded scripting compatibility (complete baseline)
 
@@ -1598,7 +1598,22 @@ Compatibility bounds remain explicit: timeline rows are bounded structured works
 
 Compatibility bounds remain explicit: Event Stream logs/timelines remain bounded workspace records rather than upstream filesystem paths, and streaming plugin hooks plus external third-party compatibility matrices remain open. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 106 — remaining parity closure and release hardening
+## Milestone 106 — self-contained multipart and binary client code (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia renders the effective request into HAR body text or multipart parameters and delegates its broader target/client matrix to HTTPSnippet |
+| Exact multipart body | Complete baseline | Enabled resolved text/file parts are serialized once with CRLF framing, duplicate names, optional text content types, filenames, MIME types, exact file bytes, and a deterministic collision-checked boundary |
+| Header safety | Complete | Multipart name, filename, and content-type line breaks are neutralized with visible warnings; quoted parameters escape backslashes and quotes; unattached or malformed file bytes are omitted explicitly rather than corrupting the body |
+| Header continuity | Complete | Any stale authored multipart Content-Type is replaced by the exact generated boundary, while a standalone binary body receives its saved MIME type only when the request has no explicit Content-Type |
+| Six target emitters | Complete baseline | cURL decodes through a temporary file with GNU/BSD `base64` fallback; JavaScript Fetch, Python Requests, Go, Java, and C# decode the same Base64 body in memory |
+| Standalone binary | Complete | All six targets receive the exact saved binary bytes instead of the prior omission warning |
+| Executable coverage | Complete | Focused tests decode generated multipart bytes, prove framing/metadata/templates/duplicates/binary values/boundary collision handling, compare the common payload across every target, and exercise invalid-file warnings |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 106 verification](QA_MILESTONE_106.md) |
+
+Compatibility bounds remain explicit: Brunomnia currently exposes six local targets rather than Insomnia's full HTTPSnippet matrix, and it does not install target dependencies, reproduce runtime-only advanced auth signing, validate every emitted language, or execute snippets. Inline byte payloads make previews self-contained but can be large. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 107 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
