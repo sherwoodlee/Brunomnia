@@ -50,7 +50,7 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     ...current,
     ...project,
     format: 'brunomnia',
-    version: 32,
+    version: 33,
     history: current.history,
     runnerReports: current.runnerReports,
     imports: current.imports,

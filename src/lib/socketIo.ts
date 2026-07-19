@@ -4,6 +4,7 @@ import { cookieHeaderForUrl } from './cookies';
 import { streamTransportConfig } from './protocol';
 import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
 import type { ProxyPreferences } from './transport';
+import { applyDefaultUserAgentHeader } from './userAgent';
 
 const mockTimers = new Map<string, number[]>();
 
@@ -43,11 +44,12 @@ export const connectSocketIo = async (
 ): Promise<StreamConnectionMetadata> => {
   const variables = environmentMap(environment);
   const url = buildRequestUrl(request, variables);
-  const headers = resolvedHeaders(request, environment);
+  let headers = resolvedHeaders(request, environment);
   if (request.transport.sendCookies && !headers.some((header) => header.enabled && header.name.toLowerCase() === 'cookie')) {
     const cookie = cookieHeaderForUrl(cookies, url);
     if (cookie) headers.push({ id: 'cookie-jar', name: 'Cookie', value: cookie, enabled: true });
   }
+  headers = applyDefaultUserAgentHeader(headers, request.disableUserAgentHeader);
   if (isTauri()) {
     const channel = new Channel<StreamMessage>();
     channel.onmessage = onEvent;

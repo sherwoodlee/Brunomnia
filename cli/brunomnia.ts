@@ -13,6 +13,7 @@ import { createScriptModules } from '../src/lib/scriptModules';
 import { applyWorkspaceCertificates } from '../src/lib/certificates';
 import { resolveCertificateValidation, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from '../src/lib/transport';
 import { migrateWorkspace } from '../src/lib/storage';
+import { applyDefaultUserAgentHeader } from '../src/lib/userAgent';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -374,7 +375,7 @@ const runNodeScript = async (
 const executeHttp = async (request: ApiRequest, variables: Record<string, string>, requestTimeoutMs = 30_000, proxyPreferences?: ProxyPreferences): Promise<HttpResponse> => {
   if (request.protocol !== 'http' && request.protocol !== 'graphql') throw new Error(`CLI collection execution does not yet support ${request.protocol}.`);
   const url = buildRequestUrl(request, variables);
-  const headers = buildHeaders(request, variables);
+  let headers = buildHeaders(request, variables);
   const renderBody = (value: string) => request.renderBodyTemplates !== false ? resolveTemplate(value, variables) : value;
   let body: BodyInit | undefined;
   if (request.protocol === 'graphql') {
@@ -397,6 +398,7 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
     body = Buffer.from(request.binaryBody.dataBase64, 'base64');
     if (!headers.some((header) => header.enabled && header.name.toLowerCase() === 'content-type')) headers.push({ id: 'cli-binary', name: 'Content-Type', value: request.binaryBody.mimeType, enabled: true });
   }
+  headers = applyDefaultUserAgentHeader(headers, request.disableUserAgentHeader);
   const started = performance.now();
   const timeoutMs = resolveRequestTimeout(request.transport, requestTimeoutMs);
   if (resolveProxyTransport(request.transport, url, proxyPreferences).proxyMode === 'custom') {

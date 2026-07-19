@@ -22,6 +22,7 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
   pathParams: [],
   params: [],
   headers: [{ id: `${id}-content-type`, name: 'Content-Type', value: 'application/json', enabled: method !== 'GET' }],
+  disableUserAgentHeader: false,
   bodyMode: method === 'GET' ? 'none' : 'json',
   renderBodyTemplates: true,
   body: '',
@@ -59,7 +60,6 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
     reflectionApiUrl: 'https://buf.build',
     reflectionApiKey: '',
     reflectionApiModule: 'buf.build/connectrpc/eliza',
-    disableUserAgentHeader: false,
     protoText: seedProtoText,
     protoFiles: [{ id: `${id}-grpc-schema`, path: 'schema.proto', text: seedProtoText }],
     protoEntryPath: 'schema.proto',
@@ -134,7 +134,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 32,
+  version: 33,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',

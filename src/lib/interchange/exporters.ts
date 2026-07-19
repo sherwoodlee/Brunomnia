@@ -86,6 +86,7 @@ const v4Request = (request: ApiRequest, parentId: string, index: number, warning
     pathParameters: request.pathParams.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
     parameters: request.params.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
     headers: request.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled, description: header.description })),
+    disableUserAgentHeader: request.disableUserAgentHeader,
     authentication: insomniaAuth(request.auth), preRequestScript: request.preRequestScript, afterResponseScript: request.tests, description: request.documentation ?? '',
     settingFollowRedirects: request.transport.followRedirectsMode,
     settingDisableRenderRequestBody: !request.renderBodyTemplates,
@@ -100,7 +101,7 @@ const v4Request = (request: ApiRequest, parentId: string, index: number, warning
     eventListeners: request.socketIo.eventListeners.map((listener) => ({ id: listener.id, eventName: listener.eventName, desc: listener.description, isOpen: listener.enabled })),
     payload: { eventName: request.socketIo.eventName, ack: request.socketIo.ack, args: request.socketIo.args },
   };
-  if (request.protocol === 'grpc') return { ...base, _type: 'grpc_request', body: { text: request.grpc.input }, metadata: request.grpc.metadata.map((item) => ({ name: item.name, value: item.value, disabled: !item.enabled })), protoFileId, protoMethodName: [request.grpc.service, request.grpc.method].filter(Boolean).join('/'), reflectionApi: { enabled: request.grpc.descriptorSource === 'buf', url: request.grpc.reflectionApiUrl, apiKey: request.grpc.reflectionApiKey, module: request.grpc.reflectionApiModule }, disableUserAgentHeader: request.grpc.disableUserAgentHeader };
+  if (request.protocol === 'grpc') return { ...base, _type: 'grpc_request', body: { text: request.grpc.input }, metadata: request.grpc.metadata.map((item) => ({ name: item.name, value: item.value, disabled: !item.enabled })), protoFileId, protoMethodName: [request.grpc.service, request.grpc.method].filter(Boolean).join('/'), reflectionApi: { enabled: request.grpc.descriptorSource === 'buf', url: request.grpc.reflectionApiUrl, apiKey: request.grpc.reflectionApiKey, module: request.grpc.reflectionApiModule } };
   return { ...base, _type: 'request', body: insomniaBody(request, warnings) };
 };
 
@@ -193,6 +194,7 @@ const v5Request = (request: ApiRequest, index: number, warnings: ImportWarning[]
   const common = {
     url: request.url, name: request.name, meta: { id: `${prefix}-req_${index + 1}`, description: request.documentation || (request.source ? `Imported from ${request.source.format}` : '') },
     headers: request.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled, description: header.description })),
+    disableUserAgentHeader: request.disableUserAgentHeader,
     pathParameters: request.pathParams.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
     parameters: request.params.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
     authentication: insomniaAuth(request.auth),
@@ -207,7 +209,7 @@ const v5Request = (request: ApiRequest, index: number, warnings: ImportWarning[]
   };
   if (request.protocol === 'grpc') {
     if (request.grpc.descriptorSource === 'proto') warnings.push({ code: 'external-schema', message: 'Insomnia v5 collection YAML cannot embed its database-backed proto resource; import the proto source separately.', resource: request.name });
-    return { ...common, meta: { ...common.meta, id: `${prefix}-greq_${index + 1}` }, body: { text: request.grpc.input }, metadata: request.grpc.metadata.map((item) => ({ name: item.name, value: item.value, disabled: !item.enabled })), protoFileId: '', protoMethodName: [request.grpc.service, request.grpc.method].filter(Boolean).join('/'), reflectionApi: { enabled: request.grpc.descriptorSource === 'buf', url: request.grpc.reflectionApiUrl, apiKey: request.grpc.reflectionApiKey, module: request.grpc.reflectionApiModule }, disableUserAgentHeader: request.grpc.disableUserAgentHeader };
+    return { ...common, meta: { ...common.meta, id: `${prefix}-greq_${index + 1}` }, body: { text: request.grpc.input }, metadata: request.grpc.metadata.map((item) => ({ name: item.name, value: item.value, disabled: !item.enabled })), protoFileId: '', protoMethodName: [request.grpc.service, request.grpc.method].filter(Boolean).join('/'), reflectionApi: { enabled: request.grpc.descriptorSource === 'buf', url: request.grpc.reflectionApiUrl, apiKey: request.grpc.reflectionApiKey, module: request.grpc.reflectionApiModule } };
   }
   return {
     ...common,

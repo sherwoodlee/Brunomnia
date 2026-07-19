@@ -123,6 +123,7 @@ const mapInsomniaRequest = (
   const isSocketIo = type === 'socketio_request' || metaId.startsWith('socketio-req');
   const isMcp = type === 'mcp_request' || metaId.startsWith('mcp-req');
   const isGrpc = type === 'grpc_request' || Boolean(raw.protoMethodName) || Boolean(raw.reflectionApi);
+  request.disableUserAgentHeader = asBoolean(raw.disableUserAgentHeader);
   if (isWebsocket) {
     request.protocol = 'websocket';
     request.method = 'GET';
@@ -166,7 +167,6 @@ const mapInsomniaRequest = (
       reflectionApiUrl: asString(reflectionApi?.url, request.grpc.reflectionApiUrl),
       reflectionApiKey: asString(reflectionApi?.apiKey),
       reflectionApiModule: asString(reflectionApi?.module, request.grpc.reflectionApiModule),
-      disableUserAgentHeader: asBoolean(raw.disableUserAgentHeader),
     };
   } else if (isMcp) {
     request.method = 'POST';

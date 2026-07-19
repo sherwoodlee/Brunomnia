@@ -198,12 +198,14 @@ paths:
     expect(v4.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
     expect(v4.collections[0].requests[0].folderId).toBe(v4.collections[0].folders?.[0].id);
     expect(v4.collections[0].environment?.[0]).toMatchObject({ name: 'token', value: 'abc' });
-    expect(v4.collections[0].requests.find((request) => request.protocol === 'grpc')?.grpc).toMatchObject({
-      descriptorSource: 'buf',
-      reflectionApiUrl: 'https://buf.example.com',
-      reflectionApiKey: '{{ vault.buf }}',
-      reflectionApiModule: 'buf.build/acme/greeter',
+    expect(v4.collections[0].requests.find((request) => request.protocol === 'grpc')).toMatchObject({
       disableUserAgentHeader: true,
+      grpc: {
+        descriptorSource: 'buf',
+        reflectionApiUrl: 'https://buf.example.com',
+        reflectionApiKey: '{{ vault.buf }}',
+        reflectionApiModule: 'buf.build/acme/greeter',
+      },
     });
 
     const v5 = importArtifact(`type: collection.insomnia.rest/5.0
@@ -283,7 +285,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(32);
+    expect(second.version).toBe(33);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

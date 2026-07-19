@@ -57,7 +57,7 @@ describe('gRPC schema loading', () => {
     request.grpc.reflectionApiUrl = 'https://{{ registry }}/tenant';
     request.grpc.reflectionApiKey = '{{ token }}';
     request.grpc.reflectionApiModule = 'buf.build/{{ organization }}/payments';
-    request.grpc.disableUserAgentHeader = true;
+    request.disableUserAgentHeader = true;
 
     await loadGrpcSchema(request, {
       id: 'environment',

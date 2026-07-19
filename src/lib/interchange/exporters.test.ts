@@ -14,6 +14,7 @@ describe('artifact export adapters', () => {
     workspace.collections[0].requests[0].url = 'https://api.acme.dev/v1/orders/{orderId}';
     workspace.collections[0].requests[0].pathParams = [{ id: 'order-id', name: 'orderId', value: 'ord/one', enabled: true, description: 'Order identifier' }];
     workspace.collections[0].requests[0].headers[0].description = 'Payload type';
+    workspace.collections[0].requests[0].disableUserAgentHeader = true;
     workspace.collections[0].requests[0].renderBodyTemplates = false;
     workspace.collections[0].requests[0].bodyMode = 'multipart';
     workspace.collections[0].requests[0].multipartBody = [
@@ -33,7 +34,7 @@ describe('artifact export adapters', () => {
     grpcRequest.grpc.reflectionApiUrl = 'https://buf.example.com';
     grpcRequest.grpc.reflectionApiKey = '{{ vault.buf }}';
     grpcRequest.grpc.reflectionApiModule = 'buf.build/acme/greeter';
-    grpcRequest.grpc.disableUserAgentHeader = true;
+    grpcRequest.disableUserAgentHeader = true;
     workspace.cookies = [{ id: 'cookie-session', name: 'session', value: 'abc', domain: 'api.acme.dev', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-16T12:00:00.000Z' }];
     const v4Export = exportArtifact(workspace, { format: 'insomnia-v4', scope: 'all' });
     const v4Import = importArtifact(v4Export.contents, v4Export.fileName);
@@ -48,6 +49,7 @@ describe('artifact export adapters', () => {
     expect(v4Import.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'orderId', value: 'ord/one', description: 'Order identifier' });
     expect(v4Import.collections[0].requests[0].headers[0].description).toBe('Payload type');
     expect(v4Import.collections[0].requests[0].renderBodyTemplates).toBe(false);
+    expect(v4Import.collections[0].requests[0].disableUserAgentHeader).toBe(true);
     expect(v4Import.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ name: 'payload', multiline: true, contentType: 'application/json', description: 'JSON document', enabled: true }),
       expect.objectContaining({ name: 'optional', multiline: false, description: 'Disabled field', enabled: false }),
@@ -60,7 +62,7 @@ describe('artifact export adapters', () => {
     expect(v4Import.collections[0].environment?.[0]).toMatchObject({ name: 'region', value: 'base' });
     expect(v4Import.collections[0].subEnvironments?.[0]).toMatchObject({ name: 'Staging', variables: [expect.objectContaining({ name: 'region', value: 'staging' })] });
     expect(v4Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'socketio')).toMatchObject({ socketIo: { path: '/socket.io', eventName: 'message', ack: true, eventListeners: [expect.objectContaining({ eventName: 'order.updated', enabled: true })] } });
-    expect(v4Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'grpc')?.grpc).toMatchObject({ descriptorSource: 'buf', reflectionApiUrl: 'https://buf.example.com', reflectionApiKey: '{{ vault.buf }}', reflectionApiModule: 'buf.build/acme/greeter', disableUserAgentHeader: true });
+    expect(v4Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'grpc')).toMatchObject({ disableUserAgentHeader: true, grpc: { descriptorSource: 'buf', reflectionApiUrl: 'https://buf.example.com', reflectionApiKey: '{{ vault.buf }}', reflectionApiModule: 'buf.build/acme/greeter' } });
 
     const v5Export = exportArtifact(workspace, { format: 'insomnia-v5', scope: 'all' });
     const v5Import = importArtifact(v5Export.contents, v5Export.fileName);
@@ -74,6 +76,7 @@ describe('artifact export adapters', () => {
     expect(v5Import.collections[0].requests[0].transport.followRedirectsMode).toBe('off');
     expect(v5Import.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'orderId', value: 'ord/one', description: 'Order identifier' });
     expect(v5Import.collections[0].requests[0].renderBodyTemplates).toBe(false);
+    expect(v5Import.collections[0].requests[0].disableUserAgentHeader).toBe(true);
     expect(v5Import.collections[0].requests[0].multipartBody[0]).toMatchObject({ multiline: true, contentType: 'application/json', description: 'JSON document' });
     expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.name === 'Form controls')?.formBody[0]).toMatchObject({ enabled: false, description: 'Multiline notes', multiline: true });
     expect(v5Import.collections[0].folders?.[0]).toMatchObject({ name: 'Secured orders', documentation: 'Folder docs' });
@@ -83,7 +86,7 @@ describe('artifact export adapters', () => {
     expect(v5Import.collections[0].subEnvironments?.[0]).toMatchObject({ name: 'Staging', variables: [expect.objectContaining({ name: 'region', value: 'staging' })] });
     expect(v5Import.environments.length).toBeGreaterThan(0);
     expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'socketio')).toMatchObject({ socketIo: { path: '/socket.io', eventName: 'message', ack: true, eventListeners: [expect.objectContaining({ eventName: 'order.updated', enabled: true })] } });
-    expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'grpc')?.grpc).toMatchObject({ descriptorSource: 'buf', reflectionApiUrl: 'https://buf.example.com', reflectionApiKey: '{{ vault.buf }}', reflectionApiModule: 'buf.build/acme/greeter', disableUserAgentHeader: true });
+    expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'grpc')).toMatchObject({ disableUserAgentHeader: true, grpc: { descriptorSource: 'buf', reflectionApiUrl: 'https://buf.example.com', reflectionApiKey: '{{ vault.buf }}', reflectionApiModule: 'buf.build/acme/greeter' } });
   });
 
   it('exports and reimports HAR while warning about streaming protocols', () => {
@@ -140,7 +143,7 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(32);
+    expect(parsed.version).toBe(33);
     expect(parsed.certificates.clients[0]).toMatchObject({ pfxBase64: 'cGZ4', passphrase: 'secret' });
 
     const design = workspace.apiDesigns[0];

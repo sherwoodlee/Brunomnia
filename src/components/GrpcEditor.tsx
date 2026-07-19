@@ -176,7 +176,7 @@ export function GrpcEditor({
             <label>Registry URL<input disabled={sessionActive} onChange={(event) => update({ reflectionApiUrl: event.target.value, descriptorSetBase64: '' })} placeholder="https://buf.build" value={grpc.reflectionApiUrl} /></label>
             <label>Module<input disabled={sessionActive} onChange={(event) => update({ reflectionApiModule: event.target.value, descriptorSetBase64: '' })} placeholder="buf.build/connectrpc/eliza" value={grpc.reflectionApiModule} /></label>
             <label>API key<input autoComplete="off" disabled={sessionActive} onChange={(event) => update({ reflectionApiKey: event.target.value, descriptorSetBase64: '' })} type="password" value={grpc.reflectionApiKey} /></label>
-            <label className="grpc-registry-toggle"><input checked={grpc.disableUserAgentHeader} disabled={sessionActive} onChange={(event) => update({ disableUserAgentHeader: event.target.checked, descriptorSetBase64: '' })} type="checkbox" /> Disable User-Agent header</label>
+            <label className="grpc-registry-toggle"><input checked={request.disableUserAgentHeader} disabled={sessionActive} onChange={(event) => onChange({ disableUserAgentHeader: event.target.checked, grpc: { ...grpc, descriptorSetBase64: '' } })} type="checkbox" /> Disable User-Agent header</label>
             <small>URL, module, and API key support environment templates. Registry TLS uses the request transport and matching workspace certificates.</small>
           </div>
         ) : null}

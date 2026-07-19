@@ -26,6 +26,11 @@ export const restoreRequestSnapshot = (owner: RequestSnapshotOwner, current: Api
     || !record(snapshot.transport)
     || !record(snapshot.sse)) return current;
   const restored = structuredClone(snapshot) as ApiRequest;
+  const restoredGrpc = restored.grpc as ApiRequest['grpc'] & { disableUserAgentHeader?: boolean };
+  restored.disableUserAgentHeader = typeof snapshot.disableUserAgentHeader === 'boolean'
+    ? snapshot.disableUserAgentHeader
+    : restoredGrpc.disableUserAgentHeader === true;
+  delete restoredGrpc.disableUserAgentHeader;
   return { ...restored, id: current.id, folderId: current.folderId, renderBodyTemplates: snapshot.renderBodyTemplates !== false, socketIo: record(snapshot.socketIo) ? restored.socketIo : current.socketIo };
 };
 

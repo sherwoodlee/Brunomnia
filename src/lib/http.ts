@@ -8,6 +8,7 @@ import { renderTemplate } from './templates';
 import { buildResponseTimeline } from './timeline';
 import { decodeHttpResponseBody, responseBodyFromBytes, responseCharset } from './responseBytes';
 import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
+import { applyDefaultUserAgentHeader } from './userAgent';
 
 export type SendRequestContext = {
   cookies?: CookieRecord[];
@@ -192,6 +193,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
   };
 
   if (isTauri()) {
+    headers = applyDefaultUserAgentHeader(headers, prepared.disableUserAgentHeader);
     const body = prepared.protocol === 'graphql'
       ? graphqlPayload!
       : prepared.body;

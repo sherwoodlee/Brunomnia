@@ -157,7 +157,7 @@ export const loadGrpcSchema = async (request: ApiRequest, environment?: Environm
     url: resolveTemplate(request.grpc.reflectionApiUrl, variables),
     apiKey: resolveTemplate(request.grpc.reflectionApiKey, variables),
     module: resolveTemplate(request.grpc.reflectionApiModule, variables),
-    disableUserAgentHeader: request.grpc.disableUserAgentHeader,
+    disableUserAgentHeader: request.disableUserAgentHeader,
   };
   const schemaEndpoint = request.grpc.descriptorSource === 'buf' ? reflectionApi.url : endpoint;
   if (!isTauri()) {

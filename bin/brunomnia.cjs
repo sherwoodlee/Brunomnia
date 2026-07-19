@@ -7686,6 +7686,20 @@ var init_responseBytes = __esm({
   }
 });
 
+// src/lib/userAgent.ts
+var BRUNOMNIA_USER_AGENT, isUserAgentHeader, hasAuthoredUserAgentHeader, applyDefaultUserAgentHeader;
+var init_userAgent = __esm({
+  "src/lib/userAgent.ts"() {
+    BRUNOMNIA_USER_AGENT = "brunomnia/0.1.0";
+    isUserAgentHeader = (header) => header.name.toLowerCase() === "user-agent";
+    hasAuthoredUserAgentHeader = (headers) => headers.some(isUserAgentHeader);
+    applyDefaultUserAgentHeader = (headers, disableUserAgentHeader) => {
+      if (disableUserAgentHeader || hasAuthoredUserAgentHeader(headers)) return headers;
+      return [...headers, { id: "default-user-agent", name: "User-Agent", value: BRUNOMNIA_USER_AGENT, enabled: true }];
+    };
+  }
+});
+
 // src/lib/http.ts
 var init_http = __esm({
   "src/lib/http.ts"() {
@@ -7698,6 +7712,7 @@ var init_http = __esm({
     init_timeline();
     init_responseBytes();
     init_transport();
+    init_userAgent();
   }
 });
 
@@ -7801,6 +7816,7 @@ var createRequest = (id, name, method, url) => ({
   pathParams: [],
   params: [],
   headers: [{ id: `${id}-content-type`, name: "Content-Type", value: "application/json", enabled: method !== "GET" }],
+  disableUserAgentHeader: false,
   bodyMode: method === "GET" ? "none" : "json",
   renderBodyTemplates: true,
   body: "",
@@ -7885,7 +7901,6 @@ var createRequest = (id, name, method, url) => ({
     reflectionApiUrl: "https://buf.build",
     reflectionApiKey: "",
     reflectionApiModule: "buf.build/connectrpc/eliza",
-    disableUserAgentHeader: false,
     protoText: seedProtoText,
     protoFiles: [{ id: `${id}-grpc-schema`, path: "schema.proto", text: seedProtoText }],
     protoEntryPath: "schema.proto",
@@ -7957,7 +7972,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 32,
+  version: 33,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -11827,6 +11842,7 @@ var migrateWorkspace = (value) => {
       const validateCertificatesMode = request.transport?.validateCertificatesMode === "global" || request.transport?.validateCertificatesMode === "on" || request.transport?.validateCertificatesMode === "off" ? request.transport.validateCertificatesMode : typeof request.transport?.validateCertificates === "boolean" ? request.transport.validateCertificates ? "on" : "off" : "global";
       const proxyMode = request.transport?.proxyMode === "global" || request.transport?.proxyMode === "custom" || request.transport?.proxyMode === "disabled" ? request.transport.proxyMode : stringValue3(request.transport?.proxyUrl).trim() || stringValue3(request.transport?.proxyExclusions).trim() ? "custom" : "global";
       const grpc = record5(request.grpc);
+      const { disableUserAgentHeader: legacyDisableUserAgentHeader, ...persistedGrpc } = grpc ?? {};
       const protoTree = normalizeGrpcProtoTree(
         grpc?.protoFiles,
         stringValue3(grpc?.protoText, defaults.grpc.protoText),
@@ -11845,6 +11861,7 @@ var migrateWorkspace = (value) => {
         pathParams: normalizeRows(request.pathParams, `${requestId}-path`),
         params: normalizeRows(request.params, `${requestId}-query`),
         headers: normalizeRows(request.headers, `${requestId}-header`),
+        disableUserAgentHeader: typeof request.disableUserAgentHeader === "boolean" ? request.disableUserAgentHeader : legacyDisableUserAgentHeader === true,
         bodyMode: request.bodyMode ?? (method === "GET" || method === "HEAD" ? "none" : "json"),
         renderBodyTemplates: request.renderBodyTemplates !== false,
         auth: {
@@ -11861,13 +11878,12 @@ var migrateWorkspace = (value) => {
         },
         grpc: {
           ...defaults.grpc,
-          ...request.grpc,
+          ...persistedGrpc,
           ...protoTree,
           descriptorSource: grpc?.descriptorSource === "proto" || grpc?.descriptorSource === "buf" ? grpc.descriptorSource : "reflection",
           reflectionApiUrl: stringValue3(grpc?.reflectionApiUrl, defaults.grpc.reflectionApiUrl).slice(0, 8192),
           reflectionApiKey: stringValue3(grpc?.reflectionApiKey).slice(0, 65536),
           reflectionApiModule: stringValue3(grpc?.reflectionApiModule, defaults.grpc.reflectionApiModule).slice(0, 2048),
-          disableUserAgentHeader: grpc?.disableUserAgentHeader === true,
           metadata: normalizeRows(grpc?.metadata, `${requestId}-metadata`)
         },
         transport: {
@@ -11945,7 +11961,7 @@ var migrateWorkspace = (value) => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 32,
+    version: 33,
     name: workspace.name || "Imported Workspace",
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? "",
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
@@ -11975,6 +11991,7 @@ var migrateWorkspace = (value) => {
 };
 
 // cli/brunomnia.ts
+init_userAgent();
 var args = process.argv.slice(2);
 var flag = (name) => {
   const index = args.indexOf(name);
@@ -12478,7 +12495,7 @@ var runNodeScript = async (source, originalRequest, originalEnvironment, respons
 var executeHttp = async (request, variables, requestTimeoutMs = 3e4, proxyPreferences) => {
   if (request.protocol !== "http" && request.protocol !== "graphql") throw new Error(`CLI collection execution does not yet support ${request.protocol}.`);
   const url = buildRequestUrl(request, variables);
-  const headers = buildHeaders(request, variables);
+  let headers = buildHeaders(request, variables);
   const renderBody = (value) => request.renderBodyTemplates !== false ? resolveTemplate(value, variables) : value;
   let body;
   if (request.protocol === "graphql") {
@@ -12500,6 +12517,7 @@ var executeHttp = async (request, variables, requestTimeoutMs = 3e4, proxyPrefer
     body = Buffer.from(request.binaryBody.dataBase64, "base64");
     if (!headers.some((header) => header.enabled && header.name.toLowerCase() === "content-type")) headers.push({ id: "cli-binary", name: "Content-Type", value: request.binaryBody.mimeType, enabled: true });
   }
+  headers = applyDefaultUserAgentHeader(headers, request.disableUserAgentHeader);
   const started = performance.now();
   const timeoutMs = resolveRequestTimeout(request.transport, requestTimeoutMs);
   if (resolveProxyTransport(request.transport, url, proxyPreferences).proxyMode === "custom") {

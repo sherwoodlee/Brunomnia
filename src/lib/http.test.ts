@@ -30,6 +30,29 @@ describe('GraphQL request serialization', () => {
 });
 
 describe('native HTTP transport preferences', () => {
+  it('adds the default User-Agent unless the request opts out or authors one', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
+    const request = createBlankRequest('user-agent-policy');
+    request.url = 'https://example.test/status';
+    request.headers = [];
+
+    await sendRequest(request, undefined);
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ headers: [expect.objectContaining({ name: 'User-Agent', value: 'brunomnia/0.1.0', enabled: true })] }) }));
+
+    request.disableUserAgentHeader = true;
+    await sendRequest(request, undefined);
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual([]);
+
+    request.disableUserAgentHeader = false;
+    request.headers = [{ id: 'custom-agent', name: 'user-agent', value: 'custom/2.0', enabled: true }];
+    await sendRequest(request, undefined);
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual([expect.objectContaining({ value: 'custom/2.0' })]);
+
+    request.headers[0].enabled = false;
+    await sendRequest(request, undefined);
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual([expect.objectContaining({ value: 'custom/2.0', enabled: false })]);
+  });
+
   it('applies or bypasses body template rendering across multipart metadata', async () => {
     tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
     const request = createBlankRequest('body-rendering');
@@ -64,11 +87,11 @@ describe('native HTTP transport preferences', () => {
     request.headers = [];
 
     await sendRequest(request, undefined);
-    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ headers: [expect.objectContaining({ name: 'Content-Type', value: 'application/x-archive' })] }) }));
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ headers: expect.arrayContaining([expect.objectContaining({ name: 'Content-Type', value: 'application/x-archive' })]) }) }));
 
     request.headers = [{ id: 'content-type', name: 'content-type', value: 'application/custom', enabled: true }];
     await sendRequest(request, undefined);
-    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ headers: [expect.objectContaining({ value: 'application/custom' })] }) }));
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ headers: expect.arrayContaining([expect.objectContaining({ value: 'application/custom' })]) }) }));
   });
 
   it('decodes native response bytes with the declared charset before hooks and previews', async () => {
@@ -286,7 +309,7 @@ describe('native HTTP transport preferences', () => {
     });
 
     expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({
-      input: expect.objectContaining({ headers: [expect.objectContaining({ value: 'development-value' })] }),
+      input: expect.objectContaining({ headers: expect.arrayContaining([expect.objectContaining({ value: 'development-value' })]) }),
     }));
   });
 });

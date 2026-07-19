@@ -526,6 +526,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           ? 'custom'
           : 'global';
       const grpc = record(request.grpc);
+      const { disableUserAgentHeader: legacyDisableUserAgentHeader, ...persistedGrpc } = grpc ?? {};
       const protoTree = normalizeGrpcProtoTree(
         grpc?.protoFiles,
         stringValue(grpc?.protoText, defaults.grpc.protoText),
@@ -544,6 +545,9 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         pathParams: normalizeRows(request.pathParams, `${requestId}-path`),
         params: normalizeRows(request.params, `${requestId}-query`),
         headers: normalizeRows(request.headers, `${requestId}-header`),
+        disableUserAgentHeader: typeof request.disableUserAgentHeader === 'boolean'
+          ? request.disableUserAgentHeader
+          : legacyDisableUserAgentHeader === true,
         bodyMode: request.bodyMode ?? (method === 'GET' || method === 'HEAD' ? 'none' : 'json'),
         renderBodyTemplates: request.renderBodyTemplates !== false,
         auth: {
@@ -562,13 +566,12 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         },
         grpc: {
           ...defaults.grpc,
-          ...request.grpc,
+          ...persistedGrpc,
           ...protoTree,
           descriptorSource: grpc?.descriptorSource === 'proto' || grpc?.descriptorSource === 'buf' ? grpc.descriptorSource : 'reflection',
           reflectionApiUrl: stringValue(grpc?.reflectionApiUrl, defaults.grpc.reflectionApiUrl).slice(0, 8_192),
           reflectionApiKey: stringValue(grpc?.reflectionApiKey).slice(0, 65_536),
           reflectionApiModule: stringValue(grpc?.reflectionApiModule, defaults.grpc.reflectionApiModule).slice(0, 2_048),
-          disableUserAgentHeader: grpc?.disableUserAgentHeader === true,
           metadata: normalizeRows(grpc?.metadata, `${requestId}-metadata`),
         },
         transport: {
@@ -648,7 +651,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 32,
+    version: 33,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

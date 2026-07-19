@@ -16,6 +16,7 @@ import { isGraphqlSubscriptionRequest } from './graphql';
 import { graphqlBody } from './http';
 import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
 import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
+import { applyDefaultUserAgentHeader } from './userAgent';
 
 const mockTimers = new Map<string, number[]>();
 
@@ -58,7 +59,7 @@ const streamHeaders = (request: ApiRequest, environment: Environment | undefined
     const cookie = cookieHeaderForUrl(cookies, url);
     if (cookie) headers.push({ id: 'cookie-jar', name: 'Cookie', value: cookie, enabled: true });
   }
-  return headers;
+  return applyDefaultUserAgentHeader(headers, request.disableUserAgentHeader);
 };
 
 const event = (sessionId: string, direction: StreamMessage['direction'], kind: string, text: string): StreamMessage => ({

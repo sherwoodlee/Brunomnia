@@ -22,6 +22,7 @@ import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
 import type { AppliedResponseMockTarget } from './lib/mockRouteFromResponse';
 import type { OAuthAuthorizationStatus } from './components/OAuthAuthorizationDialog';
 import { withoutOAuth2RuntimeCredentials } from './lib/oauth2Tokens';
+import { BRUNOMNIA_USER_AGENT, hasAuthoredUserAgentHeader, userAgentDisabledAfterHeaderChange } from './lib/userAgent';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -166,6 +167,8 @@ const findRequest = (workspace: Workspace): { request: ApiRequest; collectionId:
 type KeyValueEditorProps = {
   rows: KeyValue[];
   onChange: (rows: KeyValue[]) => void;
+  readOnlyRows?: KeyValue[];
+  onReadOnlyEnabledChange?: (row: KeyValue, enabled: boolean) => void;
   namePlaceholder?: string;
   valuePlaceholder?: string;
   detailed?: boolean;
@@ -174,6 +177,8 @@ type KeyValueEditorProps = {
 function KeyValueEditor({
   rows,
   onChange,
+  readOnlyRows = [],
+  onReadOnlyEnabledChange,
   namePlaceholder = 'Name',
   valuePlaceholder = 'Value',
   detailed = false,
@@ -190,6 +195,21 @@ function KeyValueEditor({
         {detailed ? <span>Description</span> : null}
         <span />
       </div>
+      {readOnlyRows.map((row) => (
+        <div className="kv-row read-only" key={row.id}>
+          <input
+            aria-label={`Enable default ${row.name}`}
+            checked={row.enabled}
+            className="kv-check"
+            onChange={(event) => onReadOnlyEnabledChange?.(row, event.target.checked)}
+            type="checkbox"
+          />
+          <input aria-label={namePlaceholder} readOnly spellCheck={false} value={row.name} />
+          {detailed ? <textarea aria-label={valuePlaceholder} readOnly rows={1} spellCheck={false} value={row.value} /> : <input aria-label={valuePlaceholder} readOnly spellCheck={false} value={row.value} />}
+          {detailed ? <input aria-label="Description" readOnly value={row.description ?? ''} /> : null}
+          <span aria-label="Default read-only header" className="kv-read-only"><Icon name="lock" size={13} /></span>
+        </div>
+      ))}
       {rows.map((row) => (
         <div className="kv-row" key={row.id}>
           <input
@@ -579,6 +599,12 @@ function RequestPanel({
   onToggleBulkParametersEditor,
 }: RequestPanelProps) {
   const streamProtocol = isStreamingRequest(request);
+  const hasUserAgentHeader = hasAuthoredUserAgentHeader(request.headers);
+  const changeHeaders = (headers: KeyValue[]) => onChange({
+    headers,
+    disableUserAgentHeader: userAgentDisabledAfterHeaderChange(request.headers, headers, request.disableUserAgentHeader),
+  });
+  const defaultUserAgentRow: KeyValue = { id: 'default-user-agent', name: 'User-Agent', value: BRUNOMNIA_USER_AGENT, enabled: !request.disableUserAgentHeader, description: 'Added automatically' };
   const actionLabel = streamProtocol
     ? streamStatus === 'connected' ? 'Disconnect' : streamStatus === 'reconnecting' ? 'Stop reconnecting' : streamStatus === 'connecting' ? 'Connecting' : 'Connect'
     : request.protocol === 'grpc' ? 'Invoke' : 'Send';
@@ -665,7 +691,7 @@ function RequestPanel({
           </div>
         ) : null}
         {activeTab === 'headers' && request.protocol !== 'grpc' ? (
-          <div className="editor-stack bulk-key-value-stack"><div className="editor-toolbar"><span>Request headers</span><button onClick={onToggleBulkHeaderEditor} type="button">{useBulkHeaderEditor ? 'Regular Edit' : 'Bulk Edit'}</button></div>{useBulkHeaderEditor ? <BulkKeyValueEditor ariaLabel="Bulk request headers" rows={request.headers} onChange={(headers) => onChange({ headers })} /> : <div className="bulk-regular-editor"><KeyValueEditor detailed rows={request.headers} onChange={(headers) => onChange({ headers })} namePlaceholder="Header" /></div>}</div>
+          <div className="editor-stack bulk-key-value-stack"><div className="editor-toolbar"><span>Request headers</span><button onClick={onToggleBulkHeaderEditor} type="button">{useBulkHeaderEditor ? 'Regular Edit' : 'Bulk Edit'}</button></div>{useBulkHeaderEditor ? <>{!hasUserAgentHeader ? <div className="bulk-default-header"><input aria-label="Enable default User-Agent" checked={!request.disableUserAgentHeader} onChange={(event) => onChange({ disableUserAgentHeader: !event.target.checked })} type="checkbox" /><code>User-Agent</code><code>{BRUNOMNIA_USER_AGENT}</code><span>Default read-only header</span></div> : null}<BulkKeyValueEditor ariaLabel="Bulk request headers" rows={request.headers} onChange={changeHeaders} /></> : <div className="bulk-regular-editor"><KeyValueEditor detailed readOnlyRows={hasUserAgentHeader ? [] : [defaultUserAgentRow]} rows={request.headers} onChange={changeHeaders} onReadOnlyEnabledChange={(_row, enabled) => onChange({ disableUserAgentHeader: !enabled })} namePlaceholder="Header" /></div>}</div>
         ) : null}
         {activeTab === 'headers' && request.protocol === 'grpc' ? (
           <KeyValueEditor rows={request.grpc.metadata} onChange={(metadata) => onChange({ grpc: { ...request.grpc, metadata } })} namePlaceholder="Metadata" />
@@ -979,7 +1005,7 @@ function FolderDialog({ collection, folder, environment, cookies, responses, req
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 32, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+    format: 'brunomnia', version: 33, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');

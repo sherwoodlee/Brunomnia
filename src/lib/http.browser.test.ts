@@ -10,6 +10,18 @@ vi.mock('@tauri-apps/api/core', () => ({
 afterEach(() => vi.unstubAllGlobals());
 
 describe('browser HTTP response bytes', () => {
+  it('does not inject the desktop User-Agent into browser Fetch', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const request = createBlankRequest('browser-user-agent');
+    request.url = 'https://example.test/status';
+    request.headers = [];
+
+    await sendRequest(request, undefined, { requestTimeoutMs: 0 });
+
+    expect(fetchMock).toHaveBeenCalledWith(request.url, expect.objectContaining({ headers: {} }));
+  });
+
   it('honors the request body rendering switch in browser development', async () => {
     const fetchMock = vi.fn().mockImplementation(async () => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);

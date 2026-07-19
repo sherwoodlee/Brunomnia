@@ -159,7 +159,6 @@ export type GrpcConfig = {
   reflectionApiUrl: string;
   reflectionApiKey: string;
   reflectionApiModule: string;
-  disableUserAgentHeader: boolean;
   protoText: string;
   protoFiles: GrpcProtoFile[];
   protoEntryPath: string;
@@ -302,6 +301,7 @@ export type ApiRequest = {
   pathParams: KeyValue[];
   params: KeyValue[];
   headers: KeyValue[];
+  disableUserAgentHeader: boolean;
   bodyMode: BodyMode;
   renderBodyTemplates: boolean;
   body: string;
@@ -378,7 +378,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 32;
+  version: 33;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

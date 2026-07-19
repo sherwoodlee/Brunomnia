@@ -106,9 +106,13 @@ describe('response history preferences', () => {
     historical.folderId = 'old-folder';
     const legacySnapshot = createRequestSnapshot(historical) as unknown as Record<string, unknown>;
     delete legacySnapshot.renderBodyTemplates;
+    delete legacySnapshot.disableUserAgentHeader;
+    (legacySnapshot.grpc as Record<string, unknown>).disableUserAgentHeader = true;
     const saved = { ...response('saved', 'request-a', 'dev', '2026-07-17T01:00:00.000Z'), requestSnapshot: legacySnapshot as unknown as ApiRequest };
 
-    expect(restoreRequestSnapshot(saved, current)).toMatchObject({ id: 'request-a', name: 'Historical', url: 'https://example.test/historical', folderId: 'current-folder', renderBodyTemplates: true });
+    const restored = restoreRequestSnapshot(saved, current);
+    expect(restored).toMatchObject({ id: 'request-a', name: 'Historical', url: 'https://example.test/historical', folderId: 'current-folder', renderBodyTemplates: true, disableUserAgentHeader: true });
+    expect(restored.grpc).not.toHaveProperty('disableUserAgentHeader');
   });
 
   it('ignores missing, mismatched, and malformed request versions', () => {
