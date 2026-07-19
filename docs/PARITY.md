@@ -1289,6 +1289,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Explicit `--allow-config-code`, full package/`.insorc`/`.config`/`inso.config` discovery, filtered global-option routing, deterministic license-comment normalization, and generated bundle: [`cli/brunomnia.ts`](../cli/brunomnia.ts), [`src/lib/runnerCli.ts`](../src/lib/runnerCli.ts), [`package.json`](../package.json), [`scripts/normalize-cli-bundle.mjs`](../scripts/normalize-cli-bundle.mjs), and [`bin/brunomnia.cjs`](../bin/brunomnia.cjs)
 - In-memory TypeScript transpilation plus fresh resource-limited workers, deadlines, disabled imports/host authority/code generation/external buffers, strict JSON output, and focused regressions: [`cli/configCode.ts`](../cli/configCode.ts) and [`cli/configCode.test.ts`](../cli/configCode.test.ts)
 - Default-denial/explicit-grant packaged and no-network Node 22 container evidence with updated trust guidance: [`scripts/cli-runner-preview-smoke.mjs`](../scripts/cli-runner-preview-smoke.mjs), [`scripts/cli-container-smoke.mjs`](../scripts/cli-container-smoke.mjs), [`README.md`](../README.md), [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md), [`docs/CLI_CONTAINER.md`](CLI_CONTAINER.md), and [`docs/QA_MILESTONE_226.md`](QA_MILESTONE_226.md)
+- Successful remote rebuild/smoke, AMD64/ARM64 publication, keyless digest signing, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_226.md`](QA_MILESTONE_226.md)
 
 ## Parity declaration rule
 

@@ -34,7 +34,13 @@ No Rust/native behavior changed. Milestone 220 remains the latest full native an
 
 ## Remote gate
 
-The main-branch container workflow must rebuild this larger bundle, repeat the explicit-grant TypeScript/plugin smoke, publish AMD64/ARM64 manifests, and keylessly sign the new immutable digest. This post-push observation is recorded separately rather than inferred from local Docker evidence.
+Main commit `965fce08da6b8e40f016ce079c8b1059ea53adc6` completed both jobs in [Actions run 29707916707](https://github.com/sherwoodlee/Brunomnia/actions/runs/29707916707). The Node 22 verify job rebuilt the bundle without drift and passed the read-only, no-network TypeScript/plugin smoke; the publish job emitted AMD64/ARM64 provenance and SBOM attestations and signed:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:83ed54414f9ce4fba2f08dbc50a95b7772ee3f0f8cad82635da0e4a961a1738e
+```
+
+Independent `cosign verify` passed the exact GitHub Actions issuer and `cli-container.yml@refs/heads/main` identity, validated digest claims and the trusted certificate chain, and found transparency-log entry `2204409460` for the exact M226 commit.
 
 ## Acceptance boundary
 
