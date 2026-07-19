@@ -2380,10 +2380,24 @@ Compatibility bounds remain explicit: pinned ordinary workspaces contain the req
 
 Compatibility bounds remain explicit: pinned v4/v5 standalone-suite interchange and CLI suite identity/selection remain open, while realtime/gRPC requests are not offered in the pinned HTTP-request selector contract. Raw-JSON environment editing and broader ledger gaps also remain. Collections, Collection runner, Headless CLI, and Import/export stay `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 163 — remaining parity closure and release hardening
+## Milestone 163 — raw JSON environments (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned editor audit | Complete | Pinned raw/table editors require a root object, reject NeDB-unsafe and reserved root keys, prevent invalid raw-to-table switches, warn before table losses, and convert object/array values to JSON-typed rows while keeping scalars as strings |
+| Persisted model | Complete | Workspace v36 stores optional String/JSON row types and per-scope Table/Raw modes for global, collection base/sub-, and folder environments with bounded migration defaults |
+| Shared conversion | Complete | One bounded converter formats rows, parses raw objects, preserves stable row IDs, validates nested keys/depth/size/count, drops disabled/earlier duplicate rows only after confirmation, and safely retains special object keys |
+| Reusable editor | Complete baseline | Every supported environment surface uses one labeled Table/Raw control; JSON rows open a validated code editor, raw errors remain visible, and invalid drafts block Table mode |
+| Runtime values | Complete | Typed objects and arrays retain compact root JSON plus bounded nested dot paths across HTTP/templates, global/collection/folder script stores, runners, unit tests, and collection configuration |
+| Interchange | Complete baseline | Brunomnia v36 preserves modes/types; Insomnia v4 preserves raw/table plus disabled KV rows; Insomnia v4/v5 preserve object/array data without stringifying it |
+| Executable evidence | Complete baseline | Focused 87-test coverage, 67-file/483-test frontend regressions, strict build, CLI smoke, 105 native tests, formatting/check/clippy, clean audit, and a rebuilt arm64 app verify the milestone |
+
+Compatibility bounds remain explicit: Insomnia v5 has no compatible KV-pair/editor-mode field, so v5 imports use Raw mode while preserving typed data. Rendered Browser QA remains omitted by the standing local-browser restriction. Collections and Import/export stay `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete.
+
+## Milestone 164 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
-- Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
+- Close remaining response-viewer, nested-resource, protocol, scripting, extension, collaboration, and CLI gaps
 - Cross-platform installers, signing/notarization guidance, accessibility audit, load/performance testing, and broader recovery tests
 - Declare parity only after every ledger row has reproducible evidence
 

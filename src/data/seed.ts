@@ -133,12 +133,13 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
   requests,
   folders: [],
   environment: [],
+  environmentEditorMode: 'table',
   documentation: '',
 });
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 35,
+  version: 36,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -199,18 +200,21 @@ export const seedWorkspace: Workspace = {
         { id: 'base-order-id', name: 'orderId', value: 'ord_abc123', enabled: true },
         { id: 'base-product-id', name: 'productId', value: 'prod_98765', enabled: true },
       ],
+      environmentEditorMode: 'table',
       parentId: '', private: false, color: '#7e8a91',
     },
     {
       id: 'development',
       name: 'Development',
       variables: [{ id: 'dev-base-url', name: 'baseUrl', value: 'https://api.acme.dev', enabled: true }],
+      environmentEditorMode: 'table',
       parentId: 'base-environment', private: false, color: '#66c68d',
     },
     {
       id: 'production',
       name: 'Production',
       variables: [{ id: 'prod-base-url', name: 'baseUrl', value: 'https://api.acme.com', enabled: true }],
+      environmentEditorMode: 'table',
       parentId: 'base-environment', private: false, color: '#ff9d4a',
     },
   ],

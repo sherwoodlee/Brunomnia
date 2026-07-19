@@ -62,8 +62,9 @@ export const objectVariables = (value: unknown, prefix: string): KeyValue[] => {
   return Object.entries(record).map(([name, entry], index) => ({
     id: `${prefix}-${index}`,
     name,
-    value: typeof entry === 'string' ? entry : JSON.stringify(entry),
+    value: typeof entry === 'string' ? entry : JSON.stringify(entry) ?? String(entry ?? ''),
     enabled: true,
+    valueType: entry !== null && typeof entry === 'object' ? 'json' : 'string',
   }));
 };
 

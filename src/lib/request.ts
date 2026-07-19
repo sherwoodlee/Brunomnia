@@ -1,4 +1,5 @@
 import type { ApiRequest, BodyMode, Environment, HttpResponse, KeyValue } from '../types';
+import { environmentVariables } from './environmentJson';
 
 const templatePattern = /{{\s*([^{}]+?)\s*}}/g;
 const methodPattern = /^[!#$%&'*+.^_`|~0-9A-Z-]+$/;
@@ -8,15 +9,10 @@ export const normalizeHttpMethod = (value: string, fallback = 'GET'): string => 
   return method && method.length <= 32 && methodPattern.test(method) ? method : fallback;
 };
 
-export const environmentMap = (environment: Environment | undefined): Record<string, string> =>
-  Object.fromEntries(
-    (environment?.variables ?? [])
-      .filter((variable) => variable.enabled && variable.name.trim())
-      .map((variable) => [variable.name.trim(), variable.value]),
-  );
+export const environmentMap = (environment: Environment | undefined): Record<string, string> => environmentVariables(environment?.variables ?? []);
 
 export const resolveTemplate = (value: string, variables: Record<string, string>): string =>
-  value.replace(templatePattern, (match, name: string) => variables[name] ?? match);
+  value.replace(templatePattern, (match, name: string) => Object.hasOwn(variables, name) ? variables[name] : match);
 
 export const buildRequestUrl = (request: ApiRequest, variables: Record<string, string>): string => {
   let rawUrl = resolveTemplate(request.url, variables);

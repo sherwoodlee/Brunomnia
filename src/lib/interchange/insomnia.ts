@@ -6,6 +6,23 @@ import { emptyResources, type ArtifactImport } from './types';
 
 const joinScripts = (...scripts: unknown[]) => scripts.map((script) => asString(script)).filter(Boolean).join('\n\n');
 
+const insomniaEnvironmentMode = (raw: UnknownRecord): 'table' | 'raw' => raw.environmentType === 'kv' ? 'table' : 'raw';
+
+const insomniaEnvironmentRows = (raw: UnknownRecord, dataKey: 'data' | 'environment', prefix: string): KeyValue[] => {
+  const pairs = asArray(raw.kvPairData).flatMap((value, index): KeyValue[] => {
+    const pair = asRecord(value);
+    if (!pair) return [];
+    return [{
+      id: asString(pair.id, `${prefix}-${index}`),
+      name: asString(pair.name),
+      value: asString(pair.value),
+      enabled: pair.enabled !== false,
+      valueType: pair.type === 'json' ? 'json' : 'string',
+    }];
+  });
+  return raw.environmentType === 'kv' && pairs.length ? pairs : objectVariables(raw[dataKey], prefix);
+};
+
 const applyInsomniaAuth = (request: ApiRequest, rawValue: unknown, format: string, warnings: ImportWarning[]) => {
   const auth = asRecord(rawValue);
   const type = asString(auth?.type);
@@ -224,7 +241,7 @@ const folderConfig = (raw: UnknownRecord, format: 'insomnia-v4' | 'insomnia-v5',
   const meta = asRecord(raw.meta);
   const rawEnvironment = Array.isArray(raw.environment)
     ? keyValues(raw.environment, `${id}-environment`)
-    : objectVariables(raw.environment, `${id}-environment`);
+    : insomniaEnvironmentRows(raw, 'environment', `${id}-environment`);
   return {
     id,
     name: asString(raw.name, `Folder ${index + 1}`),
@@ -232,6 +249,7 @@ const folderConfig = (raw: UnknownRecord, format: 'insomnia-v4' | 'insomnia-v5',
     expanded: true,
     headers: keyValues(raw.headers, `${id}-header`),
     environment: rawEnvironment,
+    environmentEditorMode: Array.isArray(raw.environment) ? 'table' : insomniaEnvironmentMode(raw),
     auth: raw.authentication ? authRequest.auth : undefined,
     preRequestScript: joinScripts(raw.preRequestScript, scripts?.preRequest),
     tests: joinScripts(raw.afterResponseScript, scripts?.afterResponse),
@@ -262,7 +280,8 @@ const v4Environments = (resources: UnknownRecord[], workspaceId: string, format:
   return selected.map((environment, index) => ({
     id: ids.get(asString(environment._id))!,
     name: asString(environment.name, `Environment ${index + 1}`),
-    variables: objectVariables(environment.data, `insomnia-v4-env-${index}`),
+    variables: insomniaEnvironmentRows(environment, 'data', `insomnia-v4-env-${index}`),
+    environmentEditorMode: insomniaEnvironmentMode(environment),
     parentId: ids.get(asString(environment.parentId)) ?? '',
     source: sourceMetadata(format, environment._id, { parentId: environment.parentId }),
   }));
@@ -272,7 +291,8 @@ const collectionEnvironmentFields = (environments: Environment[]) => {
   const base = environments.find((environment) => !environment.parentId) ?? environments[0];
   return {
     environment: base?.variables ?? [],
-    subEnvironments: environments.filter((environment) => environment.id !== base?.id).map((environment) => ({ id: environment.id, name: environment.name, variables: environment.variables })),
+    environmentEditorMode: base?.environmentEditorMode ?? 'table',
+    subEnvironments: environments.filter((environment) => environment.id !== base?.id).map((environment) => ({ id: environment.id, name: environment.name, variables: environment.variables, environmentEditorMode: environment.environmentEditorMode })),
     activeSubEnvironmentId: '',
   };
 };
@@ -495,11 +515,11 @@ const v5Environments = (document: UnknownRecord, prefix: string): Environment[] 
   if (!root) return [];
   const environments: Environment[] = [{
     id: sourceId('environment', 'insomnia-v5', asString(asRecord(root.meta)?.id, `${prefix}-base`)),
-    name: asString(root.name, 'Base Environment'), variables: objectVariables(root.data, `${prefix}-base`), source: sourceMetadata('insomnia-v5', asRecord(root.meta)?.id),
+    name: asString(root.name, 'Base Environment'), variables: objectVariables(root.data, `${prefix}-base`), environmentEditorMode: 'raw', source: sourceMetadata('insomnia-v5', asRecord(root.meta)?.id),
   }];
   const baseId = environments[0].id;
   asArray(root.subEnvironments).map(asRecord).filter((environment): environment is UnknownRecord => Boolean(environment)).forEach((environment, index) => {
-    environments.push({ id: sourceId('environment', 'insomnia-v5', asString(asRecord(environment.meta)?.id, `${prefix}-${index}`)), name: asString(environment.name, `Environment ${index + 1}`), variables: objectVariables(environment.data, `${prefix}-${index}`), parentId: baseId, source: sourceMetadata('insomnia-v5', asRecord(environment.meta)?.id) });
+    environments.push({ id: sourceId('environment', 'insomnia-v5', asString(asRecord(environment.meta)?.id, `${prefix}-${index}`)), name: asString(environment.name, `Environment ${index + 1}`), variables: objectVariables(environment.data, `${prefix}-${index}`), environmentEditorMode: 'raw', parentId: baseId, source: sourceMetadata('insomnia-v5', asRecord(environment.meta)?.id) });
   });
   return environments;
 };

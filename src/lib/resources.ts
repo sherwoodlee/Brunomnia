@@ -1,4 +1,5 @@
 import type { ApiRequest, Collection, Environment, KeyValue, RequestFolder, Workspace } from '../types';
+import { environmentRowVariables } from './environmentJson';
 
 export type VariableScope = { values: Record<string, string>; disabled: string[] };
 
@@ -353,8 +354,12 @@ export const variableScope = (layers: KeyValue[][]): VariableScope => {
   layers.forEach((rows) => rows.forEach((row) => {
     const name = row.name.trim();
     if (!name) return;
-    if (row.enabled) { values[name] = row.value; disabled.delete(name); }
-    else { delete values[name]; disabled.add(name); }
+    Object.keys(values).filter((key) => key === name || key.startsWith(`${name}.`)).forEach((key) => delete values[key]);
+    if (row.enabled) {
+      Object.entries(environmentRowVariables(row)).forEach(([key, value]) => Object.defineProperty(values, key, { configurable: true, enumerable: true, value, writable: true }));
+      disabled.delete(name);
+    }
+    else { disabled.add(name); }
   }));
   return { values, disabled: [...disabled] };
 };

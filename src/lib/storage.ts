@@ -22,10 +22,12 @@ const governanceRoles: GovernanceRole[] = ['owner', 'admin', 'editor', 'viewer']
 const storageModes: GovernancePolicy['allowedStorage'] = ['local', 'folder', 'git', 'encrypted-file'];
 const record = (value: unknown) => value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
 const stringValue = (value: unknown, fallback = '') => typeof value === 'string' ? value : fallback;
+const environmentEditorMode = (value: unknown) => value === 'raw' ? 'raw' as const : 'table' as const;
 const normalizeRows = (value: unknown, prefix: string): KeyValue[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
   const row = record(item);
   if (!row) return [];
-  return [{ id: stringValue(row.id, `${prefix}-${index}`), name: stringValue(row.name), value: stringValue(row.value), enabled: row.enabled !== false, description: stringValue(row.description).slice(0, 20_000), ...(row.multiline === true ? { multiline: true } : {}) }];
+  const valueType = row.valueType === 'json' ? 'json' as const : 'string' as const;
+  return [{ id: stringValue(row.id, `${prefix}-${index}`), name: stringValue(row.name), value: stringValue(row.value), enabled: row.enabled !== false, description: stringValue(row.description).slice(0, 20_000), ...(row.multiline === true ? { multiline: true } : {}), ...(valueType === 'json' ? { valueType } : {}) }];
 }).slice(0, 1_000);
 
 const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
@@ -435,6 +437,7 @@ const normalizeFolders = (value: unknown, defaultAuth: AuthConfig): RequestFolde
       expanded: folder.expanded !== false,
       headers: normalizeRows(folder.headers, `${id}-header`),
       environment: normalizeRows(folder.environment, `${id}-environment`),
+      environmentEditorMode: environmentEditorMode(folder.environmentEditorMode),
       auth: folder.auth ? { ...defaultAuth, ...record(folder.auth) } as AuthConfig : undefined,
       preRequestScript: stringValue(folder.preRequestScript),
       tests: stringValue(folder.tests),
@@ -470,6 +473,7 @@ const normalizeCollectionEnvironments = (value: unknown, collectionId: string) =
     id,
     name: stringValue(environment.name, `Environment ${index + 1}`),
     variables: normalizeRows(environment.variables, `${id}-variable`),
+    environmentEditorMode: environmentEditorMode(environment.environmentEditorMode),
   }];
 });
 
@@ -480,7 +484,7 @@ const normalizeEnvironments = (value: unknown, fallback: Environment[]): Environ
     if (!environment) return [];
     const id = stringValue(environment.id, `migrated-environment-${index}`);
     const color = stringValue(environment.color);
-    return [{ id, name: stringValue(environment.name, `Environment ${index + 1}`), variables: normalizeRows(environment.variables, `${id}-variable`), parentId: stringValue(environment.parentId), private: environment.private === true, color: /^#[0-9a-f]{6}$/i.test(color) ? color : '', source: environment.source as Environment['source'] }];
+    return [{ id, name: stringValue(environment.name, `Environment ${index + 1}`), variables: normalizeRows(environment.variables, `${id}-variable`), environmentEditorMode: environmentEditorMode(environment.environmentEditorMode), parentId: stringValue(environment.parentId), private: environment.private === true, color: /^#[0-9a-f]{6}$/i.test(color) ? color : '', source: environment.source as Environment['source'] }];
   });
   if (!environments.length) return fallback;
   const ids = new Set(environments.map((environment) => environment.id));
@@ -596,6 +600,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     ...collection,
     folders: normalizeFolders(collection.folders, defaults.auth),
     environment: normalizeRows(collection.environment, `${collection.id}-environment`),
+    environmentEditorMode: environmentEditorMode(collection.environmentEditorMode),
     subEnvironments: normalizeCollectionEnvironments(collection.subEnvironments, collection.id),
     activeSubEnvironmentId: stringValue(collection.activeSubEnvironmentId),
     documentation: stringValue(collection.documentation),
@@ -765,7 +770,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const testSuites = normalizeTestSuites(workspace.testSuites, requestIds);
   return {
     ...workspace,
-    version: 35,
+    version: 36,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

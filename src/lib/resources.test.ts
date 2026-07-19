@@ -80,6 +80,22 @@ describe('resource hierarchy', () => {
     });
   });
 
+  it('exposes nested JSON values in global, collection, and folder script scopes', () => {
+    const jsonRow = (id: string, name: string, value: string) => ({ ...row(id, name, value), valueType: 'json' as const });
+    const environments: Environment[] = [{ id: 'base', name: 'Base', variables: [jsonRow('global', 'service', '{"host":"global","tls":{"enabled":true}}')] }];
+    const collection: Collection = {
+      id: 'collection', name: 'Collection', expanded: true, requests: [],
+      environment: [jsonRow('collection', 'client', '{"retries":3}')],
+      subEnvironments: [{ id: 'selected', name: 'Selected', variables: [jsonRow('selected', 'region', '{"name":"west"}')] }],
+      activeSubEnvironmentId: 'selected',
+    };
+    expect(scriptEnvironmentScopes(environments, 'base')?.globals.values).toMatchObject({ 'service.host': 'global', 'service.tls.enabled': 'true' });
+    expect(collectionEnvironmentScopes(collection)).toMatchObject({
+      baseEnvironment: { values: expect.objectContaining({ 'client.retries': '3' }) },
+      environment: { values: expect.objectContaining({ 'region.name': 'west' }) },
+    });
+  });
+
   it('removes private environments from shareable sets', () => {
     expect(publicEnvironments([
       { id: 'base', name: 'Base', variables: [] },

@@ -25,9 +25,10 @@ describe('artifact export adapters', () => {
     workspace.collections[0].requests[1].name = 'Form controls';
     workspace.collections[0].requests[1].bodyMode = 'form-urlencoded';
     workspace.collections[0].requests[1].formBody = [{ id: 'form-value', name: 'notes', value: 'one\ntwo', enabled: false, description: 'Multiline notes', multiline: true }];
-    workspace.collections[0].folders = [{ id: 'orders-folder', name: 'Secured orders', parentId: '', expanded: true, headers: [{ id: 'folder-header', name: 'X-Team', value: 'orders', enabled: true }], environment: [{ id: 'folder-variable', name: 'scope', value: 'orders', enabled: true }], auth: { ...workspace.collections[0].requests[0].auth, type: 'bearer', token: '{{ vault.orders }}' }, preRequestScript: 'folderPre();', tests: 'folderAfter();', documentation: 'Folder docs' }];
-    workspace.collections[0].environment = [{ id: 'collection-base', name: 'region', value: 'base', enabled: true }];
-    workspace.collections[0].subEnvironments = [{ id: 'collection-staging', name: 'Staging', variables: [{ id: 'collection-selected', name: 'region', value: 'staging', enabled: true }] }];
+    workspace.collections[0].folders = [{ id: 'orders-folder', name: 'Secured orders', parentId: '', expanded: true, headers: [{ id: 'folder-header', name: 'X-Team', value: 'orders', enabled: true }], environment: [{ id: 'folder-variable', name: 'scope', value: 'orders', enabled: true }, { id: 'folder-json', name: 'limits', value: '{"retries":3}', valueType: 'json', enabled: true }], environmentEditorMode: 'raw', auth: { ...workspace.collections[0].requests[0].auth, type: 'bearer', token: '{{ vault.orders }}' }, preRequestScript: 'folderPre();', tests: 'folderAfter();', documentation: 'Folder docs' }];
+    workspace.collections[0].environment = [{ id: 'collection-base', name: 'region', value: 'base', enabled: true }, { id: 'collection-json', name: 'service', value: '{"host":"api.example"}', valueType: 'json', enabled: true }];
+    workspace.collections[0].environmentEditorMode = 'raw';
+    workspace.collections[0].subEnvironments = [{ id: 'collection-staging', name: 'Staging', environmentEditorMode: 'table', variables: [{ id: 'collection-selected', name: 'region', value: 'staging', enabled: true }, { id: 'collection-disabled', name: 'disabled', value: 'kept in v4 table data', enabled: false }] }];
     workspace.collections[0].activeSubEnvironmentId = 'collection-staging';
     workspace.collections[0].requests[0].folderId = 'orders-folder';
     const grpcRequest = workspace.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'grpc')!;
@@ -61,7 +62,11 @@ describe('artifact export adapters', () => {
     expect(v4Import.cookies[0]).toMatchObject({ name: 'session', sameSite: 'lax' });
     expect(v4Import.cookies).toHaveLength(1);
     expect(v4Import.collections[0].environment?.[0]).toMatchObject({ name: 'region', value: 'base' });
-    expect(v4Import.collections[0].subEnvironments?.[0]).toMatchObject({ name: 'Staging', variables: [expect.objectContaining({ name: 'region', value: 'staging' })] });
+    expect(v4Import.collections[0]).toMatchObject({ environmentEditorMode: 'raw', environment: expect.arrayContaining([expect.objectContaining({ name: 'service', valueType: 'json' })]) });
+    expect(v4Import.collections[0].subEnvironments?.[0]).toMatchObject({ name: 'Staging' });
+    expect(v4Import.collections[0].subEnvironments?.[0].variables).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'region', value: 'staging' })]));
+    expect(v4Import.collections[0].subEnvironments?.[0]).toMatchObject({ environmentEditorMode: 'table', variables: expect.arrayContaining([expect.objectContaining({ name: 'disabled', enabled: false })]) });
+    expect(v4Import.collections[0].folders?.[0]).toMatchObject({ environmentEditorMode: 'raw', environment: expect.arrayContaining([expect.objectContaining({ name: 'limits', valueType: 'json' })]) });
     expect(v4Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'socketio')).toMatchObject({ socketIo: { path: '/socket.io', eventName: 'message', ack: true, eventListeners: [expect.objectContaining({ eventName: 'order.updated', enabled: true })] } });
     expect(v4Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'grpc')).toMatchObject({ disableUserAgentHeader: true, grpc: { descriptorSource: 'buf', reflectionApiUrl: 'https://buf.example.com', reflectionApiKey: '{{ vault.buf }}', reflectionApiModule: 'buf.build/acme/greeter' } });
 
@@ -84,7 +89,10 @@ describe('artifact export adapters', () => {
     expect(v5Import.collections[0].requests[0].folderId).toBe(v5Import.collections[0].folders?.[0].id);
     expect(v5Import.cookies[0]).toMatchObject({ name: 'session', sameSite: 'lax' });
     expect(v5Import.collections[0].environment?.[0]).toMatchObject({ name: 'region', value: 'base' });
-    expect(v5Import.collections[0].subEnvironments?.[0]).toMatchObject({ name: 'Staging', variables: [expect.objectContaining({ name: 'region', value: 'staging' })] });
+    expect(v5Import.collections[0].environment).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'service', valueType: 'json' })]));
+    expect(v5Import.collections[0].subEnvironments?.[0]).toMatchObject({ name: 'Staging' });
+    expect(v5Import.collections[0].subEnvironments?.[0].variables).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'region', value: 'staging' })]));
+    expect(v5Import.collections[0].folders?.[0]?.environment).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'limits', valueType: 'json' })]));
     expect(v5Import.environments.length).toBeGreaterThan(0);
     expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'socketio')).toMatchObject({ socketIo: { path: '/socket.io', eventName: 'message', ack: true, eventListeners: [expect.objectContaining({ eventName: 'order.updated', enabled: true })] } });
     expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'grpc')).toMatchObject({ disableUserAgentHeader: true, grpc: { descriptorSource: 'buf', reflectionApiUrl: 'https://buf.example.com', reflectionApiKey: '{{ vault.buf }}', reflectionApiModule: 'buf.build/acme/greeter' } });
@@ -201,7 +209,7 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(35);
+    expect(parsed.version).toBe(36);
     expect(parsed.testSuites).toEqual([expect.objectContaining({ id: 'suite', tests: [expect.objectContaining({ id: 'included' })] })]);
     expect(parsed.unitTestResults).toEqual([expect.objectContaining({ id: 'run', suiteId: 'suite', tests: [expect.objectContaining({ testId: 'included' })] })]);
     expect(parsed.certificates.clients[0]).toMatchObject({ pfxBase64: 'cGZ4', passphrase: 'secret' });

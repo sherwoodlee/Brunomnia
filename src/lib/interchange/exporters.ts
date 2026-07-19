@@ -3,6 +3,7 @@ import type { ApiRequest, Environment, ImportWarning, Workspace } from '../../ty
 import type { ArtifactExport, ExportFormat, ExportScope } from './types';
 import { normalizeGrpcProtoTree } from '../grpcProto';
 import { orderedCollectionChildren, publicEnvironments } from '../resources';
+import { environmentRowsToObject } from '../environmentJson';
 
 export type ExportOptions = {
   format: ExportFormat;
@@ -12,6 +13,15 @@ export type ExportOptions = {
 };
 
 const safeName = (value: string) => value.trim().replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'brunomnia-export';
+
+const environmentData = (rows: Workspace['environments'][number]['variables']) => environmentRowsToObject(rows).object
+  ?? Object.fromEntries(rows.filter((row) => row.enabled && row.name.trim()).map((row) => [row.name.trim(), row.value]));
+
+const insomniaV4EnvironmentFields = (rows: Workspace['environments'][number]['variables'], mode: 'table' | 'raw' | undefined, dataKey: 'data' | 'environment' = 'data') => ({
+  [dataKey]: environmentData(rows),
+  environmentType: mode === 'raw' ? 'json' : 'kv',
+  kvPairData: mode === 'raw' ? [] : rows.map((row) => ({ id: row.id, name: row.name, value: row.value, type: row.valueType === 'json' ? 'json' : 'str', enabled: row.enabled })),
+});
 
 const selectedCollections = (workspace: Workspace, options: ExportOptions) => options.scope === 'collection'
   ? workspace.collections.filter((collection) => collection.id === options.collectionId)
@@ -159,8 +169,8 @@ const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): Artifac
     resources.push({ _id: workspaceId, parentId: null, modified: Date.now(), created: Date.now(), name: collection.name, description: collection.documentation ?? '', scope: 'collection', _type: 'workspace' });
     resources.push({ _id: `__COOKIE_JAR_${collectionIndex + 1}__`, parentId: workspaceId, modified: Date.now(), created: Date.now(), name: 'Default Jar', cookies: workspace.cookies.map(insomniaCookie), _type: 'cookie_jar' });
     const baseEnvironmentId = `__BASE_ENVIRONMENT_${collectionIndex + 1}__`;
-    resources.push({ _id: baseEnvironmentId, parentId: workspaceId, modified: Date.now(), created: Date.now(), name: 'Base Environment', data: Object.fromEntries((collection.environment ?? []).filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])), _type: 'environment' });
-    (collection.subEnvironments ?? []).forEach((environment, environmentIndex) => resources.push({ _id: `__ENVIRONMENT_${collectionIndex + 1}_${environmentIndex + 1}__`, parentId: baseEnvironmentId, modified: Date.now(), created: Date.now(), name: environment.name, data: Object.fromEntries(environment.variables.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])), _type: 'environment' }));
+    resources.push({ _id: baseEnvironmentId, parentId: workspaceId, modified: Date.now(), created: Date.now(), name: 'Base Environment', ...insomniaV4EnvironmentFields(collection.environment ?? [], collection.environmentEditorMode), _type: 'environment' });
+    (collection.subEnvironments ?? []).forEach((environment, environmentIndex) => resources.push({ _id: `__ENVIRONMENT_${collectionIndex + 1}_${environmentIndex + 1}__`, parentId: baseEnvironmentId, modified: Date.now(), created: Date.now(), name: environment.name, ...insomniaV4EnvironmentFields(environment.variables, environment.environmentEditorMode), _type: 'environment' }));
     const folders = collection.folders ?? [];
     const foldersById = new Map(folders.map((folder) => [folder.id, folder]));
     const requestsById = new Map(collection.requests.map((request) => [request.id, request]));
@@ -175,7 +185,7 @@ const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): Artifac
           resources.push({
             _id: folderId, parentId: exportedParentId, modified: Date.now(), created: Date.now(), name: folder.name, description: folder.documentation, metaSortKey: siblingIndex,
             headers: folder.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })),
-            environment: Object.fromEntries(folder.environment.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])),
+            ...insomniaV4EnvironmentFields(folder.environment, folder.environmentEditorMode, 'environment'),
             authentication: folder.auth ? insomniaAuth(folder.auth) : undefined,
             preRequestScript: folder.preRequestScript, afterResponseScript: folder.tests, _type: 'request_group',
           });
@@ -205,16 +215,16 @@ const v5GlobalEnvironment = (environments: Environment[], prefix: string) => {
   return {
     name: base?.name ?? 'Base Environment',
     meta: { id: `${prefix}-environment-base` },
-    data: Object.fromEntries((base?.variables ?? []).filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])),
-    subEnvironments: subEnvironments.map((environment, index) => ({ name: environment.name, meta: { id: `${prefix}-environment-${index + 1}` }, data: Object.fromEntries(environment.variables.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])) })),
+    data: environmentData(base?.variables ?? []),
+    subEnvironments: subEnvironments.map((environment, index) => ({ name: environment.name, meta: { id: `${prefix}-environment-${index + 1}` }, data: environmentData(environment.variables) })),
   };
 };
 
 const v5CollectionEnvironment = (collection: Workspace['collections'][number], prefix: string) => ({
   name: 'Base Environment',
   meta: { id: `${prefix}-environment-base` },
-  data: Object.fromEntries((collection.environment ?? []).filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])),
-  subEnvironments: (collection.subEnvironments ?? []).map((environment, index) => ({ name: environment.name, meta: { id: `${prefix}-environment-${index + 1}` }, data: Object.fromEntries(environment.variables.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])) })),
+  data: environmentData(collection.environment ?? []),
+  subEnvironments: (collection.subEnvironments ?? []).map((environment, index) => ({ name: environment.name, meta: { id: `${prefix}-environment-${index + 1}` }, data: environmentData(environment.variables) })),
 });
 
 const v5Request = (request: ApiRequest, index: number, sortKey: number, warnings: ImportWarning[], prefix: string) => {
@@ -261,7 +271,7 @@ const v5Collection = (collection: Workspace['collections'][number], warnings: Im
         meta: { id: `${prefix}-folder-${folder.id}`, description: folder.documentation, sortKey: siblingIndex },
         headers: folder.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })),
         authentication: folder.auth ? insomniaAuth(folder.auth) : undefined,
-        environment: Object.fromEntries(folder.environment.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])),
+        environment: environmentData(folder.environment),
         scripts: { preRequest: folder.preRequestScript, afterResponse: folder.tests },
         children: children(folder.id),
       }];

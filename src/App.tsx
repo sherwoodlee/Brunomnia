@@ -20,6 +20,7 @@ import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWor
 import type { WorkspaceEnvironmentMove, WorkspaceResourceKeyboardAction, WorkspaceResourceMove } from './lib/resources';
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
+import { environmentRowsToObject, formatEnvironmentJson, parseEnvironmentJson } from './lib/environmentJson';
 import { parsePinnedRequestIds, pinnedWorkspaceRequests, reconcilePinnedRequestIds, togglePinnedRequestId } from './lib/requestPins';
 import { closeAllRequestTabs, closeOtherRequestTabs, closeRequestTab, cycleRequestTab, emptyRequestTabState, moveRequestTab, openDocumentTab, openRequestTab, parseRequestTabState, promoteRequestTab, reconcileRequestTabState, reopenClosedDocumentTab } from './lib/requestTabs';
 import type { DocumentTabReference, DocumentTabType, RequestTabPlacement, RequestTabState } from './lib/requestTabs';
@@ -151,12 +152,10 @@ const scriptVariableRows = (values: Record<string, string>, existing: KeyValue[]
   ];
 };
 
-const scriptFolderVariables = (folders: RequestFolder[]) => folders.map((folder) => ({
-  id: folder.id,
-  name: folder.name,
-  environment: Object.fromEntries(folder.environment.filter((row) => row.enabled && row.name).map((row) => [row.name, row.value])),
-  disabled: folder.environment.filter((row) => !row.enabled && row.name).map((row) => row.name),
-}));
+const scriptFolderVariables = (folders: RequestFolder[]) => folders.map((folder) => {
+  const scope = variableScope([folder.environment]);
+  return { id: folder.id, name: folder.name, environment: scope.values, disabled: scope.disabled };
+});
 
 const mergedScriptVariables = (result: ScriptRunResult, scopes: ScriptRunOptions): Record<string, string> => {
   const values: Record<string, string> = {};
@@ -205,6 +204,7 @@ type KeyValueEditorProps = {
   namePlaceholder?: string;
   valuePlaceholder?: string;
   detailed?: boolean;
+  environmentValues?: boolean;
 };
 
 function KeyValueEditor({
@@ -215,16 +215,36 @@ function KeyValueEditor({
   namePlaceholder = 'Name',
   valuePlaceholder = 'Value',
   detailed = false,
+  environmentValues = false,
 }: KeyValueEditorProps) {
+  const [editingJsonRowId, setEditingJsonRowId] = useState('');
+  const [jsonDraft, setJsonDraft] = useState('');
+  const [jsonError, setJsonError] = useState('');
   const update = (id: string, patch: Partial<KeyValue>) =>
     onChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  const validateJsonValue = (row: KeyValue, value: string) => environmentRowsToObject(rows.map((candidate) => candidate.id === row.id ? { ...candidate, value, valueType: 'json' } : candidate)).error ?? '';
+  const changeValueType = (row: KeyValue, valueType: NonNullable<KeyValue['valueType']>) => {
+    if (valueType === 'string') {
+      update(row.id, { valueType });
+      return;
+    }
+    const value = row.value.trim() ? row.value : '{}';
+    const error = validateJsonValue(row, value);
+    if (error) {
+      window.alert(error);
+      return;
+    }
+    update(row.id, { value, valueType });
+  };
+  const editingJsonRow = rows.find((row) => row.id === editingJsonRowId);
 
   return (
-    <div className={`kv-editor${detailed ? ' detailed' : ''}`}>
+    <div className={`kv-editor${detailed ? ' detailed' : ''}${environmentValues ? ' typed' : ''}`}>
       <div className="kv-header">
         <span />
         <span>{namePlaceholder}</span>
         <span>{valuePlaceholder}</span>
+        {environmentValues ? <span>Type</span> : null}
         {detailed ? <span>Description</span> : null}
         <span />
       </div>
@@ -253,7 +273,16 @@ function KeyValueEditor({
             spellCheck={false}
             value={row.name}
           />
-          {detailed ? <textarea
+          {environmentValues && row.valueType === 'json' ? <button
+            aria-label={`Edit JSON value for ${row.name || 'row'}`}
+            className="kv-json-value"
+            onClick={() => {
+              setEditingJsonRowId(row.id);
+              setJsonDraft(row.value);
+              setJsonError(validateJsonValue(row, row.value));
+            }}
+            type="button"
+          ><Icon name="code" size={13} /> Edit JSON</button> : detailed ? <textarea
             aria-label={valuePlaceholder}
             onChange={(event) => update(row.id, { value: event.target.value })}
             placeholder={valuePlaceholder}
@@ -267,6 +296,7 @@ function KeyValueEditor({
             spellCheck={false}
             value={row.value}
           />}
+          {environmentValues ? <select aria-label={`Type for ${row.name || 'row'}`} onChange={(event) => changeValueType(row, event.target.value as NonNullable<KeyValue['valueType']>)} value={row.valueType ?? 'string'}><option value="string">String</option><option value="json">JSON</option></select> : null}
           {detailed ? <input aria-label="Description" onChange={(event) => update(row.id, { description: event.target.value })} placeholder="Description" value={row.description ?? ''} /> : null}
           <button
             aria-label="Remove row"
@@ -285,8 +315,61 @@ function KeyValueEditor({
       >
         <Icon name="plus" size={14} /> Add row
       </button>
+      {editingJsonRow ? <div className="modal-backdrop environment-json-value-backdrop" role="presentation" onMouseDown={() => setEditingJsonRowId('')}><section aria-labelledby="environment-json-value-title" aria-modal="true" className="modal environment-json-value-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog"><header><div><small>Environment variable</small><h2 id="environment-json-value-title">{editingJsonRow.name || 'JSON value'}</h2></div><button aria-label="Close" className="icon-button subtle" onClick={() => setEditingJsonRowId('')} type="button"><Icon name="x" /></button></header><div className="environment-json-value-editor"><CodeEditor ariaLabel={`JSON value for ${editingJsonRow.name || 'row'}`} onChange={(value) => { setJsonDraft(value); setJsonError(validateJsonValue(editingJsonRow, value)); }} value={jsonDraft} /></div>{jsonError ? <p className="environment-editor-error" role="alert">{jsonError}</p> : null}<footer><button className="secondary-button" onClick={() => setEditingJsonRowId('')} type="button">Cancel</button><button className="primary-button" disabled={Boolean(jsonError)} onClick={() => { const error = validateJsonValue(editingJsonRow, jsonDraft); if (error) { setJsonError(error); return; } update(editingJsonRow.id, { value: jsonDraft, valueType: 'json' }); setEditingJsonRowId(''); }} type="button">Done</button></footer></section></div> : null}
     </div>
   );
+}
+
+type EnvironmentVariablesEditorProps = {
+  rows: KeyValue[];
+  mode?: 'table' | 'raw';
+  onChange: (rows: KeyValue[], mode: 'table' | 'raw') => void;
+};
+
+function EnvironmentVariablesEditor({ rows, mode = 'table', onChange }: EnvironmentVariablesEditorProps) {
+  const formatted = useMemo(() => formatEnvironmentJson(rows), [rows]);
+  const [draft, setDraft] = useState(() => formatted.source ?? '{}');
+  const [error, setError] = useState(() => formatted.error ?? '');
+  const previousMode = useRef(mode);
+  useEffect(() => {
+    if (mode === 'table' || previousMode.current !== mode) {
+      setDraft(formatted.source ?? '{}');
+      setError(formatted.error ?? '');
+    }
+    previousMode.current = mode;
+  }, [formatted.error, formatted.source, mode]);
+  const switchMode = (nextMode: 'table' | 'raw') => {
+    if (nextMode === mode) return;
+    if (nextMode === 'raw') {
+      if (!formatted.source || formatted.error) {
+        window.alert(formatted.error || 'The environment cannot be converted to raw JSON.');
+        return;
+      }
+      const warnings = [
+        formatted.disabledNames.length ? 'All disabled items will be lost.' : '',
+        formatted.duplicateNames.length ? 'Items with the same name will be lost except the last one.' : '',
+      ].filter(Boolean);
+      if (warnings.length && !window.confirm(`${warnings.join('\n')}\n\nContinue?`)) return;
+      const parsed = parseEnvironmentJson(formatted.source, rows, () => uid('variable'));
+      if (!parsed.rows) {
+        window.alert(parsed.error || 'The environment cannot be converted to raw JSON.');
+        return;
+      }
+      setDraft(formatted.source);
+      setError('');
+      onChange(parsed.rows, 'raw');
+      return;
+    }
+    const parsed = parseEnvironmentJson(draft, rows, () => uid('variable'));
+    if (!parsed.rows) {
+      setError(parsed.error || 'Please fix the raw JSON before switching to Table view.');
+      window.alert('Please modify and fix the JSON error before switching to Table view.');
+      return;
+    }
+    setError('');
+    onChange(parsed.rows, 'table');
+  };
+  return <section className="environment-variable-editor"><div className="environment-editor-toolbar" role="tablist" aria-label="Environment editor mode"><button aria-selected={mode === 'table'} className={mode === 'table' ? 'active' : ''} onClick={() => switchMode('table')} role="tab" type="button">Table</button><button aria-selected={mode === 'raw'} className={mode === 'raw' ? 'active' : ''} onClick={() => switchMode('raw')} role="tab" type="button">Raw JSON</button></div>{mode === 'table' ? <><KeyValueEditor environmentValues namePlaceholder="Variable" onChange={(nextRows) => onChange(nextRows, 'table')} rows={rows} />{formatted.error ? <p className="environment-editor-error" role="alert">{formatted.error}</p> : null}</> : <div className="environment-raw-editor"><CodeEditor ariaLabel="Raw environment JSON" onChange={(value) => { setDraft(value); const parsed = parseEnvironmentJson(value, rows, () => uid('variable')); if (!parsed.rows) { setError(parsed.error || 'Invalid environment JSON.'); return; } setError(''); onChange(parsed.rows, 'raw'); }} value={draft} />{error ? <p className="environment-editor-error" role="alert">{error}</p> : null}</div>}</section>;
 }
 
 function BulkKeyValueEditor({ rows, onChange, ariaLabel }: { rows: KeyValue[]; onChange: (rows: KeyValue[]) => void; ariaLabel: string }) {
@@ -1171,7 +1254,7 @@ function EnvironmentDocumentPanel({ environments, activeId, documentTabStrip, on
         <div className="environment-identity"><label>Name<input onChange={(event) => onChange({ ...environment, name: event.target.value })} value={environment.name} /></label><label>Parent<select onChange={(event) => { const parentId = event.target.value; onChange({ ...environment, parentId, private: parentId ? environment.private || !publicIds.has(parentId) : false }); }} value={environment.parentId ?? ''}><option value="">None (base)</option>{environments.filter((candidate) => candidate.id !== environment.id && !environmentAncestors(environments, candidate.id).some((ancestor) => ancestor.id === environment.id)).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label><label>Color<input onChange={(event) => onChange({ ...environment, color: event.target.value })} type="color" value={environment.color || '#7e8a91'} /></label><label className="private-environment"><input checked={environment.private === true} disabled={!environment.parentId || !publicIds.has(environment.parentId)} onChange={(event) => onChange({ ...environment, private: event.target.checked })} type="checkbox" /> Private on this device</label></div>
         <p>Own values override inherited values immediately. Private sub-environments are omitted from project sync and exports; use vault references for encrypted secrets.</p>
         {inherited.length ? <div className="inherited-variables"><strong>Inherited from parent</strong>{inherited.map((variable) => <span key={variable.name}><code>{variable.name}</code><em>{variable.value}</em></span>)}</div> : null}
-        <KeyValueEditor rows={environment.variables} onChange={(variables) => onChange({ ...environment, variables })} namePlaceholder="Variable" />
+        <EnvironmentVariablesEditor key={environment.id} mode={environment.environmentEditorMode} onChange={(variables, environmentEditorMode) => onChange({ ...environment, variables, environmentEditorMode })} rows={environment.variables} />
       </main></div>
       <footer><button className="danger-action" disabled={environments.length <= 1} onClick={() => onDelete(environment.id)} type="button">Delete</button><button className="secondary-button" disabled={!environment.parentId} onClick={() => onDuplicate(environment.id)} type="button"><Icon name="copy" size={13} /> Duplicate</button><span className="footer-spacer" /><span>{environments.length} environment{environments.length === 1 ? '' : 's'}</span></footer>
     </section>
@@ -1193,7 +1276,7 @@ function CollectionDocumentPanel({ collection, documentTabStrip, onChange }: Col
     onChange({
       ...collection,
       activeSubEnvironmentId: id,
-      subEnvironments: [...(collection.subEnvironments ?? []), { id, name: `Environment ${(collection.subEnvironments?.length ?? 0) + 1}`, variables: [] }],
+      subEnvironments: [...(collection.subEnvironments ?? []), { id, name: `Environment ${(collection.subEnvironments?.length ?? 0) + 1}`, variables: [], environmentEditorMode: 'table' }],
     });
   };
   const updateSelectedEnvironment = (patch: Partial<NonNullable<typeof selectedEnvironment>>) => {
@@ -1213,7 +1296,7 @@ function CollectionDocumentPanel({ collection, documentTabStrip, onChange }: Col
       {tab === 'variables' ? <div className="environment-layout collection-environment-layout"><aside><div><button className={!selectedEnvironment ? 'active' : ''} onClick={() => selectEnvironment('')} type="button"><i /><span>Base environment</span><small>BASE</small></button>{(collection.subEnvironments ?? []).map((environment) => <button className={selectedEnvironment?.id === environment.id ? 'active' : ''} key={environment.id} onClick={() => selectEnvironment(environment.id)} type="button"><i /><span>{environment.name}</span></button>)}</div><button onClick={addEnvironment} type="button"><Icon name="plus" size={13} /> Sub-environment</button></aside><main>
         {selectedEnvironment ? <div className="environment-identity collection-environment-identity"><label>Name<input onChange={(event) => updateSelectedEnvironment({ name: event.target.value })} value={selectedEnvironment.name} /></label></div> : <strong>Collection base environment</strong>}
         <p>{selectedEnvironment ? 'The selected collection environment overrides the collection base and selected global values.' : 'Base collection values override selected and base global values for every request in this collection.'}</p>
-        <KeyValueEditor namePlaceholder="Variable" onChange={(variables) => selectedEnvironment ? updateSelectedEnvironment({ variables }) : onChange({ ...collection, environment: variables })} rows={selectedEnvironment?.variables ?? collection.environment ?? []} />
+        <EnvironmentVariablesEditor key={selectedEnvironment?.id ?? `${collection.id}-base-environment`} mode={selectedEnvironment?.environmentEditorMode ?? collection.environmentEditorMode} onChange={(variables, environmentEditorMode) => selectedEnvironment ? updateSelectedEnvironment({ variables, environmentEditorMode }) : onChange({ ...collection, environment: variables, environmentEditorMode })} rows={selectedEnvironment?.variables ?? collection.environment ?? []} />
         {selectedEnvironment ? <button className="danger-action collection-environment-delete" onClick={deleteSelectedEnvironment} type="button">Delete sub-environment</button> : null}
       </main></div> : null}
       {tab === 'docs' ? <div className="request-docs-editor"><header><strong>Collection documentation</strong><small>Markdown source</small></header><textarea aria-label="Collection documentation" onChange={(event) => onChange({ ...collection, documentation: event.target.value })} value={collection.documentation ?? ''} /><section><small>Preview</small><pre>{collection.documentation || 'No documentation yet.'}</pre></section></div> : null}
@@ -1246,7 +1329,7 @@ function FolderEditorContent({ collection, folder, environment, cookies, respons
     <div className="folder-identity"><label>Name<input autoFocus={autoFocusName} onChange={(event) => onChange({ ...folder, name: event.target.value })} value={folder.name} /></label><label>Parent folder<select onChange={(event) => onChange({ ...folder, parentId: event.target.value })} value={folder.parentId}><option value="">Collection root</option>{(collection.folders ?? []).filter((candidate) => !invalidParents.has(candidate.id)).map((candidate) => <option key={candidate.id} value={candidate.id}>{folderPath(collection, candidate.id)}</option>)}</select></label></div>
     <nav className="interchange-tabs" aria-label="Folder settings">{(['variables', 'headers', 'auth', 'scripts', 'docs'] as const).map((item) => <button className={tab === item ? 'active' : ''} key={item} onClick={() => setTab(item)} type="button">{titleCase(item)}</button>)}</nav>
     <div className="folder-modal-content">
-      {tab === 'variables' ? <><p>Folder values override collection and selected environment values for every descendant request.</p><KeyValueEditor namePlaceholder="Variable" onChange={(variables) => onChange({ ...folder, environment: variables })} rows={folder.environment} /></> : null}
+      {tab === 'variables' ? <><p>Folder values override collection and selected environment values for every descendant request.</p><EnvironmentVariablesEditor key={folder.id} mode={folder.environmentEditorMode} onChange={(environment, environmentEditorMode) => onChange({ ...folder, environment, environmentEditorMode })} rows={folder.environment} /></> : null}
       {tab === 'headers' ? <><p>Closer folders and request headers override inherited headers with the same name.</p><KeyValueEditor namePlaceholder="Header" onChange={(headers) => onChange({ ...folder, headers })} rows={folder.headers} /></> : null}
       {tab === 'auth' ? <><label className="folder-auth-toggle"><input checked={Boolean(folder.auth)} onChange={(event) => onChange({ ...folder, auth: event.target.checked ? authRequest.auth : undefined })} type="checkbox" /> Configure inheritable authentication</label>{folder.auth ? <Suspense fallback={<div className="dialog-loading">Loading authentication…</div>}><AuthEditor cookies={cookies} environment={environment} onChange={(patch) => { if (patch.auth) onChange({ ...folder, auth: patch.auth }); }} request={authRequest} requestContext={requestContext} responses={responses} showPasswords={showPasswords} /></Suspense> : <div className="empty-state compact"><Icon name="lock" size={24} /><strong>No folder authentication</strong><span>Enable it here, then choose “Inherit” on descendant requests.</span></div>}</> : null}
       {tab === 'scripts' ? <div className="folder-script-grid"><section><header>Pre-request · root to request</header><CodeEditor ariaLabel="Folder pre-request script" onChange={(preRequestScript) => onChange({ ...folder, preRequestScript })} value={folder.preRequestScript} /></section><section><header>After-response · request to root</header><CodeEditor ariaLabel="Folder after-response script" onChange={(tests) => onChange({ ...folder, tests })} value={folder.tests} /></section></div> : null}
@@ -1279,7 +1362,7 @@ function FolderDocumentPanel({ documentTabStrip, onConfigure, onRun, ...editorPr
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 35, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+    format: 'brunomnia', version: 36, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -1996,14 +2079,14 @@ export default function App() {
     const id = uid('collection');
     setWorkspace((current) => ({
       ...current,
-      collections: [...current.collections, { id, name: `Collection ${current.collections.length + 1}`, expanded: true, requests: [], folders: [], resourceOrder: [], environment: [], subEnvironments: [], activeSubEnvironmentId: '', documentation: '' }],
+      collections: [...current.collections, { id, name: `Collection ${current.collections.length + 1}`, expanded: true, requests: [], folders: [], resourceOrder: [], environment: [], environmentEditorMode: 'table', subEnvironments: [], activeSubEnvironmentId: '', documentation: '' }],
     }));
     openCollectionDocument(id);
   };
 
   const addFolder = (collectionId: string, parentId: string) => {
     const folderId = uid('folder');
-    setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === collectionId ? { ...collection, expanded: true, folders: [...(collection.folders ?? []), { id: folderId, name: 'Untitled Folder', parentId, expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }], resourceOrder: [...(collection.resourceOrder ?? [...(collection.folders ?? []).map((folder) => folder.id), ...collection.requests.map((request) => request.id)]), folderId] } : collection) }));
+    setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === collectionId ? { ...collection, expanded: true, folders: [...(collection.folders ?? []), { id: folderId, name: 'Untitled Folder', parentId, expanded: true, headers: [], environment: [], environmentEditorMode: 'table', preRequestScript: '', tests: '', documentation: '' }], resourceOrder: [...(collection.resourceOrder ?? [...(collection.folders ?? []).map((folder) => folder.id), ...collection.requests.map((request) => request.id)]), folderId] } : collection) }));
     setFolderEditor({ collectionId, folderId });
   };
 
@@ -2862,7 +2945,7 @@ export default function App() {
     const id = uid('environment');
     setWorkspace((current) => {
       const publicIds = new Set(publicEnvironments(current.environments).map((environment) => environment.id));
-      return { ...current, activeEnvironmentId: id, environments: [...current.environments, { id, name: parentId ? 'New Sub-environment' : 'New Base Environment', variables: [], parentId, private: Boolean(parentId) && !publicIds.has(parentId), color: '#69bddd' }] };
+      return { ...current, activeEnvironmentId: id, environments: [...current.environments, { id, name: parentId ? 'New Sub-environment' : 'New Base Environment', variables: [], environmentEditorMode: 'table', parentId, private: Boolean(parentId) && !publicIds.has(parentId), color: '#69bddd' }] };
     });
   };
 

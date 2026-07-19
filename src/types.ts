@@ -16,6 +16,7 @@ export type KeyValue = {
   enabled: boolean;
   description?: string;
   multiline?: boolean;
+  valueType?: 'string' | 'json';
 };
 
 export type AuthConfig = {
@@ -352,6 +353,7 @@ export type RequestFolder = {
   expanded: boolean;
   headers: KeyValue[];
   environment: KeyValue[];
+  environmentEditorMode?: 'table' | 'raw';
   auth?: AuthConfig;
   preRequestScript: string;
   tests: string;
@@ -363,6 +365,7 @@ export type CollectionEnvironment = {
   id: string;
   name: string;
   variables: KeyValue[];
+  environmentEditorMode?: 'table' | 'raw';
 };
 
 export type Collection = {
@@ -373,6 +376,7 @@ export type Collection = {
   folders?: RequestFolder[];
   resourceOrder?: string[];
   environment?: KeyValue[];
+  environmentEditorMode?: 'table' | 'raw';
   subEnvironments?: CollectionEnvironment[];
   activeSubEnvironmentId?: string;
   documentation?: string;
@@ -383,6 +387,7 @@ export type Environment = {
   id: string;
   name: string;
   variables: KeyValue[];
+  environmentEditorMode?: 'table' | 'raw';
   parentId?: string;
   private?: boolean;
   color?: string;
@@ -402,7 +407,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 35;
+  version: 36;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

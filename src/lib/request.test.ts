@@ -7,6 +7,7 @@ describe('request templates', () => {
     expect(resolveTemplate('{{ baseUrl }}/orders/{{ missing }}', { baseUrl: 'https://api.example.com' })).toBe(
       'https://api.example.com/orders/{{ missing }}',
     );
+    expect(resolveTemplate('{{ toString }}', {})).toBe('{{ toString }}');
   });
 
   it('adds enabled query parameters', () => {

@@ -64,6 +64,10 @@ Use the pin control in the active request tab to add or remove that request from
 
 Open the environment editor from the top bar. Base environments have no parent. Sub-environments inherit enabled and disabled variable rows from their parent chain, with a closer value replacing an earlier value with the same name. Editing a script stores only changed or newly created values in the selected sub-environment instead of flattening all inherited values into it.
 
+Global base/sub-environments, collection base/sub-environments, and folder variables each persist their own **Table** or **Raw JSON** editor mode. Raw mode requires a JSON object at the root and rejects keys that begin with `$`, contain `.`, or use the reserved root names `_`, `vault`, and `__insomnia_vault`. Invalid raw JSON remains visible with an error and blocks switching back to Table mode. Switching Table to Raw asks before discarding disabled rows or all but the final enabled duplicate name.
+
+Table rows support **String** and **JSON** values. Raw objects and arrays become JSON rows; scalar JSON values become strings, matching pinned Insomnia. JSON rows expose nested template/script names such as `service.host` while retaining the compact root value. Conversion is bounded to 1,000 top-level keys, 10,000 nested values, 50 levels, and one million source characters.
+
 Drag a sub-environment before or after one of its siblings to persist that sibling order. Focused sub-environments expose the equivalent Option/Alt + Arrow Up/Down and Home/End controls. **Duplicate** creates a sibling named with the pinned `(Copy)` suffix immediately after the source, regenerates the environment and variable-row IDs, and removes import provenance so the copy is locally owned. Base environments are not reorderable or duplicable through these pinned-compatible actions.
 
 The runner and bundled CLI resolve the same ancestry before applying collection and folder variables. Environment and folder ancestry is cycle-bounded during execution, while workspace migration removes malformed parent cycles and invalid references.
@@ -83,6 +87,6 @@ Private environments are an omission boundary, not encrypted storage. Use `{{ va
 
 ## Import and export
 
-Brunomnia v12 exports preserve the complete hierarchy. Insomnia v4 and v5 compatibility adapters preserve nested folders, request placement, environment ancestry, folder headers, authentication, variables, scripts, and documentation inside their supported schemas. Imported folder and environment IDs are remapped as one batch so parent and request references remain collision-safe.
+Brunomnia v36 exports preserve the complete hierarchy, typed environment rows, and editor modes. Insomnia v4 compatibility exports preserve table/raw mode and disabled table rows through its environment KV-pair fields; Insomnia v4 and v5 both preserve object/array values as typed JSON data. The adapters also preserve nested folders, request placement, environment ancestry, folder headers, authentication, variables, scripts, and documentation inside their supported schemas. Imported folder and environment IDs are remapped as one batch so parent and request references remain collision-safe.
 
 External file bytes, unsupported protocol details, and format-specific fields that have no executable Brunomnia equivalent continue to produce explicit conversion warnings instead of silent parity claims.
