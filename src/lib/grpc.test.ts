@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { cancelGrpcSession, commitGrpcSession, loadGrpcSchema, sendGrpcSessionMessage, startGrpcSession } from './grpc';
+import { cancelGrpcSession, commitGrpcSession, formatGrpcError, grpcConnectionErrorDetails, loadGrpcSchema, sendGrpcSessionMessage, startGrpcSession } from './grpc';
 
 const tauri = vi.hoisted(() => ({ channels: [] as Array<{ onmessage?: (message: unknown) => void }>, invoke: vi.fn() }));
 
@@ -152,5 +152,25 @@ describe('gRPC schema loading', () => {
       ['grpc_commit_session', { sessionId: 'session-2' }],
       ['grpc_cancel_session', { sessionId: 'session-2' }],
     ]);
+  });
+});
+
+describe('gRPC connection error guidance', () => {
+  it.each([
+    ['Invalid CA certificate PEM: bad syntax', 'call', 'Local Root Certificate Error'],
+    ['gRPC connection failed: invalid peer certificate: UnknownIssuer', 'call', 'Server Certificate Cannot Be Validated'],
+    ['gRPC connection failed: received fatal alert: CertificateRequired', 'call', 'Client Certificate Required'],
+    ['gRPC connection failed: WRONG_VERSION_NUMBER', 'call', 'TLS Not Supported'],
+    ['gRPC Unimplemented: unknown service grpc.reflection.v1.ServerReflection', 'reflection', 'Reflection Not Supported'],
+    ['gRPC Cancelled: call closed by server', 'call', 'Server Cancelled Request'],
+    ['gRPC Unimplemented: unknown method SayHello', 'call', 'Unimplemented Method'],
+  ] as const)('classifies %s', (detail, context, title) => {
+    expect(grpcConnectionErrorDetails(detail, context)).toMatchObject({ title, detail });
+    expect(formatGrpcError(detail, context)).toContain(`${title}:`);
+  });
+
+  it('preserves unrecognized errors without inventing guidance', () => {
+    expect(grpcConnectionErrorDetails('gRPC Internal: database unavailable', 'call')).toBeUndefined();
+    expect(formatGrpcError('gRPC Internal: database unavailable', 'call')).toBe('gRPC Internal: database unavailable');
   });
 });

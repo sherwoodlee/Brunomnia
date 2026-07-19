@@ -97,7 +97,9 @@ Each interactive message is schema-validated after environment substitution and 
 
 Choose **Use stub** beside the selected method to replace the editor with a descriptor-generated request object. Stubs include every field up to a 500-field and three-level recursion budget, one sample for repeated fields and maps, the first enum number, valid base64 bytes, realistic scalar values, UUIDs for names beginning or ending in `id`, JSON field names, and one branch per oneof. Brunomnia exposes the same action for reflected and imported-proto schemas; pinned Insomnia exposes it for reflected examples. Existing message text is replaced only after the explicit click.
 
-Pinned Insomnia also keeps gRPC request/response messages transient, so persisted gRPC call history is not tracked as a parity gap. Its `@grpc/grpc-js` channel construction has no separate HTTP/HTTPS proxy agent, so a custom gRPC proxy is likewise not required. Richer connection-error guidance and broader third-party fixtures remain open.
+Schema loading and live calls recognize the same focused connection failures as pinned Insomnia. The response or call console explains an invalid local root, an untrusted/self-signed server certificate, a required client certificate, TLS sent to a plaintext endpoint, unsupported server reflection, server cancellation, or an unimplemented method. Native Tonic/Rustls spellings such as `UnknownIssuer` and `CertificateRequired` map to the same guidance; the original error always remains visible, and unrecognized errors are never relabeled.
+
+Pinned Insomnia also keeps gRPC request/response messages transient, so persisted gRPC call history is not tracked as a parity gap. Its `@grpc/grpc-js` channel construction has no separate HTTP/HTTPS proxy agent, so a custom gRPC proxy is likewise not required. Broader third-party fixtures remain open.
 
 ## Socket.IO sessions
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ApiRequest, Environment, GrpcSchema, StreamMessage } from '../types';
 import type { SendRequestContext } from '../lib/http';
-import { cancelGrpcSession, commitGrpcSession, sendGrpcSessionMessage, startGrpcSession } from '../lib/grpc';
+import { cancelGrpcSession, commitGrpcSession, formatGrpcError, sendGrpcSessionMessage, startGrpcSession } from '../lib/grpc';
 import { importGrpcProtoFiles } from '../lib/grpcProtoImport';
 import { CodeEditor } from './ProtocolEditors';
 import { Icon } from './Icon';
@@ -44,7 +44,7 @@ export function GrpcEditor({
   const update = (patch: Partial<ApiRequest['grpc']>) => onChange({ grpc: { ...grpc, ...patch } });
   const onSessionEvent = (message: StreamMessage) => {
     setSessionMessages((current) => [...current, message].slice(-500));
-    if (message.kind === 'error') setSessionError(message.text);
+    if (message.kind === 'error') setSessionError(formatGrpcError(message.text, 'call'));
     if (message.kind === 'end') {
       sessionId.current = '';
       setSessionStatus('ended');
@@ -75,7 +75,7 @@ export function GrpcEditor({
     } catch (error) {
       if (sessionId.current === nextSessionId) sessionId.current = '';
       setSessionStatus('ended');
-      setSessionError(error instanceof Error ? error.message : String(error));
+      setSessionError(formatGrpcError(error, 'call'));
     }
   };
   const sendMessage = async () => {
@@ -84,7 +84,7 @@ export function GrpcEditor({
       setSessionError('');
       await sendGrpcSessionMessage(sessionId.current, grpc.input, environment);
     } catch (error) {
-      setSessionError(error instanceof Error ? error.message : String(error));
+      setSessionError(formatGrpcError(error, 'call'));
     }
   };
   const commitSession = async () => {
@@ -94,7 +94,7 @@ export function GrpcEditor({
       await commitGrpcSession(sessionId.current);
       setSessionStatus('committed');
     } catch (error) {
-      setSessionError(error instanceof Error ? error.message : String(error));
+      setSessionError(formatGrpcError(error, 'call'));
     }
   };
   const cancelSession = async () => {
@@ -104,7 +104,7 @@ export function GrpcEditor({
       setSessionError('');
       await cancelGrpcSession(activeSessionId);
     } catch (error) {
-      setSessionError(error instanceof Error ? error.message : String(error));
+      setSessionError(formatGrpcError(error, 'call'));
     } finally {
       if (sessionId.current === activeSessionId) {
         sessionId.current = '';

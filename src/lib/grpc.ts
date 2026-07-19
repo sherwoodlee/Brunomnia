@@ -18,6 +18,46 @@ export type GrpcSessionStartOutput = {
   durationMs: number;
 };
 
+export type GrpcErrorContext = 'reflection' | 'call';
+export type GrpcErrorDetails = { title: string; message: string; detail: string };
+
+const grpcErrorDetail = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+export const grpcConnectionErrorDetails = (error: unknown, context: GrpcErrorContext): GrpcErrorDetails | undefined => {
+  const detail = grpcErrorDetail(error);
+  const normalized = detail.toLowerCase();
+  let title = '';
+  let message = '';
+  if (normalized.includes('invalid ca certificate pem') || normalized.includes('ca certificate pem contains no certificates') || normalized.includes('unable to get local issuer certificate')) {
+    title = 'Local Root Certificate Error';
+    message = 'The local root certificate enabled for the host is not valid. Either disable the root certificate, or update it with a valid one.';
+  } else if (normalized.includes('self signed certificate') || normalized.includes('unknownissuer') || normalized.includes('unknown issuer') || normalized.includes('invalid peer certificate')) {
+    title = 'Server Certificate Cannot Be Validated';
+    message = "The server is using a certificate that cannot be validated. Add the server's root certificate to this workspace or disable certificate validation for API requests in Preferences.";
+  } else if (normalized.includes('certificate_required') || normalized.includes('certificaterequired') || normalized.includes('certificate required') || normalized.includes('peer sent no certificates')) {
+    title = 'Client Certificate Required';
+    message = 'The server requires a client certificate to establish a connection.';
+  } else if (normalized.includes('wrong_version_number') || normalized.includes('wrong version number')) {
+    title = 'TLS Not Supported';
+    message = 'The server does not support TLS connections. Remove the "grpcs://" prefix from the request URL to make an insecure request.';
+  } else if (context === 'reflection' && (normalized.includes('unimplemented') || normalized.includes('reflection error 12') || normalized.includes('does not support reflection'))) {
+    title = 'Reflection Not Supported';
+    message = 'The server has indicated that it does not support reflection. You may need to manually enable it server-side or load a proto source.';
+  } else if (normalized.includes('cancelled') || normalized.includes('canceled')) {
+    title = 'Server Cancelled Request';
+    message = 'The request was cancelled by the server. If the server requires a TLS connection, ensure the request URL is prefixed with "grpcs://".';
+  } else if (normalized.includes('unimplemented') || normalized.includes('method not found')) {
+    title = 'Unimplemented Method';
+    message = 'The server does not support the requested method. Is the .proto file correct?';
+  }
+  return title ? { title, message, detail } : undefined;
+};
+
+export const formatGrpcError = (error: unknown, context: GrpcErrorContext) => {
+  const guidance = grpcConnectionErrorDetails(error, context);
+  return guidance ? `${guidance.title}: ${guidance.message}\n${guidance.detail}` : grpcErrorDetail(error);
+};
+
 type NativeGrpcEvent = Omit<StreamMessage, 'id'>;
 
 type BrowserGrpcSession = {

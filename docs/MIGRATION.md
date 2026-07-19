@@ -1802,7 +1802,20 @@ Compatibility bounds remain explicit: Buf Schema Registry reflection, disable-us
 
 Compatibility bounds remain explicit: richer gRPC connection-error guidance and broader third-party fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 121 — remaining parity closure and release hardening
+## Milestone 121 — actionable gRPC connection guidance (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned `ui/utils/grpc.ts` recognizes self-signed server chains, required client certificates, cancellation, wrong TLS version, invalid local roots, unsupported reflection, and unimplemented methods |
+| Cross-runtime classification | Complete | One context-aware helper accepts upstream Node/grpc-js phrases plus Tonic/Rustls `UnknownIssuer`, `CertificateRequired`, and title-case status equivalents without broadly relabeling unknown failures |
+| Schema-load presentation | Complete | Reflection failures use the focused title in the response summary and include explanation plus the exact native error in the response body |
+| Live-call presentation | Complete | Start/send/commit/cancel catches and asynchronous native error events share multiline guidance while structured status events remain unchanged |
+| Executable coverage | Complete | A table-driven renderer fixture covers all seven categories, reflection-versus-method disambiguation, and exact preservation of unrecognized errors |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 121 verification](QA_MILESTONE_121.md) |
+
+Compatibility bounds remain explicit: broader third-party gRPC fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 122 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

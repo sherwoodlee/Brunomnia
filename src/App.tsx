@@ -1412,9 +1412,11 @@ export default function App() {
       setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => ({ ...collection, requests: collection.requests.map((request) => request.id === targetRequest.id ? { ...request, grpc: { ...request.grpc, descriptorSetBase64: schema.descriptorSetBase64, service: service?.fullName ?? '', method: method?.name ?? '' } } : request) })) }));
       return schema;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const { formatGrpcError, grpcConnectionErrorDetails } = await import('./lib/grpc');
+      const guidance = grpcConnectionErrorDetails(error, 'reflection');
+      const message = formatGrpcError(error, 'reflection');
       if (activeRequestIdRef.current === targetRequest.id) {
-        setResponse({ status: 0, statusText: 'Schema failed', headers: {}, body: message, durationMs: 0, sizeBytes: message.length });
+        setResponse({ status: 0, statusText: guidance?.title ?? 'Schema failed', headers: {}, body: message, durationMs: 0, sizeBytes: message.length });
         setResponseTab('preview');
       }
       return undefined;
