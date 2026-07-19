@@ -44,6 +44,10 @@ Headers override by case-insensitive name. A request inherits authentication onl
 
 Collection, folder, and request documentation is stored as Markdown source. This milestone provides a safe plain-text preview; rendered Markdown and attachment handling remain open parity work.
 
+## Request pins
+
+Use the pin control in the active request tab to add or remove that request from the separate **Pinned requests** list above the collection tree. The pinned list follows persisted collection resource order and the current sidebar search, while the ordinary hierarchy remains unchanged. Pin IDs are bounded device-local metadata, matching pinned Insomnia's non-sync `RequestMeta`; they are not added to workspace exports, split-YAML/Git projects, compatibility exports, or collaboration payloads. Missing and deleted requests are removed during reconciliation.
+
 ## Environments
 
 Open the environment editor from the top bar. Base environments have no parent. Sub-environments inherit enabled and disabled variable rows from their parent chain, with a closer value replacing an earlier value with the same name. Editing a script stores only changed or newly created values in the selected sub-environment instead of flattening all inherited values into it.

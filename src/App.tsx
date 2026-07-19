@@ -20,6 +20,7 @@ import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWor
 import type { WorkspaceEnvironmentMove, WorkspaceResourceKeyboardAction, WorkspaceResourceMove } from './lib/resources';
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
+import { parsePinnedRequestIds, pinnedWorkspaceRequests, reconcilePinnedRequestIds, togglePinnedRequestId } from './lib/requestPins';
 import type { AppliedResponseMockTarget } from './lib/mockRouteFromResponse';
 import type { OAuthAuthorizationStatus } from './components/OAuthAuthorizationDialog';
 import { withoutOAuth2RuntimeCredentials } from './lib/oauth2Tokens';
@@ -99,6 +100,7 @@ const methodClass = (method: string) => methods.includes(method as HttpMethod) ?
 type PendingTemplatePrompt = { id: string; input: TemplatePromptInput; resolve: (value: string | null) => void };
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+const requestPinsStorageKey = (workspaceId: string) => `brunomnia-request-pins:${workspaceId}`;
 const workspaceCatalogApi = () => import('./lib/workspaceCatalog');
 
 const visibleStreamSessions = (sessions: StoredStreamSession[], requestId: string, environmentId: string, filterResponsesByEnv: boolean) => sessions
@@ -282,10 +284,12 @@ function BulkKeyValueEditor({ rows, onChange, ariaLabel }: { rows: KeyValue[]; o
 
 type CollectionSidebarProps = {
   workspace: Workspace;
+  pinnedRequestIds: string[];
   search: string;
   mode: SidebarMode;
   onSearch: (value: string) => void;
   onSelectRequest: (id: string) => void;
+  onToggleRequestPin: (id: string) => void;
   onToggleCollection: (id: string) => void;
   onAddRequest: () => void;
   onAddCollection: () => void;
@@ -302,10 +306,12 @@ type SidebarDragSource =
 
 function CollectionSidebar({
   workspace,
+  pinnedRequestIds,
   search,
   mode,
   onSearch,
   onSelectRequest,
+  onToggleRequestPin,
   onToggleCollection,
   onAddRequest,
   onAddCollection,
@@ -319,6 +325,8 @@ function CollectionSidebar({
   const [dragSource, setDragSource] = useState<SidebarDragSource>();
   const [dropIndicator, setDropIndicator] = useState('');
   const normalizedSearch = search.trim().toLowerCase();
+  const pinnedIds = new Set(pinnedRequestIds);
+  const pinnedRequests = pinnedWorkspaceRequests(workspace, pinnedRequestIds, search);
   const history = workspace.history.filter((entry) =>
     `${entry.name} ${entry.url} ${entry.method}`.toLowerCase().includes(normalizedSearch),
   );
@@ -456,7 +464,9 @@ function CollectionSidebar({
       </div>
 
       <div className="collection-scroll">
-        {mode === 'collections' ? workspace.collections.map((collection) => {
+        {mode === 'collections' ? <>
+          {pinnedRequests.length ? <section className="pinned-requests"><header><Icon name="pin" size={12} /><span>Pinned requests</span><small>{pinnedRequests.length}</small></header>{pinnedRequests.map(({ collectionId, request }) => <div className="pinned-request-row" key={request.id}><button onClick={() => onSelectRequest(request.id)} type="button"><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span><strong>{request.name}</strong><small>{workspace.collections.find((collection) => collection.id === collectionId)?.name}</small></span></button><button aria-label={`Unpin ${request.name}`} onClick={() => onToggleRequestPin(request.id)} title="Unpin request" type="button"><Icon name="pin" size={12} /></button></div>)}</section> : null}
+          {workspace.collections.map((collection) => {
           const visibleRequests = collection.requests.filter((request) =>
             `${request.name} ${request.method} ${request.protocol} ${request.url}`.toLowerCase().includes(normalizedSearch),
           );
@@ -487,7 +497,7 @@ function CollectionSidebar({
             title={normalizedSearch ? 'Clear search to reorder' : 'Drag to move · Option/Alt+Arrows reorder, indent, or outdent · Option/Alt+Home/End moves first or last'}
             aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight Alt+Home Alt+End"
             type="button"
-          ><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span>{request.name}</span></button>;
+          ><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span>{request.name}</span>{pinnedIds.has(request.id) ? <Icon name="pin" size={12} /> : null}</button>;
           }
           function renderResources(parentId: string, depth: number): ReactNode[] {
             return orderedCollectionChildren(collection, parentId).flatMap((resource): ReactNode[] => {
@@ -539,7 +549,8 @@ function CollectionSidebar({
               {collection.expanded ? <div>{renderResources('', 0)}</div> : null}
             </div>
           );
-        }) : (
+          })}
+        </> : (
           history.length ? history.map((entry) => (
             <button className="history-row" key={entry.id} onClick={() => onSelectRequest(entry.requestId)} type="button">
               <span className={`method method-${methodClass(entry.method)}`}>{entry.method}</span>
@@ -567,6 +578,7 @@ type RequestPanelProps = {
   showPasswords: boolean;
   useBulkHeaderEditor: boolean;
   useBulkParametersEditor: boolean;
+  pinned: boolean;
   activeTab: RequestTab;
   isSending: boolean;
   streamStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
@@ -584,6 +596,7 @@ type RequestPanelProps = {
   onSocketIoListenerToggle: (eventName: string, enabled: boolean) => void;
   onAddRequest: () => void;
   onGenerateCode: () => void;
+  onTogglePin: () => void;
   onToggleBulkHeaderEditor: () => void;
   onToggleBulkParametersEditor: () => void;
   scheduledSendLabel: string;
@@ -620,8 +633,10 @@ function RequestPanel({
   showPasswords,
   useBulkHeaderEditor,
   useBulkParametersEditor,
+  pinned,
   onToggleBulkHeaderEditor,
   onToggleBulkParametersEditor,
+  onTogglePin,
 }: RequestPanelProps) {
   const [showTemplateTags, setShowTemplateTags] = useState(false);
   const streamProtocol = isStreamingRequest(request);
@@ -645,6 +660,7 @@ function RequestPanel({
             value={request.name}
           />
           <span className="dirty-dot" />
+          <button aria-label={pinned ? 'Unpin request' : 'Pin request'} className={pinned ? 'active' : ''} onClick={onTogglePin} title={pinned ? 'Unpin request' : 'Pin request'} type="button"><Icon name="pin" size={13} /></button>
         </div>
         <select aria-label="Request folder" className="request-folder-select" onChange={(event) => onChange({ folderId: event.target.value })} value={request.folderId ?? ''}><option value="">Collection root</option>{(collection.folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folderPath(collection, folder.id)}</option>)}</select>
         <button aria-label="New request" className="tab-plus" onClick={onAddRequest} type="button"><Icon name="plus" size={16} /></button>
@@ -1092,6 +1108,7 @@ export default function App() {
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('collections');
   const [search, setSearch] = useState('');
   const [requestTab, setRequestTab] = useState<RequestTab>('body');
+  const [requestPinState, setRequestPinState] = useState<{ workspaceId: string; ids: string[] }>({ workspaceId: '', ids: [] });
   const [responseTab, setResponseTab] = useState<ResponseTab>('preview');
   const [response, setResponse] = useState<HttpResponse>(() => mockResponse());
   const [selectedResponseId, setSelectedResponseId] = useState('');
@@ -1181,6 +1198,24 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!hydrated || !activeWorkspaceId) return;
+    let stored: string | null = null;
+    try { stored = window.localStorage.getItem(requestPinsStorageKey(activeWorkspaceId)); } catch { stored = null; }
+    const ids = reconcilePinnedRequestIds(workspace, parsePinnedRequestIds(stored));
+    setRequestPinState({ workspaceId: activeWorkspaceId, ids });
+  }, [activeWorkspaceId, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !activeWorkspaceId || requestPinState.workspaceId !== activeWorkspaceId) return;
+    const ids = reconcilePinnedRequestIds(workspace, requestPinState.ids);
+    if (ids.length !== requestPinState.ids.length || ids.some((id, index) => id !== requestPinState.ids[index])) {
+      setRequestPinState({ workspaceId: activeWorkspaceId, ids });
+      return;
+    }
+    try { window.localStorage.setItem(requestPinsStorageKey(activeWorkspaceId), JSON.stringify(ids)); } catch {}
+  }, [activeWorkspaceId, hydrated, requestPinState, workspace.collections]);
+
+  useEffect(() => {
     if (!hydrated || !activeWorkspaceId || (workspaceRecovery?.kind === 'workspace-backup' && workspaceRecovery.workspaceId === activeWorkspaceId)) return;
     const timeout = window.setTimeout(() => {
       void workspaceCatalogApi().then(({ saveCatalogWorkspace }) => saveCatalogWorkspace(activeWorkspaceId, workspace)).then(() => {
@@ -1216,6 +1251,7 @@ export default function App() {
   }, [hydrated, workspace]);
 
   const active = useMemo(() => findRequest(workspace), [workspace]);
+  const activePinnedRequestIds = requestPinState.workspaceId === activeWorkspaceId ? requestPinState.ids : [];
   const activeStreaming = active ? isStreamingRequest(active.request) : false;
   const activeCollection = workspace.collections.find((collection) => collection.id === active?.collectionId);
   activeRequestIdRef.current = workspace.activeRequestId;
@@ -1493,6 +1529,14 @@ export default function App() {
       })),
     }));
   }, []);
+
+  const toggleRequestPin = (requestId: string) => {
+    if (!activeWorkspaceId) return;
+    setRequestPinState((current) => ({
+      workspaceId: activeWorkspaceId,
+      ids: togglePinnedRequestId(workspace, current.workspaceId === activeWorkspaceId ? current.ids : [], requestId),
+    }));
+  };
 
   const addRequest = useCallback(() => {
     setWorkspace((current) => {
@@ -2512,9 +2556,11 @@ export default function App() {
           onAddRequest={addRequest}
           onSearch={setSearch}
           onSelectRequest={(id) => setWorkspace((current) => ({ ...current, activeRequestId: id }))}
+          onToggleRequestPin={toggleRequestPin}
           onToggleCollection={(id) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === id ? { ...collection, expanded: !collection.expanded } : collection) }))}
           onToggleFolder={(collectionId, folderId) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === collectionId ? { ...collection, folders: (collection.folders ?? []).map((folder) => folder.id === folderId ? { ...folder, expanded: !folder.expanded } : folder) } : collection) }))}
           search={search}
+          pinnedRequestIds={activePinnedRequestIds}
           workspace={workspace}
         /> : null}
 
@@ -2532,6 +2578,7 @@ export default function App() {
             onAddRequest={addRequest}
             onCancelScheduled={cancelScheduledSends}
             onGenerateCode={() => setShowCodeGeneration(true)}
+            onTogglePin={() => toggleRequestPin(active.request.id)}
             onToggleBulkHeaderEditor={() => setWorkspace((current) => ({ ...current, preferences: { ...current.preferences, useBulkHeaderEditor: !current.preferences.useBulkHeaderEditor } }))}
             onToggleBulkParametersEditor={() => setWorkspace((current) => ({ ...current, preferences: { ...current.preferences, useBulkParametersEditor: !current.preferences.useBulkParametersEditor } }))}
             onLoadGraphqlSchema={(includeInputValueDeprecation) => void loadActiveGraphqlSchema(includeInputValueDeprecation)}
@@ -2541,6 +2588,7 @@ export default function App() {
             onSocketIoListenerToggle={(eventName, enabled) => void toggleSocketIoListener(eventName, enabled)}
             onTabChange={setRequestTab}
             request={active.request}
+            pinned={activePinnedRequestIds.includes(active.request.id)}
             requestContext={{ cookies: [...workspace.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, active.request), resolveResponse: templateResponseResolver.current, authorizeOAuth2: authorizeOAuth2WithStatus, pluginRuntime: createPersistentTemplatePluginRuntime(activeEnvironment) }}
             scheduledSendLabel={scheduledSendLabel}
             showPasswords={workspace.preferences.showPasswords}

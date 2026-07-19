@@ -2167,7 +2167,19 @@ Compatibility bounds remain explicit: duplication stays within the current colle
 
 Compatibility bounds remain explicit: pinned Insomnia exposes these actions only for sub-environments, so Brunomnia base environments remain immovable and non-duplicable through this surface even though its richer model can contain multiple base trees. Parent changes remain an explicit editor field instead of an implied cross-parent drop. Multi-select/bulk resource actions, request pinning/new-tab state, collected-data breadth, legacy-version reconstruction, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 147 — remaining parity closure and release hardening
+## Milestone 147 — device-local request pinning (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned source behavior | Complete | Pinned Insomnia stores `pinned` in non-sync `RequestMeta`, exposes Pin/Unpin from request actions, and renders a separate filtered pinned-request list above the ordinary collection tree |
+| Device-local state | Complete | Brunomnia stores bounded per-project request IDs in local UI storage rather than request/workspace data, keeping pins out of exports, folder/Git projects, collaboration, and compatibility payloads |
+| Pinned list | Complete | Valid pins render once in collection resource order, honor the current request search, expose collection context, and select the original request without changing hierarchy |
+| Safe reconciliation | Complete | Malformed storage, duplicate IDs, missing requests, deleted requests, project switches, and unavailable local storage cannot pollute workspace data or crash request editing |
+| Executable evidence | Complete | Pure tests prove safe parsing, uniqueness, current-workspace reconciliation, toggle no-ops, removal, resource-order listing, and filtering; strict TypeScript proves active and pinned-list controls |
+
+Compatibility bounds remain explicit: this milestone closes request pin metadata and its sidebar projection, not Insomnia's separate persistent temporary/permanent document-tab context, tab history, close/reopen behavior, or tab drag ordering. Multi-select/bulk resource actions, document-tab state, collected-data breadth, legacy-version reconstruction, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 148 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
