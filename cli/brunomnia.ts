@@ -1,7 +1,7 @@
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node:os';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import vm from 'node:vm';
 import { parse as parseYaml, parseAllDocuments } from 'yaml';
 import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openapi';
@@ -25,7 +25,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
-import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, type RunnerInsoConfig } from '../src/lib/runnerCli';
+import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, type RunnerInsoConfig } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -43,13 +43,35 @@ const loadText = async (path: string) => readFile(path, 'utf8').catch((error) =>
 const scriptFileMime = (path: string) => ({
   '.cer': 'application/x-pem-file', '.crt': 'application/x-pem-file', '.csv': 'text/csv', '.gif': 'image/gif', '.htm': 'text/html', '.html': 'text/html', '.jpeg': 'image/jpeg', '.jpg': 'image/jpeg', '.json': 'application/json', '.key': 'application/x-pem-file', '.pdf': 'application/pdf', '.pem': 'application/x-pem-file', '.png': 'image/png', '.txt': 'text/plain', '.xml': 'application/xml',
 } as Record<string, string>)[extname(path).toLowerCase()] ?? 'application/octet-stream';
-const readCliScriptFile = async (path: string) => {
-  const bytes = await readFile(path);
+const canonicalCliDataFolders = async (paths: string[]) => {
+  if (paths.length > 20) throw new Error('CLI data folders cannot exceed 20 roots.');
+  const roots = await Promise.all(paths.map(async (path) => {
+    if (!path || path.length > 4_096) throw new Error('CLI data-folder paths must contain 1–4,096 characters.');
+    const canonical = await realpath(resolve(path)).catch(() => { throw new Error(`CLI data folder '${path}' does not exist.`); });
+    if (!(await stat(canonical)).isDirectory()) throw new Error(`CLI data folder '${path}' is not a directory.`);
+    return canonical;
+  }));
+  return [...new Set(roots)];
+};
+const readCliFile = async (path: string, roots: string[]) => {
+  if (!roots.length) throw new Error('CLI file access requires at least one -f/--dataFolders root.');
+  if (!path || path.length > 4_096) throw new Error('CLI file paths must contain 1–4,096 characters.');
+  const canonical = await realpath(resolve(path)).catch(() => { throw new Error(`CLI file '${path}' does not exist.`); });
+  const allowed = roots.some((root) => {
+    const child = relative(root, canonical);
+    return child === '' || (child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child));
+  });
+  if (!allowed) throw new Error(`CLI file '${path}' is outside the allowed --dataFolders roots.`);
+  if (!(await stat(canonical)).isFile()) throw new Error(`CLI file '${path}' is not a regular file.`);
+  return readFile(canonical);
+};
+const readCliScriptFile = async (path: string, roots: string[]) => {
+  const bytes = await readCliFile(path, roots);
   if (bytes.byteLength > 5_000_000) throw new Error(`Script file '${path}' exceeds the 5 MB per-file limit.`);
   return { fileName: basename(path) || 'attachment.bin', mimeType: scriptFileMime(path), dataBase64: bytes.toString('base64') };
 };
-const readCliTemplateFile = async (path: string) => {
-  const bytes = await readFile(path);
+const readCliTemplateFile = async (path: string, roots: string[]) => {
+  const bytes = await readCliFile(path, roots);
   if (bytes.byteLength > 5_000_000) throw new Error(`Template file '${path}' exceeds the 5 MB per-file limit.`);
   return bytes.toString('utf8');
 };
@@ -674,8 +696,8 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
-  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [same options except --item/--env-var/--delay-request]
+  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [-f, --dataFolders <folder...>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
+  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [-f, --dataFolders <folder...>] [same options except --item/--env-var/--delay-request]
   brunomnia script <name> [arguments...] [--config <path>]
 
 Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the collection, suite, or API-spec identifier positionally.
@@ -789,9 +811,11 @@ const main = async () => {
     const testNamePattern = subject === 'test' ? validateTestNamePattern(requestedTestNamePattern) : undefined;
     let cliCookies = [...workspace.cookies];
     let cliResponses = [...workspace.responses];
+    const dataFolders = await canonicalCliDataFolders(runnerCliVariadicOptionValues(args, '--dataFolders', '--data-folders', '-f'));
     const templateFileReader = hasFlag('--allow-template-files') || hasFlag('--allow-script-files')
-      ? readCliTemplateFile
+      ? (path: string) => readCliTemplateFile(path, dataFolders)
       : async (_path: string) => { throw new Error('Template file access is disabled. Re-run trusted workspaces with --allow-template-files.'); };
+    const scriptFileReader = hasFlag('--allow-script-files') ? (path: string) => readCliScriptFile(path, dataFolders) : undefined;
     const externalSecret = hasFlag('--allow-external-vaults')
       ? createCliExternalSecretResolver(workspace.governance.policy.externalVaultAllowlist)
       : async () => { throw new Error('External vault access is disabled. Re-run trusted workspaces with --allow-external-vaults.'); };
@@ -883,7 +907,7 @@ const main = async () => {
         return runNodeScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
           ...scriptOptions,
           sendRequest: hasFlag('--allow-script-requests') ? executeWorkspaceHttp : undefined,
-          readFile: hasFlag('--allow-script-files') ? readCliScriptFile : undefined,
+          readFile: scriptFileReader,
         });
       });
     } else {
@@ -932,7 +956,7 @@ const main = async () => {
                     response = await executeWorkspaceHttp(request, variables);
                     return response;
                   } : undefined,
-                  readFile: hasFlag('--allow-script-files') ? readCliScriptFile : undefined,
+                  readFile: scriptFileReader,
                   maxSubrequests: 20,
                 });
                 tests = output.tests;

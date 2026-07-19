@@ -43,7 +43,7 @@ External tags cover HTTP, GraphQL, OAuth/schema requests, non-streaming collecti
 
 The desktop `{% file '/absolute/path.txt' %}` tag reuses the device-local script file grant and allowed-folder list. The host canonicalizes both the requested file and each configured absolute root, rejects traversal and symlink escapes, requires a regular file, caps reads at 5 MB, and returns UTF-8 inspection text. The renderer never receives unrestricted filesystem authority. Browser development, disabled grants, missing roots, and out-of-root paths fail explicitly; File tags cannot write, list directories, or execute content.
 
-The trusted portable CLI has a separate `--allow-template-files` process grant; `--allow-script-files` implies it for compatibility with script-backed workspaces. The CLI does not consume desktop approved roots, so either flag lets the imported workspace name any readable path available to that operating-system process, still under the 5 MB UTF-8 read-only ceiling. Keep both flags absent for untrusted workspaces. They cannot be persisted in workspace data and grant no write, directory-listing, or execution API.
+The trusted portable CLI has a separate `--allow-template-files` process grant; `--allow-script-files` implies it for compatibility with script-backed workspaces. Either grant also requires one or more invocation-only `-f`/`--dataFolders` roots. The CLI canonicalizes each root and requested regular file, rejects traversal and symlink escapes, and keeps the 5 MB read-only ceiling. It does not consume desktop approved roots, and workspace data cannot persist either the process grant or roots. Keep all grants absent for untrusted workspaces; they provide no write, directory-listing, or execution API.
 
 ## Plaintext-secret guardrail
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, validateRunnerRequestNamePattern } from './runnerCli';
+import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, validateRunnerRequestNamePattern } from './runnerCli';
 
 describe('Runner CLI command preview', () => {
   it('preserves selected request order and every execution control', () => {
@@ -103,6 +103,8 @@ describe('Runner CLI command preview', () => {
     expect(runnerCliPositionalArguments(['workspace.json', 'collection', '--item', 'request', '-b'])).toEqual(['workspace.json', 'collection']);
     expect(runnerCliPositionalArguments(['collection', '-w', '/tmp/project', '--globals', 'team', '--env', 'staging', '--requestTimeout', '5000'])).toEqual(['collection']);
     expect(runnerCliPositionalArguments(['--config', '/tmp/.insorc', '--ci', '--workingDir', '/tmp/project', '--allow-scripts', 'suite'])).toEqual(['suite']);
+    expect(runnerCliPositionalArguments(['suite', '-f', '/tmp/first', '/tmp/second', '--reporter', 'json'])).toEqual(['suite']);
+    expect(runnerCliVariadicOptionValues(['suite', '-f', '/tmp/first', '/tmp/second', '--reporter', 'json', '--dataFolders', '/tmp/third'], '--dataFolders', '--data-folders', '-f')).toEqual(['/tmp/first', '/tmp/second', '/tmp/third']);
   });
 
   it('selects global and collection environments independently', () => {

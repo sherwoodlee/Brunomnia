@@ -1174,6 +1174,13 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Bounded Brunomnia/Insomnia v4/v5 environment-file parsing, collection/suite execution wiring, and bundled help: [`cli/brunomnia.ts`](../cli/brunomnia.ts) and [`bin/brunomnia.cjs`](../bin/brunomnia.cjs)
 - Run-via-CLI dual-scope generation, packaged ID/name/file/failure smoke, updated guidance, and exact verification record: [`src/components/RunnerCliDialog.tsx`](../src/components/RunnerCliDialog.tsx), [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx), [`scripts/cli-runner-preview-smoke.mjs`](../scripts/cli-runner-preview-smoke.mjs), [`README.md`](../README.md), [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md), and [`docs/QA_MILESTONE_208.md`](QA_MILESTONE_208.md)
 
+## Milestone 209 acceptance evidence
+
+- Pinned variadic `-f`/`--dataFolders` request-run option and secure-reader boundary audit: [`docs/QA_MILESTONE_209.md`](QA_MILESTONE_209.md)
+- Variadic option extraction, positional protection, and focused regressions: [`src/lib/runnerCli.ts`](../src/lib/runnerCli.ts) and [`src/lib/runnerCli.test.ts`](../src/lib/runnerCli.test.ts)
+- Canonical root normalization, component-aware containment, regular-file checks, and shared template/script readers: [`cli/brunomnia.ts`](../cli/brunomnia.ts) and [`bin/brunomnia.cjs`](../bin/brunomnia.cjs)
+- Packaged rootless/outside/symlink denial plus valid template/script reads, updated security guidance, and exact verification record: [`scripts/cli-template-smoke.mjs`](../scripts/cli-template-smoke.mjs), [`README.md`](../README.md), [`docs/SECURITY_AND_SYNC.md`](SECURITY_AND_SYNC.md), [`docs/SCRIPTING.md`](SCRIPTING.md), [`docs/REQUEST_AUTHORING.md`](REQUEST_AUTHORING.md), and [`docs/QA_MILESTONE_209.md`](QA_MILESTONE_209.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).

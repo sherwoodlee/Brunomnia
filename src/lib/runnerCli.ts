@@ -22,6 +22,8 @@ const runnerCliValueOptions = new Set([
   '--output', '-o', '--workingDir', '--working-dir', '-w', '--config',
 ]);
 
+const runnerCliVariadicValueOptions = new Set(['--dataFolders', '--data-folders', '-f']);
+
 const runnerCliBooleanOptions = new Set([
   '--bail', '-b', '--allow-scripts', '--allow-script-requests', '--allow-script-files', '--allow-template-files',
   '--allow-external-vaults', '--ci', '--verbose', '--printOptions', '--print-options', '--help', '-h',
@@ -32,6 +34,10 @@ export const runnerCliPositionalArguments = (values: string[]) => {
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
     if (runnerCliBooleanOptions.has(value)) continue;
+    if (runnerCliVariadicValueOptions.has(value)) {
+      while (index + 1 < values.length && !values[index + 1].startsWith('-')) index += 1;
+      continue;
+    }
     if (runnerCliValueOptions.has(value)) {
       index += 1;
       continue;
@@ -39,6 +45,18 @@ export const runnerCliPositionalArguments = (values: string[]) => {
     positionals.push(value);
   }
   return positionals;
+};
+
+export const runnerCliVariadicOptionValues = (values: string[], ...names: string[]) => {
+  const output: string[] = [];
+  for (let index = 0; index < values.length; index += 1) {
+    if (!names.includes(values[index])) continue;
+    while (index + 1 < values.length && !values[index + 1].startsWith('-')) {
+      output.push(values[index + 1]);
+      index += 1;
+    }
+  }
+  return output;
 };
 
 export const selectRunnerGlobalEnvironment = (environments: Environment[], activeId: string, identifier?: string) => {

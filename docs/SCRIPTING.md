@@ -75,7 +75,7 @@ The bundled CLI uses Node's `vm` compatibility runtime, which is not a security 
 brunomnia run test workspace.json "Suite or API spec" --allow-scripts
 ```
 
-Local attachments additionally require `--allow-script-files`; arbitrary `insomnia.sendRequest()` calls require `--allow-script-requests`. Standalone-suite `insomnia.send()` may execute only a saved HTTP/GraphQL request in that suite's owning collection and still requires `--allow-scripts`. A file-backed arbitrary secondary request therefore requires all three flags, including `--allow-scripts`. The trusted CLI does not consume the desktop allowed-folder list or expose the desktop local vault. These invocation flags are intentionally not read from workspace preference data, preventing an imported workspace from granting itself script authority.
+Local attachments additionally require `--allow-script-files` and at least one `-f`/`--dataFolders` root; arbitrary `insomnia.sendRequest()` calls require `--allow-script-requests`. Standalone-suite `insomnia.send()` may execute only a saved HTTP/GraphQL request in that suite's owning collection and still requires `--allow-scripts`. A file-backed arbitrary secondary request therefore requires all three authority flags plus a canonical allowed root. The trusted CLI does not consume the desktop allowed-folder list or expose the desktop local vault. These invocation flags and roots are intentionally not read from workspace preference data, preventing an imported workspace from granting itself script authority.
 
 ## Remaining compatibility limits
 
