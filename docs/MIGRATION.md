@@ -2090,9 +2090,21 @@ Compatibility bounds remain explicit: browser development's `FormData` cannot at
 | Explicit skipped routes | Complete | Missing-service, expression-router, SNI, and L4 routes remain inspectable with source-backed reasons rather than becoming misleading HTTP requests |
 | Executable mapping evidence | Complete | Focused tests cover 12 HTTP/WS/gRPC combinations, protocol proxy defaults, regex parameters, sanitization, three skip classes, legacy local and collection preservation, duplicate-key defense, and gRPC stale-metadata replacement |
 
-Compatibility bounds remain explicit: Brunomnia still pulls one selected control plane into the current project rather than reconciling every control plane into typed projects/workspaces. It uses reviewable protocol-specific loopback proxy defaults because the current control-plane model does not retain `proxy_urls`. Automatic route-folder hierarchy, reviewed expression-router conversion, and a credentialed live-tenant fixture remain open. Service integrations stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone remain explicit: Brunomnia still pulls one selected control plane into the current project rather than reconciling every control plane into typed projects/workspaces. Milestone 140 uses reviewable protocol-specific loopback proxy defaults and defers control-plane `proxy_urls` retention to Milestone 141. Automatic route-folder hierarchy, reviewed expression-router conversion, and a credentialed live-tenant fixture remain open. Service integrations stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 141 — remaining parity closure and release hardening
+## Milestone 141 — Konnect control-plane proxy defaults (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Control-plane discovery model | Complete | Bounded HTTP/HTTPS/WS/WSS/gRPC/GRPCS `proxy_urls` survive API discovery and workspace persistence with protocol, host, port, template, and resource-count validation |
+| HTTP-like family defaults | Complete | The first HTTP/HTTPS/WS/WSS authority seeds protocol-specific HTTP, HTTPS, WS, and WSS URL variables with standard-port omission and nonstandard-port retention |
+| gRPC defaults | Complete | Exact gRPC and GRPCS entries seed their matching full URL variables with explicit ports and bracketed IPv6 authority handling |
+| Safe fallback and merge | Complete | Missing families keep reviewable loopback values; empty or untouched managed loopback rows can adopt later remote defaults while custom rows and edited values remain unchanged |
+| Executable evidence | Complete | Focused mapper, transport-boundary, persistence-migration, environment-merge, and integration regressions cover remote sanitization, malformed-value rejection, family mapping, IPv6, fallback replacement, custom preservation, and missing-row creation |
+
+Compatibility bounds remain explicit: the selected control plane must first be discovered so its proxy metadata is local, and no credentialed tenant fixture is stored in the repository. Automatic all-control-plane project/workspace reconciliation, route-folder hierarchy, and reviewed expression-router conversion remain open. Service integrations stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 142 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

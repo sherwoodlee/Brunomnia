@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
-import { loadKonnectControlPlanes, mapKonnectResources } from './konnect';
+import { applyKonnectVariableDefaults, loadKonnectControlPlanes, mapKonnectResources } from './konnect';
+
+const transport = vi.hoisted(() => ({ sendRequest: vi.fn() }));
+
+vi.mock('./http', () => ({ sendRequest: transport.sendRequest }));
+
+beforeEach(() => transport.sendRequest.mockReset());
 
 describe('Konnect pull mapping', () => {
   it('maps HTTP routes, preserves local request fields, and isolates unsupported protocols', () => {
@@ -136,6 +142,80 @@ describe('Konnect pull mapping', () => {
     expect(collection.subEnvironments).toEqual([expect.objectContaining({ id: 'collection-sub-environment' })]);
     expect(collection.activeSubEnvironmentId).toBe('collection-sub-environment');
     expect(collection.documentation).toBe('Collection notes');
+  });
+
+  it('derives protocol URLs from the selected control plane and preserves edited variables', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.konnect.controlPlaneId = 'cp-one';
+    workspace.konnect.controlPlanes = [{
+      id: 'cp-one',
+      name: 'Cloud Gateway',
+      description: '',
+      proxyUrls: [
+        { host: 'gateway.example.com', port: 443, protocol: 'https' },
+        { host: '2001:db8::1', port: 9000, protocol: 'grpc' },
+        { host: 'secure-grpc.example.com', port: 443, protocol: 'grpcs' },
+      ],
+    }];
+    workspace.collections = [];
+
+    const mapped = mapKonnectResources(workspace, [{ id: 'service-one', name: 'Gateway' }], [
+      { id: 'route-http', service: { id: 'service-one' }, protocols: ['http', 'https'], methods: ['GET'], paths: ['/'] },
+      { id: 'route-ws', service: { id: 'service-one' }, protocols: ['ws', 'wss'], paths: ['/events'] },
+      { id: 'route-grpc', service: { id: 'service-one' }, protocols: ['grpc', 'grpcs'], paths: ['/acme.Greeter/SayHello'] },
+    ]);
+
+    expect(mapped.variableDefaults).toEqual({
+      konnect_service_one_http_proxy_url: 'http://gateway.example.com',
+      konnect_service_one_https_proxy_url: 'https://gateway.example.com',
+      konnect_service_one_ws_proxy_url: 'ws://gateway.example.com',
+      konnect_service_one_wss_proxy_url: 'wss://gateway.example.com',
+      konnect_service_one_grpc_proxy_url: 'grpc://[2001:db8::1]:9000',
+      konnect_service_one_grpcs_proxy_url: 'grpcs://secure-grpc.example.com:443',
+    });
+
+    const variables = applyKonnectVariableDefaults([
+      { id: 'konnect-variable-http', name: 'konnect_service_one_http_proxy_url', value: 'http://127.0.0.1:8000', enabled: true },
+      { id: 'konnect-variable-https', name: 'konnect_service_one_https_proxy_url', value: '', enabled: true },
+      { id: 'konnect-variable-grpc', name: 'konnect_service_one_grpc_proxy_url', value: 'grpc://custom.example:9443', enabled: true },
+      { id: 'custom-wss', name: 'konnect_service_one_wss_proxy_url', value: '', enabled: true },
+    ], mapped.variableDefaults, mapped.variableProtocols);
+    expect(Object.fromEntries(variables.map((variable) => [variable.name, variable.value]))).toMatchObject({
+      konnect_service_one_http_proxy_url: 'http://gateway.example.com',
+      konnect_service_one_https_proxy_url: 'https://gateway.example.com',
+      konnect_service_one_ws_proxy_url: 'ws://gateway.example.com',
+      konnect_service_one_wss_proxy_url: '',
+      konnect_service_one_grpc_proxy_url: 'grpc://custom.example:9443',
+      konnect_service_one_grpcs_proxy_url: 'grpcs://secure-grpc.example.com:443',
+    });
+  });
+
+  it('retains only bounded safe proxy URLs from control-plane discovery', async () => {
+    transport.sendRequest.mockResolvedValue({
+      status: 200,
+      body: JSON.stringify({
+        data: [{
+          id: 'cp-one',
+          name: 'Gateway {{ vault.hidden }}',
+          description: 'Remote {% secret %}',
+          proxy_urls: [
+            { host: 'gateway.example.com', port: 443, protocol: 'HTTPS' },
+            { host: '{{ vault.proxy }}', port: 443, protocol: 'https' },
+            { host: 'bad.example.com/path', port: 443, protocol: 'https' },
+            { host: 'bad.example.com:443', port: 443, protocol: 'https' },
+            { host: 'grpc.example.com', port: 70_000, protocol: 'grpc' },
+          ],
+        }],
+      }),
+    });
+
+    const controlPlanes = await loadKonnectControlPlanes({ enabled: true, baseUrl: 'https://us.api.konghq.com', token: '{{ vault.konnect }}', controlPlaneId: '', controlPlanes: [] }, undefined, {});
+    expect(controlPlanes).toEqual([{
+      id: 'cp-one',
+      name: 'Gateway ',
+      description: 'Remote ',
+      proxyUrls: [{ host: 'gateway.example.com', port: 443, protocol: 'https' }],
+    }]);
   });
 
   it('rejects plaintext tokens before a Konnect request', async () => {

@@ -540,6 +540,11 @@ export type KonnectControlPlane = {
   id: string;
   name: string;
   description: string;
+  proxyUrls: Array<{
+    host: string;
+    port: number;
+    protocol: 'http' | 'https' | 'ws' | 'wss' | 'grpc' | 'grpcs';
+  }>;
 };
 
 export type KonnectConfig = {

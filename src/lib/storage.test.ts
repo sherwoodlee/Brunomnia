@@ -415,6 +415,32 @@ describe('workspace migrations', () => {
     expect(migrated.governance.audit).toHaveLength(1);
   });
 
+  it('bounds and validates persisted Konnect proxy URLs', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.konnect = {
+      enabled: true,
+      baseUrl: 'https://us.api.konghq.com',
+      token: '',
+      controlPlaneId: 'cp-one',
+      controlPlanes: [{
+        id: 'cp-one',
+        name: 'Gateway',
+        proxy_urls: [
+          { host: 'gateway.example.com', port: 443, protocol: 'HTTPS' },
+          { host: '{{ vault.host }}', port: 443, protocol: 'https' },
+          { host: 'bad.example.com/path', port: 443, protocol: 'https' },
+          { host: 'bad.example.com:443', port: 443, protocol: 'https' },
+          { host: 'grpc.example.com', port: 70_000, protocol: 'grpc' },
+          { host: 'tcp.example.com', port: 9000, protocol: 'tcp' },
+        ],
+      }],
+    };
+
+    expect(migrateWorkspace(workspace).konnect.controlPlanes[0].proxyUrls).toEqual([
+      { host: 'gateway.example.com', port: 443, protocol: 'https' },
+    ]);
+  });
+
   it('rejects unrelated JSON', () => {
     expect(() => migrateWorkspace({ hello: 'world' })).toThrow('not a Brunomnia');
   });

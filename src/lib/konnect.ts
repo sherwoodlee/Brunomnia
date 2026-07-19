@@ -9,6 +9,36 @@ const asString = (value: unknown) => typeof value === 'string' ? value : '';
 const asStrings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 const sourceId = (value: unknown) => asString(asRecord(value)?.id);
 
+const stripTemplateSyntax = (value: string) => {
+  let sanitized = value;
+  let previous = '';
+  while (sanitized !== previous) {
+    previous = sanitized;
+    sanitized = sanitized.replace(/{{[\s\S]*?}}/g, '').replace(/{%[\s\S]*?%}/g, '');
+  }
+  return sanitized;
+};
+
+const validProxyHost = (host: string) => {
+  if (!host || /[\s\\/@?#]|{{|{%/.test(host)) return false;
+  const authority = host.includes(':') && !(host.startsWith('[') && host.endsWith(']')) ? `[${host}]` : host;
+  try {
+    const parsed = new URL(`http://${authority}`);
+    return Boolean(parsed.hostname) && !parsed.username && !parsed.password && parsed.pathname === '/' && !parsed.search && !parsed.hash;
+  } catch {
+    return false;
+  }
+};
+
+const parseProxyUrls = (value: unknown): KonnectControlPlane['proxyUrls'] => !Array.isArray(value) ? [] : value.flatMap((item): KonnectControlPlane['proxyUrls'] => {
+  const proxy = asRecord(item);
+  const host = stripTemplateSyntax(asString(proxy?.host)).trim().slice(0, 1_000);
+  const port = Number(proxy?.port);
+  const protocol = asString(proxy?.protocol).toLowerCase();
+  if (!validProxyHost(host) || !Number.isInteger(port) || port < 1 || port > 65_535 || !['http', 'https', 'ws', 'wss', 'grpc', 'grpcs'].includes(protocol)) return [];
+  return [{ host, port, protocol: protocol as KonnectControlPlane['proxyUrls'][number]['protocol'] }];
+}).slice(0, 100);
+
 const baseUrl = (config: KonnectConfig) => {
   const url = new URL(config.baseUrl.trim());
   if (url.protocol !== 'https:' || url.username || url.password || !(url.hostname === 'api.konghq.com' || url.hostname.endsWith('.api.konghq.com'))) {
@@ -60,18 +90,13 @@ export const loadKonnectControlPlanes = async (config: KonnectConfig, environmen
   return records.flatMap((item): KonnectControlPlane[] => {
     const plane = asRecord(item);
     const id = asString(plane?.id);
-    return plane && id ? [{ id, name: asString(plane.name) || id, description: asString(plane.description) }] : [];
+    return plane && id ? [{
+      id,
+      name: stripTemplateSyntax(asString(plane.name)).slice(0, 500) || id,
+      description: stripTemplateSyntax(asString(plane.description)).slice(0, 20_000),
+      proxyUrls: parseProxyUrls(plane.proxy_urls),
+    }] : [];
   });
-};
-
-const stripTemplateSyntax = (value: string) => {
-  let sanitized = value;
-  let previous = '';
-  while (sanitized !== previous) {
-    previous = sanitized;
-    sanitized = sanitized.replace(/{{[\s\S]*?}}/g, '').replace(/{%[\s\S]*?%}/g, '');
-  }
-  return sanitized;
 };
 
 const sanitizedStrings = (value: unknown) => asStrings(value).map(stripTemplateSyntax).filter((item) => item.trim());
@@ -115,8 +140,40 @@ const resolveKonnectPath = (rawPath: string) => {
 };
 
 const serviceVariable = (serviceId: string, protocol: string) => `konnect_${serviceId.replace(/[^a-z0-9_]/gi, '_')}_${protocol}_proxy_url`;
-const defaultProxyUrl = (protocol: string) => `${protocol}://127.0.0.1:${protocol === 'grpc' || protocol === 'grpcs' ? '9000' : '8000'}`;
+const loopbackProxyUrl = (protocol: string) => `${protocol}://127.0.0.1:${protocol === 'grpc' || protocol === 'grpcs' ? '9000' : '8000'}`;
 const routeRequestId = (key: string) => `konnect-route-${Array.from(new TextEncoder().encode(key), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+const httpLikeProxyProtocols = new Set(['http', 'https', 'ws', 'wss']);
+const defaultPorts: Record<string, number> = { http: 80, ws: 80, https: 443, wss: 443 };
+
+const proxyAuthority = ({ host, port, protocol }: KonnectControlPlane['proxyUrls'][number]) => {
+  const normalizedHost = host.includes(':') && !(host.startsWith('[') && host.endsWith(']')) ? `[${host}]` : host;
+  return defaultPorts[protocol] === port ? normalizedHost : `${normalizedHost}:${port}`;
+};
+
+const controlPlaneProxyUrl = (protocol: string, proxyUrls: KonnectControlPlane['proxyUrls']) => {
+  const proxy = protocol === 'grpc' || protocol === 'grpcs'
+    ? proxyUrls.find((candidate) => candidate.protocol === protocol)
+    : proxyUrls.find((candidate) => httpLikeProxyProtocols.has(candidate.protocol));
+  return proxy ? `${protocol}://${proxyAuthority(proxy)}` : '';
+};
+
+export const applyKonnectVariableDefaults = (
+  variables: KeyValue[],
+  variableDefaults: Record<string, string>,
+  variableProtocols: Record<string, string>,
+) => {
+  const names = Object.keys(variableDefaults);
+  const existingNames = new Set(variables.map((variable) => variable.name));
+  return [
+    ...variables.map((variable) => {
+      const protocol = variableProtocols[variable.name];
+      const nextValue = variableDefaults[variable.name];
+      if (!protocol || !nextValue || !variable.id.startsWith('konnect-variable-')) return variable;
+      return variable.value === '' || variable.value === loopbackProxyUrl(protocol) ? { ...variable, value: nextValue } : variable;
+    }),
+    ...names.filter((name) => !existingNames.has(name)).map((name) => ({ id: `konnect-variable-${crypto.randomUUID()}`, name, value: variableDefaults[name], enabled: true })),
+  ];
+};
 
 const previousManagedHeaderNames = (request: ApiRequest | undefined) => new Set(sanitizedStrings(asRecord(request?.source?.unsupported)?.managedHeaderNames).map((name) => name.toLowerCase()));
 
@@ -210,6 +267,8 @@ export const mapKonnectResources = (workspace: Workspace, servicesSource: unknow
   const collections: Collection[] = [];
   const variables = new Set<string>();
   const variableDefaults: Record<string, string> = {};
+  const variableProtocols: Record<string, string> = {};
+  const proxyUrls = workspace.konnect.controlPlanes.find((plane) => plane.id === workspace.konnect.controlPlaneId)?.proxyUrls ?? [];
   services.forEach((service, serviceId) => {
     const existing = existingCollections.get(serviceId);
     const existingRequests = new Map(existing?.requests.map((request) => [request.source?.sourceId, request]) ?? []);
@@ -240,7 +299,8 @@ export const mapKonnectResources = (workspace: Workspace, servicesSource: unknow
       protocols.forEach((protocol) => {
         const variable = serviceVariable(serviceId, protocol);
         variables.add(variable);
-        variableDefaults[variable] = defaultProxyUrl(protocol);
+        variableDefaults[variable] = controlPlaneProxyUrl(protocol, proxyUrls) || loopbackProxyUrl(protocol);
+        variableProtocols[variable] = protocol;
         paths.forEach((rawPath) => {
           const resolved = resolveKonnectPath(rawPath);
           const methods = protocol === 'http' || protocol === 'https'
@@ -306,7 +366,7 @@ export const mapKonnectResources = (workspace: Workspace, servicesSource: unknow
       }),
     }, existing));
   }
-  return { collections, variables: [...variables], variableDefaults, skipped: skipped.length };
+  return { collections, variables: [...variables], variableDefaults, variableProtocols, skipped: skipped.length };
 };
 
 export const syncKonnectRoutes = async (workspace: Workspace, environment: Environment | undefined, context: SendRequestContext) => {
@@ -322,7 +382,7 @@ export const syncKonnectRoutes = async (workspace: Workspace, environment: Envir
   const localCollections = workspace.collections.filter((collection) => collection.source?.format !== 'konnect');
   const environments = workspace.environments.map((candidate) => candidate.id !== workspace.activeEnvironmentId ? candidate : {
     ...candidate,
-    variables: [...candidate.variables, ...mapped.variables.filter((name) => !candidate.variables.some((variable) => variable.name === name)).map((name) => ({ id: `konnect-variable-${crypto.randomUUID()}`, name, value: mapped.variableDefaults[name], enabled: true }))],
+    variables: applyKonnectVariableDefaults(candidate.variables, mapped.variableDefaults, mapped.variableProtocols),
   });
   return {
     workspace: {

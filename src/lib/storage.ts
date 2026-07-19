@@ -193,12 +193,33 @@ const normalizeAi = (value: unknown, defaults: AiSettings): AiSettings => {
   };
 };
 
+const validKonnectProxyHost = (host: string) => {
+  if (!host || /[\s\\/@?#]|{{|{%/.test(host)) return false;
+  const authority = host.includes(':') && !(host.startsWith('[') && host.endsWith(']')) ? `[${host}]` : host;
+  try {
+    const parsed = new URL(`http://${authority}`);
+    return Boolean(parsed.hostname) && !parsed.username && !parsed.password && parsed.pathname === '/' && !parsed.search && !parsed.hash;
+  } catch {
+    return false;
+  }
+};
+
 const normalizeKonnect = (value: unknown, defaults: KonnectConfig): KonnectConfig => {
   const source = record(value);
   const controlPlanes = !Array.isArray(source?.controlPlanes) ? [] : source.controlPlanes.flatMap((item): KonnectConfig['controlPlanes'] => {
     const plane = record(item);
     const id = stringValue(plane?.id);
-    return plane && id ? [{ id, name: stringValue(plane.name, id), description: stringValue(plane.description) }] : [];
+    if (!plane || !id) return [];
+    const rawProxyUrls = Array.isArray(plane.proxyUrls) ? plane.proxyUrls : Array.isArray(plane.proxy_urls) ? plane.proxy_urls : [];
+    const proxyUrls = rawProxyUrls.flatMap((item): KonnectConfig['controlPlanes'][number]['proxyUrls'] => {
+      const proxy = record(item);
+      const host = stringValue(proxy?.host).trim().slice(0, 1_000);
+      const port = Number(proxy?.port);
+      const protocol = stringValue(proxy?.protocol).toLowerCase();
+      if (!validKonnectProxyHost(host) || !Number.isInteger(port) || port < 1 || port > 65_535 || !['http', 'https', 'ws', 'wss', 'grpc', 'grpcs'].includes(protocol)) return [];
+      return [{ host, port, protocol: protocol as KonnectConfig['controlPlanes'][number]['proxyUrls'][number]['protocol'] }];
+    }).slice(0, 100);
+    return [{ id, name: stringValue(plane.name, id).slice(0, 500), description: stringValue(plane.description).slice(0, 20_000), proxyUrls }];
   }).slice(0, 1_000);
   return {
     enabled: source?.enabled === true,
