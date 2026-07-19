@@ -8,6 +8,7 @@ export type RequestTabState = {
   activeRequestId: string;
   history: string[];
   closed: string[];
+  dashboard: boolean;
 };
 
 export type RequestTabPlacement = 'before' | 'after';
@@ -16,7 +17,7 @@ const MAX_OPEN_TABS = 100;
 const MAX_TAB_HISTORY = 100;
 const MAX_CLOSED_TABS = 50;
 
-export const emptyRequestTabState = (): RequestTabState => ({ tabs: [], activeRequestId: '', history: [], closed: [] });
+export const emptyRequestTabState = (): RequestTabState => ({ tabs: [], activeRequestId: '', history: [], closed: [], dashboard: false });
 
 const uniqueIds = (value: unknown, limit: number): string[] => {
   if (!Array.isArray(value)) return [];
@@ -45,6 +46,7 @@ export const parseRequestTabState = (value: string | null): RequestTabState => {
       activeRequestId: typeof parsed.activeRequestId === 'string' ? parsed.activeRequestId : '',
       history: uniqueIds(parsed.history, MAX_TAB_HISTORY),
       closed: uniqueIds(parsed.closed, MAX_CLOSED_TABS),
+      dashboard: parsed.dashboard === true && tabs.length === 0,
     };
   } catch {
     return emptyRequestTabState();
@@ -53,11 +55,11 @@ export const parseRequestTabState = (value: string | null): RequestTabState => {
 
 const activate = (state: RequestTabState, requestId: string): RequestTabState => {
   if (!state.tabs.some((tab) => tab.requestId === requestId)) return state;
-  if (state.activeRequestId === requestId) return { ...state, closed: state.closed.filter((id) => id !== requestId) };
+  if (state.activeRequestId === requestId) return { ...state, closed: state.closed.filter((id) => id !== requestId), dashboard: false };
   const history = state.activeRequestId && state.tabs.some((tab) => tab.requestId === state.activeRequestId)
     ? [state.activeRequestId, ...state.history.filter((id) => id !== state.activeRequestId && id !== requestId)]
     : state.history.filter((id) => id !== requestId);
-  return { ...state, activeRequestId: requestId, history: history.slice(0, MAX_TAB_HISTORY), closed: state.closed.filter((id) => id !== requestId) };
+  return { ...state, activeRequestId: requestId, history: history.slice(0, MAX_TAB_HISTORY), closed: state.closed.filter((id) => id !== requestId), dashboard: false };
 };
 
 export const reconcileRequestTabState = (state: RequestTabState, validRequestIds: string[], fallbackRequestId = ''): RequestTabState => {
@@ -71,7 +73,8 @@ export const reconcileRequestTabState = (state: RequestTabState, validRequestIds
     temporarySeen ||= temporary;
     return [{ requestId: tab.requestId, temporary }];
   }).slice(0, MAX_OPEN_TABS);
-  if (!tabs.length && validIds.has(fallbackRequestId)) tabs.push({ requestId: fallbackRequestId, temporary: true });
+  const dashboard = state.dashboard && tabs.length === 0;
+  if (!tabs.length && !dashboard && validIds.has(fallbackRequestId)) tabs.push({ requestId: fallbackRequestId, temporary: true });
   const tabIds = new Set(tabs.map((tab) => tab.requestId));
   const activeRequestId = tabIds.has(state.activeRequestId)
     ? state.activeRequestId
@@ -81,6 +84,7 @@ export const reconcileRequestTabState = (state: RequestTabState, validRequestIds
     activeRequestId,
     history: uniqueIds(state.history, MAX_TAB_HISTORY).filter((id) => tabIds.has(id) && id !== activeRequestId),
     closed: uniqueIds(state.closed, MAX_CLOSED_TABS).filter((id) => validIds.has(id) && !tabIds.has(id)),
+    dashboard: dashboard && tabs.length === 0,
   };
 };
 
@@ -114,7 +118,16 @@ export const promoteRequestTab = (state: RequestTabState, requestId: string): Re
 
 export const closeRequestTab = (state: RequestTabState, requestId: string): RequestTabState => {
   const index = state.tabs.findIndex((tab) => tab.requestId === requestId);
-  if (index < 0 || state.tabs.length <= 1) return state;
+  if (index < 0) return state;
+  if (state.tabs.length === 1) {
+    return {
+      tabs: [],
+      activeRequestId: '',
+      history: [],
+      closed: [...state.closed.filter((id) => id !== requestId), requestId].slice(-MAX_CLOSED_TABS),
+      dashboard: true,
+    };
+  }
   const tabs = state.tabs.filter((tab) => tab.requestId !== requestId);
   const tabIds = new Set(tabs.map((tab) => tab.requestId));
   const history = state.history.filter((id) => id !== requestId && tabIds.has(id));
@@ -126,6 +139,20 @@ export const closeRequestTab = (state: RequestTabState, requestId: string): Requ
     activeRequestId,
     history: history.filter((id) => id !== activeRequestId),
     closed: [...state.closed.filter((id) => id !== requestId), requestId].slice(-MAX_CLOSED_TABS),
+    dashboard: false,
+  };
+};
+
+export const closeAllRequestTabs = (state: RequestTabState): RequestTabState => {
+  if (!state.tabs.length) return state;
+  const closingIds = state.tabs.map((tab) => tab.requestId);
+  const closing = new Set(closingIds);
+  return {
+    tabs: [],
+    activeRequestId: '',
+    history: [],
+    closed: [...state.closed.filter((id) => !closing.has(id)), ...closingIds].slice(-MAX_CLOSED_TABS),
+    dashboard: true,
   };
 };
 
@@ -139,6 +166,7 @@ export const closeOtherRequestTabs = (state: RequestTabState, requestId: string)
     activeRequestId: requestId,
     history: [],
     closed: [...state.closed.filter((id) => id !== requestId && !closing.has(id)), ...closingIds].slice(-MAX_CLOSED_TABS),
+    dashboard: false,
   };
 };
 

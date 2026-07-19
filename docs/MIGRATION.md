@@ -2257,7 +2257,20 @@ Compatibility bounds remain explicit: this milestone guarantees arbitrary mixed 
 
 Compatibility bounds remain explicit: pinned Close All empties the tab list and navigates to the project dashboard. Brunomnia does not yet have that project-dashboard route and deliberately retains one request-workbench tab, so it does not relabel Close Others as Close All. Broader folder/environment/mock/spec/runner tabs and true Close All remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 154 — remaining parity closure and release hardening
+## Milestone 154 — final-tab dashboard and Close All (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned route audit | Complete | Closing the sole active tab and batch-closing every tab both append closed history, clear active/list state, and navigate to the project route; scratchpad is the pinned route-only exception |
+| Intentional empty state | Complete | Per-project local tab state distinguishes an intentional dashboard from an uninitialized/invalid empty state, so ordinary startup still creates a valid temporary fallback while Close All survives reconciliation and restart |
+| Final and batch close | Complete | The tab close control and Command/Ctrl+W can close the final request; Close All removes every visible tab in order, bounds and deduplicates closed IDs, clears active history, and opens the dashboard |
+| Project dashboard | Complete baseline | The request area becomes a project resource dashboard with collection/request/design/mock totals, collection/design/mock resource cards, new-request and newest-valid reopen actions, while the collection sidebar remains available |
+| Reopen paths | Complete | Sidebar selection, dashboard collection cards, new request, automation collection opening, and Command/Ctrl+Shift+T leave dashboard state and open a request tab without changing persisted workspace content |
+| Executable evidence | Complete baseline | Focused pure-state tests, strict React/TypeScript compilation, full frontend/native suites, CLI/audit gates, and a rebuilt macOS app verify the milestone without rendered Browser QA |
+
+Compatibility bounds remain explicit: this dashboard adapts pinned project-file navigation to Brunomnia's local project model and supported collection/design/mock resources. Folder/environment/mock/spec/runner resources still do not participate in the shared document-tab strip. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 155 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

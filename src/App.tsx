@@ -21,7 +21,7 @@ import type { WorkspaceEnvironmentMove, WorkspaceResourceKeyboardAction, Workspa
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
 import { parsePinnedRequestIds, pinnedWorkspaceRequests, reconcilePinnedRequestIds, togglePinnedRequestId } from './lib/requestPins';
-import { closeOtherRequestTabs, closeRequestTab, cycleRequestTab, emptyRequestTabState, moveRequestTab, openRequestTab, parseRequestTabState, promoteRequestTab, reconcileRequestTabState, reopenClosedRequestTab } from './lib/requestTabs';
+import { closeAllRequestTabs, closeOtherRequestTabs, closeRequestTab, cycleRequestTab, emptyRequestTabState, moveRequestTab, openRequestTab, parseRequestTabState, promoteRequestTab, reconcileRequestTabState, reopenClosedRequestTab } from './lib/requestTabs';
 import type { RequestTabPlacement, RequestTabState } from './lib/requestTabs';
 import type { AppliedResponseMockTarget } from './lib/mockRouteFromResponse';
 import type { OAuthAuthorizationStatus } from './components/OAuthAuthorizationDialog';
@@ -287,6 +287,7 @@ function BulkKeyValueEditor({ rows, onChange, ariaLabel }: { rows: KeyValue[]; o
 
 type CollectionSidebarProps = {
   workspace: Workspace;
+  selectedRequestId: string;
   pinnedRequestIds: string[];
   search: string;
   mode: SidebarMode;
@@ -309,6 +310,7 @@ type SidebarDragSource =
 
 function CollectionSidebar({
   workspace,
+  selectedRequestId,
   pinnedRequestIds,
   search,
   mode,
@@ -487,7 +489,7 @@ function CollectionSidebar({
             const source: SidebarDragSource = { kind: 'request', collectionId: collection.id, resourceId: request.id };
             return <button
             aria-grabbed={dragSource?.kind === 'request' && dragSource.resourceId === request.id}
-            className={`request-row${workspace.activeRequestId === request.id ? ' selected' : ''}${sourceClass(source)}${indicatorClass('resource', request.id)}`}
+            className={`request-row${selectedRequestId === request.id ? ' selected' : ''}${sourceClass(source)}${indicatorClass('resource', request.id)}`}
             draggable={!normalizedSearch}
             key={request.id}
             onDragEnd={clearDrag}
@@ -572,6 +574,50 @@ function CollectionSidebar({
   );
 }
 
+type ProjectDashboardProps = {
+  workspace: Workspace;
+  canReopenRequest: boolean;
+  onAddRequest: () => void;
+  onOpenRequest: (requestId: string) => void;
+  onOpenSection: (section: 'design' | 'mocks') => void;
+  onReopenRequest: () => void;
+};
+
+function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onOpenRequest, onOpenSection, onReopenRequest }: ProjectDashboardProps) {
+  const requestCount = workspace.collections.reduce((total, collection) => total + collection.requests.length, 0);
+  return <section aria-labelledby="project-dashboard-title" className="project-dashboard">
+    <header>
+      <div><small>Project dashboard</small><h1 id="project-dashboard-title">{workspace.name}</h1><p>Open a project resource or select any request from the sidebar.</p></div>
+      <div className="project-dashboard-actions">
+        <button className="secondary-button" disabled={!canReopenRequest} onClick={onReopenRequest} type="button"><Icon name="history" size={14} /> Reopen closed tab</button>
+        <button className="primary-button" onClick={onAddRequest} type="button"><Icon name="plus" size={14} /> New request</button>
+      </div>
+    </header>
+    <div aria-label="Project resource totals" className="project-dashboard-metrics">
+      <div><strong>{workspace.collections.length}</strong><span>Collections</span></div>
+      <div><strong>{requestCount}</strong><span>Requests</span></div>
+      <div><strong>{workspace.apiDesigns.length}</strong><span>API designs</span></div>
+      <div><strong>{workspace.mockServers.length}</strong><span>Mock servers</span></div>
+    </div>
+    <section className="project-dashboard-resources">
+      <header><div><small>Local resources</small><h2>Project files</h2></div><span>{workspace.collections.length + workspace.apiDesigns.length + workspace.mockServers.length} total</span></header>
+      <div className="project-dashboard-grid">
+        {workspace.collections.map((collection) => {
+          const firstRequest = collection.requests[0];
+          return <button disabled={!firstRequest} key={collection.id} onClick={() => { if (firstRequest) onOpenRequest(firstRequest.id); }} type="button">
+            <Icon name="archive" size={19} />
+            <span><strong>{collection.name}</strong><small>{collection.requests.length} request{collection.requests.length === 1 ? '' : 's'} · {(collection.folders ?? []).length} folder{(collection.folders ?? []).length === 1 ? '' : 's'}</small></span>
+            <Icon name="chevron-right" size={14} />
+          </button>;
+        })}
+        {workspace.apiDesigns.map((design) => <button key={design.id} onClick={() => onOpenSection('design')} type="button"><Icon name="grid" size={19} /><span><strong>{design.name}</strong><small>API design</small></span><Icon name="chevron-right" size={14} /></button>)}
+        {workspace.mockServers.map((server) => <button key={server.id} onClick={() => onOpenSection('mocks')} type="button"><Icon name="spark" size={19} /><span><strong>{server.name}</strong><small>{server.routes.length} route{server.routes.length === 1 ? '' : 's'} · 127.0.0.1:{server.port}</small></span><Icon name="chevron-right" size={14} /></button>)}
+        {!workspace.collections.length && !workspace.apiDesigns.length && !workspace.mockServers.length ? <div className="empty-state"><Icon name="archive" size={28} /><strong>No project resources</strong><span>Create a request to start a collection.</span></div> : null}
+      </div>
+    </section>
+  </section>;
+}
+
 type RequestPanelProps = {
   request: ApiRequest;
   documentTabs: Array<{ request: ApiRequest; temporary: boolean }>;
@@ -602,6 +648,7 @@ type RequestPanelProps = {
   onLoadGraphqlSchema: (includeInputValueDeprecation: boolean) => void;
   onSocketIoListenerToggle: (eventName: string, enabled: boolean) => void;
   onAddRequest: () => void;
+  onCloseAllDocumentTabs: () => void;
   onCloseDocumentTab: (requestId: string) => void;
   onCloseOtherDocumentTabs: (requestId: string) => void;
   onGenerateCode: () => void;
@@ -637,6 +684,7 @@ function RequestPanel({
   onLoadGraphqlSchema,
   onSocketIoListenerToggle,
   onAddRequest,
+  onCloseAllDocumentTabs,
   onCloseDocumentTab,
   onCloseOtherDocumentTabs,
   onGenerateCode,
@@ -701,7 +749,7 @@ function RequestPanel({
   const openDocumentMenu = (requestId: string, left: number, top: number) => setDocumentMenu({
     requestId,
     left: Math.max(4, Math.min(left, window.innerWidth - 190)),
-    top: Math.max(4, Math.min(top, window.innerHeight - 52)),
+    top: Math.max(4, Math.min(top, window.innerHeight - 84)),
   });
   useEffect(() => {
     if (!documentMenu) return;
@@ -727,10 +775,10 @@ function RequestPanel({
             {activeDocument ? <input aria-label="Request name" onChange={(event) => onChange({ name: event.target.value })} onClick={(event) => event.stopPropagation()} spellCheck={false} value={request.name} /> : <span className="document-tab-name">{document.request.name}</span>}
             {document.temporary ? <button aria-label={`Keep ${document.request.name} tab open`} onClick={(event) => { event.stopPropagation(); onPromoteDocumentTab(document.request.id); }} title="Keep tab open" type="button"><Icon name="check" size={11} /></button> : null}
             {activeDocument ? <button aria-label={pinned ? 'Unpin request' : 'Pin request'} className={pinned ? 'active' : ''} onClick={(event) => { event.stopPropagation(); onTogglePin(); }} title={pinned ? 'Unpin request' : 'Pin request'} type="button"><Icon name="pin" size={13} /></button> : null}
-            <button aria-label={`Close ${document.request.name}`} disabled={documentTabs.length <= 1} onClick={(event) => { event.stopPropagation(); onCloseDocumentTab(document.request.id); }} title={documentTabs.length <= 1 ? 'The request workbench keeps one tab open' : 'Close tab'} type="button"><Icon name="x" size={12} /></button>
+            <button aria-label={`Close ${document.request.name}`} onClick={(event) => { event.stopPropagation(); onCloseDocumentTab(document.request.id); }} title="Close tab" type="button"><Icon name="x" size={12} /></button>
           </div>;
         })}</div>
-        {documentMenu ? <div className="document-tab-menu" role="menu" style={{ left: documentMenu.left, top: documentMenu.top }}><button disabled={documentTabs.length <= 1} onClick={() => { onCloseOtherDocumentTabs(documentMenu.requestId); setDocumentMenu(undefined); }} role="menuitem" type="button">Close other tabs</button></div> : null}
+        {documentMenu ? <div className="document-tab-menu" role="menu" style={{ left: documentMenu.left, top: documentMenu.top }}><button onClick={() => { onCloseAllDocumentTabs(); setDocumentMenu(undefined); }} role="menuitem" type="button">Close All</button><button disabled={documentTabs.length <= 1} onClick={() => { onCloseOtherDocumentTabs(documentMenu.requestId); setDocumentMenu(undefined); }} role="menuitem" type="button">Close Other Tabs</button></div> : null}
         <select aria-label="Request folder" className="request-folder-select" onChange={(event) => onChange({ folderId: event.target.value })} value={request.folderId ?? ''}><option value="">Collection root</option>{(collection.folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folderPath(collection, folder.id)}</option>)}</select>
         <button aria-label="Reopen closed request tab" className="tab-plus" disabled={!canReopenDocumentTab} onClick={onReopenDocumentTab} title="Reopen closed tab · Command/Ctrl+Shift+T" type="button"><Icon name="history" size={15} /></button>
         <button aria-label="New request" className="tab-plus" onClick={onAddRequest} type="button"><Icon name="plus" size={16} /></button>
@@ -1303,7 +1351,7 @@ export default function App() {
     if (!hydrated || !activeWorkspaceId || requestDocumentState.workspaceId !== activeWorkspaceId) return;
     const validRequestIds = workspace.collections.flatMap((collection) => collection.requests.map((request) => request.id));
     let state = reconcileRequestTabState(requestDocumentState.state, validRequestIds, workspace.activeRequestId);
-    if (workspace.activeRequestId && validRequestIds.includes(workspace.activeRequestId) && state.activeRequestId !== workspace.activeRequestId) {
+    if (!state.dashboard && workspace.activeRequestId && validRequestIds.includes(workspace.activeRequestId) && state.activeRequestId !== workspace.activeRequestId) {
       state = openRequestTab(state, workspace.activeRequestId);
     }
     if (JSON.stringify(state) !== JSON.stringify(requestDocumentState.state)) {
@@ -1358,6 +1406,7 @@ export default function App() {
     const request = requestsById.get(tab.requestId);
     return request ? [{ request, temporary: tab.temporary }] : [];
   });
+  const isRequestDashboard = activeRequestDocumentState.dashboard && requestDocumentTabs.length === 0;
   const activeStreaming = active ? isStreamingRequest(active.request) : false;
   const activeCollection = workspace.collections.find((collection) => collection.id === active?.collectionId);
   activeRequestIdRef.current = workspace.activeRequestId;
@@ -1659,6 +1708,10 @@ export default function App() {
     applyRequestDocumentState(closeRequestTab(activeRequestDocumentState, requestId));
   };
 
+  const closeAllRequestDocuments = () => {
+    applyRequestDocumentState(closeAllRequestTabs(activeRequestDocumentState));
+  };
+
   const closeOtherRequestDocuments = (requestId: string) => {
     applyRequestDocumentState(closeOtherRequestTabs(activeRequestDocumentState, requestId));
   };
@@ -1713,9 +1766,9 @@ export default function App() {
   };
 
   const addRequest = useCallback(() => {
+    const id = uid('request');
+    const request = createBlankRequest(id);
     setWorkspace((current) => {
-      const id = uid('request');
-      const request = createBlankRequest(id);
       if (current.collections.length === 0) {
         return { ...current, activeRequestId: id, collections: [{ id: uid('collection'), name: 'Requests', expanded: true, requests: [request], resourceOrder: [id] }] };
       }
@@ -1727,9 +1780,10 @@ export default function App() {
           : collection),
       };
     });
+    applyRequestDocumentState(openRequestTab(activeRequestDocumentState, id));
     setWorkbenchSection('requests');
     setRequestTab('params');
-  }, []);
+  }, [activeRequestDocumentState, activeWorkspaceId]);
 
   const addCollection = useCallback(() => {
     setWorkspace((current) => ({
@@ -2542,21 +2596,21 @@ export default function App() {
       const action = (callback: () => void) => { event.preventDefault(); callback(); };
       if (shortcutMatches(event, shortcuts.palette)) action(() => setShowPalette((visible) => !visible));
       else if (shortcutMatches(event, shortcuts.preferences)) action(() => setWorkbenchSection('preferences'));
-      else if (shortcutMatches(event, shortcuts.send)) action(() => { if (scheduledSendLabel) cancelScheduledSends(); else if (!isSending) void executeRequest(); });
+      else if (shortcutMatches(event, shortcuts.send) && !isRequestDashboard) action(() => { if (scheduledSendLabel) cancelScheduledSends(); else if (!isSending) void executeRequest(); });
       else if (shortcutMatches(event, shortcuts.environment)) action(() => setShowEnvironment(true));
       else if (shortcutMatches(event, shortcuts.history)) action(() => { setWorkbenchSection('requests'); setSidebarMode('history'); setSidebarHidden(false); });
       else if (shortcutMatches(event, shortcuts['toggle-sidebar'])) action(() => setSidebarHidden((hidden) => !hidden));
       else if (shortcutMatches(event, shortcuts['new-request'])) action(addRequest);
-      else if (shortcutMatches(event, shortcuts['duplicate-request'])) action(duplicateActiveRequest);
-      else if (shortcutMatches(event, shortcuts['delete-request'])) action(deleteActiveRequest);
-      else if (shortcutMatches(event, shortcuts['focus-url'])) action(() => { setWorkbenchSection('requests'); urlInputRef.current?.focus(); urlInputRef.current?.select(); });
-      else if (shortcutMatches(event, shortcuts['generate-code'])) action(() => {
+      else if (shortcutMatches(event, shortcuts['duplicate-request']) && !isRequestDashboard) action(duplicateActiveRequest);
+      else if (shortcutMatches(event, shortcuts['delete-request']) && !isRequestDashboard) action(deleteActiveRequest);
+      else if (shortcutMatches(event, shortcuts['focus-url']) && !isRequestDashboard) action(() => { setWorkbenchSection('requests'); urlInputRef.current?.focus(); urlInputRef.current?.select(); });
+      else if (shortcutMatches(event, shortcuts['generate-code']) && !isRequestDashboard) action(() => {
         if (active && (active.request.protocol === 'http' || active.request.protocol === 'graphql')) setShowCodeGeneration(true);
       });
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [active, isSending, scheduledSendLabel, workspace]);
+  }, [active, isRequestDashboard, isSending, scheduledSendLabel, workspace]);
 
   const applyImport = async (result: ArtifactImport) => {
     const { applyArtifactImport } = await import('./lib/interchange/apply');
@@ -2741,11 +2795,19 @@ export default function App() {
           onToggleCollection={(id) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === id ? { ...collection, expanded: !collection.expanded } : collection) }))}
           onToggleFolder={(collectionId, folderId) => setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => collection.id === collectionId ? { ...collection, folders: (collection.folders ?? []).map((folder) => folder.id === folderId ? { ...folder, expanded: !folder.expanded } : folder) } : collection) }))}
           search={search}
+          selectedRequestId={isRequestDashboard ? '' : activeRequestDocumentState.activeRequestId}
           pinnedRequestIds={activePinnedRequestIds}
           workspace={workspace}
         /> : null}
 
-        {workbenchSection === 'requests' ? <div className="workbench">
+        {workbenchSection === 'requests' ? (isRequestDashboard ? <ProjectDashboard
+          canReopenRequest={activeRequestDocumentState.closed.some((requestId) => requestsById.has(requestId))}
+          onAddRequest={addRequest}
+          onOpenRequest={(requestId) => openRequestDocument(requestId)}
+          onOpenSection={setWorkbenchSection}
+          onReopenRequest={reopenRequestDocument}
+          workspace={workspace}
+        /> : <div className="workbench">
           <RequestPanel
             activeTab={requestTab}
             canReopenDocumentTab={activeRequestDocumentState.closed.some((requestId) => requestsById.has(requestId))}
@@ -2760,6 +2822,7 @@ export default function App() {
             onChange={updateActiveRequest}
             onAddRequest={addRequest}
             onCancelScheduled={cancelScheduledSends}
+            onCloseAllDocumentTabs={closeAllRequestDocuments}
             onCloseDocumentTab={closeRequestDocument}
             onCloseOtherDocumentTabs={closeOtherRequestDocuments}
             onGenerateCode={() => setShowCodeGeneration(true)}
@@ -2838,7 +2901,7 @@ export default function App() {
             streamSession={streamSessionView}
             streamStatus={streamStatus}
           />
-        </div> : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} templatePrompt={requestTemplatePrompt} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : (
+        </div>) : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} templatePrompt={requestTemplatePrompt} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : (
           <Suspense fallback={<div className="dialog-loading">Loading automation…</div>}><AutomationWorkbench
             activeEnvironment={activeEnvironment}
             focusedMock={focusedMock}
@@ -2846,7 +2909,7 @@ export default function App() {
             onOpenCollection={(collection) => {
               setWorkbenchSection('requests');
               setSidebarMode('collections');
-              if (collection.requests[0]) setWorkspace((current) => ({ ...current, activeRequestId: collection.requests[0].id }));
+              if (collection.requests[0]) openRequestDocument(collection.requests[0].id);
             }}
             onStartMock={(serverId, runningMock) => setRunningMocks((current) => ({ ...current, [serverId]: runningMock }))}
             onStopMock={(serverId) => setRunningMocks((current) => {
@@ -2871,7 +2934,7 @@ export default function App() {
         <span>{vaultSession.unlocked ? `Vault: ${vaultSession.entries.length} unlocked` : 'Vault: locked'}</span>
         <span>Local-only</span>
         <span>UTF-8</span>
-        <span>{workbenchSection === 'requests' ? protocolLabel(active.request) : titleCase(workbenchSection)}</span>
+        <span>{workbenchSection === 'requests' ? isRequestDashboard ? 'Project' : protocolLabel(active.request) : titleCase(workbenchSection)}</span>
       </footer>
 
       {showEnvironment ? <EnvironmentDialog activeId={workspace.activeEnvironmentId} environments={workspace.environments} onAdd={addEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} onDelete={deleteEnvironment} onDuplicate={duplicateEnvironment} onMove={moveEnvironment} onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))} /> : null}

@@ -50,7 +50,7 @@ Collection, folder, and request documentation is stored as Markdown source. This
 
 Selecting a request normally opens one temporary tab; selecting another unopened request replaces that temporary tab. Command/Ctrl-click, middle-click, or double-click opens a permanent tab, while double-clicking a temporary tab or using its check control keeps it open. Editing or sending a temporary request also promotes it. Tabs persist per local project, follow request renames/methods directly from the workspace, support pointer drag ordering, and reconcile deleted request IDs without entering workspace data.
 
-Close uses recent active-tab history before falling back to the preceding tab. Command/Ctrl+Tab and Command/Ctrl+Shift+Tab cycle tabs, Command/Ctrl+W closes the active tab, and Command/Ctrl+Shift+T or the history control reopens the latest valid closed tab. Brunomnia's request workbench keeps one tab open because it does not navigate to Insomnia's separate project-dashboard route when the last tab closes.
+Close uses recent active-tab history before falling back to the preceding tab. Closing the final tab or choosing **Close All** stores every closed request and opens the project resource dashboard; **Close Other Tabs** preserves and activates its selected tab. Command/Ctrl+Tab and Command/Ctrl+Shift+Tab cycle tabs, Command/Ctrl+W closes the active tab, and Command/Ctrl+Shift+T or the dashboard/history controls reopen the latest valid closed tab. Selecting a sidebar request, project card, or new request leaves the dashboard and opens a request tab.
 
 ## Request pins
 
