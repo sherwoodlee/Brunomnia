@@ -2141,7 +2141,7 @@ Compatibility bounds remain explicit: the pinned parser deliberately ignores uns
 | Safety and discoverability | Complete | Search disables keyboard moves, impossible and boundary operations are no-ops, focusable controls advertise `aria-keyshortcuts`, and titles describe macOS Option plus cross-platform Alt behavior |
 | Executable evidence | Complete | A pure planner regression applies real moves across mixed siblings, indent/outdent, first placement, collection placement, and invalid boundaries; strict TypeScript proves all focusable wiring |
 
-Compatibility bounds remain explicit: keyboard moves operate one resource at a time and do not add multi-select/bulk tree actions. Rendered interaction and assistive-technology QA remain omitted by standing direction, so this milestone claims source semantics, focusable controls, shortcut metadata, pure move evidence, full regression suites, and packaged-app verification rather than observed focus visuals. Richer resource actions, environment-tree ordering, collected-data breadth, explicit legacy response-only labeling, byte-exact wire diagnostic export, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete.
+Compatibility bounds remain explicit: keyboard moves operate one resource at a time and do not add multi-select/bulk tree actions. Rendered interaction and assistive-technology QA remain omitted by standing direction, so this milestone claims source semantics, focusable controls, shortcut metadata, pure move evidence, full regression suites, and packaged-app verification rather than observed focus visuals. Richer resource actions, environment-tree ordering, collected-data breadth, explicit legacy response-only labeling, richer libcurl-style header/text timeline evidence, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete.
 
 ## Milestone 145 — deep folder duplication (complete baseline)
 
@@ -2153,7 +2153,7 @@ Compatibility bounds remain explicit: keyboard moves operate one resource at a t
 | Mixed order | Complete | The copied subtree retains its internal persisted order and is inserted immediately after the complete original subtree without disturbing unrelated siblings |
 | Executable evidence | Complete | A deterministic pure regression proves hierarchy, request placement, fresh row/protocol IDs, source detachment, adjacent order, and invalid-target no-op behavior; strict TypeScript proves folder-dialog wiring |
 
-Compatibility bounds remain explicit: duplication stays within the current collection, matching the ordinary pinned folder action; cross-workspace copy/move continues through existing drag/settings paths rather than this command. Multi-select/bulk resource actions, request pinning/new-tab state, environment-tree ordering, collected-data breadth, explicit legacy response-only labeling, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: duplication stays within the current collection, matching the ordinary pinned folder action; cross-workspace copy/move continues through existing drag/settings paths rather than this command. Multi-select/bulk resource actions, request pinning/new-tab state, environment-tree ordering, collected-data breadth, explicit legacy response-only labeling, richer libcurl-style header/text timeline evidence, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 146 — sub-environment ordering and duplication (complete baseline)
 
@@ -2165,7 +2165,7 @@ Compatibility bounds remain explicit: duplication stays within the current colle
 | Safe duplication | Complete | The copy retains parent, values, color, and private state; regenerates environment and variable-row IDs; removes import provenance; and does not duplicate descendants |
 | Executable evidence | Complete | A deterministic regression proves sibling order, nested-child stability, keyboard planning, invalid cross-parent/base operations, adjacent copy placement, fresh IDs, provenance removal, and descendant exclusion; strict TypeScript proves dialog wiring |
 
-Compatibility bounds remain explicit: pinned Insomnia exposes these actions only for sub-environments, so Brunomnia base environments remain immovable and non-duplicable through this surface even though its richer model can contain multiple base trees. Parent changes remain an explicit editor field instead of an implied cross-parent drop. Multi-select/bulk resource actions, request pinning/new-tab state, collected-data breadth, explicit legacy response-only labeling, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+Compatibility bounds remain explicit: pinned Insomnia exposes these actions only for sub-environments, so Brunomnia base environments remain immovable and non-duplicable through this surface even though its richer model can contain multiple base trees. Parent changes remain an explicit editor field instead of an implied cross-parent drop. Multi-select/bulk resource actions, request pinning/new-tab state, collected-data breadth, explicit legacy response-only labeling, richer libcurl-style header/text timeline evidence, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
 ## Milestone 147 — device-local request pinning (complete baseline)
 
@@ -2177,7 +2177,7 @@ Compatibility bounds remain explicit: pinned Insomnia exposes these actions only
 | Safe reconciliation | Complete | Malformed storage, duplicate IDs, missing requests, deleted requests, project switches, and unavailable local storage cannot pollute workspace data or crash request editing |
 | Executable evidence | Complete | Pure tests prove safe parsing, uniqueness, current-workspace reconciliation, toggle no-ops, removal, resource-order listing, and filtering; strict TypeScript proves active and pinned-list controls |
 
-Compatibility bounds remain explicit: this milestone closes request pin metadata and its sidebar projection, not Insomnia's separate persistent temporary/permanent document-tab context, tab history, close/reopen behavior, or tab drag ordering. Multi-select/bulk resource actions, document-tab state, collected-data breadth, explicit legacy response-only labeling, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+Compatibility bounds remain explicit: this milestone closes request pin metadata and its sidebar projection, not Insomnia's separate persistent temporary/permanent document-tab context, tab history, close/reopen behavior, or tab drag ordering. Multi-select/bulk resource actions, document-tab state, collected-data breadth, explicit legacy response-only labeling, richer libcurl-style header/text timeline evidence, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
 ## Milestone 148 — persistent request document tabs (complete baseline)
 
@@ -2190,7 +2190,7 @@ Compatibility bounds remain explicit: this milestone closes request pin metadata
 | Ordering and reconciliation | Complete | Native pointer drag persists before/after tab order; duplicate/malformed/deleted/stale IDs are bounded and repaired while request names, methods, and protocols remain live workspace projections |
 | Executable evidence | Complete | Pure tests prove parsing, single-temporary enforcement, replacement, promotion, close history, reopen, cycle, drag order, deletion repair, and fallback creation; strict TypeScript proves the full request-tab strip |
 
-Compatibility bounds remain explicit: pinned Insomnia can close its final tab and navigate to a separate project dashboard, while Brunomnia's always-present request workbench deliberately keeps one request tab open. This milestone covers request documents, not Insomnia's broader folder/environment/mock/spec/runner tab types or close-all/close-others context menu. Multi-select/bulk resource actions, collected-data breadth, explicit legacy response-only labeling, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+Compatibility bounds remain explicit: pinned Insomnia can close its final tab and navigate to a separate project dashboard, while Brunomnia's always-present request workbench deliberately keeps one request tab open. This milestone covers request documents, not Insomnia's broader folder/environment/mock/spec/runner tab types or close-all/close-others context menu. Multi-select/bulk resource actions, collected-data breadth, explicit legacy response-only labeling, richer libcurl-style header/text timeline evidence, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
 ## Milestone 149 — corrective collection bulk-action audit (complete)
 
@@ -2202,7 +2202,7 @@ Compatibility bounds remain explicit: pinned Insomnia can close its final tab an
 | Existing bulk surfaces | Preserved | Bulk query/header text editors and multi-request runner selection remain implemented and are unrelated to collection-tree resource selection |
 | Ledger correction | Complete | The stale multi-select/bulk collection-tree gap is removed without adding behavior absent from pinned Insomnia or changing Brunomnia product code |
 
-Compatibility bounds remain explicit: this audit does not assert that Insomnia has no multi-selection anywhere; runner result tables, plugin settings, Git history, and other domain-specific lists can be multi-select. The corrected claim is limited to collection-tree resources and their actions. Collected-data breadth, explicit legacy response-only labeling, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. No rendered interaction claim is made.
+Compatibility bounds remain explicit: this audit does not assert that Insomnia has no multi-selection anywhere; runner result tables, plugin settings, Git history, and other domain-specific lists can be multi-select. The corrected claim is limited to collection-tree resources and their actions. Collected-data breadth, explicit legacy response-only labeling, richer libcurl-style header/text timeline evidence, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. No rendered interaction claim is made.
 
 ## Milestone 150 — response collected-data and restore fidelity (complete baseline)
 
@@ -2216,9 +2216,22 @@ Compatibility bounds remain explicit: this audit does not assert that Insomnia h
 | Persistence hardening | Complete | Migration bounds assertion counts and strings, admits only boolean cookie settings and bounded environment IDs, and preserves older response-only entries without inventing snapshots |
 | Executable evidence | Complete baseline | Focused history/storage/runner/script tests, strict TypeScript, the full frontend/native suites, production build, CLI artifact, dependency audit, and macOS debug-app bundle verify the milestone without rendered Browser QA |
 
-Compatibility bounds remain explicit: response history remains device-local and stores bounded values directly instead of Insomnia's database plus filesystem body/timeline paths. Raw wire headers/chunks, duplicate header ordering, TLS/redirect traces, and compressed transfer bytes remain unavailable to byte-exact diagnostics. Collections stays `Baseline`; 19 parity rows remain incomplete. Legacy response-only entries are compatible behavior, not an open reconstruction task. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: response history remains device-local and stores bounded values directly instead of Insomnia's database plus filesystem body/timeline paths. Raw header ordering and libcurl-style redirect/network text remain absent from the persisted timeline. Milestone 151 later confirms that pinned Insomnia filters SSL data, summarizes incoming chunks, bounds outgoing body text, and has no byte-exact diagnostic export. Collections stays `Baseline`; 19 parity rows remain incomplete. Legacy response-only entries are compatible behavior, not an open reconstruction task. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 151 — remaining parity closure and release hardening
+## Milestone 151 — corrective response diagnostic audit (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned debug surface | Corrected | `response-debug-modal.tsx` loads a response timeline into a read-only prefixed text viewer; it does not export a byte-exact wire transcript |
+| Pinned capture policy | Corrected | The libcurl debug callback drops SSL data, empty chunks, and cookie-jar additions; it UTF-8-decodes small outgoing data, hides larger outgoing data, and replaces each incoming data chunk with a byte-count message |
+| Optional body display | Corrected | `getResponseTimeline(response, true)` reads the separately stored response body as UTF-8 text and appends it to the viewer; this is not compressed-wire or exact binary evidence |
+| Ledger placement | Complete | The false byte-exact export requirement is removed from Collections. The real missing HeaderIn/HeaderOut/Text redirect/network evidence remains named under REST/HTTP execution |
+| Existing extras | Preserved | Brunomnia's deterministic response transcript and HAR downloads remain useful account-free extensions without being mislabeled as pinned timeline parity |
+| Product delta | Complete | No product code changes are required for this corrective audit; M150's verified renderer, CLI, native suites, dependency audit, and arm64 app bundle remain unchanged |
+
+Compatibility bounds remain explicit: Brunomnia still lacks persisted raw duplicate-header order and libcurl-style redirect/network text. Pinned Insomnia itself excludes SSL bytes, summarizes incoming body chunks, bounds outgoing body text, and offers no byte-exact diagnostic export, so those excluded bytes are not retained as a false parity requirement. Collections remains `Baseline` for broader document-tab coverage; 19 parity rows remain incomplete. No rendered interaction claim is made.
+
+## Milestone 152 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

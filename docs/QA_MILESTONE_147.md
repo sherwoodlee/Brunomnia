@@ -43,4 +43,4 @@ Rendered interaction and assistive-technology QA are omitted by standing directi
 
 ## Acceptance boundary
 
-Milestone 147 accepts device-local request pinning and the separate filtered pinned-request list. Multi-select/bulk actions, persistent temporary/permanent document tabs, richer collected data, explicit legacy response-only labeling, byte-exact wire diagnostics, and arbitrary mixed-order third-party exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 148.
+Milestone 147 accepts device-local request pinning and the separate filtered pinned-request list. Multi-select/bulk actions, persistent temporary/permanent document tabs, richer collected data, explicit legacy response-only labeling, richer libcurl-style header/text timeline evidence, and arbitrary mixed-order third-party exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 148.

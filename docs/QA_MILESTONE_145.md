@@ -44,4 +44,4 @@ Rendered interaction QA is omitted by standing direction. This milestone makes n
 
 ## Acceptance boundary
 
-Milestone 145 accepts deep local folder duplication. Multi-select/bulk actions, request pinning/new-tab state, environment-tree ordering, richer collected data, explicit legacy response-only labeling, byte-exact wire diagnostics, and arbitrary mixed-order third-party exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 146.
+Milestone 145 accepts deep local folder duplication. Multi-select/bulk actions, request pinning/new-tab state, environment-tree ordering, richer collected data, explicit legacy response-only labeling, richer libcurl-style header/text timeline evidence, and arbitrary mixed-order third-party exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 146.

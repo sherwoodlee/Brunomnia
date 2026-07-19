@@ -43,4 +43,4 @@ Rendered interaction and assistive-technology QA are omitted by standing directi
 
 ## Acceptance boundary
 
-Milestone 144 accepts single-resource keyboard-equivalent collection-tree movement. Multi-select/bulk resource actions, environment-tree ordering, richer collected data, explicit legacy response-only labeling, byte-exact wire diagnostics, and arbitrary mixed-order third-party exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 145.
+Milestone 144 accepts single-resource keyboard-equivalent collection-tree movement. Multi-select/bulk resource actions, environment-tree ordering, richer collected data, explicit legacy response-only labeling, richer libcurl-style header/text timeline evidence, and arbitrary mixed-order third-party exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 145.

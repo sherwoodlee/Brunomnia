@@ -28,4 +28,4 @@ Scope: remove a stale collection-tree multi-select/bulk-action requirement that 
 
 ## Acceptance boundary
 
-Milestone 149 removes only the false collection-tree multi-select/bulk-action gap. It does not turn unrelated multi-select tables into single-select surfaces and does not claim broad Collections completion. Collected-data breadth, explicit legacy response-only labeling, byte-exact wire diagnostics, and arbitrary mixed-order third-party exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 150.
+Milestone 149 removes only the false collection-tree multi-select/bulk-action gap. It does not turn unrelated multi-select tables into single-select surfaces and does not claim broad Collections completion. Collected-data breadth, explicit legacy response-only labeling, richer libcurl-style header/text timeline evidence, and arbitrary mixed-order third-party exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 150.
