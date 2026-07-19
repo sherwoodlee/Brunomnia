@@ -1062,6 +1062,20 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Corrected historical boundary and account-free documentation: [`docs/QA_MILESTONE_183.md`](QA_MILESTONE_183.md) and [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
 - Exact verification record: [`docs/QA_MILESTONE_192.md`](QA_MILESTONE_192.md)
 
+## Milestone 193 acceptance evidence
+
+- Pinned controlled Results/History/Console active-tab audit: [`docs/QA_MILESTONE_193.md`](QA_MILESTONE_193.md)
+- Pure active-execution pane selection with post-run restoration regression: [`src/lib/runnerPlan.ts`](../src/lib/runnerPlan.ts) and [`src/lib/runnerPlan.test.ts`](../src/lib/runnerPlan.test.ts)
+- Controlled visual/ARIA pane state that keeps live progress, Skip, and Cancel all reachable throughout execution: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx)
+- Exact verification record: [`docs/QA_MILESTONE_193.md`](QA_MILESTONE_193.md)
+
+## Milestone 194 acceptance evidence
+
+- Pinned initial Results Hotkey guidance and saved empty-run distinction audit: [`docs/QA_MILESTONE_194.md`](QA_MILESTONE_194.md)
+- Semantic configured-shortcut guidance with focused static-render regressions: [`src/components/RunnerResultsEmptyState.tsx`](../src/components/RunnerResultsEmptyState.tsx) and [`src/components/RunnerResultsEmptyState.test.tsx`](../src/components/RunnerResultsEmptyState.test.tsx)
+- Initial/saved empty-state integration and corrected M188 presentation boundary: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx) and [`docs/QA_MILESTONE_188.md`](QA_MILESTONE_188.md)
+- Exact verification record: [`docs/QA_MILESTONE_194.md`](QA_MILESTONE_194.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).
