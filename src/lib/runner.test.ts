@@ -549,6 +549,32 @@ describe('collection runner', () => {
     expect(disabled.results[0].timeline).toBeUndefined();
   });
 
+  it('retains and redacts pre-response transport failure timelines', async () => {
+    const request = createBlankRequest('transport-failure');
+    const failure = Object.assign(new Error('connect failed for https://example.test/orders?token=secret'), {
+      durationMs: 23,
+      timeline: [
+        { name: 'Text' as const, value: 'Preparing GET request to https://example.test/orders?token=secret', elapsedMs: 0 },
+        { name: 'HeaderOut' as const, value: 'Authorization: Bearer secret\nX-Trace: visible', elapsedMs: 0 },
+        { name: 'Text' as const, value: 'Transport connect: https://example.test/orders?token=secret', elapsedMs: 23 },
+      ],
+    });
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
+      async () => { throw failure; },
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    );
+
+    expect(report.results[0]).toMatchObject({ status: 0, durationMs: 23, error: 'connect failed for https://example.test/orders?token=%5Bredacted%5D' });
+    expect(report.results[0].timeline?.entries).toEqual([
+      { name: 'Text', value: 'Preparing GET request to https://example.test/orders?token=%5Bredacted%5D', elapsedMs: 0 },
+      { name: 'HeaderOut', value: 'Authorization: [redacted]\nX-Trace: visible', elapsedMs: 0 },
+      { name: 'Text', value: 'Transport connect: https://example.test/orders?token=%5Bredacted%5D', elapsedMs: 23 },
+    ]);
+  });
+
   it('aggregates retry timelines and errors in execution order with pinned prefixes', () => {
     const result = (id: string, attempt: number, patch: Partial<RunnerItemResult>): RunnerItemResult => ({
       id,

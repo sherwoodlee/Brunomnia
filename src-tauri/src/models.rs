@@ -182,6 +182,24 @@ pub struct HttpRedirectOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HttpRequestError {
+    pub message: String,
+    pub kind: String,
+    pub elapsed_ms: u128,
+    pub redirects: Vec<HttpRedirectOutput>,
+    pub redirects_truncated: bool,
+}
+
+impl std::fmt::Display for HttpRequestError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for HttpRequestError {}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HttpResponseOutput {
     pub status: u16,
     pub status_text: String,

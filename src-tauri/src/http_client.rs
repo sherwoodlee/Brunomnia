@@ -1,7 +1,8 @@
 use crate::{
     client_identity::{effective_client_identity_pem, validate_certificate_material},
     models::{
-        HttpHeaderOutput, HttpRedirectOutput, HttpRequestInput, HttpResponseOutput, TransportConfig,
+        HttpHeaderOutput, HttpRedirectOutput, HttpRequestError, HttpRequestInput,
+        HttpResponseOutput, TransportConfig,
     },
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -77,6 +78,65 @@ impl RedirectTrace {
     fn snapshot(&self) -> (Vec<HttpRedirectOutput>, bool) {
         let state = self.state.lock().expect("redirect trace lock poisoned");
         (state.entries.clone(), state.truncated)
+    }
+}
+
+impl HttpRequestError {
+    fn request(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            kind: "request".into(),
+            elapsed_ms: 0,
+            redirects: Vec::new(),
+            redirects_truncated: false,
+        }
+    }
+
+    fn from_reqwest(error: reqwest::Error) -> Self {
+        let kind = if error.is_timeout() {
+            "timeout"
+        } else if error.is_connect() {
+            "connect"
+        } else if error.is_redirect() {
+            "redirect"
+        } else if error.is_decode() {
+            "decode"
+        } else if error.is_builder() {
+            "request"
+        } else if error.is_status() {
+            "status"
+        } else {
+            "transport"
+        };
+        Self {
+            message: error.to_string(),
+            kind: kind.into(),
+            elapsed_ms: 0,
+            redirects: Vec::new(),
+            redirects_truncated: false,
+        }
+    }
+
+    fn with_trace(mut self, started: Instant, trace: &RedirectTrace) -> Self {
+        let (redirects, redirects_truncated) = trace.snapshot();
+        self.elapsed_ms = started.elapsed().as_millis();
+        self.redirects = redirects;
+        self.redirects_truncated = redirects_truncated;
+        self
+    }
+
+    fn canceled(started: Instant) -> Self {
+        Self {
+            kind: "canceled".into(),
+            elapsed_ms: started.elapsed().as_millis(),
+            ..Self::request("Request canceled.")
+        }
+    }
+}
+
+impl From<String> for HttpRequestError {
+    fn from(message: String) -> Self {
+        Self::request(message)
     }
 }
 
@@ -365,11 +425,11 @@ async fn send_digest(
     client: &Client,
     input: &HttpRequestInput,
     url: url::Url,
-) -> Result<Response, String> {
+) -> Result<Response, HttpRequestError> {
     let response = build_request(client, input, url.clone(), None)?
         .send()
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(HttpRequestError::from_reqwest)?;
     if response.status() != reqwest::StatusCode::UNAUTHORIZED {
         return Ok(response);
     }
@@ -402,7 +462,7 @@ async fn send_digest(
     build_request(client, input, url, Some(&authorization))?
         .send()
         .await
-        .map_err(|error| error.to_string())
+        .map_err(HttpRequestError::from_reqwest)
 }
 
 fn ntlm_challenge(header: &str) -> Option<&str> {
@@ -416,7 +476,7 @@ async fn send_ntlm(
     client: &Client,
     input: &HttpRequestInput,
     url: url::Url,
-) -> Result<Response, String> {
+) -> Result<Response, HttpRequestError> {
     let negotiate_flags = ntlmclient::Flags::NEGOTIATE_UNICODE
         | ntlmclient::Flags::REQUEST_TARGET
         | ntlmclient::Flags::NEGOTIATE_NTLM
@@ -438,7 +498,7 @@ async fn send_ntlm(
     let response = build_request(client, input, url, Some(&negotiate_header))?
         .send()
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(HttpRequestError::from_reqwest)?;
     let authentication_url = response.url().clone();
     let challenge_header = response
         .headers()
@@ -454,7 +514,11 @@ async fn send_ntlm(
         .map_err(|error| format!("Invalid NTLM challenge: {error}"))?;
     let challenge = match challenge {
         ntlmclient::Message::Challenge(value) => value,
-        _ => return Err("The server returned the wrong NTLM message type.".into()),
+        _ => {
+            return Err(HttpRequestError::request(
+                "The server returned the wrong NTLM message type.",
+            ))
+        }
     };
     let target_information = challenge
         .target_information
@@ -493,7 +557,7 @@ async fn send_ntlm(
     )?
     .send()
     .await
-    .map_err(|error| error.to_string())
+    .map_err(HttpRequestError::from_reqwest)
 }
 
 fn netrc_credentials(source: &str, hostname: &str) -> Option<(String, String)> {
@@ -539,12 +603,12 @@ async fn send_with_auth(
     client: &Client,
     input: &HttpRequestInput,
     url: url::Url,
-) -> Result<Response, String> {
+) -> Result<Response, HttpRequestError> {
     if input.auth.disabled {
         return build_request(client, input, url, None)?
             .send()
             .await
-            .map_err(|error| error.to_string());
+            .map_err(HttpRequestError::from_reqwest);
     }
     match input.auth.auth_type.as_str() {
         "digest" => send_digest(client, input, url).await,
@@ -557,12 +621,12 @@ async fn send_with_auth(
                 .basic_auth(username, Some(password))
                 .send()
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(HttpRequestError::from_reqwest)
         }
         _ => build_request(client, input, url, None)?
             .send()
             .await
-            .map_err(|error| error.to_string()),
+            .map_err(HttpRequestError::from_reqwest),
     }
 }
 
@@ -622,18 +686,22 @@ fn response_body_fields(bytes: &[u8]) -> (String, Option<String>) {
     }
 }
 
-pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
-    let url = url::Url::parse(&input.url).map_err(|error| format!("Invalid URL: {error}"))?;
+pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, HttpRequestError> {
     let started = Instant::now();
     let trace = Arc::new(RedirectTrace::new(started));
+    let url = url::Url::parse(&input.url)
+        .map_err(|error| HttpRequestError::request(format!("Invalid URL: {error}")))?;
     let client = build_client_with_options(
         &input.transport,
         Some(&input.url),
         true,
         true,
         Some(Arc::clone(&trace)),
-    )?;
-    let response = send_with_auth(&client, &input, url.clone()).await?;
+    )
+    .map_err(|error| HttpRequestError::request(error).with_trace(started, trace.as_ref()))?;
+    let response = send_with_auth(&client, &input, url.clone())
+        .await
+        .map_err(|error| error.with_trace(started, trace.as_ref()))?;
     let (redirects, redirects_truncated) = trace.snapshot();
     match read_response(response, started, redirects, redirects_truncated).await {
         Ok(output) => Ok(output),
@@ -645,14 +713,24 @@ pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String>
                 true,
                 false,
                 Some(Arc::clone(&fallback_trace)),
-            )?;
-            let response = send_with_auth(&client, &input, url).await?;
+            )
+            .map_err(|error| {
+                HttpRequestError::request(error).with_trace(started, fallback_trace.as_ref())
+            })?;
+            let response = send_with_auth(&client, &input, url)
+                .await
+                .map_err(|error| error.with_trace(started, fallback_trace.as_ref()))?;
             let (redirects, redirects_truncated) = fallback_trace.snapshot();
             read_response(response, started, redirects, redirects_truncated)
                 .await
-                .map_err(|fallback_error| fallback_error.to_string())
+                .map_err(|error| {
+                    HttpRequestError::from_reqwest(error)
+                        .with_trace(started, fallback_trace.as_ref())
+                })
         }
-        Err(error) => Err(error.to_string()),
+        Err(error) => {
+            Err(HttpRequestError::from_reqwest(error).with_trace(started, trace.as_ref()))
+        }
     }
 }
 
@@ -660,16 +738,17 @@ pub async fn send_cancellable(
     input: HttpRequestInput,
     cancellation_id: Option<String>,
     state: &HttpCancellationState,
-) -> Result<HttpResponseOutput, String> {
+) -> Result<HttpResponseOutput, HttpRequestError> {
+    let started = Instant::now();
     let Some(cancellation_id) = cancellation_id.filter(|value| !value.is_empty()) else {
         return send(input).await;
     };
     let Some(cancellation) = state.register(cancellation_id.clone()) else {
-        return Err("Request canceled.".into());
+        return Err(HttpRequestError::canceled(started));
     };
     let result = tokio::select! {
         result = send(input) => result,
-        _ = cancellation => Err("Request canceled.".into()),
+        _ = cancellation => Err(HttpRequestError::canceled(started)),
     };
     state.finish(&cancellation_id);
     result
@@ -757,8 +836,29 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(result.unwrap_err(), "Request canceled.");
+        let error = result.unwrap_err();
+        assert_eq!(error.message, "Request canceled.");
+        assert_eq!(error.kind, "canceled");
+        assert!(error.elapsed_ms > 0);
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn classifies_pre_response_connection_failures() {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let mut input = body_test_input("none");
+        input.method = "GET".into();
+        input.url = format!("http://{address}/unavailable");
+
+        let error = send(input).await.unwrap_err();
+
+        assert_eq!(error.kind, "connect");
+        assert!(error.message.contains("error sending request"));
+        assert!(error.redirects.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

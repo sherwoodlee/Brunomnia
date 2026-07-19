@@ -4,7 +4,7 @@ import { applyAdvancedAuth } from './auth';
 import { applyWorkspaceCertificates } from './certificates';
 import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
-import { buildResponseTimeline } from './timeline';
+import { buildRequestFailureTimeline, buildResponseTimeline } from './timeline';
 import { decodeHttpResponseBody, responseBodyFromBytes, responseCharset } from './responseBytes';
 import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
 import { applyDefaultUserAgentHeader } from './userAgent';
@@ -18,6 +18,47 @@ type NativeHttpResponse = HttpResponse & {
   redirectsTruncated?: boolean;
   effectiveUrl?: string;
 };
+
+type NativeHttpError = {
+  message: string;
+  kind: string;
+  elapsedMs: number;
+  redirects?: Array<{ status: number; fromUrl: string; toUrl: string; elapsedMs: number }>;
+  redirectsTruncated?: boolean;
+};
+
+const parseNativeHttpError = (value: unknown): NativeHttpError | undefined => {
+  let candidate = value;
+  if (typeof candidate === 'string' && candidate.startsWith('{')) {
+    try { candidate = JSON.parse(candidate); } catch { return undefined; }
+  }
+  if (!candidate || typeof candidate !== 'object') return undefined;
+  const source = candidate as Partial<NativeHttpError>;
+  if (typeof source.message !== 'string' || typeof source.kind !== 'string' || typeof source.elapsedMs !== 'number' || !Number.isFinite(source.elapsedMs)) return undefined;
+  return {
+    message: source.message,
+    kind: source.kind,
+    elapsedMs: Math.max(0, Number(source.elapsedMs)),
+    redirects: Array.isArray(source.redirects) ? source.redirects : [],
+    redirectsTruncated: source.redirectsTruncated === true,
+  };
+};
+
+export class HttpTransportError extends Error {
+  readonly kind: string;
+  readonly durationMs: number;
+  readonly requestUrl: string;
+  readonly timeline: NonNullable<HttpResponse['timeline']>;
+
+  constructor(message: string, kind: string, durationMs: number, requestUrl: string, timeline: NonNullable<HttpResponse['timeline']>) {
+    super(message);
+    this.name = 'HttpTransportError';
+    this.kind = kind;
+    this.durationMs = durationMs;
+    this.requestUrl = requestUrl;
+    this.timeline = timeline;
+  }
+}
 
 export type SendRequestContext = {
   cookies?: CookieRecord[];
@@ -235,6 +276,21 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         redirectsTruncated,
         effectiveUrl,
       }));
+    } catch (caught) {
+      const failure = parseNativeHttpError(caught);
+      if (!failure) throw caught;
+      const transport = {
+        requestHeaders: headers.filter((header) => header.enabled).map((header) => ({ name: header.name, value: header.value })),
+        redirects: failure.redirects,
+        redirectsTruncated: failure.redirectsTruncated,
+      };
+      throw new HttpTransportError(
+        failure.message,
+        failure.kind,
+        failure.elapsedMs,
+        url,
+        buildRequestFailureTimeline(prepared, url, failure, context.maxTimelineDataSizeKB ?? 10, graphqlPayload, transport),
+      );
     } finally {
       context.signal?.removeEventListener('abort', cancel);
     }

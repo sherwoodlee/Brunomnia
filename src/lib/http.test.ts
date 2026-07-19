@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
 import type { CookieRecord, StoredResponse } from '../types';
-import { fetchOAuth2Token, graphqlBody, sendRequest } from './http';
+import { HttpTransportError, fetchOAuth2Token, graphqlBody, sendRequest } from './http';
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
 
@@ -326,6 +326,28 @@ describe('native HTTP transport preferences', () => {
       expect.objectContaining({ value: 'Negotiated HTTP/1.1' }),
       expect.objectContaining({ value: 'Response body decoded and available to scripts and preview' }),
     ]);
+  });
+
+  it('converts native pre-response failures into bounded timeline errors', async () => {
+    tauri.invoke.mockRejectedValue({
+      message: 'error sending request for url (https://example.test/final?token=secret)',
+      kind: 'connect',
+      elapsedMs: 17,
+      redirects: [{ status: 302, fromUrl: 'https://example.test/start?token=secret', toUrl: 'https://example.test/final?token=secret', elapsedMs: 8 }],
+      redirectsTruncated: false,
+    });
+    const request = createBlankRequest('timeline-failure');
+    request.url = 'https://example.test/start?token=secret';
+
+    const failure = await sendRequest(request, undefined).catch((caught) => caught);
+
+    expect(failure).toBeInstanceOf(HttpTransportError);
+    expect(failure).toMatchObject({ kind: 'connect', durationMs: 17, requestUrl: request.url });
+    expect((failure as HttpTransportError).timeline).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'HeaderOut', value: expect.stringContaining('Accept: */*') }),
+      expect.objectContaining({ name: 'Text', value: 'Redirect 302: https://example.test/start?token=secret -> https://example.test/final?token=secret', elapsedMs: 8 }),
+      expect.objectContaining({ name: 'Text', value: 'Transport connect: error sending request for url (https://example.test/final?token=secret)', elapsedMs: 17 }),
+    ]));
   });
 
   it('selects response template history from the active environment', async () => {

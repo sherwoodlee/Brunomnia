@@ -65,15 +65,7 @@ const requestPayload = (request: ApiRequest, graphqlPayload?: string): TimelineP
   return undefined;
 };
 
-export const buildResponseTimeline = (
-  request: ApiRequest,
-  url: string,
-  response: HttpResponse,
-  maxTimelineDataSizeKB = 10,
-  graphqlPayload?: string,
-  transport: ResponseTransportEvidence = {},
-): ResponseTimelineEntry[] => {
-  const elapsedMs = Math.max(0, response.durationMs);
+const requestTimeline = (request: ApiRequest, url: string, maxTimelineDataSizeKB: number, graphqlPayload: string | undefined, transport: ResponseTransportEvidence) => {
   const entries: ResponseTimelineEntry[] = [{ name: 'Text', value: `Preparing ${request.method} request to ${url}`, elapsedMs: 0 }];
   if (transport.requestHeaders?.length) entries.push({
     name: 'HeaderOut',
@@ -93,12 +85,44 @@ export const buildResponseTimeline = (
       ...(hidden ? { hidden: true } : {}),
     });
   }
+  return entries;
+};
+
+const appendRedirectEvidence = (entries: ResponseTimelineEntry[], transport: ResponseTransportEvidence, elapsedMs: number) => {
   transport.redirects?.slice(0, 100).forEach((redirect) => entries.push({
     name: 'Text',
     value: `Redirect ${redirect.status}: ${redirect.fromUrl} -> ${redirect.toUrl}`,
     elapsedMs: Number.isFinite(redirect.elapsedMs) ? Math.max(0, redirect.elapsedMs) : 0,
   }));
   if (transport.redirectsTruncated) entries.push({ name: 'Text', value: 'Redirect trace truncated after 100 hops', elapsedMs });
+};
+
+export const buildRequestFailureTimeline = (
+  request: ApiRequest,
+  url: string,
+  failure: { kind: string; message: string; elapsedMs: number },
+  maxTimelineDataSizeKB = 10,
+  graphqlPayload?: string,
+  transport: ResponseTransportEvidence = {},
+) => {
+  const elapsedMs = Number.isFinite(failure.elapsedMs) ? Math.max(0, failure.elapsedMs) : 0;
+  const entries = requestTimeline(request, url, maxTimelineDataSizeKB, graphqlPayload, transport);
+  appendRedirectEvidence(entries, transport, elapsedMs);
+  entries.push({ name: 'Text', value: `Transport ${failure.kind || 'error'}: ${failure.message}`, elapsedMs });
+  return entries;
+};
+
+export const buildResponseTimeline = (
+  request: ApiRequest,
+  url: string,
+  response: HttpResponse,
+  maxTimelineDataSizeKB = 10,
+  graphqlPayload?: string,
+  transport: ResponseTransportEvidence = {},
+): ResponseTimelineEntry[] => {
+  const elapsedMs = Math.max(0, response.durationMs);
+  const entries = requestTimeline(request, url, maxTimelineDataSizeKB, graphqlPayload, transport);
+  appendRedirectEvidence(entries, transport, elapsedMs);
   const responseHeaders = transport.responseHeaders?.length
     ? transport.responseHeaders
     : Object.entries(response.headers).map(([name, value]) => ({ name, value }));

@@ -16,7 +16,7 @@ mod template_os;
 mod workspace_store;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use models::{HttpRequestInput, HttpResponseOutput};
+use models::{HttpRequestError, HttpRequestInput, HttpResponseOutput};
 use serde_json::Value;
 use std::fs;
 use tauri::{ipc::Channel, AppHandle, Manager, State};
@@ -178,7 +178,7 @@ async fn send_http_request(
     input: HttpRequestInput,
     cancellation_id: Option<String>,
     state: State<'_, http_client::HttpCancellationState>,
-) -> Result<HttpResponseOutput, String> {
+) -> Result<HttpResponseOutput, HttpRequestError> {
     http_client::send_cancellable(input, cancellation_id, state.inner()).await
 }
 

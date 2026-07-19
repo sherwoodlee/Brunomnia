@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from './data/seed';
-import { sendRequest as sendHttpRequest, type SendRequestContext } from './lib/http';
+import { HttpTransportError, sendRequest as sendHttpRequest, type SendRequestContext } from './lib/http';
 import { storeResponseCookies } from './lib/cookies';
 import { connectStream, disconnectStream, isStreamingRequest, sendWebSocketMessage } from './lib/protocol';
 import { fetchGraphqlSchema } from './lib/graphql';
@@ -2656,9 +2656,39 @@ export default function App() {
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setResponse({ status: 0, statusText: 'Request failed', headers: {}, body: message, durationMs: 0, sizeBytes: message.length });
+      const failedResponse: HttpResponse = error instanceof HttpTransportError
+        ? { status: 0, statusText: 'Request failed', headers: {}, body: message, durationMs: error.durationMs, sizeBytes: new TextEncoder().encode(message).byteLength, requestUrl: error.requestUrl, timeline: error.timeline }
+        : { status: 0, statusText: 'Request failed', headers: {}, body: message, durationMs: 0, sizeBytes: new TextEncoder().encode(message).byteLength };
+      setResponse(failedResponse);
       setScriptLogs((current) => [...current, ...pluginState.notifications.map((notification) => `[plugin] ${notification.title}: ${notification.message}`)]);
-      setWorkspace((current) => ({ ...current, cookies: scriptCookies, responses: scriptResponses, pluginData: pluginState.data }));
+      if (error instanceof HttpTransportError) {
+        const receivedAt = new Date().toISOString();
+        const storedResponse: StoredResponse = {
+          ...failedResponse,
+          id: uid('response'),
+          requestId: active.request.id,
+          requestName: active.request.name,
+          requestUrl: error.requestUrl,
+          environmentId: executionEnvironment.id,
+          globalEnvironmentId: activeEnvironment.id,
+          collectionEnvironmentId: collection.activeSubEnvironmentId ?? '',
+          receivedAt,
+          requestSnapshot: createRequestSnapshot(active.request),
+          requestTestResults: [],
+          settingSendCookies: request.transport.sendCookies,
+          settingStoreCookies: request.transport.storeCookies,
+        };
+        setSelectedResponseId(workspace.preferences.maxHistoryResponses === 0 ? '' : storedResponse.id);
+        setWorkspace((current) => ({
+          ...current,
+          history: [{ id: uid('history'), requestId: active.request.id, name: active.request.name, method: active.request.method, url: error.requestUrl, status: 0, durationMs: error.durationMs, createdAt: receivedAt }, ...current.history].slice(0, 100),
+          cookies: scriptCookies,
+          responses: retainResponseHistory(scriptResponses, storedResponse, current.preferences.maxHistoryResponses, current.preferences.filterResponsesByEnv),
+          pluginData: pluginState.data,
+        }));
+      } else {
+        setWorkspace((current) => ({ ...current, cookies: scriptCookies, responses: scriptResponses, pluginData: pluginState.data }));
+      }
     } finally {
       setIsSending(false);
     }

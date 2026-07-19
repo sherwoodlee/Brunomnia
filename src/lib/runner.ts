@@ -455,6 +455,8 @@ export const runCollection = async (
           let response: HttpResponse | undefined;
           let tests: RunnerItemResult['tests'] = [];
           let error: string | undefined;
+          let failureTimeline: ResponseTimelineEntry[] | undefined;
+          let failureDurationMs: number | undefined;
           let requestVariables: Record<string, string> = {};
           const started = Date.now();
           try {
@@ -561,7 +563,11 @@ export const runCollection = async (
               break;
             }
             itemNextRequestIdOrName = '';
-            error = caught instanceof Error ? caught.message : String(caught);
+            const caughtTimeline = caught && typeof caught === 'object' ? (caught as { timeline?: unknown }).timeline : undefined;
+            failureTimeline = Array.isArray(caughtTimeline) ? caughtTimeline as ResponseTimelineEntry[] : undefined;
+            const caughtDuration = caught && typeof caught === 'object' ? Number((caught as { durationMs?: unknown }).durationMs) : Number.NaN;
+            failureDurationMs = Number.isFinite(caughtDuration) ? Math.max(0, caughtDuration) : undefined;
+            error = (caught instanceof Error ? caught.message : String(caught)).replace(/https?:\/\/[^\s]+/gi, (url) => redactSensitiveQuery(url));
           }
           const passed = !error && response !== undefined && response.status > 0 && response.status < 400 && tests.every((test) => test.passed);
           const retainResult = testNamePattern === undefined || tests.length > 0 || !passed;
@@ -573,13 +579,13 @@ export const runCollection = async (
             iteration: iteration + 1,
             attempt,
             status: response?.status ?? 0,
-            durationMs: response?.durationMs ?? Date.now() - started,
+            durationMs: response?.durationMs ?? failureDurationMs ?? Date.now() - started,
             passed,
             error,
             tests,
             request: retainResult ? captureRunnerRequest(request, requestVariables, response?.requestUrl, requestSnapshotBudget) : undefined,
             response: retainResult && response ? captureRunnerResponse(response, responseSnapshotBudget) : undefined,
-            timeline: retainResult && keepLog && response?.timeline?.length ? captureRunnerTimeline(response.timeline, timelineSnapshotBudget) : undefined,
+            timeline: retainResult && keepLog && (response?.timeline?.length || failureTimeline?.length) ? captureRunnerTimeline(response?.timeline ?? failureTimeline ?? [], timelineSnapshotBudget) : undefined,
           };
           if (retainResult) {
             results.push(result);
