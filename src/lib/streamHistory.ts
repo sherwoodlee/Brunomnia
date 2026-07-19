@@ -1,7 +1,8 @@
-import type { ApiRequest, StoredStreamSession, StreamMessage } from '../types';
+import type { ApiRequest, StoredStreamSession, StreamConnectionMetadata, StreamMessage } from '../types';
 
 const MAX_STREAM_MESSAGES = 5_000;
 const MAX_STREAM_TEXT_CHARACTERS = 5_000_000;
+const MAX_STREAM_TIMELINE_ENTRIES = 5_000;
 
 export type StreamEventCategory = '' | 'message' | 'open' | 'close' | 'error';
 
@@ -60,7 +61,25 @@ export const createStreamSession = (
   startedAt,
   messages: [],
   requestSnapshot: structuredClone(request),
+  timeline: [
+    { name: 'Text', value: `Connecting to ${request.url}`, elapsedMs: 0 },
+    ...(request.protocol === 'socketio' ? [{ name: 'Text' as const, value: `Handshake path: ${request.socketIo.path || '/socket.io'}`, elapsedMs: 0 }] : []),
+  ],
 });
+
+export const applyStreamConnectionMetadata = (
+  sessions: StoredStreamSession[],
+  sessionId: string,
+  metadata: StreamConnectionMetadata,
+) => sessions.some((session) => session.id === sessionId) ? sessions.map((session) => session.id !== sessionId ? session : {
+  ...session,
+  ...metadata,
+  timeline: [
+    ...(session.timeline ?? []),
+    { name: 'Text' as const, value: `HTTP ${metadata.status} ${metadata.statusText} · ${metadata.httpVersion || 'unknown version'}`, elapsedMs: metadata.durationMs },
+    { name: 'Text' as const, value: `Transport: ${metadata.transport}`, elapsedMs: metadata.durationMs },
+  ].slice(-MAX_STREAM_TIMELINE_ENTRIES),
+}) : sessions;
 
 export const retainStreamSessionHistory = (
   sessions: StoredStreamSession[],
@@ -87,6 +106,14 @@ export const appendStreamSessionMessage = (
     messages: boundMessages([...session.messages, message]),
     ...(message.kind === 'closed' || message.kind === 'close' || message.kind === 'error' ? { endedAt: message.timestamp } : {}),
   };
+  if (message.direction === 'system' && ['open', 'upgrade', 'reconnecting', 'error', 'close', 'closed'].includes(message.kind)) {
+    const startedAt = Date.parse(session.startedAt);
+    const timestamp = Date.parse(message.timestamp);
+    updated.timeline = [
+      ...(session.timeline ?? []),
+      { name: 'Text' as const, value: `${message.kind}: ${message.text}`, elapsedMs: Number.isFinite(startedAt) && Number.isFinite(timestamp) ? Math.max(0, timestamp - startedAt) : 0 },
+    ].slice(-MAX_STREAM_TIMELINE_ENTRIES);
+  }
   if (message.kind === 'open' || message.kind === 'reconnecting') delete updated.endedAt;
   return updated;
 }) : sessions;

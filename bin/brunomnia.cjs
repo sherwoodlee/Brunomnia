@@ -7833,7 +7833,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 25,
+  version: 26,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -11448,6 +11448,11 @@ var normalizeStreamMessages = (value, sessionId) => {
   while (messages.length > 1 && characters > 5e6) characters -= messages.shift().text.length;
   return messages;
 };
+var normalizeStreamHeaders = (value) => {
+  const source = record4(value);
+  if (!source) return void 0;
+  return Object.fromEntries(Object.entries(source).slice(0, 500).map(([name, headerValue]) => [name.slice(0, 8192), stringValue2(headerValue).slice(0, 65536)]));
+};
 var normalizeStoredStreamSessions = (value, requestIds) => (Array.isArray(value) ? value : []).slice(0, 5e3).flatMap((entry, index) => {
   const source = record4(entry);
   if (!source) return [];
@@ -11457,6 +11462,9 @@ var normalizeStoredStreamSessions = (value, requestIds) => (Array.isArray(value)
   const id = stringValue2(source.id, `legacy-stream-${index}`);
   const endedAt = stringValue2(source.endedAt);
   const requestSnapshot = record4(source.requestSnapshot);
+  const status = typeof source.status === "number" && Number.isFinite(source.status) ? Math.min(999, Math.max(0, Math.trunc(source.status))) : void 0;
+  const durationMs = typeof source.durationMs === "number" && Number.isFinite(source.durationMs) ? Math.max(0, Math.trunc(source.durationMs)) : void 0;
+  const headers = normalizeStreamHeaders(source.headers);
   return [{
     id,
     requestId,
@@ -11467,7 +11475,14 @@ var normalizeStoredStreamSessions = (value, requestIds) => (Array.isArray(value)
     startedAt: stringValue2(source.startedAt, (/* @__PURE__ */ new Date(0)).toISOString()),
     ...endedAt ? { endedAt } : {},
     messages: normalizeStreamMessages(source.messages, id),
-    ...requestSnapshot?.id === requestId ? { requestSnapshot: structuredClone(requestSnapshot) } : {}
+    ...requestSnapshot?.id === requestId ? { requestSnapshot: structuredClone(requestSnapshot) } : {},
+    ...status !== void 0 ? { status } : {},
+    ...typeof source.statusText === "string" ? { statusText: source.statusText.slice(0, 500) } : {},
+    ...headers ? { headers } : {},
+    ...typeof source.httpVersion === "string" ? { httpVersion: source.httpVersion.slice(0, 100) } : {},
+    ...durationMs !== void 0 ? { durationMs } : {},
+    ...typeof source.transport === "string" ? { transport: source.transport.slice(0, 200) } : {},
+    ...Array.isArray(source.timeline) ? { timeline: normalizeResponseTimeline(source.timeline) } : {}
   }];
 });
 var normalizeResponseFilters = (value, requestIds) => {
@@ -11695,7 +11710,7 @@ var migrateWorkspace = (value) => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 25,
+    version: 26,
     name: workspace.name || "Imported Workspace",
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? "",
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

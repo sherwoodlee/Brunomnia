@@ -1567,7 +1567,23 @@ Compatibility bounds remain explicit: stream history still does not retain hands
 
 Compatibility bounds remain explicit: Brunomnia renders complete event cards rather than upstream's virtualized summary/detail split, and sessions still lack handshake headers plus a dedicated timeline/console tab. Saved logs are bounded in workspace memory instead of upstream file paths. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 104 — remaining parity closure and release hardening
+## Milestone 104 — realtime handshake metadata and lifecycle timelines (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned WebSocket responses retain status/message, HTTP version, response headers, elapsed time, event-log path, and timeline path; Socket.IO responses retain URL, elapsed time, and a timeline containing target/path/upgrade/close evidence; Event Stream uses ordinary response headers/timeline |
+| Shared native output | Complete | WebSocket, Socket.IO, and SSE connect commands return status/message, bounded flattened headers, negotiated HTTP version, elapsed handshake duration, and effective transport without changing their existing event channels |
+| Transport evidence | Complete baseline | WebSocket returns its 101 upgrade response; SSE returns its initial successful HTTP response; Socket.IO returns the Engine.IO polling handshake headers/version plus final polling or WebSocket transport and namespace-connect duration |
+| Persisted timeline | Complete baseline | Sessions start with URL and optional Socket.IO path, add handshake status/transport, and append bounded open/upgrade/reconnect/error/close lifecycle entries with elapsed milliseconds |
+| Retention-zero continuity | Complete | A transient selected-session view mirrors event and metadata updates even when retention is `0`; retained sessions persist the same evidence and historical selection restores it |
+| Renderer inspection | Complete baseline | Streaming Headers and Timeline tabs use selected stream metadata, the summary shows handshake duration/version, and history choices include status where upstream does plus elapsed/event counts |
+| Workspace schema | Complete | Workspace v26 validates bounded metadata fields, up to 500 response headers with bounded names/values, and the existing bounded timeline normalizer while leaving legacy sessions metadata-optional |
+| Executable coverage | Complete baseline | Focused frontend tests cover metadata/timeline merge and migration; native upgraded and polling Socket.IO loopbacks assert returned status/version/transport before full release gates |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 104 verification](QA_MILESTONE_104.md) |
+
+Compatibility bounds remain explicit: timeline rows are bounded structured workspace records rather than upstream filesystem streams, duplicate response headers remain flattened, and failed pre-response connections have errors but no fabricated status/headers. WebSocket proxy/client-identity transport parity, streaming plugin hooks, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 105 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

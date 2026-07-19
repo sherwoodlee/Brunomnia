@@ -1,5 +1,5 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
-import type { ApiRequest, CookieRecord, Environment, KeyValue, PreferredHttpVersion, StreamMessage } from '../types';
+import type { ApiRequest, CookieRecord, Environment, KeyValue, PreferredHttpVersion, StreamConnectionMetadata, StreamMessage } from '../types';
 import { cookieHeaderForUrl } from './cookies';
 import { streamTransportConfig } from './protocol';
 import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
@@ -39,7 +39,7 @@ export const connectSocketIo = async (
   validateCertificates = true,
   proxy?: ProxyPreferences,
   cookies: CookieRecord[] = [],
-) => {
+): Promise<StreamConnectionMetadata> => {
   const variables = environmentMap(environment);
   const url = buildRequestUrl(request, variables);
   const headers = resolvedHeaders(request, environment);
@@ -50,7 +50,7 @@ export const connectSocketIo = async (
   if (isTauri()) {
     const channel = new Channel<StreamMessage>();
     channel.onmessage = onEvent;
-    await invoke('connect_socket_io', {
+    return invoke<StreamConnectionMetadata>('connect_socket_io', {
       input: {
         sessionId,
         url,
@@ -64,7 +64,6 @@ export const connectSocketIo = async (
       },
       onEvent: channel,
     });
-    return;
   }
 
   onEvent(event(sessionId, 'system', 'open', `Connected · Socket.IO · path ${request.socketIo.path || '/socket.io'}`));
@@ -76,6 +75,14 @@ export const connectSocketIo = async (
       450 + index * 650,
     ));
   mockTimers.set(sessionId, timers);
+  return {
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    httpVersion: 'HTTP/1.1',
+    durationMs: 0,
+    transport: 'Browser simulation',
+  };
 };
 
 export const disconnectSocketIo = async (sessionId: string) => {

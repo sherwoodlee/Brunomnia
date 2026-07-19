@@ -326,6 +326,12 @@ const normalizeStreamMessages = (value: unknown, sessionId: string): StreamMessa
   return messages;
 };
 
+const normalizeStreamHeaders = (value: unknown) => {
+  const source = record(value);
+  if (!source) return undefined;
+  return Object.fromEntries(Object.entries(source).slice(0, 500).map(([name, headerValue]) => [name.slice(0, 8_192), stringValue(headerValue).slice(0, 65_536)]));
+};
+
 const normalizeStoredStreamSessions = (value: unknown, requestIds: Set<string>): StoredStreamSession[] => (Array.isArray(value) ? value : []).slice(0, 5_000).flatMap((entry, index): StoredStreamSession[] => {
   const source = record(entry);
   if (!source) return [];
@@ -335,6 +341,9 @@ const normalizeStoredStreamSessions = (value: unknown, requestIds: Set<string>):
   const id = stringValue(source.id, `legacy-stream-${index}`);
   const endedAt = stringValue(source.endedAt);
   const requestSnapshot = record(source.requestSnapshot);
+  const status = typeof source.status === 'number' && Number.isFinite(source.status) ? Math.min(999, Math.max(0, Math.trunc(source.status))) : undefined;
+  const durationMs = typeof source.durationMs === 'number' && Number.isFinite(source.durationMs) ? Math.max(0, Math.trunc(source.durationMs)) : undefined;
+  const headers = normalizeStreamHeaders(source.headers);
   return [{
     id,
     requestId,
@@ -346,6 +355,13 @@ const normalizeStoredStreamSessions = (value: unknown, requestIds: Set<string>):
     ...(endedAt ? { endedAt } : {}),
     messages: normalizeStreamMessages(source.messages, id),
     ...(requestSnapshot?.id === requestId ? { requestSnapshot: structuredClone(requestSnapshot) as ApiRequest } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(typeof source.statusText === 'string' ? { statusText: source.statusText.slice(0, 500) } : {}),
+    ...(headers ? { headers } : {}),
+    ...(typeof source.httpVersion === 'string' ? { httpVersion: source.httpVersion.slice(0, 100) } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(typeof source.transport === 'string' ? { transport: source.transport.slice(0, 200) } : {}),
+    ...(Array.isArray(source.timeline) ? { timeline: normalizeResponseTimeline(source.timeline) } : {}),
   }];
 });
 
@@ -610,7 +626,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 25,
+    version: 26,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

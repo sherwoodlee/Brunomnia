@@ -121,7 +121,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 25,
+  version: 26,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',

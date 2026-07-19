@@ -6,6 +6,7 @@ import type {
   HttpResponse,
   KeyValue,
   PreferredHttpVersion,
+  StreamConnectionMetadata,
   StreamMessage,
 } from '../types';
 import { cookieHeaderForUrl } from './cookies';
@@ -71,11 +72,10 @@ export const connectStream = async (
   validateCertificates = true,
   proxy?: ProxyPreferences,
   cookies: CookieRecord[] = [],
-) => {
+): Promise<StreamConnectionMetadata> => {
   if (request.protocol === 'socketio') {
     const { connectSocketIo } = await import('./socketIo');
-    await connectSocketIo(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies);
-    return;
+    return connectSocketIo(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies);
   }
   const variables = environmentMap(environment);
   const url = buildRequestUrl(request, variables);
@@ -90,11 +90,10 @@ export const connectStream = async (
     const channel = new Channel<StreamMessage>();
     channel.onmessage = onEvent;
     const command = request.protocol === 'websocket' ? 'connect_websocket' : 'connect_sse';
-    await invoke(command, {
+    return invoke<StreamConnectionMetadata>(command, {
       input,
       onEvent: channel,
     });
-    return;
   }
 
   onEvent(event(sessionId, 'system', 'open', request.protocol === 'sse' ? 'Listening · HTTP 200' : 'Connected · HTTP 101'));
@@ -112,6 +111,14 @@ export const connectStream = async (
     timers.push(window.setTimeout(() => onEvent(event(sessionId, 'incoming', kind, text)), 450 + index * 650));
   });
   mockTimers.set(sessionId, timers);
+  return {
+    status: request.protocol === 'sse' ? 200 : 101,
+    statusText: request.protocol === 'sse' ? 'OK' : 'Switching Protocols',
+    headers: {},
+    httpVersion: 'HTTP/1.1',
+    durationMs: 0,
+    transport: 'Browser simulation',
+  };
 };
 
 export const disconnectStream = async (protocol: ApiRequest['protocol'], sessionId: string) => {

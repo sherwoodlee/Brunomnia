@@ -586,7 +586,7 @@ async fn connect_websocket(
     input: models::StreamConnectInput,
     on_event: Channel<models::StreamEvent>,
     state: State<'_, streaming::StreamingState>,
-) -> Result<(), String> {
+) -> Result<models::StreamConnectOutput, String> {
     streaming::connect_websocket(input, on_event, state.inner().clone()).await
 }
 
@@ -613,7 +613,7 @@ async fn connect_socket_io(
     input: models::SocketIoConnectInput,
     on_event: Channel<models::StreamEvent>,
     state: State<'_, streaming::StreamingState>,
-) -> Result<(), String> {
+) -> Result<models::StreamConnectOutput, String> {
     streaming::connect_socket_io(input, on_event, state.inner().clone()).await
 }
 
@@ -652,7 +652,7 @@ async fn connect_sse(
     input: models::StreamConnectInput,
     on_event: Channel<models::StreamEvent>,
     state: State<'_, streaming::StreamingState>,
-) -> Result<(), String> {
+) -> Result<models::StreamConnectOutput, String> {
     streaming::connect_sse(input, on_event, state.inner().clone()).await
 }
 

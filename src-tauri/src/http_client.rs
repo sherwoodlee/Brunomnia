@@ -519,7 +519,7 @@ pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String>
     }
 }
 
-fn flatten_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
+pub(crate) fn flatten_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
     let mut output = BTreeMap::<String, String>::new();
     for (name, value) in headers {
         let value = value.to_str().unwrap_or("<binary header>");

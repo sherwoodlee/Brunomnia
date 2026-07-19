@@ -1,6 +1,9 @@
 use crate::{
-    http_client::{apply_preferred_request_version, build_streaming_client},
-    models::{KeyValue, SocketIoConnectInput, StreamConnectInput, StreamEvent, TransportConfig},
+    http_client::{apply_preferred_request_version, build_streaming_client, flatten_headers},
+    models::{
+        KeyValue, SocketIoConnectInput, StreamConnectInput, StreamConnectOutput, StreamEvent,
+        TransportConfig,
+    },
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::{SinkExt, StreamExt};
@@ -9,6 +12,7 @@ use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::Instant,
 };
 use tauri::ipc::Channel;
 use tokio::{
@@ -107,6 +111,8 @@ struct EngineIoOpenPacket {
 
 struct SocketIoHttpResponse {
     status: u16,
+    headers: std::collections::BTreeMap<String, String>,
+    http_version: String,
     body: String,
 }
 
@@ -114,10 +120,14 @@ enum ConnectedSocketIoTransport {
     WebSocket {
         socket: Box<SocketIoWebSocket>,
         status: u16,
+        headers: std::collections::BTreeMap<String, String>,
+        http_version: String,
     },
     Polling {
         transport: SocketIoPollingTransport,
         status: u16,
+        headers: std::collections::BTreeMap<String, String>,
+        http_version: String,
         upgrade_note: Option<String>,
     },
 }
@@ -488,6 +498,8 @@ async fn socket_io_http_request(
         .await
         .map_err(|error| format!("Engine.IO polling request failed: {error}"))?;
     let status = response.status();
+    let headers = flatten_headers(response.headers());
+    let http_version = format!("{:?}", response.version());
     let mut bytes = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
@@ -508,6 +520,8 @@ async fn socket_io_http_request(
     }
     Ok(SocketIoHttpResponse {
         status: status.as_u16(),
+        headers,
+        http_version,
         body,
     })
 }
@@ -711,6 +725,8 @@ async fn establish_socket_io_transport(
                         ConnectedSocketIoTransport::WebSocket {
                             socket: Box::new(socket),
                             status,
+                            headers: open_response.headers,
+                            http_version: open_response.http_version,
                         },
                     ));
                 }
@@ -744,6 +760,8 @@ async fn establish_socket_io_transport(
                     .clamp(1, MAX_SOCKET_IO_PACKET_BYTES),
             },
             status: open_response.status,
+            headers: open_response.headers,
+            http_version: open_response.http_version,
             upgrade_note,
         },
     ))
@@ -753,7 +771,7 @@ pub async fn connect_websocket(
     input: StreamConnectInput,
     on_event: Channel<StreamEvent>,
     state: StreamingState,
-) -> Result<(), String> {
+) -> Result<StreamConnectOutput, String> {
     if state
         .websocket_sessions
         .lock()
@@ -780,9 +798,19 @@ pub async fn connect_websocket(
         request.headers_mut().insert(name, value);
     }
 
+    let started = Instant::now();
     let (socket, response) = connect_async(request)
         .await
         .map_err(|error| format!("WebSocket connection failed: {error}"))?;
+    let status = response.status();
+    let output = StreamConnectOutput {
+        status: status.as_u16(),
+        status_text: status.canonical_reason().unwrap_or("Unknown").to_string(),
+        headers: flatten_headers(response.headers()),
+        http_version: format!("{:?}", response.version()),
+        duration_ms: started.elapsed().as_millis(),
+        transport: "WebSocket".into(),
+    };
     let (sender, mut receiver) = mpsc::unbounded_channel();
     state
         .websocket_sessions
@@ -795,7 +823,7 @@ pub async fn connect_websocket(
     let _ = on_event.send(StreamEvent::system(
         &session_id,
         "open",
-        format!("Connected · HTTP {}", response.status()),
+        format!("Connected · HTTP {status}"),
     ));
 
     tokio::spawn(async move {
@@ -865,7 +893,7 @@ pub async fn connect_websocket(
         sessions.lock().await.remove(&session_id);
         let _ = on_event.send(StreamEvent::system(&session_id, "closed", "Disconnected"));
     });
-    Ok(())
+    Ok(output)
 }
 
 pub async fn send_websocket_message(
@@ -1295,7 +1323,7 @@ pub async fn connect_socket_io(
     input: SocketIoConnectInput,
     on_event: Channel<StreamEvent>,
     state: StreamingState,
-) -> Result<(), String> {
+) -> Result<StreamConnectOutput, String> {
     if state
         .socket_io_sessions
         .lock()
@@ -1309,6 +1337,7 @@ pub async fn connect_socket_io(
         validate_socket_io_event_name(event_name)?;
         listeners.insert(event_name.clone());
     }
+    let started = Instant::now();
     let handshake = establish_socket_io_transport(&input);
     let (namespace, transport) = if input.transport.timeout_ms == 0 {
         handshake.await
@@ -1334,17 +1363,44 @@ pub async fn connect_socket_io(
     } else {
         input.path.trim()
     };
-    let (status, transport_name, upgrade_note) = match &transport {
-        ConnectedSocketIoTransport::WebSocket { status, .. } => (
+    let (status, headers, http_version, transport_name, upgrade_note) = match &transport {
+        ConnectedSocketIoTransport::WebSocket {
+            status,
+            headers,
+            http_version,
+            ..
+        } => (
             *status,
+            headers.clone(),
+            http_version.clone(),
             "WebSocket",
             Some("Upgraded from polling to WebSocket".to_string()),
         ),
         ConnectedSocketIoTransport::Polling {
             status,
+            headers,
+            http_version,
             upgrade_note,
             ..
-        } => (*status, "polling", upgrade_note.clone()),
+        } => (
+            *status,
+            headers.clone(),
+            http_version.clone(),
+            "polling",
+            upgrade_note.clone(),
+        ),
+    };
+    let output = StreamConnectOutput {
+        status,
+        status_text: http::StatusCode::from_u16(status)
+            .ok()
+            .and_then(|status| status.canonical_reason())
+            .unwrap_or("Unknown")
+            .to_string(),
+        headers,
+        http_version,
+        duration_ms: started.elapsed().as_millis(),
+        transport: transport_name.into(),
     };
     let _ = on_event.send(StreamEvent::system(
         &session_id,
@@ -1396,7 +1452,7 @@ pub async fn connect_socket_io(
             "Socket.IO disconnected",
         ));
     });
-    Ok(())
+    Ok(output)
 }
 
 pub async fn send_socket_io_message(
@@ -1500,7 +1556,7 @@ pub async fn connect_sse(
     input: StreamConnectInput,
     on_event: Channel<StreamEvent>,
     state: StreamingState,
-) -> Result<(), String> {
+) -> Result<StreamConnectOutput, String> {
     if state
         .sse_sessions
         .lock()
@@ -1510,9 +1566,18 @@ pub async fn connect_sse(
         return Err("This SSE stream is already connected.".into());
     }
 
+    let started = Instant::now();
     let response = open_sse(&input, None).await?;
     let status = response.status();
     let version = format!("{:?}", response.version());
+    let output = StreamConnectOutput {
+        status: status.as_u16(),
+        status_text: status.canonical_reason().unwrap_or("Unknown").to_string(),
+        headers: flatten_headers(response.headers()),
+        http_version: version.clone(),
+        duration_ms: started.elapsed().as_millis(),
+        transport: "Server-Sent Events".into(),
+    };
 
     let (cancel, mut cancel_receiver) = mpsc::unbounded_channel();
     state
@@ -1616,7 +1681,7 @@ pub async fn connect_sse(
             "Event stream closed",
         ));
     });
-    Ok(())
+    Ok(output)
 }
 
 pub async fn disconnect_sse(session_id: String, state: StreamingState) -> Result<(), String> {
@@ -1961,7 +2026,7 @@ mod tests {
             Ok(())
         });
         let state = StreamingState::default();
-        connect_socket_io(
+        let output = connect_socket_io(
             SocketIoConnectInput {
                 session_id: "socket-session".into(),
                 url: format!("http://{address}/orders?token=abc"),
@@ -1979,6 +2044,9 @@ mod tests {
         )
         .await
         .unwrap();
+        assert_eq!(output.status, 101);
+        assert_eq!(output.http_version, "HTTP/1.1");
+        assert_eq!(output.transport, "WebSocket");
         send_socket_io_message(
             "socket-session".into(),
             "message".into(),
@@ -2110,7 +2178,7 @@ mod tests {
             Ok(())
         });
         let state = StreamingState::default();
-        connect_socket_io(
+        let output = connect_socket_io(
             SocketIoConnectInput {
                 session_id: "polling-session".into(),
                 url: format!("http://{address}/orders"),
@@ -2128,6 +2196,9 @@ mod tests {
         )
         .await
         .unwrap();
+        assert_eq!(output.status, 200);
+        assert_eq!(output.http_version, "HTTP/1.1");
+        assert_eq!(output.transport, "polling");
         send_socket_io_message(
             "polling-session".into(),
             "message".into(),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
 import { restoreRequestSnapshot } from './historicalRequest';
-import { appendStreamSessionMessage, clearStoredStreamSessions, createStreamSession, deleteStoredStreamSession, filterStreamMessages, retainStreamSessionHistory, streamHistorySections, streamMessageCategory, visibleStreamSessionHistory } from './streamHistory';
+import { appendStreamSessionMessage, applyStreamConnectionMetadata, clearStoredStreamSessions, createStreamSession, deleteStoredStreamSession, filterStreamMessages, retainStreamSessionHistory, streamHistorySections, streamMessageCategory, visibleStreamSessionHistory } from './streamHistory';
 
 describe('stream session history', () => {
   it('retains request/environment scoped sessions and incrementally closes logs', () => {
@@ -70,5 +70,28 @@ describe('stream session history', () => {
     expect(filterStreamMessages(messages, '', 'connection', '').map(({ id }) => id)).toEqual(['error']);
     expect(filterStreamMessages(messages, '', 'connected', '').map(({ id }) => id)).toEqual(['close']);
     expect(filterStreamMessages(messages, '', '', '2026-07-18T12:00:03.000Z').map(({ id }) => id)).toEqual(['close']);
+  });
+
+  it('persists bounded handshake metadata and lifecycle timeline evidence', () => {
+    const request = cloneSeedWorkspace().collections[0].requests[1];
+    request.protocol = 'websocket';
+    const session = createStreamSession(request, 'env-a', 'stream-metadata', '2026-07-18T12:00:00.000Z');
+    let sessions = applyStreamConnectionMetadata([session], session.id, {
+      status: 101,
+      statusText: 'Switching Protocols',
+      headers: { upgrade: 'websocket' },
+      httpVersion: 'HTTP/1.1',
+      durationMs: 42,
+      transport: 'WebSocket',
+    });
+    sessions = appendStreamSessionMessage(sessions, session.id, { id: 'closed', sessionId: session.id, direction: 'system', kind: 'closed', text: 'Disconnected', timestamp: '2026-07-18T12:00:01.000Z' });
+
+    expect(sessions[0]).toMatchObject({ status: 101, statusText: 'Switching Protocols', headers: { upgrade: 'websocket' }, httpVersion: 'HTTP/1.1', durationMs: 42, transport: 'WebSocket' });
+    expect(sessions[0].timeline?.map(({ value, elapsedMs }) => [value, elapsedMs])).toEqual([
+      [`Connecting to ${request.url}`, 0],
+      ['HTTP 101 Switching Protocols · HTTP/1.1', 42],
+      ['Transport: WebSocket', 42],
+      ['closed: Disconnected', 1_000],
+    ]);
   });
 });

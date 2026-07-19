@@ -235,6 +235,22 @@ export type StoredStreamSession = {
   endedAt?: string;
   messages: StreamMessage[];
   requestSnapshot?: ApiRequest;
+  status?: number;
+  statusText?: string;
+  headers?: Record<string, string>;
+  httpVersion?: string;
+  durationMs?: number;
+  transport?: string;
+  timeline?: ResponseTimelineEntry[];
+};
+
+export type StreamConnectionMetadata = {
+  status: number;
+  statusText: string;
+  headers: Record<string, string>;
+  httpVersion: string;
+  durationMs: number;
+  transport: string;
 };
 
 export type ResponseTimelineEntry = {
@@ -328,7 +344,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 25;
+  version: 26;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

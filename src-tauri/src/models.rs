@@ -182,6 +182,17 @@ pub struct StreamConnectInput {
     pub sse: SseConfig,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamConnectOutput {
+    pub status: u16,
+    pub status_text: String,
+    pub headers: BTreeMap<String, String>,
+    pub http_version: String,
+    pub duration_ms: u128,
+    pub transport: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SocketIoConnectInput {
