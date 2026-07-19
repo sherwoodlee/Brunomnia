@@ -37,6 +37,7 @@ import { plaintextSecretCandidates } from '../lib/security';
 import { suggestCommitGroups, type AiCommitGroup } from '../lib/ai';
 import { validateGitCommitPlan } from '../lib/gitCommitPlan';
 import type { SendRequestContext } from '../lib/http';
+import { withoutOAuth2RuntimeCredentials } from '../lib/oauth2Tokens';
 
 type ProjectWorkbenchProps = {
   workspace: Workspace;
@@ -88,7 +89,7 @@ export function ProjectWorkbench({ workspace, environment, requestContext, onCha
   const unstageableSelected = selected.filter((path) => unstageableFiles.includes(path));
   const discardableFiles = unstaged.filter((file) => !file.conflicted).map((file) => file.path);
   const discardableSelected = selected.filter((path) => discardableFiles.includes(path));
-  const plaintextSecrets = workspace.governance.policy.requireVaultForSecrets ? plaintextSecretCandidates(workspace) : [];
+  const plaintextSecrets = workspace.governance.policy.requireVaultForSecrets ? plaintextSecretCandidates(withoutOAuth2RuntimeCredentials(workspace)) : [];
   const allowedStorage = workspace.governance.policy.allowedStorage;
 
   const requireShareableSafety = () => {

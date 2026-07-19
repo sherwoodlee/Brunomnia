@@ -35,9 +35,45 @@ Authentication tokens, passwords, API-key values, client secrets, authorization 
 
 The preference changes presentation only. It does not alter stored values, logs, exports, request/integration execution, or clipboard behavior, and it does not reveal local-vault or encrypted-sync passphrases. Managed projects and encrypted-sync pulls preserve the current device choice; workspace imports reset it off. A temporary reveal resets when the request or MCP client changes.
 
+## OAuth 2 browser authorization
+
+Authorization-code and implicit grants expose **Authorize** in the Tauri app. Brunomnia generates a missing state value and, when PKCE is enabled, a missing verifier; it opens the system browser, waits on the configured loopback path, rejects mismatched state, and can be canceled from the editor. A redirect without a port receives an ephemeral one, while an explicit port is preserved. Register the redirect with the provider according to its native-app loopback policy.
+
+Automatic capture accepts plain HTTP redirects only on `localhost`, `127.0.0.1`, or `::1`. Authorization-code callbacks are exchanged through the existing token transport and retain access, refresh, and identity tokens. Implicit grants support access token, ID token, or combined responses; browser fragments are bridged locally without being sent to a remote service. The listener expires after five minutes and request switching cancels the active flow.
+
+Sending a protected request in Tauri reuses a current token, exchanges a pasted authorization code, obtains password/client-credential tokens, refreshes an expired token, or starts browser authorization before the API request is dispatched. The waiting dialog shows the exact authorization and callback URLs and can cancel the flow. Tokens inherited from a folder are written back to that folder. Collection runs, runner scripts, direct-request scripts, plugin network calls, and user-triggered project/integration HTTP operations use the same resolver; a run pauses its current sequential attempt until authorization finishes, and **Cancel run** also cancels the login flow.
+
+OAuth token responses retain access, refresh, identity, token type, and expiry metadata. ID-only implicit responses use the ID token as the effective request token, matching current Insomnia behavior. ID-token response types receive a generated nonce. Set **Origin header** when the initial token endpoint requires CORS-style origin handling, and set the token prefix to `NO_PREFIX` to send the raw token. **Refresh token** uses the saved refresh credential; **Clear tokens** removes access, refresh, identity, and expiry state.
+
+If a refresh endpoint returns HTTP 401 or OAuth `invalid_grant`, authorization-code/implicit requests restart the shared browser flow while password/client-credential requests clear stale state and obtain a fresh token directly. One-time codes, generated PKCE verifiers, and ephemeral listener ports are not retained after successful automatic exchange; the configured redirect and state remain unchanged.
+
+Runtime OAuth codes, PKCE verifiers, access/identity/refresh tokens, and expiry stay in the device-local catalog project. They are removed from split-YAML folder/Git writes and encrypted-sync revisions, then restored only from matching local request/folder owners after a project reload or sync pull. Incoming project/sync token fields are discarded. Explicit user-controlled workspace/interchange exports retain their existing behavior.
+
+**Copy authorization URL** remains available for browser development, non-loopback provider requirements, and manual troubleshooting. Complete the provider flow and paste the returned code, access token, or identity token into the editor. Brunomnia does not provide an embedded login browser, device-code flow, or custom-scheme callback in this baseline.
+
 ## Body formatting
 
 For JSON or text bodies, choose **Beautify** in the body toolbar. Valid JSON receives two-space indentation. XML-looking text, or text with an XML content type, receives conservative structural indentation. Invalid JSON and unrecognized plain text are left unchanged; the formatter does not send content anywhere.
+
+## Socket.IO sessions
+
+Choose **Socket.IO** as the request protocol, enter the server URL, and use the Engine.IO path field when the server does not use `/socket.io`. A URL path becomes the Socket.IO namespace, while query rows remain handshake query parameters. Enabled headers are templated in order; the cookie jar contributes a `Cookie` header when request cookie sending is enabled. Active Bearer authentication is sent as the Socket.IO namespace-connect `auth.token` value rather than duplicated as an HTTP authorization header.
+
+Each emit has an event name and up to 100 ordered arguments. **JSON** arguments parse after template resolution and fall back to their resolved string when invalid; **Text** arguments always remain strings. Enable **Request acknowledgement** to assign an acknowledgement ID and show the matching server arguments as an incoming `<event> · ack` record.
+
+Add up to 500 named listeners before connecting. Enabled listeners receive matching server events, and their switches can add or remove subscriptions during a live session. The stream console keeps ordered incoming, outgoing, and system evidence for the current connection. Collection-run sampling uses the same connection, emit, acknowledgement, and listener path within its configured bounded stream window.
+
+Insomnia v4/v5 imports and exports preserve Socket.IO requests, custom paths, inline or separate payload records, ordered argument modes, acknowledgement state, and named listener state. Workspace v22 and earlier data migrates to the v23 Socket.IO defaults without changing existing protocols.
+
+The native baseline starts with Engine.IO v4 HTTP polling, adds a per-request cache buster, joins the authored namespace, and upgrades through the standard WebSocket probe when the server advertises it. A polling-only server remains connected with the same emit, acknowledgement, listener, heartbeat, and disconnect behavior. If an upgrade attempt fails before completion, Brunomnia continues polling. Custom proxy, PEM client identity, or disabled certificate-validation policy deliberately keeps the session on the existing HTTP transport so those settings remain effective.
+
+Incoming Socket.IO binary events and binary acknowledgements are reconstructed across raw WebSocket frames or Engine.IO polling `b<base64>` packets. Nested placeholders become Node-compatible JSON such as `{ "type": "Buffer", "data": [0, 1, 255] }` before the listener or acknowledgement is written to the console. Up to 100 attachments and 1 MiB of attachment data are accepted per packet; malformed counts, missing indexes, interleaved packets, or oversized data close the invalid stream with visible error evidence. Current upstream authoring exposes JSON and Text arguments only, so Brunomnia does not invent a separate binary-send editor mode.
+
+WebSocket, Socket.IO, and SSE connections create a device-local saved session as soon as connection starts, then persist incoming, outgoing, system, reconnect, error, and close records incrementally. The response-history selector groups sessions as Just Now, Less Than Two Hours Ago, Today, This Week, or Older Than This Week. Selecting an earlier session disconnects a different live connection before replacing the console; Delete removes the selected session, and Clear removes the active request/environment sessions without touching other requests or environments.
+
+The existing **Max history responses** preference also controls stream sessions per request: positive values keep that many, `0` leaves the current console live without saving it, and `-1` retains all. **Filter response history by active environment** applies the same environment scope to stream selection and future pruning. Each saved session keeps at most 5,000 newest events and approximately 5 million text characters while always preserving the latest record. Workspace v23 and earlier data migrates to v24 with an empty validated session store. Saved stream history stays in the local project catalog, survives local project switching and reload, and is excluded from split-YAML projects and encrypted-sync payloads.
+
+WebSocket upgrade while custom proxy/client identity or disabled-validation policy is active, saved-event search/export, streaming plugin hooks, and live third-party compatibility fixtures remain open. Browser development uses deterministic local demo events; real transport runs in the Tauri app.
 
 ## Response compression
 

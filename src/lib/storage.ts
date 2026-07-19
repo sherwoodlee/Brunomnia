@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
-import type { AiSettings, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ShortcutAction, StoredResponse, Workspace } from '../types';
+import type { AiSettings, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ShortcutAction, StoredResponse, StoredStreamSession, StreamMessage, Workspace } from '../types';
 import { normalizeGraphqlSchema } from './graphql';
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 import { normalizeHttpMethod } from './request';
@@ -104,15 +104,23 @@ const normalizeCollaboration = (value: unknown, defaults: CollaborationConfig): 
 
 const normalizeMcpResources = (value: unknown): McpResource[] => !Array.isArray(value) ? [] : value.flatMap((item): McpResource[] => {
   const resource = record(item);
-  const uri = stringValue(resource?.uri);
+  const uriTemplate = stringValue(resource?.uriTemplate);
+  const uri = stringValue(resource?.uri, uriTemplate);
   if (!resource || !uri) return [];
-  return [{ uri, name: stringValue(resource.name, uri), description: stringValue(resource.description), mimeType: stringValue(resource.mimeType) }];
+  let variables: string[] = [];
+  if (uriTemplate) {
+    variables = [...uriTemplate.matchAll(/\{[+#./;?&]?([^{}]+)\}/g)]
+      .flatMap((match) => match[1].split(',').map((name) => name.replace(/\*$/, '').replace(/:\d+$/, '')))
+      .filter((name, index, all) => Boolean(name) && all.indexOf(name) === index)
+      .slice(0, 100);
+  }
+  return [{ uri, uriTemplate, variables, name: stringValue(resource.name, uri), description: stringValue(resource.description), mimeType: stringValue(resource.mimeType) }];
 }).slice(0, 5_000);
 
 const normalizeMcpClients = (value: unknown): McpClient[] => !Array.isArray(value) ? [] : value.flatMap((item, index): McpClient[] => {
   const client = record(item);
   if (!client) return [];
-  const authType = client.authType === 'bearer' || client.authType === 'basic' ? client.authType : 'none';
+  const authType = client.authType === 'bearer' || client.authType === 'basic' || client.authType === 'oauth2' ? client.authType : 'none';
   const tools = !Array.isArray(client.tools) ? [] : client.tools.flatMap((item): McpTool[] => {
     const tool = record(item);
     const name = stringValue(tool?.name);
@@ -143,6 +151,21 @@ const normalizeMcpClients = (value: unknown): McpClient[] => !Array.isArray(valu
     token: stringValue(client.token),
     username: stringValue(client.username),
     password: stringValue(client.password),
+    oauthAuthorizationUrl: stringValue(client.oauthAuthorizationUrl),
+    oauthAccessTokenUrl: stringValue(client.oauthAccessTokenUrl),
+    oauthClientId: stringValue(client.oauthClientId),
+    oauthClientSecret: stringValue(client.oauthClientSecret),
+    oauthScope: stringValue(client.oauthScope),
+    oauthState: stringValue(client.oauthState),
+    oauthRefreshToken: stringValue(client.oauthRefreshToken),
+    oauthIdentityToken: stringValue(client.oauthIdentityToken),
+    oauthExpiresAt: typeof client.oauthExpiresAt === 'number' && Number.isFinite(client.oauthExpiresAt) ? Math.max(0, Math.trunc(client.oauthExpiresAt)) : 0,
+    oauthTokenPrefix: stringValue(client.oauthTokenPrefix, 'Bearer'),
+    oauthRegisteredClientId: stringValue(client.oauthRegisteredClientId),
+    oauthRegisteredClientSecret: stringValue(client.oauthRegisteredClientSecret),
+    oauthRegisteredClientIdIssuedAt: typeof client.oauthRegisteredClientIdIssuedAt === 'number' && Number.isFinite(client.oauthRegisteredClientIdIssuedAt) ? Math.max(0, Math.trunc(client.oauthRegisteredClientIdIssuedAt)) : 0,
+    oauthRegisteredClientSecretExpiresAt: typeof client.oauthRegisteredClientSecretExpiresAt === 'number' && Number.isFinite(client.oauthRegisteredClientSecretExpiresAt) ? Math.max(0, Math.trunc(client.oauthRegisteredClientSecretExpiresAt)) : 0,
+    oauthRegisteredTokenEndpointAuthMethod: client.oauthRegisteredTokenEndpointAuthMethod === 'client_secret_basic' || client.oauthRegisteredTokenEndpointAuthMethod === 'client_secret_post' ? client.oauthRegisteredTokenEndpointAuthMethod : 'none',
     roots: Array.isArray(client.roots) ? client.roots.filter((root): root is string => typeof root === 'string').slice(0, 100) : [],
     tools,
     prompts,
@@ -284,6 +307,46 @@ const normalizeStoredResponses = (value: unknown): StoredResponse[] => Array.isA
   } as StoredResponse];
 }) : [];
 
+const normalizeStreamMessages = (value: unknown, sessionId: string): StreamMessage[] => {
+  const messages = (Array.isArray(value) ? value : []).slice(-5_000).flatMap((entry, index): StreamMessage[] => {
+    const source = record(entry);
+    if (!source) return [];
+    const direction = source.direction === 'incoming' || source.direction === 'outgoing' ? source.direction : 'system';
+    return [{
+      id: stringValue(source.id, `${sessionId}-event-${index}`),
+      sessionId,
+      direction,
+      kind: stringValue(source.kind, 'event').slice(0, 500),
+      text: stringValue(source.text).slice(0, 1_048_576),
+      timestamp: stringValue(source.timestamp, new Date(0).toISOString()),
+    }];
+  });
+  let characters = messages.reduce((total, message) => total + message.text.length, 0);
+  while (messages.length > 1 && characters > 5_000_000) characters -= messages.shift()!.text.length;
+  return messages;
+};
+
+const normalizeStoredStreamSessions = (value: unknown, requestIds: Set<string>): StoredStreamSession[] => (Array.isArray(value) ? value : []).slice(0, 5_000).flatMap((entry, index): StoredStreamSession[] => {
+  const source = record(entry);
+  if (!source) return [];
+  const requestId = stringValue(source.requestId);
+  if (!requestIds.has(requestId)) return [];
+  const protocol = source.protocol === 'websocket' || source.protocol === 'sse' ? source.protocol : 'socketio';
+  const id = stringValue(source.id, `legacy-stream-${index}`);
+  const endedAt = stringValue(source.endedAt);
+  return [{
+    id,
+    requestId,
+    requestName: stringValue(source.requestName),
+    requestUrl: stringValue(source.requestUrl),
+    environmentId: stringValue(source.environmentId),
+    protocol,
+    startedAt: stringValue(source.startedAt, new Date(0).toISOString()),
+    ...(endedAt ? { endedAt } : {}),
+    messages: normalizeStreamMessages(source.messages, id),
+  }];
+});
+
 const normalizeResponseFilters = (value: unknown, requestIds: Set<string>) => {
   const source = record(value);
   if (!source) return {};
@@ -409,8 +472,17 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     documentation: stringValue(collection.documentation),
     requests: collection.requests.map((request) => {
       const graphql = record(request.graphql);
+      const socketIo = record(request.socketIo);
       const requestId = stringValue(request.id, `migrated-request-${crypto.randomUUID()}`);
       const method = normalizeHttpMethod(stringValue(request.method, defaults.method), defaults.method);
+      const protocol = request.protocol === 'http'
+        || request.protocol === 'graphql'
+        || request.protocol === 'websocket'
+        || request.protocol === 'socketio'
+        || request.protocol === 'sse'
+        || request.protocol === 'grpc'
+        ? request.protocol
+        : defaults.protocol;
       const followRedirectsMode = request.transport?.followRedirectsMode === 'global'
         || request.transport?.followRedirectsMode === 'on'
         || request.transport?.followRedirectsMode === 'off'
@@ -437,6 +509,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         ...defaults,
         ...request,
         id: requestId,
+        protocol,
         method,
         folderId: stringValue(request.folderId),
         inheritFolderAuth: request.inheritFolderAuth === true,
@@ -445,7 +518,13 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         params: normalizeRows(request.params, `${requestId}-query`),
         headers: normalizeRows(request.headers, `${requestId}-header`),
         bodyMode: request.bodyMode ?? (method === 'GET' || method === 'HEAD' ? 'none' : 'json'),
-        auth: { ...defaults.auth, ...request.auth },
+        auth: {
+          ...defaults.auth,
+          ...request.auth,
+          expiresAt: typeof request.auth?.expiresAt === 'number' && Number.isFinite(request.auth.expiresAt)
+            ? Math.max(0, Math.trunc(request.auth.expiresAt))
+            : 0,
+        },
         graphql: {
           ...defaults.graphql,
           ...request.graphql,
@@ -476,6 +555,30 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           respectServerRetry: request.sse?.respectServerRetry !== false,
           sendLastEventId: request.sse?.sendLastEventId !== false,
         },
+        socketIo: {
+          path: stringValue(socketIo?.path, defaults.socketIo.path).slice(0, 2_048),
+          eventName: stringValue(socketIo?.eventName, defaults.socketIo.eventName).slice(0, 500),
+          args: (Array.isArray(socketIo?.args) ? socketIo.args : defaults.socketIo.args).flatMap((value, index) => {
+            const arg = record(value);
+            if (!arg) return [];
+            return [{
+              id: stringValue(arg.id, `${requestId}-socketio-arg-${index}`),
+              value: stringValue(arg.value).slice(0, 1_048_576),
+              mode: arg.mode === 'text' ? 'text' as const : 'json' as const,
+            }];
+          }).slice(0, 100),
+          ack: socketIo?.ack === true,
+          eventListeners: (Array.isArray(socketIo?.eventListeners) ? socketIo.eventListeners : []).flatMap((value, index) => {
+            const listener = record(value);
+            if (!listener) return [];
+            return [{
+              id: stringValue(listener.id, `${requestId}-socketio-listener-${index}`),
+              eventName: stringValue(listener.eventName).slice(0, 500),
+              description: stringValue(listener.description ?? listener.desc).slice(0, 20_000),
+              enabled: listener.enabled === true || listener.isOpen === true,
+            }];
+          }).slice(0, 500),
+        },
         formBody: normalizeRows(request.formBody, `${requestId}-form`),
         multipartBody: (request.multipartBody ?? []).map((part) => ({ ...part, contentType: part.contentType ?? part.file?.mimeType ?? '', fileName: part.fileName ?? part.file?.fileName ?? '' })),
       };
@@ -505,7 +608,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 22,
+    version: 24,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
@@ -517,6 +620,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     imports: workspace.imports ?? [],
     cookies: workspace.cookies ?? [],
     responses: normalizeStoredResponses(workspace.responses),
+    streamSessions: normalizeStoredStreamSessions(workspace.streamSessions, requestIds),
     responseFilters: normalizeResponseFilters(workspace.responseFilters, requestIds),
     project: { ...seed.project, ...workspace.project },
     plugins: normalizePlugins(workspace.plugins),
@@ -539,7 +643,7 @@ export const secureImportedWorkspace = (value: unknown): Workspace => {
     plugins: workspace.plugins.map((plugin) => ({ ...plugin, enabled: false, grantedPermissions: [] })),
     pluginData: {},
     activePluginTheme: '',
-    mcpClients: workspace.mcpClients.map((client) => ({ ...client, enabled: false, token: '', password: '' })),
+    mcpClients: workspace.mcpClients.map((client) => ({ ...client, enabled: false, token: '', password: '', oauthClientSecret: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none' })),
     ai: { ...workspace.ai, enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false },
     konnect: { ...workspace.konnect, enabled: false, token: '' },
     preferences: structuredClone(defaultPreferences),

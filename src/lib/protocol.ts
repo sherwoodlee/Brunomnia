@@ -1,22 +1,16 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import type {
   ApiRequest,
+  CookieRecord,
   Environment,
-  GrpcSchema,
   HttpResponse,
   KeyValue,
   PreferredHttpVersion,
   StreamMessage,
 } from '../types';
-import { buildHeaders, environmentMap, resolveTemplate } from './request';
+import { cookieHeaderForUrl } from './cookies';
+import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
 import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
-
-type GrpcCallOutput = {
-  status: string;
-  callType: string;
-  messages: unknown[];
-  durationMs: number;
-};
 
 const mockTimers = new Map<string, number[]>();
 
@@ -27,6 +21,15 @@ const resolvedHeaders = (request: ApiRequest, environment?: Environment): KeyVal
     name: resolveTemplate(header.name, variables),
     value: resolveTemplate(header.value, variables),
   }));
+};
+
+const streamHeaders = (request: ApiRequest, environment: Environment | undefined, url: string, cookies: CookieRecord[]) => {
+  let headers = resolvedHeaders(request, environment);
+  if (request.transport.sendCookies && !headers.some((header) => header.enabled && header.name.toLowerCase() === 'cookie')) {
+    const cookie = cookieHeaderForUrl(cookies, url);
+    if (cookie) headers.push({ id: 'cookie-jar', name: 'Cookie', value: cookie, enabled: true });
+  }
+  return headers;
 };
 
 const event = (sessionId: string, direction: StreamMessage['direction'], kind: string, text: string): StreamMessage => ({
@@ -67,27 +70,34 @@ export const connectStream = async (
   requestTimeoutMs = 30_000,
   validateCertificates = true,
   proxy?: ProxyPreferences,
+  cookies: CookieRecord[] = [],
 ) => {
+  if (request.protocol === 'socketio') {
+    const { connectSocketIo } = await import('./socketIo');
+    await connectSocketIo(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies);
+    return;
+  }
   const variables = environmentMap(environment);
-  const url = resolveTemplate(request.url, variables);
+  const url = buildRequestUrl(request, variables);
   const input = {
     sessionId,
     url,
-    headers: resolvedHeaders(request, environment),
+    headers: streamHeaders(request, environment, url, cookies),
     transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, url),
     sse: sseConnectConfig(request),
   };
   if (isTauri()) {
     const channel = new Channel<StreamMessage>();
     channel.onmessage = onEvent;
-    await invoke(request.protocol === 'websocket' ? 'connect_websocket' : 'connect_sse', {
+    const command = request.protocol === 'websocket' ? 'connect_websocket' : 'connect_sse';
+    await invoke(command, {
       input,
       onEvent: channel,
     });
     return;
   }
 
-  onEvent(event(sessionId, 'system', 'open', request.protocol === 'websocket' ? 'Connected · HTTP 101' : 'Listening · HTTP 200'));
+  onEvent(event(sessionId, 'system', 'open', request.protocol === 'sse' ? 'Listening · HTTP 200' : 'Connected · HTTP 101'));
   const timers: number[] = [];
   const samples = request.protocol === 'websocket'
     ? [
@@ -105,8 +115,13 @@ export const connectStream = async (
 };
 
 export const disconnectStream = async (protocol: ApiRequest['protocol'], sessionId: string) => {
+  if (protocol === 'socketio') {
+    await (await import('./socketIo')).disconnectSocketIo(sessionId);
+    return;
+  }
   if (isTauri()) {
-    await invoke(protocol === 'websocket' ? 'disconnect_websocket' : 'disconnect_sse', { sessionId });
+    const command = protocol === 'websocket' ? 'disconnect_websocket' : 'disconnect_sse';
+    await invoke(command, { sessionId });
   } else {
     mockTimers.get(sessionId)?.forEach((timer) => window.clearTimeout(timer));
     mockTimers.delete(sessionId);
@@ -137,8 +152,9 @@ export const runStreamSample = async (
   requestTimeoutMs = 30_000,
   validateCertificates = true,
   proxy?: ProxyPreferences,
+  cookies: CookieRecord[] = [],
 ): Promise<HttpResponse> => {
-  if (request.protocol !== 'websocket' && request.protocol !== 'sse') throw new Error('Stream sampling only supports WebSocket and SSE requests.');
+  if (request.protocol !== 'websocket' && request.protocol !== 'socketio' && request.protocol !== 'sse') throw new Error('Stream sampling only supports WebSocket, Socket.IO, and SSE requests.');
   const sessionId = `runner-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   const messages: StreamMessage[] = [];
   let resolveIncoming: (() => void) | undefined;
@@ -148,11 +164,12 @@ export const runStreamSample = async (
     messages.push(message);
     if (message.direction === 'incoming') resolveIncoming?.();
   };
-  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy);
+  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies);
   try {
     const variables = environmentMap(environment);
     const startupFrame = resolveTemplate(request.body, variables);
     if (request.protocol === 'websocket' && startupFrame.trim()) await sendWebSocketMessage(sessionId, startupFrame, 'text', onEvent);
+    if (request.protocol === 'socketio') await (await import('./socketIo')).sendSocketIoMessage(request, environment, sessionId, onEvent);
     await Promise.race([
       firstIncoming,
       new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(100, Math.min(30_000, windowMs)))),
@@ -162,83 +179,12 @@ export const runStreamSample = async (
   }
   const body = JSON.stringify(messages.map(({ direction, kind, text, timestamp }) => ({ direction, kind, text, timestamp })), null, 2);
   return {
-    status: request.protocol === 'websocket' ? 101 : 200,
-    statusText: request.protocol === 'websocket' ? 'WebSocket sample' : 'SSE sample',
+    status: request.protocol === 'sse' ? 200 : 101,
+    statusText: request.protocol === 'websocket' ? 'WebSocket sample' : request.protocol === 'socketio' ? 'Socket.IO sample' : 'SSE sample',
     headers: { 'content-type': 'application/json', 'x-brunomnia-stream-events': String(messages.length) },
     body,
     durationMs: Math.round(performance.now() - started),
     sizeBytes: new Blob([body]).size,
     requestUrl: resolveTemplate(request.url, environmentMap(environment)),
   };
-};
-
-export const previewGrpcSchema = (protoText: string): GrpcSchema => {
-  const serviceMatch = protoText.match(/service\s+(\w+)/);
-  const service = serviceMatch?.[1] ?? 'OrdersService';
-  const methods = [...protoText.matchAll(/rpc\s+(\w+)\s*\(\s*(stream\s+)?([\w.]+)\s*\)\s*returns\s*\(\s*(stream\s+)?([\w.]+)/g)]
-    .map((match) => ({
-      name: match[1],
-      fullName: `${service}.${match[1]}`,
-      clientStreaming: Boolean(match[2]),
-      serverStreaming: Boolean(match[4]),
-      inputType: match[3],
-      outputType: match[5],
-    }));
-  return {
-    descriptorSetBase64: btoa(protoText || 'browser-reflection-descriptor'),
-    services: [{
-      name: service,
-      fullName: service,
-      methods: methods.length ? methods : [{
-        name: 'ListOrders', fullName: `${service}.ListOrders`, clientStreaming: false,
-        serverStreaming: true, inputType: 'ListOrdersRequest', outputType: 'Order',
-      }],
-    }],
-  };
-};
-
-const mockGrpcSchema = (request: ApiRequest): GrpcSchema => previewGrpcSchema(request.grpc.protoText);
-
-export const loadGrpcSchema = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000, validateCertificates = true): Promise<GrpcSchema> => {
-  const variables = environmentMap(environment);
-  if (!isTauri()) {
-    await new Promise((resolve) => window.setTimeout(resolve, 300));
-    return mockGrpcSchema(request);
-  }
-  return invoke<GrpcSchema>('grpc_load_schema', {
-    input: {
-      endpoint: resolveTemplate(request.url, variables),
-      source: request.grpc.descriptorSource,
-      protoText: request.grpc.protoText,
-      metadata: request.grpc.metadata,
-      transport: { ...request.transport, timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs), validateCertificates: resolveCertificateValidation(request.transport, validateCertificates) },
-    },
-  });
-};
-
-export const invokeGrpc = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000, validateCertificates = true): Promise<GrpcCallOutput> => {
-  const variables = environmentMap(environment);
-  if (!isTauri()) {
-    await new Promise((resolve) => window.setTimeout(resolve, 420));
-    return {
-      status: 'OK',
-      callType: 'server-streaming',
-      messages: [
-        { id: 'ord_201', status: 'PROCESSING', total: 119.97 },
-        { id: 'ord_202', status: 'FULFILLED', total: 49.99 },
-      ],
-      durationMs: 418,
-    };
-  }
-  return invoke<GrpcCallOutput>('send_grpc_request', {
-    input: {
-      endpoint: resolveTemplate(request.url, variables),
-      service: request.grpc.service,
-      method: request.grpc.method,
-      descriptorSetBase64: request.grpc.descriptorSetBase64,
-      messagesJson: resolveTemplate(request.grpc.input, variables),
-      metadata: request.grpc.metadata,
-      transport: { ...request.transport, timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs), validateCertificates: resolveCertificateValidation(request.transport, validateCertificates) },
-    },
-  });
 };

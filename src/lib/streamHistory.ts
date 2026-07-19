@@ -1,0 +1,107 @@
+import type { ApiRequest, StoredStreamSession, StreamMessage } from '../types';
+
+const MAX_STREAM_MESSAGES = 5_000;
+const MAX_STREAM_TEXT_CHARACTERS = 5_000_000;
+
+const sameScope = (candidate: StoredStreamSession, session: StoredStreamSession, filterResponsesByEnv: boolean) => candidate.requestId === session.requestId
+  && (!filterResponsesByEnv || candidate.environmentId === session.environmentId);
+
+const newestFirst = (left: StoredStreamSession, right: StoredStreamSession) => right.startedAt.localeCompare(left.startedAt);
+
+const boundMessages = (messages: StreamMessage[]) => {
+  const bounded = messages.slice(-MAX_STREAM_MESSAGES);
+  let characters = bounded.reduce((total, message) => total + message.text.length, 0);
+  while (bounded.length > 1 && characters > MAX_STREAM_TEXT_CHARACTERS) {
+    characters -= bounded.shift()!.text.length;
+  }
+  return bounded;
+};
+
+export const appendVisibleStreamMessage = (messages: StreamMessage[], message: StreamMessage) => boundMessages([...messages, message]);
+
+export const createStreamSession = (
+  request: ApiRequest,
+  environmentId: string,
+  sessionId: string,
+  startedAt = new Date().toISOString(),
+): StoredStreamSession => ({
+  id: sessionId,
+  requestId: request.id,
+  requestName: request.name,
+  requestUrl: request.url,
+  environmentId,
+  protocol: request.protocol as StoredStreamSession['protocol'],
+  startedAt,
+  messages: [],
+});
+
+export const retainStreamSessionHistory = (
+  sessions: StoredStreamSession[],
+  session: StoredStreamSession,
+  maxHistoryResponses: number,
+  filterResponsesByEnv: boolean,
+) => {
+  const existing = sessions.filter((candidate) => candidate.id !== session.id);
+  const outsideScope = existing.filter((candidate) => !sameScope(candidate, session, filterResponsesByEnv));
+  const limit = Math.max(-1, Math.trunc(maxHistoryResponses));
+  if (limit === 0) return outsideScope.sort(newestFirst);
+  const scoped = [session, ...existing.filter((candidate) => sameScope(candidate, session, filterResponsesByEnv))].sort(newestFirst);
+  return [...(limit < 0 ? scoped : scoped.slice(0, limit)), ...outsideScope].sort(newestFirst);
+};
+
+export const appendStreamSessionMessage = (
+  sessions: StoredStreamSession[],
+  sessionId: string,
+  message: StreamMessage,
+) => sessions.some((session) => session.id === sessionId) ? sessions.map((session) => {
+  if (session.id !== sessionId) return session;
+  const updated = {
+    ...session,
+    messages: boundMessages([...session.messages, message]),
+    ...(message.kind === 'closed' || message.kind === 'close' || message.kind === 'error' ? { endedAt: message.timestamp } : {}),
+  };
+  if (message.kind === 'open' || message.kind === 'reconnecting') delete updated.endedAt;
+  return updated;
+}) : sessions;
+
+export const visibleStreamSessionHistory = (
+  sessions: StoredStreamSession[],
+  requestId: string,
+  environmentId: string,
+  filterResponsesByEnv: boolean,
+) => sessions
+  .filter((session) => session.requestId === requestId && (!filterResponsesByEnv || session.environmentId === environmentId))
+  .sort(newestFirst);
+
+export const deleteStoredStreamSession = (sessions: StoredStreamSession[], sessionId: string) => sessions
+  .filter((session) => session.id !== sessionId);
+
+export const clearStoredStreamSessions = (sessions: StoredStreamSession[], requestId: string, environmentId: string) => sessions
+  .filter((session) => session.requestId !== requestId || session.environmentId !== environmentId);
+
+export type StreamHistorySection = { label: string; sessions: StoredStreamSession[] };
+
+export const streamHistorySections = (sessions: StoredStreamSession[], now = new Date()): StreamHistorySection[] => {
+  const sections: StreamHistorySection[] = [
+    { label: 'Just Now', sessions: [] },
+    { label: 'Less Than Two Hours Ago', sessions: [] },
+    { label: 'Today', sessions: [] },
+    { label: 'This Week', sessions: [] },
+    { label: 'Older Than This Week', sessions: [] },
+  ];
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+  sessions.forEach((session) => {
+    const startedAt = new Date(session.startedAt);
+    const elapsed = now.getTime() - startedAt.getTime();
+    const section = Number.isNaN(startedAt.getTime()) ? sections[4]
+      : elapsed < 5 * 60_000 ? sections[0]
+        : elapsed < 2 * 60 * 60_000 ? sections[1]
+          : startedAt >= startOfToday ? sections[2]
+            : startedAt >= startOfWeek ? sections[3]
+              : sections[4];
+    section.sessions.push(session);
+  });
+  return sections.filter((section) => section.sessions.length);
+};

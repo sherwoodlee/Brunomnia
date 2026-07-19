@@ -65,7 +65,7 @@ Current compatibility bounds are explicit: linting is not yet Spectral ruleset p
 | Workspace migration | Complete | Versions 1–3 migrate in place to version 4 import records and source metadata |
 | Compatibility fixtures | Complete | Project-owned fixtures for every import adapter plus Insomnia v4/v5 and HAR round-trip tests |
 
-Compatibility bounds remain explicit: nested source folders are represented in flattened request names; Postman scripts are translated only for the supported permission-bounded API; local file references must be selected again; WSDL message schemas become editable SOAP placeholders; Socket.IO becomes a WebSocket baseline and MCP becomes an HTTP baseline with source metadata; and binary payload bytes are not embedded in compatibility exports.
+Compatibility bounds remain explicit: nested source folders are represented in flattened request names; Postman scripts are translated only for the supported permission-bounded API; local file references must be selected again; WSDL message schemas become editable SOAP placeholders; MCP becomes an HTTP baseline with source metadata; and binary payload bytes are not embedded in compatibility exports. Socket.IO was originally downgraded at this milestone; Milestone 98 now preserves and executes it as a first-class protocol.
 
 ## Milestone 5 — request and authentication fidelity (complete)
 
@@ -80,7 +80,7 @@ Compatibility bounds remain explicit: nested source folders are represented in f
 | Script/test API | Complete baseline | Environment/base/collection/local/iteration variable APIs, replacement helpers, request getters/setters, response header/cookie helpers, console capture, and Jest/Chai-style expectation aliases |
 | Interoperability and migration | Complete | Workspace v5, advanced Insomnia/Postman auth mapping, Insomnia v4/v5 cookie-jar round trips, and collision-safe cookie import |
 
-Compatibility bounds remain explicit: OAuth 2 authorization uses a copied authorization URL and manual returned code/token rather than an embedded callback listener; Netrc contents are project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, and arbitrary Spectral JavaScript/functions/remote `extends` remain deferred. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. WebSocket custom proxy/client identity and headless CLI streaming/auth parity remain later closure work. The later permission-bounded scripting expansion is recorded in Milestone 12.
+Compatibility bounds at Milestone 5 were explicit: OAuth 2 authorization used a copied URL and manual returned code/token. Milestone 88 adds native system-browser loopback capture while retaining that browser-development fallback. Netrc contents were project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, and arbitrary Spectral JavaScript/functions/remote `extends` remained deferred. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. WebSocket custom proxy/client identity and headless CLI streaming/auth parity remain later closure work. The later permission-bounded scripting expansion is recorded in Milestone 12.
 
 ## Milestone 6 — Git Sync and extensibility (complete)
 
@@ -501,7 +501,7 @@ Compatibility bounds remain explicit: WebSocket connection APIs do not expose th
 | --- | --- | --- |
 | Current preference surface | Complete baseline | Separate on-by-default device-local validation settings exist for API requests and OAuth/authentication traffic, matching current upstream's `validateSSL` and `validateAuthSSL` split |
 | Request inheritance | Complete | New requests persist Use Preferences; Always/Never override the API device default for native transports |
-| Authentication separation | Complete baseline | OAuth token requests ignore the API request mode and resolve the authentication validation preference, matching current upstream token behavior; automated authorization-window callback capture remains open |
+| Authentication separation | Complete baseline | OAuth token requests ignore the API request mode and resolve the authentication validation preference, matching current upstream token behavior; Milestone 88 adds automated system-browser loopback callback capture |
 | Legacy safety | Complete | Workspace v15 and earlier request booleans migrate to Always/Never, while requests without a saved transport validation value adopt inheritance |
 | Execution breadth | Complete baseline | Native HTTP/GraphQL, Event Streams, gRPC, collection runs, script/plugin calls, URL imports, OAuth tokens, Git-AI, and HTTP-backed integrations receive the effective setting |
 | Browser/CLI safety | Complete baseline | Browser Fetch keeps browser-owned TLS verification; the CLI rejects an effective Never mode instead of weakening Node TLS globally |
@@ -509,7 +509,7 @@ Compatibility bounds remain explicit: WebSocket connection APIs do not expose th
 | Executable coverage | Complete baseline | Frontend tests cover both defaults, explicit modes, legacy migration, OAuth separation, native invocation, stream configuration, and cURL defaults/override; rendered and live untrusted-certificate fixtures remain intentionally omitted |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 34 verification](QA_MILESTONE_34.md) |
 
-Compatibility bounds remain explicit: browser engines own TLS validation, CLI Node Fetch cannot safely disable it per request, and OAuth authorization-window/callback capture is not implemented. Brunomnia's request-level Always/Never modes are an additional local capability; current Insomnia exposes the API and authentication choices globally.
+Compatibility bounds remain explicit: browser engines own TLS validation and CLI Node Fetch cannot safely disable it per request. Native OAuth callback capture does not change provider TLS policy and browser development retains manual authorization. Brunomnia's request-level Always/Never modes are an additional local capability; current Insomnia exposes the API and authentication choices globally.
 
 ## Milestone 35 — proxy defaults and request inheritance (complete baseline)
 
@@ -1222,11 +1222,326 @@ Compatibility bounds remain explicit: multipart content must fit the existing bo
 
 Compatibility bounds remain explicit: bracket expressions support quoted literal properties and numeric indices, not dynamic index variables or arbitrary Liquid expressions. Multipart filename/content-type/header metadata, live route hot reload, and the response-pane server/route chooser remain open. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 82 — remaining parity closure and release hardening
+## Milestone 82 — live native mock-route updates (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Shared running state | Complete baseline | Each native listener reads routes through a server-scoped asynchronous snapshot store instead of retaining only its startup configuration |
+| Editor synchronization | Complete baseline | Route additions, deletions, enablement, method/path, status, delay, headers, and body edits are debounced per running server and sent through a dedicated Tauri command |
+| Request consistency | Complete | A request clones the route it matches before body parsing or delay, so an in-flight response stays internally consistent while the next request observes the newest route set |
+| Lifecycle safety | Complete | Stop removes only its own running generation, and delayed cleanup cannot erase a quickly restarted server with the same workspace ID |
+| Executable coverage | Complete baseline | Socket-free handler coverage proves route replacement without rebinding; the real loopback fixture proves the same base URL serves the edited route and response |
+| Documentation and evidence | Complete | Updated [local mock server guide](MOCK_SERVERS.md), [parity ledger](PARITY.md), and [Milestone 82 verification](QA_MILESTONE_82.md) |
+
+Compatibility bounds remain explicit: editing the server host or port still requires a restart because those values define the listener itself. Updates are device-local and debounced rather than a collaborative hosted deployment stream. Multipart metadata properties, broader Liquid syntax, and response-pane server/route selection remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 83 — free response-pane mock extraction (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes a dedicated response extractor with mock-server and mock-route selectors, create/overwrite actions, and route navigation while gating local-project creation behind cloud or enterprise conditions |
+| Free local workflow | Complete | Brunomnia exposes the same response-tab workflow for local HTTP/GraphQL responses and saved history with no account, project-type, organization, plan, or entitlement check |
+| Server and route creation | Complete baseline | **Create new local server** chooses the first free loopback port from 4010, while existing-server creation accepts editable method/path and rejects a shadowing method/path conflict |
+| Existing-route overwrite | Complete | The selected route keeps its identity, method, path, name, enabled state, and delay while response status, bounded headers, and text body are replaced |
+| Live and historical sources | Complete baseline | Selected saved responses and live responses retained with a zero-history preference can both be transformed; failed, streaming, gRPC, binary, and oversized sources remain refused or unavailable |
+| Navigation and running state | Complete baseline | **Go to mock** opens the exact server/route; response-pane changes issue an immediate native update when that local server is already running |
+| Bundle boundary | Complete | The extractor and conversion engine load only when the Mock response tab opens; the main production JavaScript chunk remains below the 500 kB warning line |
+| Documentation and evidence | Complete | Updated [local mock server guide](MOCK_SERVERS.md), [parity ledger](PARITY.md), and [Milestone 83 verification](QA_MILESTONE_83.md) |
+
+Compatibility bounds remain explicit: create uses an inline method/path editor instead of Insomnia's separate modal. Mock bodies remain text-backed, and hosted/self-host deployment is outside this local listener workflow. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 84 — LiquidJS condition semantics (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Kong developer-doc commit `73995e32ed758882a290c945807225d7442b483e` documents only `assign`/`if`/`unless`/`raw` and the `default` filter; Mockbin commit `fe06c386407e6df5fd5b6004daae4e105c202572` runs LiquidJS 10.27 with that exact tag/filter allowlist |
+| Typed condition values | Complete baseline | Parsed JSON numbers, booleans, arrays, objects, and null retain type; query/form/header/path values remain strings; assignments retain rather than stringify those values |
+| Operator surface | Complete baseline | LiquidJS 10.27 equality, inequality, four relational operators, string/array `contains`, unary `not`, and same-precedence right-associative `and`/`or` work with quoted-operator and Unicode-safe scanning |
+| Branch grammar | Complete baseline | Ordered `elsif` branches work inside both `if` and `unless`; the first `unless` condition is inverted while later `elsif` conditions use ordinary truthiness like LiquidJS |
+| Truthiness and literals | Complete baseline | Only false/nil/missing are falsey; empty strings, empty arrays, objects, and zero are truthy; `empty` and `blank` comparison literals are supported |
+| Default filter | Complete baseline | False, nil, empty strings, and empty arrays use the fallback while zero and non-empty typed values remain unchanged |
+| Existing safety bounds | Complete | The 1,000-token, 20-level, 100-local, 10,000-byte-local, and 5 MB dynamic-expansion limits continue to bound all new branches and operators |
+| Documentation and evidence | Complete | Updated [local mock server guide](MOCK_SERVERS.md), [parity ledger](PARITY.md), and [Milestone 84 verification](QA_MILESTONE_84.md) |
+
+Compatibility bounds at this milestone were explicit: Brunomnia preserved unsupported syntax as reviewable text instead of reproducing Mockbin's template-error HTTP 500. Milestone 85 closes that behavior gap. Exact LiquidJS token diagnostics, escaped-string behavior, runtime wall-clock/memory accounting, and object identity are not claimed. Filters and tags outside the upstream allowlist remain intentionally unavailable. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 85 — Mockbin template failures (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Mockbin commit `fe06c386407e6df5fd5b6004daae4e105c202572` uses LiquidJS 10.27 with non-strict variables, strict filters, and only `assign`/`if`/`unless`/`raw` plus `default`; render errors become a structured HTTP 500 body |
+| Permissive variables | Complete baseline | Missing request/local paths, unknown output roots, and unknown Faker names render as empty strings while `default` still supplies its documented fallback values |
+| Strict syntax rejection | Complete baseline | Unsupported filters/tags, malformed or unclosed outputs/controls, duplicate or misplaced branches, and invalid assignments return render errors even when invalid syntax is inside an unselected branch |
+| Bounded failure behavior | Complete | A 1,000,000-character source ceiling joins existing token, nesting, local-count, assigned-value, and dynamic-expansion ceilings; crossing a limit returns an error instead of exposing a literal unprocessed remainder |
+| HTTP error contract | Complete baseline | The native handler returns status 500 and `{"error":"Error rendering body template","message":"<diagnostic>"}` with JSON content type, CORS, and route identity headers |
+| Executable coverage | Complete baseline | Pure renderer fixtures cover permissive missing values, unsupported syntax, malformed controls, invalid assignments, and every resource ceiling; a socket-free handler fixture proves the structured 500 contract |
+| Documentation and evidence | Complete | Updated [local mock server guide](MOCK_SERVERS.md), [parity ledger](PARITY.md), and [Milestone 85 verification](QA_MILESTONE_85.md) |
+
+Compatibility bounds at this milestone were explicit: Brunomnia matched the observable permissive-variable/strict-syntax failure contract, not exact LiquidJS token locations or wording. Milestone 86 closes ordinary escaped-string, quoted-delimiter, and computed-property behavior. Runtime wall-clock/memory accounting, object identity, and exact FakerJS corpus/distribution identity remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 86 — Liquid tokenizer and computed properties (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | LiquidJS 10.27 commit `a8fd734b5ec4e0a6ffd1501a5961edc1e241be17` token/string/expression fixtures define quote-aware output/tag boundaries, JavaScript-style named/Unicode/octal escapes, dynamic bracket keys, nested property expressions, and array/string helper properties |
+| Quote-aware token boundaries | Complete baseline | `}}`, `%}`, `{%`, operators, brackets, and pipes inside escaped quoted values remain content; Unicode scanning never slices through a multibyte character |
+| String literal escapes | Complete baseline | Single/double quotes support LiquidJS backslash, named control, one-to-four-digit hexadecimal Unicode, one-to-three-digit octal, and pass-through unknown escapes |
+| Computed properties | Complete baseline | Literal/numeric/dynamic brackets can nest, resolve request fields or typed locals, preserve case-insensitive header lookup, and expose array/string `size`/`first`/`last` helpers under the existing expression-depth bound |
+| Filter tokenization | Complete baseline | The allowed `default` filter can be chained, while quoted pipes stay inside fallback strings and every other filter remains rejected |
+| Whole-branch syntax | Complete baseline | Output syntax in inactive conditional branches is preflighted, so unsupported filters, malformed properties, or unclosed quoted outputs cannot hide behind runtime branch selection |
+| Executable coverage | Complete baseline | Native fixtures reproduce pinned escaped-string and dynamic/nested-property examples, quoted control delimiters, local typed traversal, chained defaults, Unicode-safe scanning, and inactive-branch rejection |
+| Documentation and evidence | Complete | Updated [local mock server guide](MOCK_SERVERS.md), [parity ledger](PARITY.md), and [Milestone 86 verification](QA_MILESTONE_86.md) |
+
+Compatibility bounds remain explicit: range literals, property access rooted directly on quoted/range values, exact diagnostics/token locations, JavaScript lone-surrogate and object/Drop identity, and runtime wall-clock/memory accounting remain open. Filters and tags outside Mockbin's allowlist remain intentionally unavailable. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 87 — local project catalog and recovery (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes project/workspace creation, switching, settings, duplication, export/import, deletion, and a Local Vault project type whose availability is controlled by organization storage rules |
+| Free local catalog | Complete baseline | The top-bar manager creates, switches, renames, duplicates the active project, and deletes any non-last project with no account, organization, project-type, license, or entitlement branch |
+| Independent native storage | Complete | A bounded catalog points to separately stored project JSON files; saves use same-directory temporary files, rollback-safe replacement, and the previous valid primary as a rotating backup |
+| Migration and reconstruction | Complete baseline | The legacy `workspace.json` becomes `local-workspace`; an absent/corrupt catalog is restored from its backup or rebuilt from valid project files; if every project is unreadable, a fresh project opens without deleting damaged evidence |
+| Recovery workflow | Complete baseline | Invalid primary files open only through a valid backup, autosave remains blocked, and a modal requires explicit restore or switching to another healthy project; invalid files and deleted project/backup/vault files are retained under recovery/trash directories |
+| Project-scoped vaults | Complete | Each catalog ID owns a separate AES-256-GCM vault path and in-memory session; switching clears the session, deleting moves the encrypted vault to trash, and the legacy vault is copied only into the migrated legacy project |
+| Runtime isolation | Complete baseline | Project changes wait for active/scheduled sends, persist current edits, disconnect streams, stop native mocks, clear protocol/schema/script state, and preserve device preference choices across projects |
+| Browser parity | Complete baseline | Browser development uses separate primary/backup project keys plus rotating catalog backup, corruption detection, explicit restore, and soft-deleted/recovery keys |
+| Bundle boundary | Complete | Catalog, project manager, command palette, and cookie manager are lazy chunks; the 178-module production build keeps main JavaScript at 499.16 kB without a chunk warning |
+| Executable coverage | Complete baseline | Native fixtures cover legacy migration, lifecycle, catalog reconstruction, corrupt-primary restore, trash retention, vault isolation/migration, and last-project protection; frontend fixtures cover browser lifecycle plus project/catalog backup recovery |
+| Documentation and evidence | Complete | [Local project guide](LOCAL_PROJECTS.md), updated [parity ledger](PARITY.md), and [Milestone 87 verification](QA_MILESTONE_87.md) |
+
+Compatibility bounds at this milestone were explicit: Brunomnia groups collections, designs, mocks, environments, and MCP resources inside one catalog project instead of reproducing Insomnia's separate typed-workspace records beneath each project. Project/workspace manual sorting, inactive-project duplication, deleted-project restoration UI, multi-version backup browsing, automatic folder/Git discovery, and cloud/provider onboarding remained open; Milestone 96 closes deleted-project restoration and Milestone 97 closes inactive duplication plus within-catalog ordering. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 88 — native OAuth 2 callback capture (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` supports authorization-code and implicit system/default-browser flows, PKCE, state, access/refresh/identity tokens, and implicit access/ID/combined response types |
+| Native callback boundary | Complete baseline | Tauri accepts only bounded plain-HTTP `localhost`, `127.0.0.1`, or `::1` redirects, preserves explicit ports or allocates an ephemeral port, rewrites `redirect_uri`, opens the system browser without a command shell, and accepts only bounded callback GET requests on the configured path |
+| State and PKCE | Complete | Missing state and enabled-but-empty PKCE verifiers are generated with Web Crypto; the native listener requires non-empty bounded state and ignores mismatched callbacks |
+| Code grant | Complete baseline | A received code and the listener's exact redirect URL are passed through the authentication-certificate-aware token request; one-time code/verifier data is cleared and the configured redirect is retained after exchange |
+| Implicit grant | Complete baseline | A local CSP-constrained bridge converts browser fragments to loopback query parameters; access-token, ID-token, and combined response types persist access/identity tokens and token type |
+| Lifecycle | Complete | Duplicate flow IDs are rejected, readiness reports the exact browser/callback URLs, explicit cancel and request-switch cleanup stop listeners, and unattended flows expire after five minutes |
+| Manual fallback | Complete | Browser-only development and providers that cannot use loopback redirects retain copied authorization URLs plus manual code/token fields |
+| Bundle boundary | Complete | Authentication loads only when its tab opens; the 179-module build emits a 13.78 kB auth chunk and keeps main JavaScript at 490.67 kB without a warning |
+| Executable coverage | Complete baseline | Frontend fixtures cover state/PKCE generation, response normalization, code and implicit mapping, identity-token exchange, errors, readiness, and cancellation; native loopback fixtures cover code capture, rejection, and cancellation |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 88 verification](QA_MILESTONE_88.md) |
+
+Compatibility bounds remain explicit: automatic capture does not support HTTPS, custom schemes, or non-loopback redirects; the manual copied-URL path remains for those providers. There is no embedded authorization browser, reusable browser-session control, device authorization grant, dynamic client registration, or live third-party provider fixture. Exact cross-platform browser/provider behavior remains release validation work. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 89 — OAuth 2 token lifecycle and send integration (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` stores access/refresh/identity tokens and expiry separately, auto-refreshes expired credentials, supports Origin on initial token calls, maps ID-only implicit responses into the request token, adds OIDC nonce, and recognizes `NO_PREFIX` |
+| Token model | Complete baseline | Brunomnia retains access, refresh, identity, token type, and normalized expiry metadata with local request/folder auth; token fields remain masked and participate in direct plaintext-secret inspection |
+| Direct-send acquisition | Complete baseline | A protected direct send reuses a valid token, exchanges a pasted code, fetches password/client-credential grants, refreshes an expired token, or launches the cancellable system-browser flow before any protected request leaves the app |
+| Shared send guard | Complete baseline | HTTP/GraphQL sends across direct, runner, script/plugin secondary, import, AI, and HTTP-backed integration paths renew noninteractive credentials or fail before network dispatch when interactive authorization is still required |
+| Folder ownership | Complete | Tokens acquired for inherited authentication update the closest configured ancestor rather than silently detaching the request from folder auth; runner renewals use the same owner rule |
+| OIDC and header semantics | Complete baseline | ID-only implicit results populate both identity and effective request tokens, combined results retain both, generated nonces accompany ID-token response types, Origin reaches initial token calls, and `NO_PREFIX` emits the raw token |
+| Refresh controls | Complete baseline | The Auth tab refreshes through a saved refresh token instead of replaying an authorization code, clears all token material explicitly, and retains a manual Fetch path for noninteractive grants |
+| Bundle boundary | Complete | OAuth lifecycle code remains a 3.20 kB lazy chunk, the Auth editor remains an 11.97 kB lazy chunk, and the 179-module production build keeps main JavaScript at 495.46 kB without a warning |
+| Executable coverage | Complete baseline | Focused fixtures cover nonce/raw prefix, ID-only fallback, callback-plus-exchange, current/expired/missing credentials, refresh parameters, Origin, pre-send renewal/refusal, folder ownership, expiry normalization, and secret scans |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 89 verification](QA_MILESTONE_89.md) |
+
+Compatibility bounds at this milestone were explicit: direct request sends could initiate interactive browser authorization while runners and secondary/integration requests returned an actionable error when a new login was required. Milestone 90 closes that execution-breadth gap. OAuth tokens remain in project authentication data rather than an OS-keychain-wrapped unsynced token model. Invalid-refresh recovery does not yet automatically restart an interactive grant, and no live provider or cross-platform browser fixture is claimed. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 90 — interactive OAuth execution breadth (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Shared resolver boundary | Complete | The HTTP execution context can request interactive OAuth credentials; protected dispatch remains blocked until a complete auth snapshot returns, then the same pre-send persistence callback receives it |
+| Collection runner | Complete baseline | Authorization-code and implicit requests can open the system browser during a run, display exact URLs, exchange/store tokens, continue the active attempt, and reuse the credential in later iterations |
+| Secondary execution | Complete baseline | Direct-request scripts, runner scripts, plugin network calls, and user-triggered project/integration HTTP operations share the same app- or runner-owned resolver rather than bypassing OAuth |
+| Cancellation | Complete | Direct request switching, project switching, component teardown, the waiting dialog, and Cancel run terminate the matching native flow without canceling unrelated flow IDs |
+| Ownership | Complete | Main and runner acquisitions still persist request- or closest-folder-owned token state through the common ownership helper |
+| Browser boundary | Complete | Browser development keeps the manual copied-URL path and returns an explicit Tauri-required error instead of pretending it can bind a listener |
+| Bundle boundary | Complete | The reusable dialog is a 1.06 kB lazy chunk; OAuth remains 3.20 kB, Auth remains 11.97 kB, Automation is 50.94 kB, and the 180-module build keeps main JavaScript at 495.10 kB without a warning |
+| Executable coverage | Complete baseline | Transport fixtures prove resolver ordering, token persistence, protected Authorization output, and refusal without a resolver; existing callback, cancellation, runner, type, bundle, and app-build gates remain green |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 90 verification](QA_MILESTONE_90.md) |
+
+Compatibility bounds at this milestone were explicit: an interactive flow pauses the current sequential runner attempt; Brunomnia does not pre-authorize every request before a run or open multiple login windows concurrently. OAuth tokens still traveled with project/sync data and invalid-refresh recovery remained open; Milestone 91 closes both gaps. Embedded-browser session controls and live cross-platform provider fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 91 — local-only OAuth credentials and refresh recovery (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia's OAuth2Token model is `canSync=false`, stores access/refresh/identity/expiry separately from auth configuration, and treats 401 or `invalid_grant` refresh failures as unusable credentials that require fresh acquisition |
+| Shareable omission | Complete baseline | Authorization codes, PKCE verifiers, access/identity/refresh tokens, and expiry are stripped from folder/Git split YAML and encrypted-sync payloads while client/auth configuration remains shareable |
+| Local restoration | Complete | Project reload and encrypted pull sanitize incoming runtime fields first, then restore only matching local request/folder OAuth owner state; new resources and changed auth types receive no token |
+| Publishing policy | Complete | Git/folder autosave, stage/commit/push checks, and encrypted-sync preflight scan the exact scrubbed payload, so local OAuth runtime state neither leaks nor falsely blocks publication |
+| Refresh rejection | Complete baseline | Typed token errors recognize HTTP 401 and OAuth `invalid_grant`; interactive grants restart through the shared browser resolver, while client/password grants clear stale state and retry their configured noninteractive grant |
+| Transient callback state | Complete | Automatic callback exchange uses the exact listener redirect, then restores configured redirect/state and clears one-time code/verifier values; canceled editor flows restore their pre-flow auth snapshot |
+| Trust boundary | Complete | Runtime fields supplied only by incoming project/sync data are discarded before local merge, preventing a shared file from injecting bearer credentials |
+| Executable coverage | Complete baseline | Pure scrub/merge fixtures cover request/folder owners, non-mutation, type changes, new resources, and incoming injection; project/sync tests cover omission/restoration; OAuth tests cover both refresh-recovery paths |
+| Documentation and evidence | Complete | Updated [security and sync](SECURITY_AND_SYNC.md), [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 91 verification](QA_MILESTONE_91.md) |
+
+Compatibility bounds remain explicit: runtime credentials still reside in the encrypted/local catalog project document rather than a dedicated OS-keychain-wrapped database, and explicit full-workspace/interchange exports retain their existing user-controlled credential behavior. Configured OAuth client secrets remain shareable only when policy allows them. Embedded-browser session controls and live cross-platform provider fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 92 — manually configured MCP OAuth (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` uses authorization code, refresh, PKCE, protected-resource/authorization-server discovery, optional dynamic registration, default-browser callback, and separately persisted token metadata for MCP HTTP authentication |
+| OAuth request adapter | Complete baseline | MCP configuration maps into the shared authorization-code OAuth lifecycle with PKCE S256, generated state, ephemeral loopback callback, public-client body credentials, or vault-backed confidential-client Basic credentials |
+| Lifecycle propagation | Complete | Acquired/refreshed access, refresh, identity, expiry, and token-type state carries through initialize, initialized notification, every discovery page, and invocation, then returns to the owning MCP client |
+| Authoring and control | Complete baseline | The integration workbench edits authorization/token endpoints, client ID/secret, scope, and state; reports current/expired/non-expiring status; clears runtime tokens; and reuses the app-wide authorization waiting/cancel surface |
+| Local-only runtime | Complete | MCP OAuth runtime fields are omitted from folder/Git and encrypted-sync payloads, restored only to a matching local OAuth client ID, discarded when injected by incoming data, and cleared on untrusted workspace import |
+| Secret policy | Complete | Runtime tokens do not create publish-policy false positives, while configured OAuth client secrets must be complete local/external-vault references and are cleared on import |
+| Executable coverage | Complete baseline | Focused fixtures cover adapter semantics, client propagation, persistence omission/restoration/injection, auth-type changes, import clearing, normalization, and plaintext-client-secret scanning |
+| Bundle boundary | Complete | The 181-module production build keeps OAuth at 3.77 kB, the integration workbench at 34.67 kB, and main JavaScript at 497.52 kB without a chunk warning |
+| Documentation and evidence | Complete | Updated [MCP/AI/Konnect](MCP_AI_KONNECT.md), [security and sync](SECURITY_AND_SYNC.md), [parity ledger](PARITY.md), and [Milestone 92 verification](QA_MILESTONE_92.md) |
+
+Compatibility bounds remain explicit: endpoint metadata must be entered manually. `WWW-Authenticate` protected-resource metadata discovery, RFC 8414/OIDC authorization-server discovery, and dynamic client registration remain open, as do long-lived HTTP streams and live third-party fixtures. Runtime credentials remain in the encrypted/local catalog project document rather than an OS-keychain-wrapped database. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 93 — MCP OAuth discovery and dynamic registration (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Challenge negotiation | Complete baseline | An OAuth-selected client without complete configuration probes the MCP endpoint unauthenticated, parses quoted/unquoted Bearer `resource_metadata`, `scope`, and error parameters, and retries the original JSON-RPC operation only once after acquisition |
+| Protected-resource discovery | Complete baseline | The advertised URL, path-aware RFC 9728 well-known URL, and root fallback are tried in order; HTTPS/loopback confinement, bounded JSON, required authorization servers, and hierarchical RFC 8707 resource matching prevent unrelated metadata from driving authorization |
+| Authorization-server discovery | Complete baseline | Path-aware RFC 8414, prefixed OIDC, and appended OIDC locations are tried with exact issuer checks, absolute endpoint validation, and advertised authorization-code/PKCE S256 compatibility checks; legacy root defaults remain available |
+| Dynamic registration | Complete baseline | Missing client IDs use the advertised registration endpoint or legacy `/register`, request authorization-code/refresh plus loopback redirect and `none` authentication, and accept bounded public, Basic, or post client metadata |
+| Authorization semantics | Complete baseline | Discovered flows use the shared system-browser callback, generated state, PKCE S256, RFC 8707 resource, configured/challenge/resource/server scope priority, expiry-aware refresh, rejected-refresh recovery, and one insufficient-scope step-up |
+| Local persistence | Complete | Registered ID/secret/issued/expiry/auth-method data persists immediately by MCP client owner, survives local catalog use, and is omitted/sanitized/restored with OAuth token runtime state across folder/Git and encrypted sync |
+| Security boundary | Complete | Metadata/registration requests carry no MCP auth, cookies, scripts, or redirects; accept only HTTPS or loopback HTTP; use 30-second deadlines; cap parsed JSON at 1 MiB; and never write successful registration secrets to event logs |
+| Executable coverage | Complete baseline | Focused fixtures cover challenge and path construction, complete 401→resource metadata→server metadata→registration→token→initialize sequencing, immediate persistence, runtime isolation, and 403 scope escalation |
+| Bundle boundary | Complete | Discovery remains inside the lazy integration path; the 182-module build keeps OAuth at 3.77 kB, Integration at 43.80 kB, and main JavaScript at 498.95 kB without a warning |
+| Documentation and evidence | Complete | Updated [MCP/AI/Konnect](MCP_AI_KONNECT.md), [security and sync](SECURITY_AND_SYNC.md), [parity ledger](PARITY.md), and [Milestone 93 verification](QA_MILESTONE_93.md) |
+
+Compatibility bounds remain explicit: URL-based client-ID metadata documents, metadata redirects, multiple authorization-server failover after valid protected-resource metadata, DPoP, and live third-party fixtures remain open. Runtime credentials remain in the encrypted/local catalog project document rather than an OS-keychain-wrapped database. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 94 — guided MCP resource templates (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` distinguishes resources from `uriTemplate` entries, derives every template variable as a required string field, previews SDK `UriTemplate.expand`, and sends the expansion through `resources/read` |
+| Resource model | Complete | Ordinary URI and URI-template source remain distinct, template variables are derived in stable unique order during discovery/migration, and cached project metadata preserves both without treating a template as an already concrete URI |
+| RFC 6570 expansion | Complete baseline | Bounded simple/reserved/fragment/label/path/path-parameter/query/continuation operators support comma variables, explode, scalar prefix, UTF-8 percent encoding, and scalar/list/object values with RFC empty-value behavior |
+| Guided operation UI | Complete baseline | Selecting a template creates required string controls, resets stale operation parameters, and previews the exact expanded URI; ordinary resources show their immutable URI while tools/prompts retain JSON parameters |
+| Invocation | Complete | HTTP and STDIO resource reads resolve the selected cached template immediately before `resources/read`; malformed/oversized templates and oversized expansions fail before transport while OAuth/session client updates remain intact |
+| Bounds | Complete | Template source is capped at 8,192 characters, expressions/variables at 100, scalar prefix at 10,000 code points, and expanded output at 32,768 characters |
+| Executable coverage | Complete baseline | RFC examples cover scalar/reserved/fragment/prefix, list/object/path/query/explode/empty semantics, variable deduplication, malformed syntax, discovery mapping, migration derivation, and concrete resource URI resolution |
+| Bundle boundary | Complete | RFC expansion remains in the lazy integration chunk; the 183-module build keeps Integration at 49.05 kB and main JavaScript at 499.20 kB without a chunk warning |
+| Documentation and evidence | Complete | Updated [MCP/AI/Konnect](MCP_AI_KONNECT.md), [parity ledger](PARITY.md), and [Milestone 94 verification](QA_MILESTONE_94.md) |
+
+Compatibility bounds remain explicit: Brunomnia's guided template values are strings like pinned upstream's generated schema; direct helper coverage also handles arrays/objects. Rich JSON-Schema forms for tool inputs and prompt arguments, editor history per primitive, template subscriptions, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 95 — guided MCP prompt and tool parameters (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` builds required string schemas for prompt arguments, renders complete tool `inputSchema` through RJSF, mirrors form data into a JSON overview, and keys parameter state by primitive type/name |
+| Prompt builder | Complete baseline | Every advertised prompt argument receives a string control, description, and required marker; edits synchronize with JSON and invoke `prompts/get` using the same typed object |
+| Tool scalar builder | Complete baseline | Up to 200 top-level string/number/integer/boolean properties support nullable scalar unions, title, description, required, defaults, enum, const, and type-preserving controls |
+| Complex fallback | Complete | Nested objects, arrays, references, compositions, union-only, and additional properties remain in the editable JSON overview rather than receiving lossy scalar controls; scalar edits preserve those existing values |
+| Bidirectional editing | Complete baseline | Guided edits serialize deterministic pretty JSON, direct JSON edits immediately drive every visible control, and malformed JSON is retained for correction but rejected before invocation |
+| Per-primitive state | Complete | Draft keys include MCP client, tool/prompt/resource family, and exact primitive name; revisiting restores that JSON while client switches reset the active selection, and least-recently-updated retention is bounded to 1,000 drafts |
+| Executable coverage | Complete baseline | Fixtures cover order, required/default/title/description/enum/const/nullable inference, complex fallback, scalar coercion, typed option identity, draft isolation, and retention bounds |
+| Bundle boundary | Complete | Parameter normalization stays in the lazy Integration chunk; the 184-module build keeps Integration at 53.62 kB and main JavaScript at 499.20 kB without a warning |
+| Documentation and evidence | Complete | Updated [MCP/AI/Konnect](MCP_AI_KONNECT.md), [parity ledger](PARITY.md), and [Milestone 95 verification](QA_MILESTONE_95.md) |
+
+Compatibility bounds remain explicit: recursive object/array controls, `oneOf`/`anyOf`/`allOf`, `$ref` resolution, format widgets, conditional dependencies, schema-level validation messages, and persistent drafts across app restarts remain open. The JSON overview preserves full invocation capability for those schemas. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 96 — recently deleted project restoration (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Recovery inventory | Complete baseline | Native and browser stores group workspace, rotating backup, and optional encrypted-vault artifacts by validated project ID and deletion timestamp, classify workspace/backup/unavailable recovery state, sort newest first, and expose at most 1,000 entries per listing |
+| Native restoration | Complete | Restore requires a valid primary or backup, rejects catalog/file conflicts and the 500-project ceiling, rebuilds the active primary plus valid backup and vault, rolls back newly created files if catalog persistence fails, and preserves malformed deleted JSON under recovery |
+| Browser restoration | Complete baseline | Namespaced local-storage snapshots receive the same ID/timestamp validation, conflict checks, backup promotion, invalid-source preservation, catalog reinsertion, active-project selection, and consumed-trash cleanup |
+| Project manager | Complete baseline | The lazy top-bar manager exposes a collapsible Recently deleted section with deletion time, recovery source, vault evidence, conflict/unreadable disabled states, and Restore-and-open action; deleting while expanded refreshes the inventory |
+| Runtime isolation | Complete | Restoring runs through the same guarded project transition as create/open/delete, persisting current edits, refusing active sends, stopping project runtimes, clearing transient protocol/vault state, and adopting the restored project snapshot |
+| Bounds and safety | Complete baseline | IDs remain path-safe, timestamps must be non-negative safe integers, native enumeration accepts regular files with exact suffixes only, invalid snapshots cannot restore, and successful restore consumes its valid trash artifacts |
+| Executable coverage | Complete baseline | Native lifecycle coverage now verifies grouped listing, status/name/backup/vault evidence, active restoration, encrypted-vault bytes, and consumed trash; browser coverage verifies backup-based recovery, invalid-primary preservation, catalog reinsertion, and empty post-restore inventory |
+| Bundle boundary | Complete | Recovery inventory state and UI remain in the lazy 6.47 kB WorkspaceSwitcher chunk; the 184-module build keeps the catalog at 10.38 kB and main JavaScript at 499.42 kB without a warning |
+| Documentation and evidence | Complete | Updated [local project guide](LOCAL_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 96 verification](QA_MILESTONE_96.md) |
+
+Compatibility bounds at this milestone were explicit: restoration reuses the deleted project ID and therefore refuses a current-ID or orphan-file collision instead of offering rename-on-restore. Original catalog creation/update/open timestamps are not stored in the trash snapshot, the manager has no permanent purge or retention-policy controls, and only the newest 1,000 deletion groups are listed even though older files remain retained. General multi-version backup browsing, exact project-to-typed-workspace hierarchy, manual ordering, discovery, and cloud/provider onboarding remained open; Milestone 97 closes manual within-catalog ordering. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 97 — inactive duplication and persistent project ordering (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` exposes Duplicate / Move from every non-MCP workspace card, asks for a name and destination project, duplicates through an Insomnia v5 export including private environments, navigates to the copy, and supports workspace drag reordering within a project |
+| Inactive source read | Complete | Native and browser catalogs can read a valid primary or recoverable backup for any catalog member without changing the active project, last-opened selection, or runtime state |
+| Duplicate workflow | Complete baseline | Every healthy project exposes Duplicate, prompts for the new name, deep-copies the full resource tree and private environments, clears local response/activity/runner evidence, resets Git and shared-file targets, applies current device preferences, creates a fresh ID, and opens the copy |
+| Persistent ordering | Complete | Native and browser stores validate source/target IDs plus before/after placement, atomically persist catalog order, preserve the active project and workspace document, and retain order across future loads |
+| Drag interaction | Complete baseline | A dedicated reorder handle uses HTML drag data, before/after midpoint targeting, visible insertion markers, and dragging feedback without making project open/action controls the drag source |
+| Keyboard ordering | Complete | The same focusable handle maps Arrow Up/Down to adjacent before/after placement and Home/End to first/last placement while all operations honor the shared project busy guard |
+| Runtime isolation | Complete | Reordering saves the active workspace but does not stop requests, reset workbench state, or switch projects; duplication uses the full guarded project transition and adopts the new copy only after source read and creation succeed |
+| Executable coverage | Complete baseline | Native fixtures prove inactive reads, before/after order persistence, unchanged active data, and invalid-position rejection; browser fixtures prove inactive duplication, deep resource cloning, local-target reset, order persistence, and copy activation |
+| Bundle boundary | Complete | Read/duplicate/reorder logic stays in the lazy 11.94 kB catalog chunk and controls stay in the lazy 7.80 kB switcher; the 184-module build keeps main JavaScript at 499.35 kB without a warning |
+| Documentation and evidence | Complete | Updated [local project guide](LOCAL_PROJECTS.md), [parity ledger](PARITY.md), and [Milestone 97 verification](QA_MILESTONE_97.md) |
+
+Compatibility bounds remain explicit: Brunomnia still maps one catalog entry to one combined project document instead of reproducing Insomnia's project containing separately typed collection/design/document/mock/MCP workspaces. Duplication therefore targets the same local catalog rather than another project/organization, and cross-project move semantics are not representable yet. General discovery, cloud/provider onboarding, permanent trash controls, original deleted-catalog metadata, and multi-version backup browsing remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 98 — first-class Socket.IO requests (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` was checked across the Socket.IO request/payload/response models, main-process transport, editor/listener surfaces, and smoke fixture |
+| Request model and migration | Complete baseline | Workspace v23 retains custom Engine.IO path, ordered JSON/text arguments, optional acknowledgements, and up to 500 enabled/disabled named listeners with bounded normalization and safe defaults |
+| Native transport | Complete baseline | Engine.IO v4 over WebSocket handles URL-path namespaces, custom paths, query/headers/cookies, Bearer connect auth, heartbeat packets, namespace connect/disconnect, emits, acknowledgement IDs, listener filtering, and 1 MiB packet limits |
+| Authoring and console | Complete baseline | A lazy protocol editor controls path, event, argument order/mode, acknowledgement, and listeners; a lazy ordered console shows incoming, outgoing, and system events while listeners can toggle during a live session |
+| Runner sampling | Complete baseline | Collection runs connect the same native/browser path, emit the authored event, wait for incoming listener or acknowledgement evidence within a bounded window, and persist the resulting event snapshot |
+| Insomnia interchange | Complete baseline | v4/v5 imports preserve Socket.IO identity, inline or separate payloads, custom path, event arguments, acknowledgement, and listener state; v4/v5 exports emit first-class Socket.IO request and payload records |
+| Executable coverage | Complete baseline | Frontend fixtures cover argument rendering, migration, and v4/v5 import/export; native unit and real loopback integration fixtures cover handshake, namespace, emit, acknowledgement, incoming listener, and disconnect |
+| Bundle boundary | Complete | Socket.IO bridge/editor/console and gRPC/project helpers remain lazy; the 188-module production build keeps Socket.IO at 2.13 kB and main JavaScript at 497.66 kB with no chunk warning |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 98 verification](QA_MILESTONE_98.md) |
+
+Compatibility bounds at this milestone were explicit: the native baseline connected directly through the Engine.IO WebSocket transport instead of negotiating polling/fallback transports. Milestone 99 closes that negotiation gap. Binary Socket.IO attachment packets remain reported but not decoded, and richer message persistence/search/export, streaming plugin hooks, and live third-party compatibility fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 99 — Socket.IO polling negotiation and WebSocket upgrade (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia uses `socket.io-client` 4.8.1 with default polling-first transport selection, listens for Engine.IO upgrade evidence, and passes headers/query/cookies/proxy/TLS/client identities through the manager |
+| Polling handshake | Complete baseline | Native Engine.IO v4 builds HTTP(S) polling URLs with reserved-query replacement and cache busting, parses bounded open packets, validates session IDs, honors server `maxPayload`, and joins root or URL-path namespaces through GET/POST polling |
+| WebSocket upgrade | Complete baseline | Advertised upgrades use the existing SID, preserve headers, exchange `2probe`/`3probe`, send upgrade packet `5`, and continue the same namespace session over WebSocket |
+| Polling fallback | Complete baseline | Servers with no WebSocket upgrade or a failed pre-upgrade probe retain polling for emits, acknowledgement correlation, named listeners, ping/pong, namespace errors/disconnect, and explicit client disconnect |
+| Transport policy | Complete baseline | Polling reuses the existing redirect, timeout, proxy, certificate-validation, no-proxy, and domain-scoped PEM identity client; custom proxy/identity or disabled validation intentionally remains on polling rather than silently dropping policy during upgrade |
+| Concurrency and bounds | Complete | A dedicated long-poll receive task permits concurrent POST commands without HTTP/1 head-of-line deadlock; every response/packet remains UTF-8 and 1 MiB bounded, listener/argument limits remain enforced, and teardown aborts the pending poll |
+| Executable coverage | Complete baseline | Unit coverage checks polling/WebSocket URL construction and packets; real polling-only and polling-to-WebSocket fixtures both cover connect, emit, acknowledgement, incoming listener, transport evidence, and disconnect |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 99 verification](QA_MILESTONE_99.md) |
+
+Compatibility bounds at this milestone were explicit: binary Socket.IO attachments were reported but not decoded. Milestone 100 closes receive-side binary event and acknowledgement hydration. WebSocket upgrade remains skipped when custom proxy/client identity or disabled certificate-validation policy is active because the current Tungstenite upgrade connector cannot preserve those authorities; the fully functional polling transport retains them. Persistent message collections/search/export, streaming plugin hooks, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 100 — Socket.IO binary event and acknowledgement hydration (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia exposes JSON/Text payload arguments, lets `socket.io-client` reconstruct incoming binary values, writes listener/ack arrays through `JSON.stringify`, and displays resulting objects as formatted JSON |
+| Binary packet parsing | Complete baseline | Native Socket.IO type 5 events and type 6 acknowledgements parse bounded attachment counts, namespaces, optional event ack IDs, required acknowledgement IDs, and JSON placeholder payloads |
+| Attachment transport | Complete baseline | WebSocket binary frames and Engine.IO polling `b<base64>` packets feed the same pending packet state; up to 100 attachments and 1 MiB total are accepted before hydration |
+| Recursive hydration | Complete | Placeholders nested in arrays or objects validate their numeric index and become Node-compatible `{ type: "Buffer", data: number[] }` values before event delivery |
+| Event and acknowledgement continuity | Complete | Hydrated events retain namespace/listener filtering, hydrated acknowledgements retain pending emit correlation, and ordinary text events continue immediately after a binary packet |
+| Failure behavior | Complete baseline | Invalid counts, payloads, base64, missing indexes, unexpected attachments, text interleaving, and count/size overflow produce visible system errors and close the malformed stream instead of exposing partial data |
+| Executable coverage | Complete baseline | Unit coverage proves nested multi-attachment event and binary-ack hydration; upgraded-WebSocket and polling-only loopbacks both prove binary ack, binary named event, ordinary event continuity, and disconnect |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 100 verification](QA_MILESTONE_100.md) |
+
+Compatibility bounds remain explicit: upstream's current editor does not expose a distinct binary-send argument mode, so no separate binary authoring control is claimed. WebSocket upgrade under custom proxy/client identity or disabled certificate validation, persistent message collections/search/export, streaming plugin hooks, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 101 — persistent realtime response history (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia stores WebSocket and Socket.IO connections as response models with file-backed event logs, applies `maxHistoryResponses`, filters by active environment, and uses the shared chronological history selector with request restoration, delete-current, and clear-history actions; Event Stream responses follow the same response loader/history path |
+| Workspace schema | Complete | Workspace v24 adds validated `StoredStreamSession` records for WebSocket, Socket.IO, and SSE; migration removes orphaned request references, normalizes event identity/direction/protocol/timestamps, and bounds sessions plus event text |
+| Incremental lifecycle | Complete baseline | A session is retained when connection starts and every incoming, outgoing, system, reconnect, error, and close record is appended through functional workspace updates; terminal timestamps clear when reconnecting/open evidence resumes |
+| History behavior | Complete baseline | The response pane restores the newest eligible session on request, environment, filter, and local-project changes, groups prior sessions into the upstream chronological sections, disconnects a different live session before selection, and supports exact delete plus active-environment clear |
+| Retention and privacy | Complete | Existing positive/zero/unlimited history and environment-filter preferences govern stream sessions; event logs retain the newest 5,000 entries and about 5 million text characters, remain device-local across project/sync boundaries, and reset on project duplication |
+| Race safety | Complete baseline | Session IDs and synchronous view-scope refs prevent late old-session events or delayed disconnect actions from replacing a newly selected request/workspace console or status; connections completing after scope abandonment are closed |
+| Executable coverage | Complete baseline | Focused history, storage migration, local-project preservation, encrypted-sync omission, and duplicate-reset tests pass alongside the existing native transport suites |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 101 verification](QA_MILESTONE_101.md) |
+
+Compatibility bounds remain explicit: stream history does not yet restore historical request versions, persist native timeline/handshake headers beside each event log, search or export saved events, or expose streaming plugin hooks. The renderer still keeps bounded logs in workspace memory rather than upstream-style file-backed event-log paths. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 102 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
-- Cross-platform installers, signing/notarization guidance, accessibility audit, load/performance testing, and recovery tests
+- Cross-platform installers, signing/notarization guidance, accessibility audit, load/performance testing, and broader recovery tests
 - Declare parity only after every ledger row has reproducible evidence
 
 ## Architectural boundaries

@@ -144,6 +144,10 @@ const requestBodyMetadata = (request: ApiRequest, variables: Record<string, stri
     const body = resolveTemplate(request.body, variables);
     return { mode: 'websocket', summary: body ? 'Startup text frame' : 'No startup frame', bytes: new TextEncoder().encode(body).byteLength, estimated: false };
   }
+  if (request.protocol === 'socketio') {
+    const args = request.socketIo.args.map((arg) => resolveTemplate(arg.value, variables));
+    return { mode: 'socketio', summary: `${request.socketIo.eventName || 'message'} · ${args.length} args${request.socketIo.ack ? ' · ack' : ''}`, bytes: new TextEncoder().encode(JSON.stringify(args)).byteLength, estimated: false };
+  }
   if (request.bodyMode === 'json' || request.bodyMode === 'text') {
     const body = resolveTemplate(request.body, variables);
     return { mode: request.bodyMode, summary: `${request.bodyMode === 'json' ? 'JSON' : 'Text'} body`, bytes: new TextEncoder().encode(body).byteLength, estimated: false };

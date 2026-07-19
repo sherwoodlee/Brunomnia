@@ -22,6 +22,9 @@ export type SendRequestContext = {
   filterResponsesByEnv?: boolean;
   vault?: Record<string, string>;
   externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
+  skipOAuth2Acquisition?: boolean;
+  onOAuth2Token?: (request: ApiRequest) => void;
+  authorizeOAuth2?: (request: ApiRequest, environment: Environment | undefined) => Promise<ApiRequest['auth']>;
   pluginRuntime?: {
     beforeRequest: (request: ApiRequest) => Promise<ApiRequest>;
     afterResponse: (request: ApiRequest, response: HttpResponse) => Promise<HttpResponse>;
@@ -114,7 +117,17 @@ const signingBody = (request: ApiRequest, variables: Record<string, string>) => 
 
 export const sendRequest = async (request: ApiRequest, environment: Environment | undefined, context: SendRequestContext = {}): Promise<HttpResponse> => {
   const variables = { ...environmentMap(environment), ...(context.vault ?? {}) };
-  const hooked = context.pluginRuntime ? await context.pluginRuntime.beforeRequest(request) : request;
+  let hooked = context.pluginRuntime ? await context.pluginRuntime.beforeRequest(request) : request;
+  if (!context.skipOAuth2Acquisition && hooked.auth.type === 'oauth2' && !hooked.auth.disabled) {
+    const { acquireOAuth2TokenWithoutBrowser } = await import('./oauth2');
+    const auth = await acquireOAuth2TokenWithoutBrowser(hooked, environment, { ...context, skipOAuth2Acquisition: true })
+      ?? await context.authorizeOAuth2?.(hooked, environment);
+    if (!auth) throw new Error('OAuth 2 browser authorization is required before this request can be sent.');
+    if (auth !== hooked.auth) {
+      hooked = { ...hooked, auth };
+      context.onOAuth2Token?.(hooked);
+    }
+  }
   const renderContext = context.filterResponsesByEnv
     ? { ...context, responses: (context.responses ?? []).filter((response) => response.environmentId === environment?.id) }
     : context;
@@ -228,10 +241,24 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
 
 export type OAuth2TokenResult = {
   accessToken: string;
+  identityToken: string;
   refreshToken: string;
   tokenType: string;
+  expiresAt: number;
   expiresIn?: number;
 };
+
+export class OAuth2TokenRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, code: string, detail: string) {
+    super(`OAuth 2 token request failed (${status}): ${detail}`);
+    this.name = 'OAuth2TokenRequestError';
+    this.status = status;
+    this.code = code;
+  }
+}
 
 export const fetchOAuth2Token = async (
   request: ApiRequest,
@@ -264,7 +291,10 @@ export const fetchOAuth2Token = async (
     method: 'POST',
     url: auth.accessTokenUrl,
     params: [],
-    headers: [{ id: 'oauth2-accept', name: 'Accept', value: 'application/json', enabled: true }],
+    headers: [
+      { id: 'oauth2-accept', name: 'Accept', value: 'application/x-www-form-urlencoded, application/json', enabled: true },
+      ...(auth.origin && auth.oauth2GrantType !== 'refresh_token' ? [{ id: 'oauth2-origin', name: 'Origin', value: auth.origin, enabled: true }] : []),
+    ],
     bodyMode: 'form-urlencoded',
     body: '',
     formBody: fields.filter(([, value]) => value !== '').map(([name, value], index) => ({ id: `oauth2-${index}`, name, value, enabled: true })),
@@ -279,16 +309,20 @@ export const fetchOAuth2Token = async (
   try { payload = JSON.parse(response.body) as Record<string, unknown>; }
   catch { payload = Object.fromEntries(new URLSearchParams(response.body).entries()); }
   if (response.status < 200 || response.status >= 300) {
-    const detail = String(payload.error_description ?? payload.error ?? response.statusText);
-    throw new Error(`OAuth 2 token request failed (${response.status}): ${detail}`);
+    const code = String(payload.error ?? '');
+    const detail = String(payload.error_description ?? (code || response.statusText));
+    throw new OAuth2TokenRequestError(response.status, code, detail);
   }
   const accessToken = String(payload.access_token ?? '');
   if (!accessToken) throw new Error('The OAuth 2 response did not contain an access_token.');
   const expires = Number(payload.expires_in);
+  const expiresIn = Number.isFinite(expires) && expires > 0 ? expires : undefined;
   return {
     accessToken,
+    identityToken: String(payload.id_token ?? auth.identityToken ?? ''),
     refreshToken: String(payload.refresh_token ?? auth.refreshToken ?? ''),
     tokenType: String(payload.token_type ?? auth.tokenPrefix ?? 'Bearer'),
-    expiresIn: Number.isFinite(expires) ? expires : undefined,
+    expiresAt: expiresIn ? Date.now() + expiresIn * 1_000 : 0,
+    expiresIn,
   };
 };

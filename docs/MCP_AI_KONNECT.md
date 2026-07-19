@@ -14,11 +14,11 @@ Credential fields execute only when the entire value is one of these protected r
 {% external 'provider', 'reference', 'scope', 'field', 'version' %}
 ```
 
-The first form resolves from the passphrase-protected local vault. The second uses an external-vault tuple approved in **Security & Sync**. Raw MCP bearer tokens/passwords/sensitive headers, AI keys, and Konnect tokens are detected as plaintext and rejected at execution. A custom HTTP authorization header can reference a vault entry containing its complete value, such as `Bearer …`.
+The first form resolves from the passphrase-protected local vault. The second uses an external-vault tuple approved in **Security & Sync**. Raw MCP bearer tokens/passwords/OAuth client secrets/sensitive headers, AI keys, and Konnect tokens are detected as plaintext and rejected at execution. A custom HTTP authorization header can reference a vault entry containing its complete value, such as `Bearer …`.
 
-Credential fields are masked by default. Each MCP bearer token/Basic password, AI-provider key, and Konnect token has a temporary Show/Hide control; the device-local **Reveal saved passwords and tokens** preference reveals them together with request authentication fields. This affects presentation only, and switching MCP clients clears temporary disclosure.
+Credential fields are masked by default. Each MCP bearer token, Basic password, OAuth client secret, AI-provider key, and Konnect token has a temporary Show/Hide control; the device-local **Reveal saved passwords and tokens** preference reveals them together with request authentication fields. This affects presentation only, and switching MCP clients clears temporary disclosure.
 
-Brunomnia imports workspace integrations in a non-authoritative state: MCP clients are disabled, bearer/Basic credential fields are cleared, AI and Konnect are disabled, and their credential fields are cleared. Changing an MCP URL, transport, command, or argument list also disables the client and clears its discovery cache.
+Brunomnia imports workspace integrations in a non-authoritative state: MCP clients are disabled; bearer, Basic, OAuth client-secret, and OAuth runtime-token fields are cleared; AI and Konnect are disabled; and their credential fields are cleared. Changing an MCP URL, transport, command, argument list, authentication family, or OAuth configuration also disables the client and clears its discovery cache.
 
 ## MCP clients
 
@@ -33,14 +33,22 @@ The HTTP client:
 - carries `Mcp-Session-Id` across initialization, discovery, and invocation;
 - discovers paginated tools, prompts, resources, and resource templates;
 - invokes tools, prompts, and resource reads;
-- accepts Basic, bearer/PAT, and custom headers;
+- accepts Basic, bearer/PAT, manually configured OAuth 2, and custom headers;
 - disables redirects and cookies;
 - permits remote HTTPS endpoints and loopback-only plain HTTP; and
 - records client/server messages in the integration event console.
 
 Discovery is bounded to 100 pages and 5,000 cached items per operation family. Each request has a 30-second deadline. The shared HTTP transport buffers a response before the parser applies its format checks, so this milestone does not claim a pre-allocation Streamable HTTP body limit.
 
-An HTTP `401` produces a focused authentication error. PAT/Basic credentials work, but automatic MCP OAuth authorization-server discovery, browser redirects, and callback capture remain open. Long-lived response streams, cancellation, server-request response UI, and live notification-driven cache refresh also remain open.
+Discovered resource templates retain `uriTemplate` separately from ordinary resource URIs. Selecting one derives its unique variables in template order, creates required string inputs, and shows the exact expanded URI before `resources/read`. Expansion covers RFC 6570 simple, reserved, fragment, label, path, path-parameter, query, and query-continuation operators; comma variables; explode and scalar-prefix modifiers; and scalar/list/object values. Templates are limited to 8,192 characters, 100 expressions/variables, a 10,000-character prefix modifier, and a 32,768-character expanded URI. Malformed templates remain visible for diagnosis but cannot be invoked. Ordinary resources remain read-only URI selections.
+
+Prompt selections create one string input per advertised argument, retain descriptions and required markers, and stay synchronized with an editable JSON parameter overview. Tool selections normalize up to 200 top-level `string`, `number`, `integer`, or `boolean` JSON-Schema properties, including nullable scalar unions, titles, descriptions, required lists, defaults, `enum`, and `const`; enum/boolean/number controls preserve JSON value types. Nested objects, arrays, references, compositions, and additional properties remain editable in the full JSON overview rather than being misrepresented as scalar controls. Parameter JSON is retained independently by MCP client, primitive family, and primitive name in a bounded 1,000-entry in-memory draft cache; switching clients clears the active editor without attaching one primitive's values to another.
+
+OAuth uses the authorization-code grant, mandatory PKCE S256, an RFC 8707 resource parameter, generated state when no override is supplied, and the shared native system-browser/loopback callback. Authorization URL, token URL, client ID, optional protected client-secret reference, scope, and state can be entered manually; leaving endpoints or client ID blank lets the first `401` drive discovery and dynamic registration. Public clients place `client_id` in the token body; confidential clients use the registered method or HTTP Basic after resolving a configured complete client-secret reference. Access, refresh, identity, expiry, and token-type metadata update across initialization, discovery pages, and invocation. Expired credentials refresh before protected dispatch, rejected refresh grants return to browser authorization, `403 insufficient_scope` requests one bounded reauthorization, and **Clear tokens** removes only local token state.
+
+For automatic setup, Brunomnia parses a Bearer `WWW-Authenticate` challenge, tries the advertised `resource_metadata` URL, then path-aware and root RFC 9728 fallbacks. It validates that protected-resource metadata covers the MCP URL, selects its first authorization server, tries path-aware RFC 8414 and OIDC metadata locations, requires authorization-code and PKCE S256 compatibility when advertised, and chooses explicit scope before challenge, protected-resource, or authorization-server scope. If no client ID exists, it registers a loopback authorization-code/refresh client at the advertised endpoint or legacy `/register` fallback. Metadata and registration requests accept only HTTPS or loopback HTTP, contain no stored MCP credentials/cookies, do not follow redirects, have 30-second deadlines, and reject post-buffer JSON over 1 MiB.
+
+MCP OAuth tokens and dynamically registered client ID/secret/expiry/auth-method metadata are retained in the local catalog project but stripped from folder/Git and encrypted-sync payloads. Incoming shared runtime fields are discarded before matching local client state is restored by MCP client ID. Registration state is persisted immediately, even when later browser authorization is canceled. Configured endpoints, manual client ID, scope/state, and protected manual client-secret reference remain project data. Client-ID metadata documents, discovery redirects, recursive/conditional JSON-Schema forms, long-lived response streams, transport cancellation, server-request response UI, reviewed sampling/elicitation, and persistent STDIO sessions remain open.
 
 ### STDIO
 
@@ -104,7 +112,7 @@ The integration is intentionally pull-only: Brunomnia never writes Gateway confi
 
 ## Device-local and shareable data
 
-- MCP configuration and cached operation metadata are project-scoped and participate in split-YAML projects.
+- MCP configuration and cached operation metadata are project-scoped and participate in split-YAML projects; MCP OAuth tokens and dynamically registered client credentials stay device-local.
 - AI and Konnect configuration are device-local when opening or pulling a project and are excluded from encrypted shared-file payloads.
 - Local response/history/cookie data remains device-local as in earlier milestones.
 - All integration actions respect the current local viewer/editor governance check.

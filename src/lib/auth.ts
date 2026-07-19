@@ -175,7 +175,7 @@ export const applyAdvancedAuth = async (
     const token = resolved(auth.accessToken, variables);
     if (!token) return application;
     const prefix = resolved(auth.tokenPrefix, variables) || 'Bearer';
-    return { ...application, headers: appendHeader(application.headers, 'Authorization', `${prefix} ${token}`.trim(), 'auth-oauth2') };
+    return { ...application, headers: appendHeader(application.headers, 'Authorization', prefix === 'NO_PREFIX' ? token : `${prefix} ${token}`.trim(), 'auth-oauth2') };
   }
   if (auth.type === 'oauth1') return oauth1(request, variables, application, clock);
   if (auth.type === 'iam') return awsIam(request, variables, application, clock);
@@ -189,7 +189,10 @@ export const createOAuth2AuthorizationUrl = async (request: ApiRequest, variable
   const url = new URL(resolved(auth.authorizationUrl, variables));
   url.searchParams.set('client_id', resolved(auth.clientId, variables));
   url.searchParams.set('redirect_uri', resolved(auth.redirectUrl, variables));
-  url.searchParams.set('response_type', auth.responseType || 'code');
+  url.searchParams.set('response_type', auth.oauth2GrantType === 'authorization_code' ? 'code' : auth.responseType || 'token');
+  if (auth.oauth2GrantType === 'implicit' && auth.responseType.includes('id_token') && !url.searchParams.has('nonce')) {
+    url.searchParams.set('nonce', generateOAuth2State());
+  }
   if (auth.scope) url.searchParams.set('scope', resolved(auth.scope, variables));
   if (auth.state) url.searchParams.set('state', resolved(auth.state, variables));
   if (auth.audience) url.searchParams.set('audience', resolved(auth.audience, variables));
@@ -205,3 +208,5 @@ export const createOAuth2AuthorizationUrl = async (request: ApiRequest, variable
 };
 
 export const generateCodeVerifier = () => base64Url(crypto.getRandomValues(new Uint8Array(48)));
+
+export const generateOAuth2State = () => base64Url(crypto.getRandomValues(new Uint8Array(32)));

@@ -6,10 +6,12 @@ mod mcp_stdio;
 mod mock_faker;
 mod mock_server;
 mod models;
+mod oauth2_callback;
 mod plugin;
 mod project;
 mod secure_store;
 mod streaming;
+mod workspace_store;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use models::{HttpRequestInput, HttpResponseOutput};
@@ -26,8 +28,20 @@ fn workspace_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(app_data.join("workspace.json"))
 }
 
-fn vault_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+fn workspace_store_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(workspace_path(app)?.with_file_name("workspaces"))
+}
+
+fn legacy_vault_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(workspace_path(app)?.with_file_name("local-vault.enc.json"))
+}
+
+fn vault_path(app: &AppHandle, workspace_id: &str) -> Result<std::path::PathBuf, String> {
+    workspace_store::project_vault_path(
+        &workspace_store_path(app)?,
+        &legacy_vault_path(app)?,
+        workspace_id,
+    )
 }
 
 #[tauri::command]
@@ -54,8 +68,124 @@ fn save_workspace(app: AppHandle, workspace: Value) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn workspace_catalog_load(
+    app: AppHandle,
+    default_workspace: Value,
+) -> Result<workspace_store::WorkspaceCatalogSnapshot, String> {
+    workspace_store::load(
+        &workspace_store_path(&app)?,
+        Some(&workspace_path(&app)?),
+        &default_workspace,
+    )
+}
+
+#[tauri::command]
+fn workspace_catalog_open(
+    app: AppHandle,
+    workspace_id: String,
+) -> Result<workspace_store::WorkspaceCatalogSnapshot, String> {
+    workspace_store::open(&workspace_store_path(&app)?, &workspace_id)
+}
+
+#[tauri::command]
+fn workspace_catalog_read(app: AppHandle, workspace_id: String) -> Result<Value, String> {
+    workspace_store::read(&workspace_store_path(&app)?, &workspace_id)
+}
+
+#[tauri::command]
+fn workspace_catalog_save(
+    app: AppHandle,
+    workspace_id: String,
+    workspace: Value,
+) -> Result<(), String> {
+    workspace_store::save(&workspace_store_path(&app)?, &workspace_id, &workspace)
+}
+
+#[tauri::command]
+fn workspace_catalog_create(
+    app: AppHandle,
+    workspace_id: String,
+    workspace: Value,
+) -> Result<workspace_store::WorkspaceCatalogSnapshot, String> {
+    workspace_store::create(&workspace_store_path(&app)?, &workspace_id, &workspace)
+}
+
+#[tauri::command]
+fn workspace_catalog_rename(
+    app: AppHandle,
+    workspace_id: String,
+    name: String,
+) -> Result<workspace_store::WorkspaceCatalogSnapshot, String> {
+    workspace_store::rename(&workspace_store_path(&app)?, &workspace_id, &name)
+}
+
+#[tauri::command]
+fn workspace_catalog_reorder(
+    app: AppHandle,
+    workspace_id: String,
+    target_workspace_id: String,
+    position: String,
+) -> Result<workspace_store::WorkspaceCatalogSnapshot, String> {
+    workspace_store::reorder(
+        &workspace_store_path(&app)?,
+        &workspace_id,
+        &target_workspace_id,
+        &position,
+    )
+}
+
+#[tauri::command]
+fn workspace_catalog_delete(
+    app: AppHandle,
+    workspace_id: String,
+) -> Result<workspace_store::WorkspaceCatalogSnapshot, String> {
+    workspace_store::delete(&workspace_store_path(&app)?, &workspace_id)
+}
+
+#[tauri::command]
+fn workspace_catalog_list_trash(
+    app: AppHandle,
+) -> Result<Vec<workspace_store::WorkspaceTrashEntry>, String> {
+    workspace_store::list_trash(&workspace_store_path(&app)?)
+}
+
+#[tauri::command]
+fn workspace_catalog_restore_trash(
+    app: AppHandle,
+    workspace_id: String,
+    deleted_at: i64,
+) -> Result<workspace_store::WorkspaceCatalogSnapshot, String> {
+    workspace_store::restore_trash(&workspace_store_path(&app)?, &workspace_id, deleted_at)
+}
+
+#[tauri::command]
+fn workspace_catalog_restore_backup(
+    app: AppHandle,
+    workspace_id: String,
+) -> Result<workspace_store::WorkspaceCatalogSnapshot, String> {
+    workspace_store::restore_backup(&workspace_store_path(&app)?, &workspace_id)
+}
+
+#[tauri::command]
 async fn send_http_request(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
     http_client::send(input).await
+}
+
+#[tauri::command]
+async fn oauth2_authorize(
+    input: oauth2_callback::OAuthCallbackInput,
+    on_event: Channel<oauth2_callback::OAuthCallbackEvent>,
+    state: State<'_, oauth2_callback::OAuthCallbackState>,
+) -> Result<oauth2_callback::OAuthCallbackOutput, String> {
+    oauth2_callback::authorize(input, on_event, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn oauth2_cancel(
+    flow_id: String,
+    state: State<'_, oauth2_callback::OAuthCallbackState>,
+) -> Result<(), String> {
+    oauth2_callback::cancel(flow_id, state.inner().clone()).await
 }
 
 #[tauri::command]
@@ -374,32 +504,37 @@ async fn plugin_read_source(path: String) -> Result<plugin::PluginSourceOutput, 
 }
 
 #[tauri::command]
-async fn secure_vault_status(app: AppHandle) -> Result<secure_store::SecureFileStatus, String> {
-    let path = vault_path(&app)?;
+async fn secure_vault_status(
+    app: AppHandle,
+    workspace_id: String,
+) -> Result<secure_store::SecureFileStatus, String> {
+    let path = vault_path(&app, &workspace_id)?;
     blocking(move || secure_store::vault_status(&path)).await
 }
 
 #[tauri::command]
 async fn secure_vault_unlock(
     app: AppHandle,
+    workspace_id: String,
     passphrase: String,
 ) -> Result<Vec<secure_store::VaultEntry>, String> {
-    let path = vault_path(&app)?;
+    let path = vault_path(&app, &workspace_id)?;
     blocking(move || secure_store::vault_unlock(&path, passphrase)).await
 }
 
 #[tauri::command]
 async fn secure_vault_save(
     app: AppHandle,
+    workspace_id: String,
     input: secure_store::VaultSaveInput,
 ) -> Result<secure_store::SecureFileStatus, String> {
-    let path = vault_path(&app)?;
+    let path = vault_path(&app, &workspace_id)?;
     blocking(move || secure_store::vault_save(&path, input)).await
 }
 
 #[tauri::command]
-async fn secure_vault_reset(app: AppHandle) -> Result<(), String> {
-    let path = vault_path(&app)?;
+async fn secure_vault_reset(app: AppHandle, workspace_id: String) -> Result<(), String> {
+    let path = vault_path(&app, &workspace_id)?;
     blocking(move || secure_store::vault_reset(&path)).await
 }
 
@@ -474,6 +609,45 @@ async fn disconnect_websocket(
 }
 
 #[tauri::command]
+async fn connect_socket_io(
+    input: models::SocketIoConnectInput,
+    on_event: Channel<models::StreamEvent>,
+    state: State<'_, streaming::StreamingState>,
+) -> Result<(), String> {
+    streaming::connect_socket_io(input, on_event, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn send_socket_io_message(
+    session_id: String,
+    event_name: String,
+    args: Vec<Value>,
+    ack: bool,
+    state: State<'_, streaming::StreamingState>,
+) -> Result<(), String> {
+    streaming::send_socket_io_message(session_id, event_name, args, ack, state.inner().clone())
+        .await
+}
+
+#[tauri::command]
+async fn set_socket_io_listener(
+    session_id: String,
+    event_name: String,
+    enabled: bool,
+    state: State<'_, streaming::StreamingState>,
+) -> Result<(), String> {
+    streaming::set_socket_io_listener(session_id, event_name, enabled, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn disconnect_socket_io(
+    session_id: String,
+    state: State<'_, streaming::StreamingState>,
+) -> Result<(), String> {
+    streaming::disconnect_socket_io(session_id, state.inner().clone()).await
+}
+
+#[tauri::command]
 async fn connect_sse(
     input: models::StreamConnectInput,
     on_event: Channel<models::StreamEvent>,
@@ -511,6 +685,14 @@ async fn start_mock_server(
 }
 
 #[tauri::command]
+async fn update_mock_server(
+    input: models::MockServerUpdateInput,
+    state: State<'_, mock_server::MockServerState>,
+) -> Result<models::MockServerUpdateOutput, String> {
+    mock_server::update(input, state.inner().clone()).await
+}
+
+#[tauri::command]
 async fn stop_mock_server(
     server_id: String,
     state: State<'_, mock_server::MockServerState>,
@@ -523,11 +705,25 @@ pub fn run() {
     tauri::Builder::default()
         .manage(streaming::StreamingState::default())
         .manage(mock_server::MockServerState::default())
+        .manage(oauth2_callback::OAuthCallbackState::default())
         .manage(external_vault::ExternalSecretCache::default())
         .invoke_handler(tauri::generate_handler![
             load_workspace,
             save_workspace,
+            workspace_catalog_load,
+            workspace_catalog_open,
+            workspace_catalog_read,
+            workspace_catalog_save,
+            workspace_catalog_create,
+            workspace_catalog_rename,
+            workspace_catalog_reorder,
+            workspace_catalog_delete,
+            workspace_catalog_list_trash,
+            workspace_catalog_restore_trash,
+            workspace_catalog_restore_backup,
             send_http_request,
+            oauth2_authorize,
+            oauth2_cancel,
             open_external_url,
             script_read_file,
             project_write,
@@ -570,11 +766,16 @@ pub fn run() {
             connect_websocket,
             send_websocket_message,
             disconnect_websocket,
+            connect_socket_io,
+            send_socket_io_message,
+            set_socket_io_listener,
+            disconnect_socket_io,
             connect_sse,
             disconnect_sse,
             grpc_load_schema,
             send_grpc_request,
             start_mock_server,
+            update_mock_server,
             stop_mock_server
         ])
         .run(tauri::generate_context!())

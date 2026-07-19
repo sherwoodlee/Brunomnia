@@ -72,18 +72,90 @@ describe('native HTTP transport preferences', () => {
   });
 
   it('uses the separate authentication certificate preference for OAuth token calls', async () => {
-    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{"access_token":"oauth-token"}', durationMs: 1, sizeBytes: 30, setCookies: [], httpVersion: 'HTTP/1.1' });
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{"access_token":"oauth-token","id_token":"identity-token"}', durationMs: 1, sizeBytes: 58, setCookies: [], httpVersion: 'HTTP/1.1' });
     const request = createBlankRequest('oauth-certificates');
     request.url = 'https://api.example.test/items';
     request.auth.oauth2GrantType = 'client_credentials';
     request.auth.accessTokenUrl = 'https://auth.example.test/token';
     request.auth.clientId = 'client';
     request.auth.clientSecret = 'secret';
+    request.auth.origin = 'https://app.example.test';
 
-    await fetchOAuth2Token(request, undefined, { validateCertificates: true, validateAuthCertificates: false });
+    const token = await fetchOAuth2Token(request, undefined, { validateCertificates: true, validateAuthCertificates: false });
 
     expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({ validateCertificates: false }) }) }));
+    expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ headers: expect.arrayContaining([expect.objectContaining({ name: 'Origin', value: 'https://app.example.test' })]) }) }));
+    expect(token.identityToken).toBe('identity-token');
     expect(request.transport.validateCertificatesMode).toBe('global');
+  });
+
+  it('refreshes expired OAuth credentials before sending the protected request', async () => {
+    tauri.invoke
+      .mockResolvedValueOnce({ status: 200, statusText: 'OK', headers: {}, body: '{"access_token":"fresh-token","expires_in":60}', durationMs: 1, sizeBytes: 48, setCookies: [], httpVersion: 'HTTP/2.0' })
+      .mockResolvedValueOnce({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 2, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/2.0' });
+    const request = createBlankRequest('oauth-refresh-before-send');
+    request.url = 'https://api.example.test/protected';
+    request.auth = {
+      ...request.auth,
+      type: 'oauth2',
+      accessTokenUrl: 'https://identity.example.test/token',
+      accessToken: 'expired-token',
+      refreshToken: 'refresh-token',
+      expiresAt: Date.now() - 1,
+    };
+    const onOAuth2Token = vi.fn();
+
+    await sendRequest(request, undefined, { onOAuth2Token });
+
+    expect(tauri.invoke).toHaveBeenCalledTimes(2);
+    expect(tauri.invoke.mock.calls[1][1]).toEqual(expect.objectContaining({ input: expect.objectContaining({
+      headers: expect.arrayContaining([expect.objectContaining({ name: 'Authorization', value: 'Bearer fresh-token' })]),
+    }) }));
+    expect(onOAuth2Token).toHaveBeenCalledWith(expect.objectContaining({ auth: expect.objectContaining({ accessToken: 'fresh-token' }) }));
+  });
+
+  it('refuses to send an interactive OAuth request without a usable credential', async () => {
+    const request = createBlankRequest('oauth-authorization-required');
+    request.url = 'https://api.example.test/protected';
+    request.auth = { ...request.auth, type: 'oauth2', authorizationUrl: 'https://identity.example.test/authorize', accessTokenUrl: 'https://identity.example.test/token' };
+    await expect(sendRequest(request, undefined)).rejects.toThrow('browser authorization is required');
+    expect(tauri.invoke).not.toHaveBeenCalled();
+  });
+
+  it('waits for a supplied interactive OAuth resolver before protected traffic', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/2.0' });
+    const request = createBlankRequest('oauth-interactive-send');
+    request.url = 'https://api.example.test/protected';
+    request.auth = { ...request.auth, type: 'oauth2', authorizationUrl: 'https://identity.example.test/authorize', accessTokenUrl: 'https://identity.example.test/token' };
+    const authorizeOAuth2 = vi.fn().mockResolvedValue({ ...request.auth, accessToken: 'interactive-token' });
+    const onOAuth2Token = vi.fn();
+
+    await sendRequest(request, undefined, { authorizeOAuth2, onOAuth2Token });
+
+    expect(authorizeOAuth2).toHaveBeenCalledWith(request, undefined);
+    expect(onOAuth2Token).toHaveBeenCalledWith(expect.objectContaining({ auth: expect.objectContaining({ accessToken: 'interactive-token' }) }));
+    expect(tauri.invoke).toHaveBeenCalledTimes(1);
+    expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({
+      headers: expect.arrayContaining([expect.objectContaining({ name: 'Authorization', value: 'Bearer interactive-token' })]),
+    }) }));
+  });
+
+  it('reauthorizes interactively after an invalid refresh grant', async () => {
+    tauri.invoke
+      .mockResolvedValueOnce({ status: 400, statusText: 'Bad Request', headers: {}, body: '{"error":"invalid_grant"}', durationMs: 1, sizeBytes: 25, setCookies: [], httpVersion: 'HTTP/2.0' })
+      .mockResolvedValueOnce({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/2.0' });
+    const request = createBlankRequest('oauth-invalid-refresh');
+    request.url = 'https://api.example.test/protected';
+    request.auth = { ...request.auth, type: 'oauth2', accessTokenUrl: 'https://identity.example.test/token', authorizationUrl: 'https://identity.example.test/authorize', accessToken: 'expired', refreshToken: 'rejected', expiresAt: Date.now() - 1 };
+    const authorizeOAuth2 = vi.fn().mockResolvedValue({ ...request.auth, accessToken: 'reauthorized', refreshToken: 'new-refresh', expiresAt: 0 });
+
+    await sendRequest(request, undefined, { authorizeOAuth2 });
+
+    expect(authorizeOAuth2).toHaveBeenCalledOnce();
+    expect(tauri.invoke).toHaveBeenCalledTimes(2);
+    expect(tauri.invoke.mock.calls[1][1]).toEqual(expect.objectContaining({ input: expect.objectContaining({
+      headers: expect.arrayContaining([expect.objectContaining({ name: 'Authorization', value: 'Bearer reauthorized' })]),
+    }) }));
   });
 
   it('honors explicit request proxy modes over the device preference', async () => {

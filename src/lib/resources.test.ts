@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
 import type { Collection, Environment, RequestFolder } from '../types';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, moveWorkspaceResource, orderedCollectionChildren, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes } from './resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes } from './resources';
 
 const row = (id: string, name: string, value: string) => ({ id, name, value, enabled: true });
 
@@ -35,6 +35,28 @@ describe('resource hierarchy', () => {
     expect(configured.request.auth).toMatchObject({ type: 'bearer', token: 'folder-token' });
     expect(configured.request.preRequestScript).toBe('rootPre();\n\nleafPre();\n\nrequestPre();');
     expect(configured.request.tests).toBe('requestAfter();\n\nleafAfter();\n\nrootAfter();');
+  });
+
+  it('persists acquired authentication to the effective folder or request owner', () => {
+    const inherited = createBlankRequest('inherited');
+    inherited.folderId = 'leaf';
+    inherited.inheritFolderAuth = true;
+    const direct = createBlankRequest('direct');
+    const folderAuth = { ...inherited.auth, type: 'oauth2' as const, accessToken: 'old-folder-token' };
+    const collection: Collection = {
+      id: 'collection', name: 'Collection', expanded: true, requests: [inherited, direct],
+      folders: [
+        { id: 'root', name: 'Root', parentId: '', expanded: true, headers: [], environment: [], auth: folderAuth, preRequestScript: '', tests: '', documentation: '' },
+        { id: 'leaf', name: 'Leaf', parentId: 'root', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+      ],
+    };
+    const acquired = { ...folderAuth, accessToken: 'new-token' };
+    const folderUpdated = persistEffectiveAuthentication(collection, inherited.id, acquired);
+    expect(folderUpdated.folders?.find((folder) => folder.id === 'root')?.auth?.accessToken).toBe('new-token');
+    expect(folderUpdated.requests.find((request) => request.id === inherited.id)?.auth.accessToken).toBe('');
+
+    const requestUpdated = persistEffectiveAuthentication(folderUpdated, direct.id, acquired);
+    expect(requestUpdated.requests.find((request) => request.id === direct.id)?.auth.accessToken).toBe('new-token');
   });
 
   it('keeps global and collection base and selected script stores distinct', () => {

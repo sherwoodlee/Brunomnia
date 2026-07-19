@@ -1,7 +1,9 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from '../data/seed';
 import type {
   ApiDesign,
+  ApiRequest,
   Collection,
   Environment,
   MockRoute,
@@ -13,13 +15,13 @@ import type {
 import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
 import { parseRunnerData, runCollection } from '../lib/runner';
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
-import { resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
+import { persistEffectiveAuthentication, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
 import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
 import { readDesktopScriptFile } from '../lib/scriptFiles';
 import { storeResponseCookies } from '../lib/cookies';
 import { sendRequest } from '../lib/http';
 import { createPluginRuntime, type PluginHostCallbacks, type PluginRunState } from '../lib/plugins';
-import { startMockServer, stopMockServer, type RunningMock } from '../lib/mock';
+import { startMockServer, stopMockServer, updateMockServer, type RunningMock } from '../lib/mock';
 import { runStreamSample } from '../lib/protocol';
 import { resolveAuthorizedExternalSecret } from '../lib/security';
 import { generateMockWithAi } from '../lib/ai';
@@ -27,6 +29,7 @@ import { buildMockAiContext, buildMockSpecUrlContext, composeMockAiInput, findAc
 import { createMockRouteFromResponse, overwriteMockRouteFromResponse } from '../lib/mockRouteFromResponse';
 import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
 import { Icon } from './Icon';
+import { OAuthAuthorizationDialog, type OAuthAuthorizationStatus } from './OAuthAuthorizationDialog';
 import { CodeEditor } from './ProtocolEditors';
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -39,6 +42,7 @@ type AutomationWorkbenchProps = {
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
   onOpenCollection: (collection: Collection) => void;
   runningMocks: Record<string, RunningMock>;
+  focusedMock?: { serverId: string; routeId: string };
   onStartMock: (serverId: string, runningMock: RunningMock) => void;
   onStopMock: (serverId: string) => void;
 };
@@ -141,12 +145,33 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const [results, setResults] = useState<RunnerItemResult[]>([]);
   const [selectedResultId, setSelectedResultId] = useState('');
   const [error, setError] = useState('');
+  const [oauthAuthorization, setOAuthAuthorization] = useState<OAuthAuthorizationStatus>();
   const [requestPlan, setRequestPlan] = useState<Array<{ id: string; enabled: boolean }>>(() => (workspace.collections[0]?.requests ?? []).map((request) => ({ id: request.id, enabled: true })));
   const cancelled = useRef(false);
+  const oauthFlowId = useRef('');
   const draggedRequestId = useRef('');
   const collection = workspace.collections.find((candidate) => candidate.id === collectionId) ?? workspace.collections[0];
   const selectedEnvironment = workspace.environments.find((candidate) => candidate.id === environmentId) ?? activeEnvironment;
   const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
+
+  const cancelRunnerOAuthAuthorization = async () => {
+    const flowId = oauthFlowId.current;
+    if (!flowId) return;
+    oauthFlowId.current = '';
+    setOAuthAuthorization(undefined);
+    try {
+      const { cancelOAuth2Authorization } = await import('../lib/oauth2');
+      await cancelOAuth2Authorization(flowId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  useEffect(() => () => {
+    const flowId = oauthFlowId.current;
+    oauthFlowId.current = '';
+    if (flowId) void import('../lib/oauth2').then(({ cancelOAuth2Authorization }) => cancelOAuth2Authorization(flowId)).catch(() => undefined);
+  }, []);
   const latestReport = workspace.runnerReports.find((report) => report.collectionId === collection?.id);
 
   useEffect(() => {
@@ -199,9 +224,43 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
     try {
       let runnerCookies = [...workspace.cookies];
       let runnerResponses = [...workspace.responses];
+      const authorizeOAuth2 = async (request: ApiRequest, requestEnvironment: Environment | undefined): Promise<ApiRequest['auth']> => {
+        if (!requestEnvironment) throw new Error('OAuth 2 browser authorization requires an active runner environment.');
+        if (!isTauri()) throw new Error('Interactive OAuth 2 runner authorization requires the Tauri app.');
+        const oauth2 = await import('../lib/oauth2');
+        const flowId = oauth2.createOAuth2FlowId();
+        oauthFlowId.current = flowId;
+        const prepared = await oauth2.prepareOAuth2Authorization(request, Object.fromEntries(requestEnvironment.variables.filter((variable) => variable.enabled).map((variable) => [variable.name, variable.value])), flowId);
+        setOAuthAuthorization({ flowId, requestName: request.name, authorizationUrl: prepared.authorizationUrl, redirectUrl: prepared.redirectUrl });
+        try {
+          const completed = await oauth2.completeOAuth2Authorization(prepared, requestEnvironment, {
+            cookies: runnerCookies,
+            responses: runnerResponses,
+            preferredHttpVersion: workspace.preferences.preferredHttpVersion,
+            maxRedirects: workspace.preferences.maxRedirects,
+            followRedirects: workspace.preferences.followRedirects,
+            requestTimeoutMs: workspace.preferences.requestTimeoutMs,
+            validateCertificates: workspace.preferences.validateCertificates,
+            validateAuthCertificates: workspace.preferences.validateAuthCertificates,
+            proxy: workspaceProxyPreferences(workspace),
+            maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
+            filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
+            vault,
+            externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input),
+          }, (event) => {
+            if (oauthFlowId.current === flowId) setOAuthAuthorization({ flowId, requestName: request.name, authorizationUrl: event.authorizationUrl, redirectUrl: event.redirectUrl });
+          });
+          return completed.auth;
+        } finally {
+          if (oauthFlowId.current === flowId) {
+            oauthFlowId.current = '';
+            setOAuthAuthorization(undefined);
+          }
+        }
+      };
       const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
       const pluginCallbacks: PluginHostCallbacks = {
-        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv }),
+        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, authorizeOAuth2 }),
         prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
         readClipboard: () => navigator.clipboard.readText(),
         writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -215,9 +274,9 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           id: environment.id, name: environment.name,
           variables: Object.entries(variables).map(([name, value]) => ({ id: `runner-${name}`, name, value, enabled: true })),
         };
-        const result = request.protocol === 'websocket' || request.protocol === 'sse'
-          ? await runStreamSample(request, requestEnvironment, streamWindowMs, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspaceProxyPreferences(workspace))
-          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
+        const result = request.protocol === 'websocket' || request.protocol === 'socketio' || request.protocol === 'sse'
+          ? await runStreamSample(request, requestEnvironment, streamWindowMs, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspaceProxyPreferences(workspace), runnerCookies)
+          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input), authorizeOAuth2, onOAuth2Token: (updated) => onChangeWorkspace((current) => ({ ...current, collections: current.collections.map((candidate) => candidate.id === collection.id ? persistEffectiveAuthentication(candidate, request.id, updated.auth) : candidate) })) });
         const requestUrl = result.requestUrl ?? request.url;
         if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
         const stored = { ...result, id: uid('response'), requestId: request.id, requestName: request.name, requestUrl, environmentId: environment.id, receivedAt: new Date().toISOString(), requestSnapshot: createRequestSnapshot(request) };
@@ -246,6 +305,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
             maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
             filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
             vault: workspace.preferences.enableVaultInScripts ? vault : {},
+            authorizeOAuth2,
           });
           const state = applyScriptSubresponse(runnerCookies, runnerResponses, subrequest, subresponse, undefined, environment.id, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
           runnerCookies = state.cookies;
@@ -269,7 +329,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       <AutomationHeader eyebrow="Test" title="Collection runner" subtitle="Run requests in order with iteration data, scripts, assertions, delays, and retries.">
         {latestReport && !running ? <button className="secondary-action" onClick={() => downloadReport('json')} type="button">Export JSON</button> : null}
         {latestReport && !running ? <button className="secondary-action" onClick={() => downloadReport('junit')} type="button">Export JUnit</button> : null}
-        {running ? <button className="danger-action" onClick={() => { cancelled.current = true; }} type="button">Cancel run</button>
+        {running ? <button className="danger-action" onClick={() => { cancelled.current = true; void cancelRunnerOAuthAuthorization(); }} type="button">Cancel run</button>
           : <button className="primary-action" disabled={!collection} onClick={() => void start()} type="button">Run collection</button>}
       </AutomationHeader>
       <div className="runner-grid">
@@ -295,11 +355,12 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
         </div>
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}
+      {oauthAuthorization ? <OAuthAuthorizationDialog onCancel={() => { cancelled.current = true; void cancelRunnerOAuthAuthorization(); }} status={oauthAuthorization} /> : null}
     </section>
   );
 }
 
-function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, runningMocks, onStartMock, onStopMock }: AutomationWorkbenchProps) {
+function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, runningMocks, focusedMock, onStartMock, onStopMock }: AutomationWorkbenchProps) {
   const [activeId, setActiveId] = useState(workspace.mockServers[0]?.id ?? '');
   const [activeRouteId, setActiveRouteId] = useState(workspace.mockServers[0]?.routes[0]?.id ?? '');
   const [error, setError] = useState('');
@@ -311,8 +372,11 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
   const [fetchingAiSpec, setFetchingAiSpec] = useState(false);
   const [aiPort, setAiPort] = useState(4020);
   const [generating, setGenerating] = useState(false);
+  const mockSyncTimeouts = useRef<Record<string, number>>({});
+  const latestMockServers = useRef<Record<string, MockServer>>({});
   const server = workspace.mockServers.find((candidate) => candidate.id === activeId) ?? workspace.mockServers[0];
   const route = server?.routes.find((candidate) => candidate.id === activeRouteId) ?? server?.routes[0];
+  const activeRun = server ? runningMocks[server.id] : undefined;
   const activeRequest = useMemo(() => findActiveRequest(workspace), [workspace]);
   const latestResponse = useMemo(() => findLatestResponseForActiveRequest(workspace), [workspace]);
   const selectedAiContext = useMemo(() => {
@@ -320,6 +384,14 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     if (aiContextSource === 'spec-url') return aiSpecContext;
     try { return buildMockAiContext(workspace, aiContextSource); } catch { return undefined; }
   }, [aiContextSource, aiSpecContext, workspace]);
+
+  useEffect(() => {
+    if (!focusedMock) return;
+    const focusedServer = workspace.mockServers.find((candidate) => candidate.id === focusedMock.serverId);
+    if (!focusedServer || !focusedServer.routes.some((candidate) => candidate.id === focusedMock.routeId)) return;
+    setActiveId(focusedMock.serverId);
+    setActiveRouteId(focusedMock.routeId);
+  }, [focusedMock, workspace.mockServers]);
 
   const updateServer = (patch: Partial<MockServer>) => {
     if (!server) return;
@@ -329,11 +401,32 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     if (!server || !route) return;
     updateServer({ routes: server.routes.map((candidate) => candidate.id === route.id ? { ...candidate, ...patch } : candidate) });
   };
+  useEffect(() => {
+    if (!server || !activeRun) return;
+    latestMockServers.current[server.id] = server;
+    const pending = mockSyncTimeouts.current[server.id];
+    if (pending !== undefined) window.clearTimeout(pending);
+    mockSyncTimeouts.current[server.id] = window.setTimeout(() => {
+      delete mockSyncTimeouts.current[server.id];
+      const latest = latestMockServers.current[server.id];
+      if (!latest) return;
+      void updateMockServer(latest).catch((caught) => {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      });
+    }, 180);
+  }, [server, activeRun?.baseUrl]);
+  useEffect(() => () => {
+    Object.values(mockSyncTimeouts.current).forEach((timeout) => window.clearTimeout(timeout));
+  }, []);
   const toggleServer = async () => {
     if (!server) return;
     setError('');
     try {
       if (runningMocks[server.id]) {
+        const pending = mockSyncTimeouts.current[server.id];
+        if (pending !== undefined) window.clearTimeout(pending);
+        delete mockSyncTimeouts.current[server.id];
+        delete latestMockServers.current[server.id];
         await stopMockServer(server.id);
         onStopMock(server.id);
       } else {
@@ -389,7 +482,6 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     onChangeWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, created] })); setActiveId(created.id);
   }} />;
 
-  const activeRun = runningMocks[server.id];
   return (
     <section className="automation-workbench mock-workbench">
       <AutomationHeader eyebrow="Mock" title="Local mock servers" subtitle="Serve deterministic scenarios from this device with no account or hosted dependency.">
@@ -423,7 +515,7 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
           </div>
           <CodeEditor ariaLabel="Mock response body" value={route.body} onChange={(body) => updateRoute({ body })} />
         </div> : <AutomationEmpty title="No routes" action="Add route" onAction={() => { const created: MockRoute = { id: uid('route'), name: 'New scenario', enabled: true, method: 'GET', path: '/resource', status: 200, headers: [], body: '{}', delayMs: 0 }; updateServer({ routes: [created] }); setActiveRouteId(created.id); }} />}
-        <aside className="mock-inspector"><div className={`mock-status-card${activeRun ? ' running' : ''}`}><i /><small>{activeRun ? 'Running locally' : 'Server stopped'}</small><strong>{activeRun?.baseUrl ?? `http://${server.host}:${server.port}`}</strong><span>{server.routes.filter((item) => item.enabled).length} enabled routes</span></div><h3>Dynamic tokens</h3><code>{'{{$timestamp}}'}</code><code>{'{{$randomUUID}}'}</code><code>{'{{request.path.id}}'}</code><h3>Request-aware output</h3><code>{"{{ req.headers['X-Client'] }}"}</code><code>{'{{ req.queryParams.id }}'}</code><code>{'{{ req.queryParams.tag[0] }}'}</code><code>{'{{ req.pathSegments[0] }}'}</code><code>{'{{ req.body.name | default: "Guest" }}'}</code><code>{'{{ req.body.tags.0 }}'}</code><h3>Control tags</h3><code>{'{% assign greeting = "Hello" %}'}</code><code>{'{% if req.queryParams.admin %}allowed{% else %}denied{% endif %}'}</code><code>{'{% unless req.body.disabled %}enabled{% endunless %}'}</code><code>{'{% raw %}{{ unchanged }}{% endraw %}'}</code><h3>Faker values</h3><code>{'{{ faker.randomUUID }}'}</code><code>{'{{ faker.randomFullName }}'}</code><code>{'{{ faker.randomExampleEmail }}'}</code><code>{'{{ faker.isoTimestamp }}'}</code><p>All 118 documented Faker names render locally. JSON, form, and multipart bodies are parsed inside a 1 MB request inspection limit. Repeated pairs preserve order and use zero-based bracket or dotted indices; path values percent-decode without changing +. Evaluation is capped at 1,000 template operations and 20 conditional levels. Unknown syntax remains unchanged.</p></aside>
+        <aside className="mock-inspector"><div className={`mock-status-card${activeRun ? ' running' : ''}`}><i /><small>{activeRun ? 'Running locally · edits apply live' : 'Server stopped'}</small><strong>{activeRun?.baseUrl ?? `http://${server.host}:${server.port}`}</strong><span>{server.routes.filter((item) => item.enabled).length} enabled routes</span></div><h3>Dynamic tokens</h3><code>{'{{$timestamp}}'}</code><code>{'{{$randomUUID}}'}</code><code>{'{{request.path.id}}'}</code><h3>Request-aware output</h3><code>{"{{ req.headers['X-Client'] }}"}</code><code>{'{{ req.queryParams.id }}'}</code><code>{'{{ req.queryParams.tag[0] }}'}</code><code>{'{{ req.pathSegments[0] }}'}</code><code>{'{{ req.body.name | default: "Guest" }}'}</code><code>{'{{ req.body.tags.0 }}'}</code><h3>Control tags</h3><code>{'{% assign greeting = "Hello" %}'}</code><code>{'{% if req.queryParams.role == "admin" %}allowed{% elsif req.queryParams.role contains "edit" %}limited{% else %}denied{% endif %}'}</code><code>{'{% unless req.body.disabled %}enabled{% endunless %}'}</code><code>{'{% raw %}{{ unchanged }}{% endraw %}'}</code><h3>Faker values</h3><code>{'{{ faker.randomUUID }}'}</code><code>{'{{ faker.randomFullName }}'}</code><code>{'{{ faker.randomExampleEmail }}'}</code><code>{'{{ faker.isoTimestamp }}'}</code><p>All 118 documented Faker names render locally. Conditions support LiquidJS comparisons, <code>contains</code>, <code>not</code>, right-associative <code>and</code>/<code>or</code>, and <code>elsif</code>. JSON, form, and multipart bodies are parsed inside a 1 MB request inspection limit. Repeated pairs preserve order and use zero-based bracket or dotted indices; path values percent-decode without changing +. Undefined variables render empty. Unsupported tags, filters, malformed controls, and exceeded render limits return a structured 500 response.</p></aside>
         </div>
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}

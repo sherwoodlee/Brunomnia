@@ -1,0 +1,228 @@
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { WorkspaceCatalogEntry, WorkspaceRecovery, WorkspaceTrashEntry } from '../lib/workspaceCatalog';
+import { Icon } from './Icon';
+
+type WorkspaceSwitcherProps = {
+  activeWorkspaceId: string;
+  busy: boolean;
+  entries: WorkspaceCatalogEntry[];
+  error?: string;
+  recovery?: WorkspaceRecovery;
+  onCreate: (name: string) => Promise<void>;
+  onDelete: (workspaceId: string) => Promise<void>;
+  onDuplicate: (workspaceId: string, name: string) => Promise<void>;
+  onListDeleted: () => Promise<WorkspaceTrashEntry[]>;
+  onOpen: (workspaceId: string) => Promise<void>;
+  onRename: (workspaceId: string, name: string) => Promise<void>;
+  onReorder: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => Promise<void>;
+  onRestore: (workspaceId: string) => Promise<void>;
+  onRestoreDeleted: (workspaceId: string, deletedAt: number) => Promise<void>;
+};
+
+export function WorkspaceSwitcher({
+  activeWorkspaceId,
+  busy,
+  entries,
+  error,
+  recovery,
+  onCreate,
+  onDelete,
+  onDuplicate,
+  onListDeleted,
+  onOpen,
+  onRename,
+  onReorder,
+  onRestore,
+  onRestoreDeleted,
+}: WorkspaceSwitcherProps) {
+  const [open, setOpen] = useState(false);
+  const [trashExpanded, setTrashExpanded] = useState(false);
+  const [trashEntries, setTrashEntries] = useState<WorkspaceTrashEntry[]>([]);
+  const [trashLoading, setTrashLoading] = useState(false);
+  const [trashError, setTrashError] = useState('');
+  const [draggedWorkspaceId, setDraggedWorkspaceId] = useState('');
+  const [dropTarget, setDropTarget] = useState<{ workspaceId: string; position: 'before' | 'after' }>();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const active = entries.find((entry) => entry.id === activeWorkspaceId);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const refreshTrash = async () => {
+    setTrashLoading(true);
+    setTrashError('');
+    try {
+      setTrashEntries(await onListDeleted());
+    } catch (loadError) {
+      setTrashError(loadError instanceof Error ? loadError.message : String(loadError));
+    } finally {
+      setTrashLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (open && trashExpanded) void refreshTrash();
+  }, [open, trashExpanded]);
+
+  const create = () => {
+    const name = window.prompt('Project name', 'New Project')?.trim();
+    if (name) void onCreate(name);
+  };
+  const rename = (entry: WorkspaceCatalogEntry) => {
+    const name = window.prompt('Rename project', entry.name)?.trim();
+    if (name && name !== entry.name) void onRename(entry.id, name);
+  };
+  const duplicate = (entry: WorkspaceCatalogEntry) => {
+    const name = window.prompt('Duplicate project as', entry.name)?.trim();
+    if (name) void onDuplicate(entry.id, name);
+  };
+  const remove = async (entry: WorkspaceCatalogEntry) => {
+    if (entries.length <= 1 || !window.confirm(`Delete “${entry.name}”? A recovery copy will remain on this device.`)) return;
+    await onDelete(entry.id);
+    if (trashExpanded) await refreshTrash();
+  };
+  const restoreDeleted = async (entry: WorkspaceTrashEntry) => {
+    await onRestoreDeleted(entry.workspaceId, entry.deletedAt);
+    await refreshTrash();
+  };
+  const startProjectDrag = (event: ReactDragEvent<HTMLButtonElement>, workspaceId: string) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', workspaceId);
+    setDraggedWorkspaceId(workspaceId);
+    setDropTarget(undefined);
+  };
+  const projectDragOver = (event: ReactDragEvent<HTMLElement>, workspaceId: string) => {
+    if (!draggedWorkspaceId || draggedWorkspaceId === workspaceId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setDropTarget({ workspaceId, position: event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after' });
+  };
+  const finishProjectDrag = () => {
+    setDraggedWorkspaceId('');
+    setDropTarget(undefined);
+  };
+  const dropProject = async (event: ReactDragEvent<HTMLElement>, workspaceId: string) => {
+    event.preventDefault();
+    const sourceId = draggedWorkspaceId || event.dataTransfer.getData('text/plain');
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const position = event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
+    finishProjectDrag();
+    if (sourceId && sourceId !== workspaceId) await onReorder(sourceId, workspaceId, position);
+  };
+  const reorderFromKeyboard = (event: ReactKeyboardEvent<HTMLButtonElement>, entry: WorkspaceCatalogEntry, index: number) => {
+    let target: WorkspaceCatalogEntry | undefined;
+    let position: 'before' | 'after' = 'before';
+    if (event.key === 'ArrowUp') target = entries[index - 1];
+    else if (event.key === 'ArrowDown') {
+      target = entries[index + 1];
+      position = 'after';
+    } else if (event.key === 'Home') target = entries[0];
+    else if (event.key === 'End') {
+      target = entries.at(-1);
+      position = 'after';
+    } else return;
+    if (!target || target.id === entry.id) return;
+    event.preventDefault();
+    void onReorder(entry.id, target.id, position);
+  };
+
+  return (
+    <div className="workspace-switcher-wrap" ref={containerRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className="workspace-switcher"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <Icon name="archive" size={17} />
+        <span>{active?.name ?? 'Local projects'}</span>
+        {active?.status === 'recoverable' ? <i aria-label="Backup opened" className="workspace-warning-dot" /> : null}
+        <Icon name="chevron-down" size={15} />
+      </button>
+      {open ? <section aria-label="Local projects" className="workspace-popover" role="dialog">
+        <header>
+          <div><strong>Local projects</strong><span>Stored only on this device</span></div>
+          <button aria-label="Create project" className="icon-button subtle" disabled={busy} onClick={create} type="button"><Icon name="plus" size={16} /></button>
+        </header>
+        {recovery ? <div className="workspace-recovery-note"><Icon name="history" size={15} /><span>{recovery.message}</span></div> : null}
+        {error ? <div className="workspace-store-error">{error}</div> : null}
+        <div className="workspace-project-list">
+          {entries.map((entry, index) => {
+            const classes = [
+              entry.id === activeWorkspaceId ? 'active' : '',
+              entry.id === draggedWorkspaceId ? 'dragging' : '',
+              dropTarget?.workspaceId === entry.id ? `drop-${dropTarget.position}` : '',
+            ].filter(Boolean).join(' ');
+            return <article className={classes} key={entry.id} onDragOver={(event) => projectDragOver(event, entry.id)} onDrop={(event) => void dropProject(event, entry.id)}>
+              <button
+                className="workspace-project-open"
+                disabled={busy || entry.id === activeWorkspaceId || entry.status === 'unavailable'}
+                onClick={() => void onOpen(entry.id)}
+                type="button"
+              >
+                <Icon name={entry.status === 'unavailable' ? 'x' : entry.status === 'recoverable' ? 'history' : 'folder'} size={16} />
+                <span><strong>{entry.name}</strong><small>{entry.status === 'ready' ? 'Local project' : entry.status === 'recoverable' ? 'Backup available' : 'Unreadable'}</small></span>
+                {entry.id === activeWorkspaceId ? <Icon name="check" size={15} /> : null}
+              </button>
+              <div className="workspace-project-actions">
+                <button aria-label={`Reorder ${entry.name}`} className="workspace-project-drag" disabled={busy || entries.length <= 1} draggable={!busy && entries.length > 1} onDragEnd={finishProjectDrag} onDragStart={(event) => startProjectDrag(event, entry.id)} onKeyDown={(event) => reorderFromKeyboard(event, entry, index)} title="Drag to reorder · Arrow keys, Home, or End" type="button"><Icon name="grid" size={13} /></button>
+                {entry.status === 'recoverable' ? <button aria-label={`Restore ${entry.name}`} disabled={busy} onClick={() => void onRestore(entry.id)} title="Restore latest valid backup" type="button"><Icon name="history" size={14} /></button> : null}
+                <button aria-label={`Rename ${entry.name}`} disabled={busy || entry.status === 'unavailable'} onClick={() => rename(entry)} title="Rename" type="button"><Icon name="settings" size={14} /></button>
+                <button aria-label={`Duplicate ${entry.name}`} disabled={busy || entry.status === 'unavailable'} onClick={() => duplicate(entry)} title="Duplicate" type="button"><Icon name="copy" size={14} /></button>
+                <button aria-label={`Delete ${entry.name}`} disabled={busy || entries.length <= 1} onClick={() => void remove(entry)} title="Delete" type="button"><Icon name="trash" size={14} /></button>
+              </div>
+            </article>;
+          })}
+        </div>
+        <button className="workspace-create-button" disabled={busy} onClick={create} type="button"><Icon name="plus" size={15} /> New local project</button>
+        <button aria-expanded={trashExpanded} className="workspace-trash-toggle" onClick={() => setTrashExpanded((current) => !current)} type="button">
+          <Icon name="history" size={15} />
+          <span><strong>Recently deleted</strong><small>{trashExpanded ? trashLoading ? 'Loading recovery copies…' : `${trashEntries.length} recovery ${trashEntries.length === 1 ? 'copy' : 'copies'}` : 'Restore device-local projects'}</small></span>
+          <Icon name={trashExpanded ? 'chevron-up' : 'chevron-down'} size={14} />
+        </button>
+        {trashExpanded ? <div className="workspace-trash-panel">
+          {trashError ? <div className="workspace-store-error">{trashError}</div> : null}
+          {!trashLoading && !trashEntries.length && !trashError ? <p>No deleted local projects.</p> : null}
+          {trashEntries.map((entry) => {
+            const conflicts = entries.some((candidate) => candidate.id === entry.workspaceId);
+            const unavailable = entry.status === 'unavailable';
+            const deletedAt = new Date(entry.deletedAt);
+            const deletedLabel = Number.isNaN(deletedAt.getTime()) ? 'Unknown deletion time' : deletedAt.toLocaleString();
+            return <article key={`${entry.workspaceId}:${entry.deletedAt}`}>
+              <Icon name={unavailable ? 'x' : 'trash'} size={15} />
+              <span><strong>{entry.name}</strong><small>{deletedLabel} · {entry.status === 'ready' ? 'Workspace' : entry.status === 'recoverable' ? 'Backup' : 'Unreadable'}{entry.hasVault ? ' · Vault' : ''}</small></span>
+              <button disabled={busy || unavailable || conflicts} onClick={() => void restoreDeleted(entry)} title={conflicts ? 'A current project already uses this ID' : unavailable ? 'No valid workspace or backup' : 'Restore and open'} type="button"><Icon name="history" size={13} /> Restore</button>
+            </article>;
+          })}
+        </div> : null}
+      </section> : null}
+      {recovery?.kind === 'workspace-backup' && recovery.workspaceId === activeWorkspaceId ? <div className="modal-backdrop workspace-recovery-backdrop" role="presentation">
+        <section aria-labelledby="workspace-recovery-title" aria-modal="true" className="modal workspace-recovery-modal" role="dialog">
+          <div className="modal-header"><div><span className="eyebrow">Local recovery</span><h2 id="workspace-recovery-title">Project backup opened</h2></div></div>
+          <p>{recovery.message}</p>
+          <p>The damaged primary file has not been overwritten. Restore the backup to resume editing, or open another healthy project.</p>
+          {error ? <div className="workspace-store-error">{error}</div> : null}
+          <div className="workspace-recovery-projects">
+            {entries.filter((entry) => entry.id !== activeWorkspaceId && entry.status !== 'unavailable').map((entry) => <button disabled={busy} key={entry.id} onClick={() => void onOpen(entry.id)} type="button"><Icon name="folder" size={15} /> Open {entry.name}</button>)}
+          </div>
+          <div className="modal-actions"><button className="primary-button" disabled={busy} onClick={() => void onRestore(activeWorkspaceId)} type="button"><Icon name="history" size={15} /> Restore latest valid backup</button></div>
+        </section>
+      </div> : null}
+    </div>
+  );
+}

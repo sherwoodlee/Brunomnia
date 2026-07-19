@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { MockServer } from '../types';
 
 export type RunningMock = { baseUrl: string; routeCount: number };
+export type UpdatedMock = { routeCount: number };
 
 export const startMockServer = async (server: MockServer): Promise<RunningMock> => {
   if (!isTauri()) {
@@ -13,6 +14,17 @@ export const startMockServer = async (server: MockServer): Promise<RunningMock> 
       serverId: server.id,
       host: server.host,
       port: server.port,
+      routes: server.routes,
+    },
+  });
+};
+
+export const updateMockServer = async (server: MockServer): Promise<UpdatedMock> => {
+  const routeCount = server.routes.filter((route) => route.enabled).length;
+  if (!isTauri()) return { routeCount };
+  return invoke<UpdatedMock>('update_mock_server', {
+    input: {
+      serverId: server.id,
       routes: server.routes,
     },
   });

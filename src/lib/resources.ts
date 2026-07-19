@@ -306,6 +306,28 @@ export const applyCollectionConfiguration = (collection: Collection, request: Ap
   };
 };
 
+export const persistEffectiveAuthentication = (
+  collection: Collection,
+  requestId: string,
+  auth: ApiRequest['auth'],
+): Collection => {
+  const request = collection.requests.find((candidate) => candidate.id === requestId);
+  if (!request) return collection;
+  const ownerFolder = request.inheritFolderAuth
+    ? [...folderAncestors(collection, request.folderId)].reverse().find((folder) => folder.auth)
+    : undefined;
+  if (ownerFolder) {
+    return {
+      ...collection,
+      folders: (collection.folders ?? []).map((folder) => folder.id === ownerFolder.id ? { ...folder, auth } : folder),
+    };
+  }
+  return {
+    ...collection,
+    requests: collection.requests.map((candidate) => candidate.id === requestId ? { ...candidate, auth } : candidate),
+  };
+};
+
 export const publicEnvironments = (environments: Environment[]): Environment[] => {
   const byId = new Map(environments.map((environment) => [environment.id, environment]));
   const isEffectivelyPrivate = (environment: Environment) => {

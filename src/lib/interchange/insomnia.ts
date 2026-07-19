@@ -27,7 +27,7 @@ const applyInsomniaAuth = (request: ApiRequest, rawValue: unknown, format: strin
     request.auth = {
       ...request.auth, type: 'oauth2', disabled,
       oauth2GrantType: supportedGrant ? grantType as ApiRequest['auth']['oauth2GrantType'] : 'authorization_code',
-      accessTokenUrl: asString(auth.accessTokenUrl), authorizationUrl: asString(auth.authorizationUrl), clientId: asString(auth.clientId), clientSecret: asString(auth.clientSecret), audience: asString(auth.audience), scope: asString(auth.scope), resource: asString(auth.resource), username: asString(auth.username), password: asString(auth.password), redirectUrl: asString(auth.redirectUrl), credentialsInBody: asBoolean(auth.credentialsInBody), state: asString(auth.state), code: asString(auth.code), accessToken: asString(auth.accessToken), refreshToken: asString(auth.refreshToken), tokenPrefix: asString(auth.tokenPrefix, 'Bearer'), usePkce: asBoolean(auth.usePkce), pkceMethod: auth.pkceMethod === 'plain' ? 'plain' : 'S256', codeVerifier: asString(auth.codeVerifier), responseType: ['code', 'token', 'id_token'].includes(responseType) ? responseType as ApiRequest['auth']['responseType'] : 'code',
+      accessTokenUrl: asString(auth.accessTokenUrl), authorizationUrl: asString(auth.authorizationUrl), clientId: asString(auth.clientId), clientSecret: asString(auth.clientSecret), audience: asString(auth.audience), scope: asString(auth.scope), resource: asString(auth.resource), origin: asString(auth.origin), username: asString(auth.username), password: asString(auth.password), redirectUrl: asString(auth.redirectUrl), credentialsInBody: asBoolean(auth.credentialsInBody), state: asString(auth.state), code: asString(auth.code), accessToken: asString(auth.accessToken), identityToken: asString(auth.identityToken), refreshToken: asString(auth.refreshToken), tokenPrefix: asString(auth.tokenPrefix, 'Bearer'), usePkce: asBoolean(auth.usePkce), pkceMethod: auth.pkceMethod === 'plain' ? 'plain' : 'S256', codeVerifier: asString(auth.codeVerifier), responseType: ['code', 'token', 'id_token', 'id_token token'].includes(responseType) ? responseType as ApiRequest['auth']['responseType'] : 'code',
     };
   }
   else if (type === 'ntlm') request.auth = { ...request.auth, type: 'ntlm', disabled, username: asString(auth.username), password: asString(auth.password), ntlmDomain: asString(auth.domain), ntlmWorkstation: asString(auth.workstation, request.auth.ntlmWorkstation) };
@@ -111,9 +111,35 @@ const mapInsomniaRequest = (
   const isSocketIo = type === 'socketio_request' || metaId.startsWith('socketio-req');
   const isMcp = type === 'mcp_request' || metaId.startsWith('mcp-req');
   const isGrpc = type === 'grpc_request' || Boolean(raw.protoMethodName) || Boolean(raw.reflectionApi);
-  if (isWebsocket || isSocketIo) {
+  if (isWebsocket) {
     request.protocol = 'websocket';
     request.method = 'GET';
+  } else if (isSocketIo) {
+    request.protocol = 'socketio';
+    request.method = 'GET';
+    const socketSettings = asRecord(raw.settings);
+    const payload = asRecord(raw.payload);
+    request.socketIo = {
+      ...request.socketIo,
+      path: asString(raw.settingPath ?? socketSettings?.path, '/socket.io'),
+      eventName: asString(payload?.eventName, 'message'),
+      ack: asBoolean(payload?.ack),
+      args: (Array.isArray(payload?.args) ? payload.args : request.socketIo.args).flatMap((value, argIndex) => {
+        const arg = asRecord(value);
+        if (!arg) return [];
+        return [{ id: asString(arg.id, `${request.id}-socketio-arg-${argIndex}`), value: asString(arg.value), mode: arg.mode === 'text' ? 'text' as const : 'json' as const }];
+      }),
+      eventListeners: (Array.isArray(raw.eventListeners) ? raw.eventListeners : []).flatMap((value, listenerIndex) => {
+        const listener = asRecord(value);
+        if (!listener) return [];
+        return [{
+          id: asString(listener.id, `${request.id}-socketio-listener-${listenerIndex}`),
+          eventName: asString(listener.eventName),
+          description: asString(listener.desc ?? listener.description),
+          enabled: asBoolean(listener.isOpen ?? listener.enabled),
+        }];
+      }),
+    };
   } else if (isGrpc) {
     request.protocol = 'grpc';
     request.method = 'POST';
@@ -139,22 +165,20 @@ const mapInsomniaRequest = (
   request.preRequestScript = joinScripts(inherited.preRequestScript, raw.preRequestScript, scripts?.preRequest);
   request.tests = joinScripts(inherited.tests, raw.afterResponseScript, scripts?.afterResponse);
   const settings = asRecord(raw.settings);
+  const cookieSettings = asRecord(settings?.cookies);
+  if (raw.settingSendCookies !== undefined || cookieSettings?.send !== undefined) request.transport.sendCookies = asBoolean(raw.settingSendCookies ?? cookieSettings?.send, true);
+  if (raw.settingStoreCookies !== undefined || cookieSettings?.store !== undefined) request.transport.storeCookies = asBoolean(raw.settingStoreCookies ?? cookieSettings?.store, true);
   const followRedirectsMode = raw.settingFollowRedirects ?? settings?.followRedirects;
   if (followRedirectsMode === 'global' || followRedirectsMode === 'on' || followRedirectsMode === 'off') {
     request.transport.followRedirectsMode = followRedirectsMode;
     request.transport.followRedirects = followRedirectsMode !== 'off';
   }
   const unsupported: Record<string, JsonValue> = { ...(request.source?.unsupported ?? {}) };
-  if (isSocketIo) {
-    unsupported.socketIo = toJsonValue({ eventListeners: raw.eventListeners, pathParameters: raw.pathParameters, settings: raw.settings });
-    warnings.push({ code: 'unsupported-protocol', message: 'Socket.IO was imported as a WebSocket baseline; event listeners and settings were preserved as source metadata.', resource: request.name });
-  }
   if (isMcp) {
     unsupported.mcp = toJsonValue({ transportType: raw.transportType, env: raw.env, roots: raw.roots });
     warnings.push({ code: 'unsupported-protocol', message: 'MCP was imported as an HTTP baseline; transport settings were preserved as source metadata.', resource: request.name });
   }
   if (raw.pathParameters && request.pathParams.length === 0) unsupported.pathParameters = toJsonValue(raw.pathParameters);
-  if (settings?.cookies) unsupported.cookieSettings = toJsonValue(settings.cookies);
   request.source = {
     ...(request.source ?? sourceMetadata(format, sourceIdentity)),
     unsupported,
@@ -252,6 +276,7 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
   const resources = asArray(document.resources).map(asRecord).filter((resource): resource is UnknownRecord => Boolean(resource));
   const workspaces = resources.filter((resource) => resource._type === 'workspace');
   const folders = new Map(resources.filter((resource) => resource._type === 'request_group').map((folder) => [asString(folder._id), folder]));
+  const socketIoPayloads = new Map(resources.filter((resource) => resource._type === 'socketio_payload' || resource._type === 'socket_io_payload').map((payload) => [asString(payload.parentId), payload]));
   const collectionWorkspaces = workspaces.length ? workspaces : [{ _id: '__WORKSPACE_ID__', name: sourceName }];
   const collections: Collection[] = [];
   const environments: Environment[] = [];
@@ -298,7 +323,7 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
         return current?.parentId === workspaceId;
       })
       .map((resource, requestIndex) => {
-        const request = mapInsomniaRequest(resource, 'insomnia-v4', requestIndex, [], { headers: [], preRequestScript: '', tests: '' }, warnings, workspaceId);
+        const request = mapInsomniaRequest({ ...resource, payload: socketIoPayloads.get(asString(resource._id)) ?? resource.payload }, 'insomnia-v4', requestIndex, [], { headers: [], preRequestScript: '', tests: '' }, warnings, workspaceId);
         request.folderId = folderIds.get(asString(resource.parentId)) ?? '';
         request.inheritFolderAuth = Boolean(request.folderId) && !resource.authentication;
         return request;

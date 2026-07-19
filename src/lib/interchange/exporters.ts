@@ -46,7 +46,7 @@ const insomniaAuth = (auth: ApiRequest['auth']) => {
   if (auth.type === 'bearer') return { type: 'bearer', token: auth.token, prefix: auth.prefix, disabled };
   if (auth.type === 'api-key') return { type: 'apikey', key: auth.apiKeyName, value: auth.apiKeyValue, addTo: auth.apiKeyLocation === 'query' ? 'queryParams' : 'header', disabled };
   if (auth.type === 'oauth1') return { type: 'oauth1', disabled, signatureMethod: auth.oauth1SignatureMethod, consumerKey: auth.consumerKey, consumerSecret: auth.consumerSecret, tokenKey: auth.tokenKey, tokenSecret: auth.tokenSecret, privateKey: auth.privateKey, version: auth.version, nonce: auth.nonce, timestamp: auth.timestamp, callback: auth.callback, realm: auth.realm, verifier: auth.verifier, includeBodyHash: auth.includeBodyHash };
-  if (auth.type === 'oauth2') return { type: 'oauth2', disabled, grantType: auth.oauth2GrantType, accessTokenUrl: auth.accessTokenUrl, authorizationUrl: auth.authorizationUrl, clientId: auth.clientId, clientSecret: auth.clientSecret, audience: auth.audience, scope: auth.scope, resource: auth.resource, username: auth.username, password: auth.password, redirectUrl: auth.redirectUrl, credentialsInBody: auth.credentialsInBody, state: auth.state, code: auth.code, accessToken: auth.accessToken, refreshToken: auth.refreshToken, tokenPrefix: auth.tokenPrefix, usePkce: auth.usePkce, pkceMethod: auth.pkceMethod, responseType: auth.responseType };
+  if (auth.type === 'oauth2') return { type: 'oauth2', disabled, grantType: auth.oauth2GrantType, accessTokenUrl: auth.accessTokenUrl, authorizationUrl: auth.authorizationUrl, clientId: auth.clientId, clientSecret: auth.clientSecret, audience: auth.audience, scope: auth.scope, resource: auth.resource, origin: auth.origin, username: auth.username, password: auth.password, redirectUrl: auth.redirectUrl, credentialsInBody: auth.credentialsInBody, state: auth.state, code: auth.code, accessToken: auth.accessToken, identityToken: auth.identityToken, refreshToken: auth.refreshToken, tokenPrefix: auth.tokenPrefix, usePkce: auth.usePkce, pkceMethod: auth.pkceMethod, responseType: auth.responseType };
   if (auth.type === 'ntlm') return { type: 'ntlm', disabled, username: auth.username, password: auth.password, domain: auth.ntlmDomain, workstation: auth.ntlmWorkstation };
   if (auth.type === 'iam') return { type: 'iam', disabled, accessKeyId: auth.awsAccessKeyId, secretAccessKey: auth.awsSecretAccessKey, sessionToken: auth.awsSessionToken, region: auth.awsRegion, service: auth.awsService };
   if (auth.type === 'hawk') return { type: 'hawk', disabled, id: auth.hawkId, key: auth.hawkKey, ext: auth.hawkExt, validatePayload: auth.hawkValidatePayload, algorithm: auth.hawkAlgorithm };
@@ -81,6 +81,15 @@ const v4Request = (request: ApiRequest, parentId: string, index: number, warning
     settingFollowRedirects: request.transport.followRedirectsMode,
   };
   if (request.protocol === 'websocket') return { ...base, _type: 'websocket_request' };
+  if (request.protocol === 'socketio') return {
+    ...base,
+    _type: 'socketio_request',
+    settingPath: request.socketIo.path,
+    settingSendCookies: request.transport.sendCookies,
+    settingStoreCookies: request.transport.storeCookies,
+    eventListeners: request.socketIo.eventListeners.map((listener) => ({ id: listener.id, eventName: listener.eventName, desc: listener.description, isOpen: listener.enabled })),
+    payload: { eventName: request.socketIo.eventName, ack: request.socketIo.ack, args: request.socketIo.args },
+  };
   if (request.protocol === 'grpc') return { ...base, _type: 'grpc_request', body: { text: request.grpc.input }, metadata: request.grpc.metadata.map((item) => ({ name: item.name, value: item.value, disabled: !item.enabled })), protoMethodName: [request.grpc.service, request.grpc.method].filter(Boolean).join('/'), reflectionApi: { enabled: request.grpc.descriptorSource === 'reflection', url: request.url } };
   return { ...base, _type: 'request', body: insomniaBody(request, warnings) };
 };
@@ -107,7 +116,11 @@ const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): Artifac
       authentication: folder.auth ? insomniaAuth(folder.auth) : undefined,
       preRequestScript: folder.preRequestScript, afterResponseScript: folder.tests, _type: 'request_group',
     }));
-    collection.requests.forEach((request, requestIndex) => resources.push(v4Request(request, request.folderId ? folderIds.get(request.folderId) ?? workspaceId : workspaceId, requestIndex, warnings, String(collectionIndex + 1))));
+    collection.requests.forEach((request, requestIndex) => {
+      const exported = v4Request(request, request.folderId ? folderIds.get(request.folderId) ?? workspaceId : workspaceId, requestIndex, warnings, String(collectionIndex + 1));
+      resources.push(exported);
+      if (request.protocol === 'socketio') resources.push({ _id: `__SOCKET_IO_PAYLOAD_${collectionIndex + 1}_${requestIndex + 1}__`, parentId: exported._id, modified: Date.now(), created: Date.now(), eventName: request.socketIo.eventName, ack: request.socketIo.ack, args: request.socketIo.args, _type: 'socketio_payload' });
+    });
   });
   selectedDesigns(workspace, options).forEach((design, index) => resources.push({ _id: `__API_SPEC_${index + 1}__`, parentId: resources.length ? '__WORKSPACE_1__' : null, name: design.name, contents: design.contents, _type: 'api_spec' }));
   if (options.scope === 'all') workspace.mockServers.forEach((server, index) => resources.push({ _id: `__MOCK_${index + 1}__`, parentId: resources.length ? '__WORKSPACE_1__' : null, name: server.name, url: `http://${server.host}:${server.port}`, routes: server.routes.map((route) => ({ name: route.name, method: route.method, path: route.path, statusCode: route.status, headers: route.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })), body: route.body, delayMs: route.delayMs })), _type: 'mock_server' }));
@@ -142,6 +155,13 @@ const v5Request = (request: ApiRequest, index: number, warnings: ImportWarning[]
     authentication: insomniaAuth(request.auth),
   };
   if (request.protocol === 'websocket') return { ...common, meta: { ...common.meta, id: `${prefix}-ws-req_${index + 1}` }, settings: { encodeUrl: true, followRedirects: request.transport.followRedirectsMode, cookies: { send: true, store: true } } };
+  if (request.protocol === 'socketio') return {
+    ...common,
+    meta: { ...common.meta, id: `socketio-req_${prefix}_${index + 1}` },
+    settings: { encodeUrl: true, path: request.socketIo.path, cookies: { send: request.transport.sendCookies, store: request.transport.storeCookies } },
+    eventListeners: request.socketIo.eventListeners.map((listener) => ({ id: listener.id, eventName: listener.eventName, desc: listener.description, isOpen: listener.enabled })),
+    payload: { eventName: request.socketIo.eventName, ack: request.socketIo.ack, args: request.socketIo.args },
+  };
   if (request.protocol === 'grpc') return { ...common, meta: { ...common.meta, id: `${prefix}-greq_${index + 1}` }, body: { text: request.grpc.input }, metadata: request.grpc.metadata.map((item) => ({ name: item.name, value: item.value, disabled: !item.enabled })), protoMethodName: [request.grpc.service, request.grpc.method].filter(Boolean).join('/'), reflectionApi: { enabled: request.grpc.descriptorSource === 'reflection', url: request.url, apiKey: '', module: '' } };
   return {
     ...common,

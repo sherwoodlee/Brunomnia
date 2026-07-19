@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { StoredResponse } from '../types';
-import { createMockRouteFromResponse, overwriteMockRouteFromResponse } from './mockRouteFromResponse';
+import type { MockServer, StoredResponse } from '../types';
+import { applyResponseToMockTarget, createMockRouteFromResponse, overwriteMockRouteFromResponse } from './mockRouteFromResponse';
 
 const response = (patch: Partial<StoredResponse> = {}): StoredResponse => ({
   id: 'response-one', requestId: 'request-one', requestName: 'Create order', requestUrl: 'https://api.example.test/orders/ord_1?expand=items', environmentId: 'environment-one', receivedAt: '2026-07-18T00:00:00.000Z',
@@ -52,5 +52,44 @@ describe('response-to-mock route conversion', () => {
   it('applies binary refusal to existing-route overwrite too', () => {
     const existing = createMockRouteFromResponse(response(), 'existing-route');
     expect(() => overwriteMockRouteFromResponse(existing, response({ headers: { 'Content-Type': 'application/zip' }, body: 'PK�', bodyBase64: 'UEsD' }))).toThrow('response is binary');
+  });
+
+  it('creates an account-free local server on the first available port', () => {
+    const existing: MockServer = { id: 'server-one', name: 'Existing', host: '127.0.0.1', port: 4010, routes: [] };
+    const applied = applyResponseToMockTarget([existing], response({ requestSnapshot: { method: 'POST' } as StoredResponse['requestSnapshot'] }), {
+      newServerId: 'server-two', newRouteId: 'route-two', newServerName: 'Orders mock', path: '/orders', method: 'PATCH',
+    });
+    expect(applied).toMatchObject({ serverId: 'server-two', routeId: 'route-two', action: 'created-server' });
+    expect(applied.mockServers[1]).toMatchObject({ id: 'server-two', name: 'Orders mock', host: '127.0.0.1', port: 4011 });
+    expect(applied.mockServers[1].routes[0]).toMatchObject({ id: 'route-two', method: 'PATCH', path: '/orders', status: 201, body: '{"ok":true}' });
+  });
+
+  it('creates a route in an existing server and rejects shadowing method-path conflicts', () => {
+    const existingRoute = createMockRouteFromResponse(response(), 'route-one');
+    const server: MockServer = { id: 'server-one', name: 'Orders', host: '127.0.0.1', port: 4010, routes: [existingRoute] };
+    const applied = applyResponseToMockTarget([server], response(), {
+      serverId: server.id, newServerId: 'unused', newRouteId: 'route-two', path: '/health', method: 'GET',
+    });
+    expect(applied).toMatchObject({ serverId: 'server-one', routeId: 'route-two', action: 'created-route' });
+    expect(applied.mockServers[0].routes).toHaveLength(2);
+    expect(() => applyResponseToMockTarget([server], response(), {
+      serverId: server.id, newServerId: 'unused', newRouteId: 'route-two', path: existingRoute.path, method: existingRoute.method,
+    })).toThrow('Select that route to overwrite it');
+  });
+
+  it('overwrites the selected route while preserving its authored match fields', () => {
+    const route = { ...createMockRouteFromResponse(response(), 'route-one'), name: 'Reviewed', path: '/reviewed/{id}', method: 'PUT' as const, delayMs: 250 };
+    const server: MockServer = { id: 'server-one', name: 'Orders', host: '127.0.0.1', port: 4010, routes: [route] };
+    const applied = applyResponseToMockTarget([server], response({ status: 202, body: '{"queued":true}' }), {
+      serverId: server.id, routeId: route.id, newServerId: 'unused', newRouteId: 'unused', path: '/ignored', method: 'GET',
+    });
+    expect(applied).toMatchObject({ serverId: 'server-one', routeId: 'route-one', action: 'overwritten-route' });
+    expect(applied.mockServers[0].routes[0]).toMatchObject({ name: 'Reviewed', path: '/reviewed/{id}', method: 'PUT', delayMs: 250, status: 202, body: '{"queued":true}' });
+  });
+
+  it('rejects stale server and route selections without mutating data', () => {
+    const server: MockServer = { id: 'server-one', name: 'Orders', host: '127.0.0.1', port: 4010, routes: [] };
+    expect(() => applyResponseToMockTarget([server], response(), { serverId: 'missing', newServerId: 'unused', newRouteId: 'route' })).toThrow('server no longer exists');
+    expect(() => applyResponseToMockTarget([server], response(), { serverId: server.id, routeId: 'missing', newServerId: 'unused', newRouteId: 'route' })).toThrow('route no longer exists');
   });
 });

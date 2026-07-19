@@ -24,8 +24,8 @@ describe('artifact export adapters', () => {
     const v4Import = importArtifact(v4Export.contents, v4Export.fileName);
     expect(v4Import.format).toBe('insomnia-v4');
     expect(v4Import.collections).toHaveLength(workspace.collections.length);
-    expect(v4Import.collections.reduce((total, collection) => total + collection.requests.length, 0)).toBe(14);
-    expect(new Set(v4Import.collections.flatMap((collection) => collection.requests.map((request) => request.id))).size).toBe(14);
+    expect(v4Import.collections.reduce((total, collection) => total + collection.requests.length, 0)).toBe(workspace.collections.reduce((total, collection) => total + collection.requests.length, 0));
+    expect(new Set(v4Import.collections.flatMap((collection) => collection.requests.map((request) => request.id))).size).toBe(workspace.collections.reduce((total, collection) => total + collection.requests.length, 0));
     expect(v4Import.collections[0].requests[0].auth).toMatchObject({ type: 'hawk', hawkId: 'client' });
     expect(v4Import.collections[0].requests[0].documentation).toBe('Request docs');
     expect(v4Import.collections[0].requests[0].transport.followRedirectsMode).toBe('off');
@@ -38,6 +38,7 @@ describe('artifact export adapters', () => {
     expect(v4Import.cookies).toHaveLength(1);
     expect(v4Import.collections[0].environment?.[0]).toMatchObject({ name: 'region', value: 'base' });
     expect(v4Import.collections[0].subEnvironments?.[0]).toMatchObject({ name: 'Staging', variables: [expect.objectContaining({ name: 'region', value: 'staging' })] });
+    expect(v4Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'socketio')).toMatchObject({ socketIo: { path: '/socket.io', eventName: 'message', ack: true, eventListeners: [expect.objectContaining({ eventName: 'order.updated', enabled: true })] } });
 
     const v5Export = exportArtifact(workspace, { format: 'insomnia-v5', scope: 'all' });
     const v5Import = importArtifact(v5Export.contents, v5Export.fileName);
@@ -56,6 +57,7 @@ describe('artifact export adapters', () => {
     expect(v5Import.collections[0].environment?.[0]).toMatchObject({ name: 'region', value: 'base' });
     expect(v5Import.collections[0].subEnvironments?.[0]).toMatchObject({ name: 'Staging', variables: [expect.objectContaining({ name: 'region', value: 'staging' })] });
     expect(v5Import.environments.length).toBeGreaterThan(0);
+    expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'socketio')).toMatchObject({ socketIo: { path: '/socket.io', eventName: 'message', ack: true, eventListeners: [expect.objectContaining({ eventName: 'order.updated', enabled: true })] } });
   });
 
   it('exports and reimports HAR while warning about streaming protocols', () => {
@@ -64,7 +66,7 @@ describe('artifact export adapters', () => {
     const imported = importArtifact(exported.contents, exported.fileName);
     expect(imported.format).toBe('har');
     expect(imported.collections[0].requests).toHaveLength(11);
-    expect(exported.warnings.filter((warning) => warning.code === 'unsupported-protocol')).toHaveLength(3);
+    expect(exported.warnings.filter((warning) => warning.code === 'unsupported-protocol')).toHaveLength(4);
   });
 
   it('creates scoped Brunomnia and raw OpenAPI exports', () => {
@@ -74,7 +76,7 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(22);
+    expect(parsed.version).toBe(24);
 
     const design = workspace.apiDesigns[0];
     const spec = exportArtifact(workspace, { format: 'openapi', scope: 'design', designId: design.id });

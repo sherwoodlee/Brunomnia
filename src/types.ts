@@ -1,5 +1,5 @@
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE' | (string & Record<never, never>);
-export type Protocol = 'http' | 'graphql' | 'websocket' | 'sse' | 'grpc';
+export type Protocol = 'http' | 'graphql' | 'websocket' | 'socketio' | 'sse' | 'grpc';
 export type BodyMode = 'none' | 'json' | 'text' | 'form-urlencoded' | 'multipart' | 'binary';
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -48,17 +48,20 @@ export type AuthConfig = {
   audience: string;
   scope: string;
   resource: string;
+  origin: string;
   redirectUrl: string;
   credentialsInBody: boolean;
   state: string;
   code: string;
   accessToken: string;
+  identityToken: string;
   refreshToken: string;
+  expiresAt: number;
   tokenPrefix: string;
   usePkce: boolean;
   pkceMethod: 'S256' | 'plain';
   codeVerifier: string;
-  responseType: 'code' | 'token' | 'id_token';
+  responseType: 'code' | 'token' | 'id_token' | 'id_token token';
   ntlmDomain: string;
   ntlmWorkstation: string;
   awsAccessKeyId: string;
@@ -176,6 +179,27 @@ export type SseConfig = {
   sendLastEventId: boolean;
 };
 
+export type SocketIoArg = {
+  id: string;
+  value: string;
+  mode: 'json' | 'text';
+};
+
+export type SocketIoEventListener = {
+  id: string;
+  eventName: string;
+  description: string;
+  enabled: boolean;
+};
+
+export type SocketIoConfig = {
+  path: string;
+  eventName: string;
+  args: SocketIoArg[];
+  ack: boolean;
+  eventListeners: SocketIoEventListener[];
+};
+
 export type CookieRecord = {
   id: string;
   name: string;
@@ -198,6 +222,18 @@ export type StoredResponse = HttpResponse & {
   environmentId: string;
   receivedAt: string;
   requestSnapshot?: ApiRequest;
+};
+
+export type StoredStreamSession = {
+  id: string;
+  requestId: string;
+  requestName: string;
+  requestUrl: string;
+  environmentId: string;
+  protocol: 'websocket' | 'socketio' | 'sse';
+  startedAt: string;
+  endedAt?: string;
+  messages: StreamMessage[];
 };
 
 export type ResponseTimelineEntry = {
@@ -226,6 +262,7 @@ export type ApiRequest = {
   grpc: GrpcConfig;
   transport: TransportConfig;
   sse: SseConfig;
+  socketIo: SocketIoConfig;
   preRequestScript: string;
   tests: string;
   folderId?: string;
@@ -290,7 +327,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 22;
+  version: 24;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -303,6 +340,7 @@ export type Workspace = {
   imports: ImportRecord[];
   cookies: CookieRecord[];
   responses: StoredResponse[];
+  streamSessions: StoredStreamSession[];
   responseFilters?: Record<string, { filter: string; history: string[]; previewMode: ResponsePreviewMode }>;
   project: ProjectConfig;
   plugins: PluginRecord[];
@@ -375,6 +413,8 @@ export type McpPrompt = {
 
 export type McpResource = {
   uri: string;
+  uriTemplate: string;
+  variables: string[];
   name: string;
   description: string;
   mimeType: string;
@@ -389,10 +429,25 @@ export type McpClient = {
   command: string;
   args: string[];
   headers: KeyValue[];
-  authType: 'none' | 'bearer' | 'basic';
+  authType: 'none' | 'bearer' | 'basic' | 'oauth2';
   token: string;
   username: string;
   password: string;
+  oauthAuthorizationUrl: string;
+  oauthAccessTokenUrl: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  oauthScope: string;
+  oauthState: string;
+  oauthRefreshToken: string;
+  oauthIdentityToken: string;
+  oauthExpiresAt: number;
+  oauthTokenPrefix: string;
+  oauthRegisteredClientId: string;
+  oauthRegisteredClientSecret: string;
+  oauthRegisteredClientIdIssuedAt: number;
+  oauthRegisteredClientSecretExpiresAt: number;
+  oauthRegisteredTokenEndpointAuthMethod: 'none' | 'client_secret_basic' | 'client_secret_post';
   roots: string[];
   tools: McpTool[];
   prompts: McpPrompt[];
@@ -522,7 +577,7 @@ export type HttpResponse = {
 };
 
 export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'transport' | 'scripts' | 'tests' | 'docs';
-export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline' | 'tests';
+export type ResponseTab = 'preview' | 'headers' | 'cookies' | 'timeline' | 'tests' | 'mock';
 export type ResponsePreviewMode = 'friendly' | 'source' | 'raw';
 export type SidebarMode = 'collections' | 'history';
 export type WorkbenchSection = 'requests' | 'design' | 'runner' | 'mocks' | 'git' | 'plugins' | 'security' | 'integrations' | 'preferences';

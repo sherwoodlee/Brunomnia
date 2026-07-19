@@ -182,6 +182,22 @@ pub struct StreamConnectInput {
     pub sse: SseConfig,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SocketIoConnectInput {
+    pub session_id: String,
+    pub url: String,
+    pub headers: Vec<KeyValue>,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub auth_token: String,
+    #[serde(default)]
+    pub event_listeners: Vec<String>,
+    #[serde(default)]
+    pub transport: TransportConfig,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamEvent {
@@ -274,10 +290,23 @@ pub struct MockServerInput {
     pub routes: Vec<MockRouteInput>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MockServerUpdateInput {
+    pub server_id: String,
+    pub routes: Vec<MockRouteInput>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MockServerOutput {
     pub base_url: String,
+    pub route_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MockServerUpdateOutput {
     pub route_count: usize,
 }
 

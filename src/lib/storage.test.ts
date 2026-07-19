@@ -1,6 +1,131 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
 import { migrateWorkspace, parseWorkspaceImport } from './storage';
+import { createBlankWorkspace, createCatalogWorkspace, createWorkspaceDuplicate, deleteCatalogWorkspace, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, openCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
+
+class MemoryStorage implements Storage {
+  readonly values = new Map<string, string>();
+  get length() { return this.values.size; }
+  clear() { this.values.clear(); }
+  getItem(key: string) { return this.values.get(key) ?? null; }
+  key(index: number) { return [...this.values.keys()][index] ?? null; }
+  removeItem(key: string) { this.values.delete(key); }
+  setItem(key: string, value: string) { this.values.set(key, value); }
+}
+
+describe('local project catalog', () => {
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: new MemoryStorage() });
+    Object.defineProperty(globalThis, 'isTauri', { configurable: true, value: false });
+  });
+
+  it('migrates the legacy browser workspace and manages project lifecycle', async () => {
+    localStorage.setItem('brunomnia.workspace.v1', JSON.stringify({ ...cloneSeedWorkspace(), name: 'Legacy' }));
+    const migrated = await loadWorkspaceCatalog();
+    expect(migrated).toMatchObject({ activeWorkspaceId: 'local-workspace', workspace: { name: 'Legacy' } });
+
+    const created = await createCatalogWorkspace(createBlankWorkspace('Second', cloneSeedWorkspace().preferences), 'second');
+    expect(created.entries.map((entry) => entry.name)).toEqual(['Legacy', 'Second']);
+    expect(created.activeWorkspaceId).toBe('second');
+
+    const renamed = await renameCatalogWorkspace('second', 'Renamed');
+    expect(renamed.workspace.name).toBe('Renamed');
+    const opened = await openCatalogWorkspace('local-workspace');
+    expect(opened.workspace.name).toBe('Legacy');
+    const deleted = await deleteCatalogWorkspace('second');
+    expect(deleted.entries).toHaveLength(1);
+    await expect(deleteCatalogWorkspace('local-workspace')).rejects.toThrow('last local project');
+  });
+
+  it('opens the last valid backup and requires explicit restoration', async () => {
+    const initial = await loadWorkspaceCatalog();
+    const saved = { ...initial.workspace, name: 'Saved' };
+    await saveCatalogWorkspace(initial.activeWorkspaceId, saved);
+    localStorage.setItem(`brunomnia.project.${initial.activeWorkspaceId}.v1`, '{ broken');
+
+    const recovered = await openCatalogWorkspace(initial.activeWorkspaceId);
+    expect(recovered.entries[0].status).toBe('recoverable');
+    expect(recovered.recovery?.kind).toBe('workspace-backup');
+    expect(recovered.workspace.name).toBe('Local Workspace');
+
+    const restored = await restoreCatalogWorkspaceBackup(initial.activeWorkspaceId);
+    expect(restored.entries[0].status).toBe('ready');
+    expect(restored.recovery).toBeUndefined();
+    expect([...((localStorage as MemoryStorage).values.keys())].some((key) => key.startsWith('brunomnia.recovery.'))).toBe(true);
+  });
+
+  it('reads inactive projects, duplicates their resources, and persists manual order', async () => {
+    const initial = await loadWorkspaceCatalog();
+    const second = createBlankWorkspace('Second', initial.workspace.preferences);
+    second.environments.push({ id: 'private-environment', name: 'Private', variables: [], parentId: '', private: true });
+    await createCatalogWorkspace(second, 'second');
+    await createCatalogWorkspace(createBlankWorkspace('Third', initial.workspace.preferences), 'third');
+    await openCatalogWorkspace(initial.activeWorkspaceId);
+
+    const inactive = await readCatalogWorkspace('second');
+    expect(inactive.name).toBe('Second');
+    const reordered = await reorderCatalogWorkspace('third', initial.activeWorkspaceId, 'before');
+    expect(reordered.entries.map((entry) => entry.id)).toEqual(['third', initial.activeWorkspaceId, 'second']);
+    expect(reordered.activeWorkspaceId).toBe(initial.activeWorkspaceId);
+
+    const duplicate = createWorkspaceDuplicate(inactive, 'Second Clone', initial.workspace.preferences);
+    expect(duplicate.name).toBe('Second Clone');
+    expect(duplicate.collections).toEqual(inactive.collections);
+    expect(duplicate.collections).not.toBe(inactive.collections);
+    expect(duplicate.environments).toContainEqual(expect.objectContaining({ id: 'private-environment', private: true }));
+    expect(duplicate.history).toEqual([]);
+    expect(duplicate.responses).toEqual([]);
+    expect(duplicate.streamSessions).toEqual([]);
+    expect(duplicate.runnerReports).toEqual([]);
+    expect(duplicate.project).toMatchObject({ mode: 'local', path: '', remoteUrl: '' });
+    expect(duplicate.collaboration).toMatchObject({ mode: 'off', path: '', revision: 0 });
+
+    const copied = await createCatalogWorkspace(duplicate, 'second-copy');
+    expect(copied.activeWorkspaceId).toBe('second-copy');
+    expect(copied.entries.map((entry) => entry.id)).toEqual(['third', initial.activeWorkspaceId, 'second', 'second-copy']);
+  });
+
+  it('lists deleted projects and restores a valid browser backup', async () => {
+    await loadWorkspaceCatalog();
+    const created = await createCatalogWorkspace(createBlankWorkspace('Second', cloneSeedWorkspace().preferences), 'second');
+    await saveCatalogWorkspace('second', { ...created.workspace, name: 'Saved' });
+    localStorage.setItem('brunomnia.project.second.v1', '{ broken');
+
+    await deleteCatalogWorkspace('second');
+    const deleted = await listDeletedCatalogWorkspaces();
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]).toMatchObject({ workspaceId: 'second', name: 'Second', status: 'recoverable', hasBackup: true, hasVault: false });
+
+    const restored = await restoreDeletedCatalogWorkspace('second', deleted[0].deletedAt);
+    expect(restored.activeWorkspaceId).toBe('second');
+    expect(restored.workspace.name).toBe('Second');
+    expect(restored.entries).toHaveLength(2);
+    expect(await listDeletedCatalogWorkspaces()).toEqual([]);
+    expect([...((localStorage as MemoryStorage).values.keys())].some((key) => key.includes('.deleted-workspace.invalid.v1'))).toBe(true);
+  });
+
+  it('refuses deleted-project restoration after its ID is reused', async () => {
+    await loadWorkspaceCatalog();
+    await createCatalogWorkspace(createBlankWorkspace('Deleted', cloneSeedWorkspace().preferences), 'second');
+    await deleteCatalogWorkspace('second');
+    const [deleted] = await listDeletedCatalogWorkspaces();
+
+    await createCatalogWorkspace(createBlankWorkspace('Replacement', cloneSeedWorkspace().preferences), 'second');
+    await expect(restoreDeletedCatalogWorkspace('second', deleted.deletedAt)).rejects.toThrow('already uses');
+    expect((await openCatalogWorkspace('second')).workspace.name).toBe('Replacement');
+    expect(await listDeletedCatalogWorkspaces()).toHaveLength(1);
+  });
+
+  it('restores a corrupt browser catalog from its rotating backup', async () => {
+    await loadWorkspaceCatalog();
+    await createCatalogWorkspace(createBlankWorkspace('Second', cloneSeedWorkspace().preferences), 'second');
+    localStorage.setItem('brunomnia.projects.v1', '{ broken');
+
+    const restored = await loadWorkspaceCatalog();
+    expect(restored.entries.map((entry) => entry.name)).toContain('Local Workspace');
+    expect(restored.recovery?.kind).toBe('catalog-backup');
+  });
+});
 
 describe('workspace migrations', () => {
   it('upgrades v1 requests with protocol defaults without changing request identity', () => {
@@ -8,19 +133,21 @@ describe('workspace migrations', () => {
     legacy.version = 1;
     const collections = legacy.collections as Array<{ requests: Array<Record<string, unknown>> }>;
     const first = collections[0].requests[0];
+    (first.auth as Record<string, unknown>).expiresAt = 'invalid';
     delete first.protocol;
     delete first.bodyMode;
     delete first.pathParams;
     delete first.graphql;
     delete first.grpc;
     delete first.transport;
+    delete first.socketIo;
     delete legacy.apiDesigns;
     delete legacy.mockServers;
     delete legacy.runnerReports;
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(22);
+    expect(migrated.version).toBe(24);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
@@ -31,11 +158,16 @@ describe('workspace migrations', () => {
       respectServerRetry: true,
       sendLastEventId: true,
     });
+    expect(migrated.collections[0].requests[0].socketIo).toEqual({
+      path: '/socket.io', eventName: 'message', ack: false, eventListeners: [],
+      args: [{ id: `${first.id}-socketio-arg`, value: '{}', mode: 'json' }],
+    });
     expect(migrated.apiDesigns[0].name).toBe('Orders API');
     expect(migrated.mockServers[0].host).toBe('127.0.0.1');
     expect(migrated.imports).toEqual([]);
     expect(migrated.cookies).toEqual([]);
     expect(migrated.responses).toEqual([]);
+    expect(migrated.streamSessions).toEqual([]);
     expect(migrated.responseFilters).toEqual({});
     expect(migrated.mcpClients).toEqual([]);
     expect(migrated.ai.enabled).toBe(false);
@@ -48,6 +180,7 @@ describe('workspace migrations', () => {
     expect(migrated.preferences).toMatchObject({ scriptTimeoutMs: 10_000, allowScriptRequests: false, allowScriptFileAccess: false, dataFolders: [], enableVaultInScripts: false });
     expect(migrated.preferences.shortcuts['generate-code']).toBe('Mod+Shift+G');
     expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaEndpoint: '', schemaFetchedAt: '' });
+    expect(migrated.collections[0].requests[0].auth.expiresAt).toBe(0);
   });
 
   it('repairs minimal exports with usable collections, environments, and active IDs', () => {
@@ -124,7 +257,7 @@ describe('workspace migrations', () => {
     collection.subEnvironments = [{ id: 'staging', name: 'Staging', variables: [{ name: 'host', value: 'staging.example', enabled: true }] }, null];
     collection.activeSubEnvironmentId = 'missing';
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(22);
+    expect(migrated.version).toBe(24);
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });
@@ -164,6 +297,21 @@ describe('workspace migrations', () => {
     expect(() => migrateWorkspace({ hello: 'world' })).toThrow('not a Brunomnia');
   });
 
+  it('normalizes legacy MCP resource templates with derived variables', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.mcpClients = [{
+      id: 'template-client', name: 'Templates', enabled: false, transport: 'http', url: 'https://mcp.example', authType: 'none',
+      resourceTemplates: [{ name: 'Search', uriTemplate: 'files://{/path}{?query,limit}', description: 'Search files' }],
+    }];
+
+    expect(migrateWorkspace(workspace).mcpClients[0].resourceTemplates[0]).toMatchObject({
+      uri: 'files://{/path}{?query,limit}',
+      uriTemplate: 'files://{/path}{?query,limit}',
+      variables: ['path', 'query', 'limit'],
+      name: 'Search',
+    });
+  });
+
   it('disables imported plugin code and clears inherited authority', () => {
     const exported = cloneSeedWorkspace();
     exported.plugins = [{
@@ -173,7 +321,7 @@ describe('workspace migrations', () => {
     exported.pluginData = { 'plugin-one': { token: 'secret' } };
     exported.activePluginTheme = 'plugin-one::theme:0';
     exported.mcpClients = [{
-      id: 'mcp-one', name: 'Imported MCP', enabled: true, transport: 'stdio', url: '', command: '/tmp/server', args: [], headers: [], authType: 'bearer', token: 'raw-token', username: '', password: 'raw-password', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [],
+      id: 'mcp-one', name: 'Imported MCP', enabled: true, transport: 'http', url: 'https://mcp.example', command: '', args: [], headers: [], authType: 'oauth2', token: 'raw-token', username: '', password: 'raw-password', oauthAuthorizationUrl: 'https://identity.example/authorize', oauthAccessTokenUrl: 'https://identity.example/token', oauthClientId: 'client', oauthClientSecret: 'raw-client-secret', oauthScope: 'mcp', oauthState: 'state', oauthRefreshToken: 'raw-refresh', oauthIdentityToken: 'raw-identity', oauthExpiresAt: 123, oauthTokenPrefix: 'DPoP', oauthRegisteredClientId: 'registered-client', oauthRegisteredClientSecret: 'registered-secret', oauthRegisteredClientIdIssuedAt: 11, oauthRegisteredClientSecretExpiresAt: 22, oauthRegisteredTokenEndpointAuthMethod: 'client_secret_basic', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [],
     }];
     exported.ai = { ...exported.ai, enabled: true, apiKey: 'raw-ai-key', mockGeneration: true, commitSuggestions: true };
     exported.konnect = { ...exported.konnect, enabled: true, token: 'raw-konnect-token' };
@@ -183,7 +331,7 @@ describe('workspace migrations', () => {
     expect(imported.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
     expect(imported.pluginData).toEqual({});
     expect(imported.activePluginTheme).toBe('');
-    expect(imported.mcpClients[0]).toMatchObject({ enabled: false, token: '', password: '' });
+    expect(imported.mcpClients[0]).toMatchObject({ enabled: false, token: '', password: '', oauthClientSecret: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none' });
     expect(imported.ai).toMatchObject({ enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false });
     expect(imported.konnect).toMatchObject({ enabled: false, token: '' });
     expect(imported.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, validateCertificates: true, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', allowScriptRequests: false, allowScriptFileAccess: false, dataFolders: [], enableVaultInScripts: false });
@@ -315,6 +463,26 @@ describe('workspace migrations', () => {
     const responses = migrateWorkspace(workspace).responses;
     expect(responses[0]).toMatchObject({ id: 'binary', body: 'f�o', bodyBase64: 'ZoBv' });
     expect(responses[1]).not.toHaveProperty('bodyBase64');
+  });
+
+  it('normalizes bounded stream session history and removes orphaned requests', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    const requestId = ((workspace.collections as Array<{ requests: Array<{ id: string }> }>)[0].requests)[0].id;
+    workspace.streamSessions = [
+      { requestId, requestName: 'Socket events', requestUrl: 'https://example.test/events', environmentId: 'environment', protocol: 'socketio', startedAt: '2026-07-18T00:00:00.000Z', messages: [{ direction: 'incoming', kind: 'order.created', text: '{"id":42}', timestamp: '2026-07-18T00:00:01.000Z' }, null] },
+      { id: 'orphan', requestId: 'missing', protocol: 'sse', messages: [] },
+    ];
+
+    expect(migrateWorkspace(workspace).streamSessions).toEqual([{
+      id: 'legacy-stream-0',
+      requestId,
+      requestName: 'Socket events',
+      requestUrl: 'https://example.test/events',
+      environmentId: 'environment',
+      protocol: 'socketio',
+      startedAt: '2026-07-18T00:00:00.000Z',
+      messages: [{ id: 'legacy-stream-0-event-0', sessionId: 'legacy-stream-0', direction: 'incoming', kind: 'order.created', text: '{"id":42}', timestamp: '2026-07-18T00:00:01.000Z' }],
+    }]);
   });
 
   it('breaks malformed resource cycles and keeps private descendants device-local', () => {

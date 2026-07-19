@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { Workspace } from '../types';
 import { migrateWorkspace } from './storage';
 import { publicEnvironments } from './resources';
+import { mergeLocalOAuth2RuntimeCredentials, withoutOAuth2RuntimeCredentials } from './oauth2Tokens';
 
 export type ProjectWriteResult = { path: string; filesWritten: number; filesUnchanged: number; filesRemoved: number };
 export type GitFileStatus = { path: string; indexStatus: string; worktreeStatus: string; staged: boolean; conflicted: boolean };
@@ -33,7 +34,8 @@ const nativeOnly = () => {
 export const writeProject = async (path: string, workspace: Workspace) => {
   nativeOnly();
   const environments = publicEnvironments(workspace.environments);
-  return invoke<ProjectWriteResult>('project_write', { input: { path, workspace: { ...workspace, environments, activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '' } } });
+  const projectWorkspace = withoutOAuth2RuntimeCredentials({ ...workspace, environments, activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '' });
+  return invoke<ProjectWriteResult>('project_write', { input: { path, workspace: projectWorkspace } });
 };
 
 export const readProject = async (path: string, current: Workspace): Promise<Workspace> => {
@@ -43,16 +45,17 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
   const privateEnvironments = current.environments.filter((environment) => !currentPublicIds.has(environment.id));
   const privateIds = new Set(privateEnvironments.map((environment) => environment.id));
   const projectEnvironments = publicEnvironments(project.environments ?? []).filter((environment) => !privateIds.has(environment.id));
-  return migrateWorkspace({
+  const merged = migrateWorkspace({
     ...current,
     ...project,
     format: 'brunomnia',
-    version: 22,
+    version: 24,
     history: current.history,
     runnerReports: current.runnerReports,
     imports: current.imports,
     cookies: current.cookies,
     responses: current.responses,
+    streamSessions: current.streamSessions,
     plugins: current.plugins,
     pluginData: current.pluginData,
     activePluginTheme: current.activePluginTheme,
@@ -60,6 +63,7 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     activeEnvironmentId: privateEnvironments.some((environment) => environment.id === current.activeEnvironmentId) ? current.activeEnvironmentId : project.activeEnvironmentId ?? current.activeEnvironmentId,
     project: { ...current.project, mode: current.project.mode === 'git' ? 'git' : 'folder', path },
   });
+  return mergeLocalOAuth2RuntimeCredentials(current, merged);
 };
 
 export const initGitProject = async (path: string, defaultBranch = 'main') => {

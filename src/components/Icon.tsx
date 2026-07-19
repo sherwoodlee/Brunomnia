@@ -6,9 +6,11 @@ export type IconName =
   | 'check'
   | 'chevron-down'
   | 'chevron-right'
+  | 'chevron-up'
   | 'clock'
   | 'code'
   | 'copy'
+  | 'cube'
   | 'database'
   | 'download'
   | 'folder'
@@ -45,9 +47,11 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
     check: <path d="m5 12 4.5 4.5L19 7" />,
     'chevron-down': <path d="m7 9 5 5 5-5" />,
     'chevron-right': <path d="m9 7 5 5-5 5" />,
+    'chevron-up': <path d="m7 14 5-5 5 5" />,
     clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3.5 2" /></>,
     code: <><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></>,
     copy: <><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></>,
+    cube: <><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z" /><path d="m4 7.5 8 4.5 8-4.5M12 12v9" /></>,
     database: <><ellipse cx="12" cy="5" rx="7.5" ry="3" /><path d="M4.5 5v7c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V5M4.5 12v7c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-7" /></>,
     download: <><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5" /><path d="M5 20h14" /></>,
     folder: <path d="M3.5 6.5h6l2 2h9v10h-17z" />,

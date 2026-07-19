@@ -5,6 +5,14 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
+};
 var __commonJS = (cb, mod) => function __require() {
   try {
     return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -994,14 +1002,14 @@ var require_foldFlowLines = __commonJS({
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
     var FOLD_QUOTED = "quoted";
-    function foldFlowLines(text, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+    function foldFlowLines(text2, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
       if (!lineWidth || lineWidth < 0)
-        return text;
+        return text2;
       if (lineWidth < minContentWidth)
         minContentWidth = 0;
       const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent.length);
-      if (text.length <= endStep)
-        return text;
+      if (text2.length <= endStep)
+        return text2;
       const folds = [];
       const escapedFolds = {};
       let end = lineWidth - indent.length;
@@ -1018,14 +1026,14 @@ var require_foldFlowLines = __commonJS({
       let escStart = -1;
       let escEnd = -1;
       if (mode === FOLD_BLOCK) {
-        i = consumeMoreIndentedLines(text, i, indent.length);
+        i = consumeMoreIndentedLines(text2, i, indent.length);
         if (i !== -1)
           end = i + endStep;
       }
-      for (let ch; ch = text[i += 1]; ) {
+      for (let ch; ch = text2[i += 1]; ) {
         if (mode === FOLD_QUOTED && ch === "\\") {
           escStart = i;
-          switch (text[i + 1]) {
+          switch (text2[i + 1]) {
             case "x":
               i += 3;
               break;
@@ -1042,12 +1050,12 @@ var require_foldFlowLines = __commonJS({
         }
         if (ch === "\n") {
           if (mode === FOLD_BLOCK)
-            i = consumeMoreIndentedLines(text, i, indent.length);
+            i = consumeMoreIndentedLines(text2, i, indent.length);
           end = i + indent.length + endStep;
           split = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
-            const next = text[i + 1];
+            const next = text2[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
               split = i;
           }
@@ -1059,12 +1067,12 @@ var require_foldFlowLines = __commonJS({
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
-                ch = text[i += 1];
+                ch = text2[i += 1];
                 overflow = true;
               }
               const j = i > escEnd + 1 ? i - 2 : escStart - 1;
               if (escapedFolds[j])
-                return text;
+                return text2;
               folds.push(j);
               escapedFolds[j] = true;
               end = j + endStep;
@@ -1079,39 +1087,39 @@ var require_foldFlowLines = __commonJS({
       if (overflow && onOverflow)
         onOverflow();
       if (folds.length === 0)
-        return text;
+        return text2;
       if (onFold)
         onFold();
-      let res = text.slice(0, folds[0]);
+      let res = text2.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
         const fold = folds[i2];
-        const end2 = folds[i2 + 1] || text.length;
+        const end2 = folds[i2 + 1] || text2.length;
         if (fold === 0)
           res = `
-${indent}${text.slice(0, end2)}`;
+${indent}${text2.slice(0, end2)}`;
         else {
           if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text[fold]}\\`;
+            res += `${text2[fold]}\\`;
           res += `
-${indent}${text.slice(fold + 1, end2)}`;
+${indent}${text2.slice(fold + 1, end2)}`;
         }
       }
       return res;
     }
-    function consumeMoreIndentedLines(text, i, indent) {
+    function consumeMoreIndentedLines(text2, i, indent) {
       let end = i;
       let start = i + 1;
-      let ch = text[start];
+      let ch = text2[start];
       while (ch === " " || ch === "	") {
         if (i < start + indent) {
-          ch = text[++i];
+          ch = text2[++i];
         } else {
           do {
-            ch = text[++i];
+            ch = text2[++i];
           } while (ch && ch !== "\n");
           end = i;
           start = i + 1;
-          ch = text[start];
+          ch = text2[start];
         }
       }
       return end;
@@ -7356,8 +7364,234 @@ var require_dist = __commonJS({
   }
 });
 
+// src/lib/request.ts
+var templatePattern, methodPattern, normalizeHttpMethod, environmentMap, resolveTemplate, buildRequestUrl, buildHeaders;
+var init_request = __esm({
+  "src/lib/request.ts"() {
+    templatePattern = /{{\s*([^{}]+?)\s*}}/g;
+    methodPattern = /^[!#$%&'*+.^_`|~0-9A-Z-]+$/;
+    normalizeHttpMethod = (value, fallback = "GET") => {
+      const method = value.trim().toUpperCase();
+      return method && method.length <= 32 && methodPattern.test(method) ? method : fallback;
+    };
+    environmentMap = (environment) => Object.fromEntries(
+      (environment?.variables ?? []).filter((variable) => variable.enabled && variable.name.trim()).map((variable) => [variable.name.trim(), variable.value])
+    );
+    resolveTemplate = (value, variables) => value.replace(templatePattern, (match, name) => variables[name] ?? match);
+    buildRequestUrl = (request, variables) => {
+      let rawUrl = resolveTemplate(request.url, variables);
+      (request.pathParams ?? []).filter((parameter) => parameter.enabled && parameter.name.trim()).forEach((parameter) => {
+        const name = resolveTemplate(parameter.name, variables).trim();
+        const value = encodeURIComponent(resolveTemplate(parameter.value, variables));
+        rawUrl = rawUrl.split(`{${name}}`).join(value);
+      });
+      const enabledParams = request.params.filter((param) => param.enabled && param.name.trim());
+      if (enabledParams.length === 0) return rawUrl;
+      const url = new URL(rawUrl);
+      for (const param of enabledParams) {
+        url.searchParams.append(resolveTemplate(param.name, variables), resolveTemplate(param.value, variables));
+      }
+      return url.toString();
+    };
+    buildHeaders = (request, variables) => {
+      const headers = request.headers.map((header) => ({
+        ...header,
+        name: resolveTemplate(header.name, variables),
+        value: resolveTemplate(header.value, variables)
+      }));
+      if (!request.auth.disabled && request.auth.type === "bearer" && request.auth.token) {
+        const prefix = resolveTemplate(request.auth.prefix, variables) || "Bearer";
+        headers.push({ id: "auth-bearer", name: "Authorization", value: `${prefix} ${resolveTemplate(request.auth.token, variables)}`.trim(), enabled: true });
+      }
+      if (!request.auth.disabled && request.auth.type === "basic" && (request.auth.username || request.auth.password)) {
+        const credentials = new TextEncoder().encode(`${resolveTemplate(request.auth.username, variables)}:${resolveTemplate(request.auth.password, variables)}`);
+        headers.push({
+          id: "auth-basic",
+          name: "Authorization",
+          value: `Basic ${btoa(String.fromCharCode(...credentials))}`,
+          enabled: true
+        });
+      }
+      if (!request.auth.disabled && request.auth.type === "api-key" && request.auth.apiKeyLocation === "header" && request.auth.apiKeyName) {
+        headers.push({
+          id: "auth-api-key",
+          name: resolveTemplate(request.auth.apiKeyName, variables),
+          value: resolveTemplate(request.auth.apiKeyValue, variables),
+          enabled: true
+        });
+      }
+      return headers;
+    };
+  }
+});
+
+// src/lib/cookies.ts
+var init_cookies = __esm({
+  "src/lib/cookies.ts"() {
+  }
+});
+
+// src/lib/transport.ts
+var normalizeRequestTimeout, resolveRequestTimeout, resolveCertificateValidation, resolveProxyTransport;
+var init_transport = __esm({
+  "src/lib/transport.ts"() {
+    normalizeRequestTimeout = (value, fallback = 3e4) => {
+      const numeric = typeof value === "number" ? value : Number.NaN;
+      return Number.isFinite(numeric) ? Math.min(2147483647, Math.max(0, Math.trunc(numeric))) : fallback;
+    };
+    resolveRequestTimeout = (transport, globalDefault = 3e4) => normalizeRequestTimeout(transport.timeoutMode === "custom" ? transport.timeoutMs : globalDefault);
+    resolveCertificateValidation = (transport, globalDefault = true) => {
+      if (transport.validateCertificatesMode === "on") return true;
+      if (transport.validateCertificatesMode === "off") return false;
+      return globalDefault;
+    };
+    resolveProxyTransport = (transport, requestUrl, preferences = { enabled: false, httpProxy: "", httpsProxy: "", noProxy: "" }) => {
+      if (transport.proxyMode === "custom") {
+        const proxyUrl2 = transport.proxyUrl.trim();
+        return proxyUrl2 ? { proxyMode: "custom", proxyUrl: proxyUrl2, proxyExclusions: transport.proxyExclusions.trim() } : { proxyMode: "disabled", proxyUrl: "", proxyExclusions: "" };
+      }
+      if (transport.proxyMode === "disabled") return { proxyMode: "disabled", proxyUrl: "", proxyExclusions: "" };
+      if (!preferences.enabled) return { proxyMode: "system", proxyUrl: "", proxyExclusions: "" };
+      let protocol = "";
+      try {
+        protocol = new URL(requestUrl).protocol;
+      } catch {
+      }
+      const proxyUrl = (protocol === "http:" ? preferences.httpProxy : preferences.httpsProxy).trim();
+      return proxyUrl ? { proxyMode: "custom", proxyUrl, proxyExclusions: preferences.noProxy.trim() } : { proxyMode: "disabled", proxyUrl: "", proxyExclusions: "" };
+    };
+  }
+});
+
+// node_modules/@tauri-apps/api/external/tslib/tslib.es6.js
+function __classPrivateFieldGet(receiver, state, kind, f) {
+  if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
+  if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
+  return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
+}
+function __classPrivateFieldSet(receiver, state, value, kind, f) {
+  if (kind === "m") throw new TypeError("Private method is not writable");
+  if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
+  if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
+  return kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value), value;
+}
+var init_tslib_es6 = __esm({
+  "node_modules/@tauri-apps/api/external/tslib/tslib.es6.js"() {
+  }
+});
+
+// node_modules/@tauri-apps/api/core.js
+function transformCallback(callback, once = false) {
+  return window.__TAURI_INTERNALS__.transformCallback(callback, once);
+}
+var _Channel_onmessage, _Channel_nextMessageIndex, _Channel_pendingMessages, _Channel_messageEndIndex, _Resource_rid, SERIALIZE_TO_IPC_FN, Channel;
+var init_core = __esm({
+  "node_modules/@tauri-apps/api/core.js"() {
+    init_tslib_es6();
+    SERIALIZE_TO_IPC_FN = "__TAURI_TO_IPC_KEY__";
+    Channel = class {
+      constructor(onmessage) {
+        _Channel_onmessage.set(this, void 0);
+        _Channel_nextMessageIndex.set(this, 0);
+        _Channel_pendingMessages.set(this, []);
+        _Channel_messageEndIndex.set(this, void 0);
+        __classPrivateFieldSet(this, _Channel_onmessage, onmessage || (() => {
+        }), "f");
+        this.id = transformCallback((rawMessage) => {
+          const index = rawMessage.index;
+          if ("end" in rawMessage) {
+            if (index == __classPrivateFieldGet(this, _Channel_nextMessageIndex, "f")) {
+              this.cleanupCallback();
+            } else {
+              __classPrivateFieldSet(this, _Channel_messageEndIndex, index, "f");
+            }
+            return;
+          }
+          const message = rawMessage.message;
+          if (index == __classPrivateFieldGet(this, _Channel_nextMessageIndex, "f")) {
+            __classPrivateFieldGet(this, _Channel_onmessage, "f").call(this, message);
+            __classPrivateFieldSet(this, _Channel_nextMessageIndex, __classPrivateFieldGet(this, _Channel_nextMessageIndex, "f") + 1, "f");
+            while (__classPrivateFieldGet(this, _Channel_nextMessageIndex, "f") in __classPrivateFieldGet(this, _Channel_pendingMessages, "f")) {
+              const message2 = __classPrivateFieldGet(this, _Channel_pendingMessages, "f")[__classPrivateFieldGet(this, _Channel_nextMessageIndex, "f")];
+              __classPrivateFieldGet(this, _Channel_onmessage, "f").call(this, message2);
+              delete __classPrivateFieldGet(this, _Channel_pendingMessages, "f")[__classPrivateFieldGet(this, _Channel_nextMessageIndex, "f")];
+              __classPrivateFieldSet(this, _Channel_nextMessageIndex, __classPrivateFieldGet(this, _Channel_nextMessageIndex, "f") + 1, "f");
+            }
+            if (__classPrivateFieldGet(this, _Channel_nextMessageIndex, "f") === __classPrivateFieldGet(this, _Channel_messageEndIndex, "f")) {
+              this.cleanupCallback();
+            }
+          } else {
+            __classPrivateFieldGet(this, _Channel_pendingMessages, "f")[index] = message;
+          }
+        });
+      }
+      cleanupCallback() {
+        window.__TAURI_INTERNALS__.unregisterCallback(this.id);
+      }
+      set onmessage(handler) {
+        __classPrivateFieldSet(this, _Channel_onmessage, handler, "f");
+      }
+      get onmessage() {
+        return __classPrivateFieldGet(this, _Channel_onmessage, "f");
+      }
+      [(_Channel_onmessage = /* @__PURE__ */ new WeakMap(), _Channel_nextMessageIndex = /* @__PURE__ */ new WeakMap(), _Channel_pendingMessages = /* @__PURE__ */ new WeakMap(), _Channel_messageEndIndex = /* @__PURE__ */ new WeakMap(), SERIALIZE_TO_IPC_FN)]() {
+        return `__CHANNEL__:${this.id}`;
+      }
+      toJSON() {
+        return this[SERIALIZE_TO_IPC_FN]();
+      }
+    };
+    _Resource_rid = /* @__PURE__ */ new WeakMap();
+  }
+});
+
+// src/lib/auth.ts
+var init_auth = __esm({
+  "src/lib/auth.ts"() {
+    init_request();
+  }
+});
+
+// src/lib/templates.ts
+var init_templates = __esm({
+  "src/lib/templates.ts"() {
+    init_cookies();
+  }
+});
+
+// src/lib/timeline.ts
+var init_timeline = __esm({
+  "src/lib/timeline.ts"() {
+  }
+});
+
+// src/lib/responseBytes.ts
+var utf8Decoder, strictUtf8Decoder, utf8Encoder;
+var init_responseBytes = __esm({
+  "src/lib/responseBytes.ts"() {
+    utf8Decoder = new TextDecoder();
+    strictUtf8Decoder = new TextDecoder("utf-8", { fatal: true });
+    utf8Encoder = new TextEncoder();
+  }
+});
+
+// src/lib/http.ts
+var init_http = __esm({
+  "src/lib/http.ts"() {
+    init_core();
+    init_auth();
+    init_cookies();
+    init_request();
+    init_templates();
+    init_timeline();
+    init_responseBytes();
+    init_transport();
+  }
+});
+
 // cli/brunomnia.ts
 var import_promises = require("node:fs/promises");
+var import_node_path = require("node:path");
 var import_node_vm = __toESM(require("node:vm"), 1);
 
 // src/lib/openapi.ts
@@ -7380,11 +7614,58 @@ var defaultShortcuts = {
 var defaultPreferences = {
   theme: "system",
   density: "comfortable",
-  fontSize: 13,
+  fontSize: 11,
+  interfaceFontSize: 13,
+  fontInterface: "",
+  fontMonospace: "",
+  showPasswords: false,
+  allowHtmlPreviewRemoteResources: false,
+  allowHtmlPreviewScripts: false,
+  disableResponsePreviewLinks: false,
+  preferredHttpVersion: "default",
+  maxRedirects: 10,
+  followRedirects: true,
+  maxTimelineDataSizeKB: 10,
+  maxHistoryResponses: 20,
+  filterResponsesByEnv: false,
   requestTimeoutMs: 3e4,
+  validateCertificates: true,
+  validateAuthCertificates: true,
+  proxyEnabled: false,
+  httpProxy: "",
+  httpsProxy: "",
+  noProxy: "",
+  useBulkHeaderEditor: false,
+  useBulkParametersEditor: false,
+  forceVerticalLayout: false,
+  editorIndentWithTabs: true,
+  editorIndentSize: 2,
+  editorLineWrapping: true,
+  fontVariantLigatures: false,
+  scriptTimeoutMs: 1e4,
+  allowScriptRequests: false,
+  allowScriptFileAccess: false,
+  dataFolders: [],
+  enableVaultInScripts: false,
   autoFetchGraphqlSchema: true,
   confirmDestructive: true,
   shortcuts: { ...defaultShortcuts }
+};
+var canonicalPart = (value) => {
+  const lower = value.toLowerCase();
+  if (lower === "mod") return "Mod";
+  if (lower === "meta" || lower === "command" || lower === "cmd") return "Meta";
+  if (lower === "control" || lower === "ctrl") return "Control";
+  if (lower === "alt" || lower === "option") return "Alt";
+  if (lower === "shift") return "Shift";
+  return value;
+};
+var modifier = (value) => value === "Meta" || value === "Control" || value === "Alt" || value === "Shift";
+var normalizeShortcut = (value) => {
+  const pieces = value.split("+").map((piece) => canonicalPart(piece.trim())).filter(Boolean);
+  const mods = [...new Set(pieces.filter((piece) => modifier(piece) || piece === "Mod"))];
+  const key = pieces.find((piece) => !modifier(piece) && piece !== "Mod") ?? "";
+  return key ? [...mods, key.length === 1 ? key.toUpperCase() : key].join("+") : "";
 };
 
 // src/data/seed.ts
@@ -7432,12 +7713,15 @@ var createRequest = (id, name, method, url) => ({
     audience: "",
     scope: "",
     resource: "",
+    origin: "",
     redirectUrl: "http://localhost/",
     credentialsInBody: false,
     state: "",
     code: "",
     accessToken: "",
+    identityToken: "",
     refreshToken: "",
+    expiresAt: 0,
     tokenPrefix: "Bearer",
     usePkce: false,
     pkceMethod: "S256",
@@ -7491,8 +7775,12 @@ message Order { string id = 1; string status = 2; double total = 3; }`,
   },
   transport: {
     followRedirects: true,
+    followRedirectsMode: "global",
+    timeoutMode: "global",
     timeoutMs: 6e4,
+    validateCertificatesMode: "global",
     validateCertificates: true,
+    proxyMode: "global",
     proxyUrl: "",
     proxyExclusions: "",
     clientCertificatePem: "",
@@ -7500,6 +7788,20 @@ message Order { string id = 1; string status = 2; double total = 3; }`,
     clientCertificateDomains: "",
     sendCookies: true,
     storeCookies: true
+  },
+  sse: {
+    autoReconnect: true,
+    reconnectDelayMs: 1e3,
+    maxReconnects: 0,
+    respectServerRetry: true,
+    sendLastEventId: true
+  },
+  socketIo: {
+    path: "/socket.io",
+    eventName: "message",
+    args: [{ id: `${id}-socketio-arg`, value: "{}", mode: "json" }],
+    ack: false,
+    eventListeners: []
   },
   preRequestScript: "// Runs before the request\n",
   tests: `insomnia.test('Status is successful', () => {
@@ -7531,7 +7833,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 11,
+  version: 24,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -7562,6 +7864,17 @@ var seedWorkspace = {
       {
         ...createRequest("live-orders", "Live Orders", "GET", "wss://ws.acme.dev/orders"),
         protocol: "websocket"
+      },
+      {
+        ...createRequest("socketio-orders", "Socket.IO Orders", "GET", "https://socket.acme.dev/orders"),
+        protocol: "socketio",
+        socketIo: {
+          path: "/socket.io",
+          eventName: "message",
+          args: [{ id: "socketio-orders-arg", value: '{\n  "status": "pending"\n}', mode: "json" }],
+          ack: true,
+          eventListeners: [{ id: "socketio-orders-listener", eventName: "order.updated", description: "Order lifecycle updates", enabled: true }]
+        }
       },
       {
         ...createRequest("order-events", "Order Events", "GET", "https://events.acme.dev/orders"),
@@ -7676,6 +7989,8 @@ paths:
   imports: [],
   cookies: [],
   responses: [],
+  streamSessions: [],
+  responseFilters: {},
   project: { mode: "local", path: "", remoteUrl: "", remoteName: "origin", authorName: "", authorEmail: "", autoSave: true },
   plugins: [],
   pluginData: {},
@@ -7692,6 +8007,7 @@ paths:
   konnect: { enabled: false, baseUrl: "https://us.api.konghq.com", token: "", controlPlaneId: "", controlPlanes: [] },
   preferences: structuredClone(defaultPreferences)
 };
+var cloneSeedWorkspace = () => structuredClone(seedWorkspace);
 var createBlankRequest = (id) => createRequest(id, "Untitled Request", "GET", "https://");
 
 // src/lib/openapi.ts
@@ -7935,58 +8251,52 @@ var generateCollectionFromOpenApi = (design) => {
   return { id: `collection-${design.id}`, name: analysis.title, expanded: true, requests };
 };
 
-// src/lib/request.ts
-var templatePattern = /{{\s*([^{}]+?)\s*}}/g;
-var environmentMap = (environment) => Object.fromEntries(
-  (environment?.variables ?? []).filter((variable) => variable.enabled && variable.name.trim()).map((variable) => [variable.name.trim(), variable.value])
-);
-var resolveTemplate = (value, variables) => value.replace(templatePattern, (match, name) => variables[name] ?? match);
-var buildRequestUrl = (request, variables) => {
-  let rawUrl = resolveTemplate(request.url, variables);
-  (request.pathParams ?? []).filter((parameter) => parameter.enabled && parameter.name.trim()).forEach((parameter) => {
-    const name = resolveTemplate(parameter.name, variables).trim();
-    const value = encodeURIComponent(resolveTemplate(parameter.value, variables));
-    rawUrl = rawUrl.split(`{${name}}`).join(value);
-  });
-  const enabledParams = request.params.filter((param) => param.enabled && param.name.trim());
-  if (enabledParams.length === 0) return rawUrl;
-  const url = new URL(rawUrl);
-  for (const param of enabledParams) {
-    url.searchParams.append(resolveTemplate(param.name, variables), resolveTemplate(param.value, variables));
-  }
-  return url.toString();
-};
-var buildHeaders = (request, variables) => {
-  const headers = request.headers.map((header) => ({
-    ...header,
-    name: resolveTemplate(header.name, variables),
-    value: resolveTemplate(header.value, variables)
-  }));
-  if (!request.auth.disabled && request.auth.type === "bearer" && request.auth.token) {
-    const prefix = resolveTemplate(request.auth.prefix, variables) || "Bearer";
-    headers.push({ id: "auth-bearer", name: "Authorization", value: `${prefix} ${resolveTemplate(request.auth.token, variables)}`.trim(), enabled: true });
-  }
-  if (!request.auth.disabled && request.auth.type === "basic" && (request.auth.username || request.auth.password)) {
-    const credentials = new TextEncoder().encode(`${resolveTemplate(request.auth.username, variables)}:${resolveTemplate(request.auth.password, variables)}`);
-    headers.push({
-      id: "auth-basic",
-      name: "Authorization",
-      value: `Basic ${btoa(String.fromCharCode(...credentials))}`,
-      enabled: true
-    });
-  }
-  if (!request.auth.disabled && request.auth.type === "api-key" && request.auth.apiKeyLocation === "header" && request.auth.apiKeyName) {
-    headers.push({
-      id: "auth-api-key",
-      name: resolveTemplate(request.auth.apiKeyName, variables),
-      value: resolveTemplate(request.auth.apiKeyValue, variables),
-      enabled: true
-    });
-  }
-  return headers;
-};
+// cli/brunomnia.ts
+init_request();
+
+// src/lib/runner.ts
+init_request();
 
 // src/lib/resources.ts
+var variableScope = (layers) => {
+  const values = {};
+  const disabled = /* @__PURE__ */ new Set();
+  layers.forEach((rows) => rows.forEach((row) => {
+    const name = row.name.trim();
+    if (!name) return;
+    if (row.enabled) {
+      values[name] = row.value;
+      disabled.delete(name);
+    } else {
+      delete values[name];
+      disabled.add(name);
+    }
+  }));
+  return { values, disabled: [...disabled] };
+};
+var scriptEnvironmentScopes = (environments, activeId) => {
+  const selected = environments.find((environment) => environment.id === activeId) ?? environments[0];
+  if (!selected) return void 0;
+  const ancestors = environmentAncestors(environments, selected.id);
+  const base = ancestors[0] ?? selected;
+  const globalsAreBase = base.id === selected.id;
+  return {
+    baseId: base.id,
+    selectedId: selected.id,
+    baseGlobals: variableScope([base.variables]),
+    globals: globalsAreBase ? variableScope([base.variables]) : variableScope([...ancestors.slice(1).map((environment) => environment.variables), selected.variables]),
+    globalsAreBase
+  };
+};
+var collectionEnvironmentScopes = (collection2) => {
+  const selected = (collection2.subEnvironments ?? []).find((environment) => environment.id === collection2.activeSubEnvironmentId);
+  return {
+    baseEnvironment: variableScope([collection2.environment ?? []]),
+    environment: selected ? variableScope([selected.variables]) : variableScope([collection2.environment ?? []]),
+    environmentIsBase: !selected,
+    selectedId: selected?.id
+  };
+};
 var rowMap = (rows, caseInsensitive) => {
   const output = /* @__PURE__ */ new Map();
   rows.forEach((row) => {
@@ -8015,6 +8325,20 @@ var resolveEnvironment = (environments, activeId) => {
   }
   return { ...selected, variables: mergeRows(chain.map((environment) => environment.variables)) };
 };
+var environmentAncestors = (environments, environmentId) => {
+  const byId = new Map(environments.map((environment) => [environment.id, environment]));
+  const output = [];
+  const visited = /* @__PURE__ */ new Set();
+  let current = byId.get(environmentId);
+  while (current?.parentId && !visited.has(current.id) && output.length < 20) {
+    visited.add(current.id);
+    const parent = byId.get(current.parentId);
+    if (!parent) break;
+    output.unshift(parent);
+    current = parent;
+  }
+  return output;
+};
 var folderAncestors = (collection2, folderId) => {
   if (!folderId) return [];
   const byId = new Map((collection2.folders ?? []).map((folder) => [folder.id, folder]));
@@ -8032,9 +8356,10 @@ var joinedScripts = (scripts) => scripts.map((script) => script.trim()).filter(B
 var applyCollectionConfiguration = (collection2, request, environment) => {
   const folders = folderAncestors(collection2, request.folderId);
   const nearestAuth = [...folders].reverse().find((folder) => folder.auth)?.auth;
+  const selectedCollectionEnvironment = (collection2.subEnvironments ?? []).find((candidate) => candidate.id === collection2.activeSubEnvironmentId);
   return {
     folders,
-    environment: { ...environment, variables: mergeRows([environment.variables, collection2.environment ?? [], ...folders.map((folder) => folder.environment)]) },
+    environment: { ...environment, variables: mergeRows([environment.variables, collection2.environment ?? [], selectedCollectionEnvironment?.variables ?? [], ...folders.map((folder) => folder.environment)]) },
     request: {
       ...request,
       headers: mergeRows([...folders.map((folder) => folder.headers), request.headers], true),
@@ -8052,41 +8377,276 @@ var boundedInteger = (value, minimum, maximum) => {
   if (!Number.isFinite(value)) return minimum;
   return Math.max(minimum, Math.min(maximum, Math.floor(value)));
 };
+var validateTestNamePattern = (value) => {
+  if (value === void 0) return void 0;
+  if (value.length > 1e3) throw new Error("Test name pattern exceeds 1,000 characters.");
+  try {
+    new RegExp(value);
+  } catch (error) {
+    throw new Error(`Invalid test name pattern: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return value;
+};
+var RUNNER_RESPONSE_PER_RESULT_BYTES = 32e3;
+var RUNNER_RESPONSE_REPORT_BYTES = 1e6;
+var RUNNER_REQUEST_PER_RESULT_BYTES = 16e3;
+var RUNNER_REQUEST_REPORT_BYTES = 5e5;
+var RUNNER_RESPONSE_BODY_BYTES = 16e3;
+var RUNNER_RESPONSE_HEADERS = 64;
+var takeUtf8 = (value, maximumBytes) => {
+  const encoded = new TextEncoder().encode(value);
+  if (encoded.byteLength <= maximumBytes) return { value, bytes: encoded.byteLength, truncated: false };
+  let end = Math.max(0, maximumBytes);
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  while (end > 0) {
+    try {
+      return { value: decoder.decode(encoded.slice(0, end)), bytes: end, truncated: true };
+    } catch {
+      end -= 1;
+    }
+  }
+  return { value: "", bytes: 0, truncated: encoded.byteLength > 0 };
+};
+var captureRunnerResponse = (response, budget) => {
+  let remaining = Math.min(RUNNER_RESPONSE_PER_RESULT_BYTES, Math.max(0, budget.remaining));
+  let storedBytes = 0;
+  const take = (value, limit) => {
+    const result = takeUtf8(value, Math.min(limit, remaining));
+    remaining -= result.bytes;
+    budget.remaining -= result.bytes;
+    storedBytes += result.bytes;
+    return result;
+  };
+  const statusText = take(response.statusText, 512);
+  const headers = {};
+  let headersTruncated = Object.keys(response.headers).length > RUNNER_RESPONSE_HEADERS;
+  for (const [rawName, rawValue] of Object.entries(response.headers).slice(0, RUNNER_RESPONSE_HEADERS)) {
+    if (remaining <= 0) {
+      headersTruncated = true;
+      break;
+    }
+    const name = take(rawName, 256);
+    const value = take(rawValue, 2048);
+    headersTruncated ||= name.truncated || value.truncated;
+    if (name.value) headers[name.value] = value.value;
+  }
+  const body = take(response.body, RUNNER_RESPONSE_BODY_BYTES);
+  return {
+    statusText: statusText.value,
+    statusTextTruncated: statusText.truncated,
+    headers,
+    headersTruncated,
+    bodyPreview: body.value,
+    bodyTruncated: body.truncated,
+    sizeBytes: response.sizeBytes,
+    storedBytes
+  };
+};
+var sensitiveName = (name) => /(^|[-_])(authorization|cookie|token|secret|password|passphrase|api[-_]?key)([-_]|$)/i.test(name);
+var redactSensitiveQuery = (value) => {
+  try {
+    const url = new URL(value);
+    [...url.searchParams.keys()].forEach((name) => {
+      if (sensitiveName(name)) url.searchParams.set(name, "[redacted]");
+    });
+    return url.toString();
+  } catch {
+    return value;
+  }
+};
+var base64Bytes = (value) => {
+  const source = value.replace(/\s/g, "");
+  return Math.max(0, Math.floor(source.length * 3 / 4) - (source.endsWith("==") ? 2 : source.endsWith("=") ? 1 : 0));
+};
+var requestBodyMetadata = (request, variables) => {
+  if (request.protocol === "graphql") {
+    const variablesText = resolveTemplate(request.graphql.variables || "{}", variables);
+    const body = JSON.stringify({ query: request.graphql.query, variables: variablesText, operationName: request.graphql.operationName || void 0 });
+    return { mode: "graphql", summary: "GraphQL query and variables", bytes: new TextEncoder().encode(body).byteLength, estimated: false };
+  }
+  if (request.protocol === "grpc") {
+    const input = resolveTemplate(request.grpc.input, variables);
+    return { mode: "grpc", summary: `${request.grpc.service}/${request.grpc.method}`, bytes: new TextEncoder().encode(input).byteLength, estimated: false };
+  }
+  if (request.protocol === "websocket") {
+    const body = resolveTemplate(request.body, variables);
+    return { mode: "websocket", summary: body ? "Startup text frame" : "No startup frame", bytes: new TextEncoder().encode(body).byteLength, estimated: false };
+  }
+  if (request.protocol === "socketio") {
+    const args2 = request.socketIo.args.map((arg) => resolveTemplate(arg.value, variables));
+    return { mode: "socketio", summary: `${request.socketIo.eventName || "message"} \xB7 ${args2.length} args${request.socketIo.ack ? " \xB7 ack" : ""}`, bytes: new TextEncoder().encode(JSON.stringify(args2)).byteLength, estimated: false };
+  }
+  if (request.bodyMode === "json" || request.bodyMode === "text") {
+    const body = resolveTemplate(request.body, variables);
+    return { mode: request.bodyMode, summary: `${request.bodyMode === "json" ? "JSON" : "Text"} body`, bytes: new TextEncoder().encode(body).byteLength, estimated: false };
+  }
+  if (request.bodyMode === "form-urlencoded") {
+    const fields = request.formBody.filter((row) => row.enabled && row.name);
+    const body = new URLSearchParams(fields.map((row) => [resolveTemplate(row.name, variables), resolveTemplate(row.value, variables)])).toString();
+    return { mode: request.bodyMode, summary: `${fields.length} fields: ${fields.map((row) => row.name).join(", ")}`, bytes: new TextEncoder().encode(body).byteLength, estimated: false };
+  }
+  if (request.bodyMode === "multipart") {
+    const parts = request.multipartBody.filter((part) => part.enabled && part.name);
+    const bytes = parts.reduce((total, part) => total + (part.kind === "file" && part.file ? base64Bytes(part.file.dataBase64) : new TextEncoder().encode(resolveTemplate(part.value, variables)).byteLength), 0);
+    return { mode: request.bodyMode, summary: `${parts.length} parts: ${parts.map((part) => part.kind === "file" ? `${part.name} (${part.fileName || part.file?.fileName || "file"})` : part.name).join(", ")}`, bytes, estimated: true };
+  }
+  if (request.bodyMode === "binary" && request.binaryBody) return { mode: request.bodyMode, summary: request.binaryBody.fileName || "Binary file", bytes: base64Bytes(request.binaryBody.dataBase64), estimated: false };
+  return { mode: request.bodyMode, summary: "No request body", bytes: 0, estimated: false };
+};
+var captureRunnerRequest = (request, variables, requestUrl, budget) => {
+  let remaining = Math.min(RUNNER_REQUEST_PER_RESULT_BYTES, Math.max(0, budget.remaining));
+  let storedBytes = 0;
+  const take = (value, limit) => {
+    const result = takeUtf8(value, Math.min(limit, remaining));
+    remaining -= result.bytes;
+    budget.remaining -= result.bytes;
+    storedBytes += result.bytes;
+    return result;
+  };
+  let resolvedUrl = requestUrl ?? request.url;
+  try {
+    resolvedUrl = requestUrl ?? buildRequestUrl(request, variables);
+  } catch {
+  }
+  const url = take(redactSensitiveQuery(resolvedUrl), 4e3);
+  let configuredHeaders = [];
+  try {
+    configuredHeaders = buildHeaders(request, variables).filter((header) => header.enabled && header.name);
+  } catch {
+  }
+  const headers = [];
+  let headersTruncated = configuredHeaders.length > 64;
+  for (const header of configuredHeaders.slice(0, 64)) {
+    if (remaining <= 0) {
+      headersTruncated = true;
+      break;
+    }
+    const name = take(header.name, 256);
+    const redacted = sensitiveName(header.name);
+    const value = take(redacted ? "[redacted]" : header.value, 2048);
+    headersTruncated ||= name.truncated || value.truncated;
+    if (name.value) headers.push({ name: name.value, value: value.value, redacted });
+  }
+  const body = requestBodyMetadata(request, variables);
+  const bodySummary = take(body.summary, 2e3);
+  return { protocol: request.protocol, method: request.method, url: url.value, urlTruncated: url.truncated, headers, headersTruncated, bodyMode: body.mode, bodySummary: bodySummary.value, bodySizeBytes: body.bytes, bodySizeEstimated: body.estimated, storedBytes };
+};
 var runCollection = async (collection2, environment, options, executeRequest, executeScript) => {
   const startedAt = (/* @__PURE__ */ new Date()).toISOString();
   const results = [];
   let cancelled = false;
+  let bailed = false;
+  const responseSnapshotBudget = { remaining: RUNNER_RESPONSE_REPORT_BYTES };
+  const requestSnapshotBudget = { remaining: RUNNER_REQUEST_REPORT_BYTES };
   const iterations = boundedInteger(options.iterations, 1, 1e3);
   const retries = boundedInteger(options.retries, 0, 10);
+  const testNamePattern = validateTestNamePattern(options.testNamePattern);
+  const requestsById = new Map(collection2.requests.map((request) => [request.id, request]));
+  const plannedRequests = options.requestIds === void 0 ? collection2.requests : [...new Set(options.requestIds)].flatMap((id) => requestsById.get(id) ?? []);
+  const configuredGlobalScopes = options.environmentScopes;
+  const globalsAreBase = configuredGlobalScopes?.globalsAreBase ?? true;
+  let baseGlobalVariables = { ...configuredGlobalScopes?.baseGlobals.values ?? environmentMap(environment) };
+  let globalVariables = globalsAreBase ? baseGlobalVariables : { ...configuredGlobalScopes?.globals.values ?? {} };
+  let baseGlobalDisabled = [...configuredGlobalScopes?.baseGlobals.disabled ?? []];
+  let globalDisabled = [...configuredGlobalScopes?.globals.disabled ?? []];
+  const configuredCollectionScopes = collectionEnvironmentScopes(collection2);
+  const collectionVariablesAreBase = configuredCollectionScopes.environmentIsBase;
+  let baseEnvironment = { ...configuredCollectionScopes.baseEnvironment.values };
+  let collectionVariables = collectionVariablesAreBase ? baseEnvironment : { ...configuredCollectionScopes.environment.values };
+  let baseEnvironmentDisabled = [...configuredCollectionScopes.baseEnvironment.disabled];
+  let collectionDisabled = [...configuredCollectionScopes.environment.disabled];
+  const folderVariables = new Map((collection2.folders ?? []).map((folder) => [folder.id, Object.fromEntries(folder.environment.filter((row) => row.enabled && row.name).map((row) => [row.name, row.value]))]));
+  const folderDisabled = new Map((collection2.folders ?? []).map((folder) => [folder.id, new Set(folder.environment.filter((row) => !row.enabled && row.name).map((row) => row.name))]));
   outer: for (let iteration = 0; iteration < iterations; iteration += 1) {
     const iterationData = options.dataRows[iteration % Math.max(1, options.dataRows.length)] ?? {};
-    let variables = { ...environmentMap(environment), ...iterationData };
-    for (const originalRequest of collection2.requests) {
+    for (const originalRequest of plannedRequests) {
       if (options.shouldCancel?.()) {
         cancelled = true;
         break outer;
       }
       for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
         const configured = applyCollectionConfiguration(collection2, originalRequest, environment);
-        variables = { ...variables, ...environmentMap(configured.environment), ...iterationData };
         let request = structuredClone(configured.request);
         let response;
         let tests = [];
         let error;
+        let requestVariables = {};
         const started = Date.now();
         try {
-          const preRequest = await executeScript(request.preRequestScript, request, variables, void 0, 2e3, {}, iterationData);
+          const scriptFolders = configured.folders.map((folder) => ({ id: folder.id, name: folder.name, environment: { ...folderVariables.get(folder.id) ?? {} }, disabled: [...folderDisabled.get(folder.id) ?? []] }));
+          const scriptScopes = {
+            baseGlobals: baseGlobalVariables,
+            baseGlobalDisabled,
+            globalDisabled,
+            globalsAreBase,
+            baseEnvironment,
+            baseEnvironmentDisabled,
+            collectionVariables,
+            collectionDisabled,
+            collectionVariablesAreBase,
+            folders: scriptFolders
+          };
+          const preRequest = await executeScript(request.preRequestScript, request, globalVariables, void 0, options.scriptTimeoutMs ?? 1e4, {}, iterationData, scriptScopes);
           request = preRequest.request;
-          variables = preRequest.environment;
+          baseGlobalVariables = preRequest.baseGlobals ?? (globalsAreBase ? preRequest.environment : baseGlobalVariables);
+          globalVariables = preRequest.environment;
+          baseGlobalDisabled = preRequest.baseGlobalDisabled ?? baseGlobalDisabled;
+          globalDisabled = preRequest.globalDisabled ?? globalDisabled;
+          baseEnvironment = preRequest.baseEnvironment ?? (collectionVariablesAreBase ? preRequest.collectionVariables : void 0) ?? baseEnvironment;
+          collectionVariables = collectionVariablesAreBase ? baseEnvironment : preRequest.collectionVariables ?? collectionVariables;
+          baseEnvironmentDisabled = preRequest.baseEnvironmentDisabled ?? baseEnvironmentDisabled;
+          collectionDisabled = preRequest.collectionDisabled ?? collectionDisabled;
+          preRequest.folders?.forEach((folder) => {
+            folderVariables.set(folder.id, folder.environment);
+            folderDisabled.set(folder.id, new Set(folder.disabled ?? []));
+          });
           const localVariables = preRequest.localVariables ?? {};
-          response = await executeRequest(request, { ...variables, ...iterationData, ...localVariables });
-          const afterResponse = await executeScript(request.tests, request, variables, response, 2e3, localVariables, iterationData);
-          variables = afterResponse.environment;
+          requestVariables = {};
+          const applyScope = (scope, disabled) => {
+            disabled.forEach((name) => delete requestVariables[name]);
+            Object.assign(requestVariables, scope);
+          };
+          applyScope(baseGlobalVariables, baseGlobalDisabled);
+          if (!globalsAreBase) applyScope(globalVariables, globalDisabled);
+          applyScope(baseEnvironment, baseEnvironmentDisabled);
+          if (!collectionVariablesAreBase) applyScope(collectionVariables, collectionDisabled);
+          scriptFolders.forEach((folder) => {
+            folderDisabled.get(folder.id)?.forEach((name) => delete requestVariables[name]);
+            Object.assign(requestVariables, folderVariables.get(folder.id) ?? {});
+          });
+          Object.assign(requestVariables, iterationData, localVariables);
+          response = await executeRequest(request, requestVariables);
+          const afterResponse = await executeScript(request.tests, request, globalVariables, response, options.scriptTimeoutMs ?? 1e4, localVariables, iterationData, {
+            baseGlobals: baseGlobalVariables,
+            baseGlobalDisabled,
+            globalDisabled,
+            globalsAreBase,
+            baseEnvironment,
+            baseEnvironmentDisabled,
+            collectionVariables,
+            collectionDisabled,
+            collectionVariablesAreBase,
+            folders: scriptFolders.map((folder) => ({ ...folder, environment: { ...folderVariables.get(folder.id) ?? {} }, disabled: [...folderDisabled.get(folder.id) ?? []] })),
+            testNamePattern
+          });
+          baseGlobalVariables = afterResponse.baseGlobals ?? (globalsAreBase ? afterResponse.environment : baseGlobalVariables);
+          globalVariables = afterResponse.environment;
+          baseGlobalDisabled = afterResponse.baseGlobalDisabled ?? baseGlobalDisabled;
+          globalDisabled = afterResponse.globalDisabled ?? globalDisabled;
+          baseEnvironment = afterResponse.baseEnvironment ?? (collectionVariablesAreBase ? afterResponse.collectionVariables : void 0) ?? baseEnvironment;
+          collectionVariables = collectionVariablesAreBase ? baseEnvironment : afterResponse.collectionVariables ?? collectionVariables;
+          baseEnvironmentDisabled = afterResponse.baseEnvironmentDisabled ?? baseEnvironmentDisabled;
+          collectionDisabled = afterResponse.collectionDisabled ?? collectionDisabled;
+          afterResponse.folders?.forEach((folder) => {
+            folderVariables.set(folder.id, folder.environment);
+            folderDisabled.set(folder.id, new Set(folder.disabled ?? []));
+          });
           tests = afterResponse.tests;
         } catch (caught) {
           error = caught instanceof Error ? caught.message : String(caught);
         }
         const passed = !error && response !== void 0 && response.status > 0 && response.status < 400 && tests.every((test) => test.passed);
+        const retainResult = testNamePattern === void 0 || tests.length > 0 || !passed;
         const result = {
           id: runId(),
           requestId: request.id,
@@ -8097,11 +8657,21 @@ var runCollection = async (collection2, environment, options, executeRequest, ex
           durationMs: response?.durationMs ?? Date.now() - started,
           passed,
           error,
-          tests
+          tests,
+          request: retainResult ? captureRunnerRequest(request, requestVariables, response?.requestUrl, requestSnapshotBudget) : void 0,
+          response: retainResult && response ? captureRunnerResponse(response, responseSnapshotBudget) : void 0
         };
-        results.push(result);
-        options.onResult?.(result);
-        if (passed || attempt > retries) break;
+        if (retainResult) {
+          results.push(result);
+          options.onResult?.(result);
+        }
+        if (passed || attempt > retries) {
+          if (!passed && options.bail) {
+            bailed = true;
+            break outer;
+          }
+          break;
+        }
         if (options.delayMs > 0) await wait(options.delayMs);
       }
       if (options.delayMs > 0) await wait(options.delayMs);
@@ -8116,10 +8686,13 @@ var runCollection = async (collection2, environment, options, executeRequest, ex
     finishedAt: (/* @__PURE__ */ new Date()).toISOString(),
     iterations,
     retries,
+    testNamePattern,
+    matchedTests: results.reduce((total, result) => total + result.tests.length, 0),
     total: results.length,
     passed: results.filter((result) => result.passed).length,
     failed: results.filter((result) => !result.passed).length,
     cancelled,
+    bailed,
     results
   };
 };
@@ -8157,6 +8730,2997 @@ var parseRunnerData = (contents) => {
   return lines.slice(1).map((line) => Object.fromEntries(headers.map((header, index) => [header, parseCsvLine(line)[index] ?? ""])));
 };
 
+// src/lib/runnerReport.ts
+var runnerReporters = ["dot", "list", "min", "progress", "spec", "tap", "json", "junit"];
+var cleanText = (value) => Array.from(String(value ?? ""), (character) => {
+  const point = character.codePointAt(0) ?? 0;
+  const xmlCharacter = point === 9 || point === 10 || point === 13 || point >= 32 && point <= 55295 || point >= 57344 && point <= 65533 || point >= 65536 && point <= 1114111;
+  return xmlCharacter && point !== 127 ? character : "\uFFFD";
+}).join("");
+var xmlText = (value) => cleanText(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+var xmlAttribute = (value) => xmlText(value).replaceAll('"', "&quot;").replaceAll("'", "&apos;").replaceAll("	", "&#9;").replaceAll("\n", "&#10;").replaceAll("\r", "&#13;");
+var seconds = (milliseconds) => (Math.max(0, milliseconds) / 1e3).toFixed(3);
+var resultLabel = (result) => `${result.requestName} (iteration ${result.iteration}, attempt ${result.attempt})`;
+var runDuration = (report) => {
+  const duration = Date.parse(report.finishedAt) - Date.parse(report.startedAt);
+  return Number.isFinite(duration) && duration >= 0 ? duration : report.results.reduce((total, result) => total + Math.max(0, result.durationMs), 0);
+};
+var failureDetails = (result) => {
+  if (result.error) return result.error;
+  const failedTests = result.tests.filter((test) => !test.passed);
+  if (failedTests.length) return failedTests.map((test) => `${test.name}: ${test.error || "assertion failed"}`).join("\n");
+  if (result.status <= 0) return "The request did not return a response.";
+  if (result.status >= 400) return `HTTP status ${result.status}.`;
+  return "The runner marked this attempt as failed.";
+};
+var summary = (report) => `${report.passed} passed, ${report.failed} failed, ${report.total} total${report.testNamePattern === void 0 ? "" : `, ${report.matchedTests ?? report.results.reduce((total, result) => total + result.tests.length, 0)} matched tests`}${report.cancelled ? ", cancelled" : ""}${report.bailed ? ", bailed" : ""} (${runDuration(report)} ms)`;
+var specReport = (report) => {
+  const lines = [report.collectionName];
+  report.results.forEach((result) => {
+    lines.push(`  ${result.passed ? "\u2713" : "\u2716"} ${resultLabel(result)} (${result.durationMs} ms)`);
+    if (!result.passed) cleanText(failureDetails(result)).split("\n").forEach((detail) => lines.push(`    ${detail}`));
+  });
+  lines.push("", summary(report));
+  return `${lines.join("\n")}
+`;
+};
+var tapLine = (value) => cleanText(value).replace(/\r?\n/g, " ");
+var tapReport = (report) => {
+  const lines = ["TAP version 13", `1..${report.total}`];
+  report.results.forEach((result, index) => {
+    lines.push(`${result.passed ? "ok" : "not ok"} ${index + 1} - ${tapLine(resultLabel(result))}`);
+    if (!result.passed) {
+      lines.push("  ---");
+      lines.push(`  message: ${JSON.stringify(tapLine(failureDetails(result)))}`);
+      lines.push(`  status: ${result.status}`);
+      lines.push(`  duration_ms: ${Math.max(0, result.durationMs)}`);
+      lines.push("  ...");
+    }
+  });
+  lines.push(`# ${summary(report)}`);
+  return `${lines.join("\n")}
+`;
+};
+var junitReport = (report) => {
+  const errors = report.results.filter((result) => Boolean(result.error)).length;
+  const failures = report.results.filter((result) => !result.passed && !result.error).length;
+  const cases = report.results.map((result) => {
+    const attributes = `name="${xmlAttribute(resultLabel(result))}" classname="${xmlAttribute(report.collectionName)}" time="${seconds(result.durationMs)}"`;
+    if (result.passed) return `    <testcase ${attributes} />`;
+    const details = xmlText(failureDetails(result));
+    if (result.error) return `    <testcase ${attributes}>
+      <error type="runner" message="${xmlAttribute(result.error)}">${details}</error>
+    </testcase>`;
+    return `    <testcase ${attributes}>
+      <failure type="assertion" message="${xmlAttribute(failureDetails(result).split("\n")[0])}">${details}</failure>
+    </testcase>`;
+  });
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<testsuites name="${xmlAttribute(report.collectionName)}" tests="${report.total}" failures="${failures}" errors="${errors}" time="${seconds(runDuration(report))}">`,
+    `  <testsuite name="${xmlAttribute(report.collectionName)}" id="${xmlAttribute(report.id)}" tests="${report.total}" failures="${failures}" errors="${errors}" skipped="0" time="${seconds(runDuration(report))}" timestamp="${xmlAttribute(report.startedAt)}">`,
+    ...cases,
+    "  </testsuite>",
+    "</testsuites>",
+    ""
+  ].join("\n");
+};
+var reportContents = (report, reporter) => {
+  if (reporter === "json") return `${JSON.stringify({ format: "brunomnia-run-report", version: 1, report }, null, 2)}
+`;
+  if (reporter === "junit") return junitReport(report);
+  if (reporter === "tap") return tapReport(report);
+  if (reporter === "spec") return specReport(report);
+  if (reporter === "min") return `${summary(report)}
+`;
+  if (reporter === "dot") return `${report.results.map((result) => result.passed ? "." : "!").join("")}
+${summary(report)}
+`;
+  if (reporter === "progress") {
+    const width = 20;
+    const complete = report.total ? Math.round(report.passed / report.total * width) : 0;
+    return `[${"=".repeat(complete)}${"-".repeat(width - complete)}] ${summary(report)}
+`;
+  }
+  return `${report.results.map((result) => `${result.passed ? "PASS" : "FAIL"} ${cleanText(resultLabel(result))} ${result.durationMs} ms${result.passed ? "" : ` \u2014 ${cleanText(failureDetails(result)).replace(/\r?\n/g, "; ")}`}`).join("\n")}
+${summary(report)}
+`;
+};
+var parseRunnerReporter = (value, fallback = "json") => {
+  if (!value) return fallback;
+  if (runnerReporters.includes(value)) return value;
+  throw new Error(`Unknown runner reporter '${value}'. Choose ${runnerReporters.join(", ")}.`);
+};
+var createRunnerReportArtifact = (report, reporter) => {
+  const slug = report.collectionName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "collection";
+  const timestamp = report.startedAt.replace(/\.\d{3}Z$/, "Z").replace(/[^0-9TZ]/g, "");
+  const extension = reporter === "json" ? "json" : reporter === "junit" ? "junit.xml" : reporter === "tap" ? "tap" : "txt";
+  const mimeType = reporter === "json" ? "application/json" : reporter === "junit" ? "application/xml" : "text/plain";
+  return { contents: reportContents(report, reporter), fileName: `${slug}-run-${timestamp}.${extension}`, mimeType };
+};
+
+// src/lib/scriptSandbox.ts
+init_cookies();
+
+// src/lib/scriptExpect.ts
+var createScriptExpect = () => {
+  const same = (left, right) => {
+    try {
+      return JSON.stringify(left) === JSON.stringify(right);
+    } catch {
+      return left === right;
+    }
+  };
+  const tag = (value) => Object.prototype.toString.call(value).slice(8, -1).toLowerCase();
+  const typeName = (value) => value && typeof value === "object" && Symbol.toStringTag in value ? String(value[Symbol.toStringTag]).toLowerCase() : tag(value);
+  const sizeOf = (value) => value instanceof Map || value instanceof Set ? value.size : value?.length;
+  const pathResult = (value, path) => {
+    const parts = String(path).replace(/\\([.\[\]\\])/g, (_match, escaped) => `\0${escaped.charCodeAt(0)}\0`).replace(/\[(?:'([^']+)'|"([^"]+)"|(\w+))\]/g, (_match, single, quoted, plain) => `.${single ?? quoted ?? plain}`).split(".").filter(Boolean).map((part) => part.replace(/\u0000(\d+)\u0000/g, (_match, code) => String.fromCharCode(Number(code))));
+    let current = value;
+    for (const part of parts) {
+      if (current == null || !(part in Object(current))) return { found: false, value: void 0 };
+      current = current[part];
+    }
+    return { found: true, value: current };
+  };
+  const keysOf = (value) => value instanceof Map ? [...value.keys()] : value instanceof Set ? [...value.values()] : value && (typeof value === "object" || typeof value === "function") ? Object.keys(value) : [];
+  const includes = (actual, expected, flags) => {
+    const compare = (left, right) => flags.deep ? same(left, right) : left === right;
+    if (typeof actual === "string") return actual.includes(String(expected));
+    if (Array.isArray(actual)) return actual.some((item) => compare(item, expected));
+    if (actual instanceof Set || actual instanceof Map) return [...actual.values()].some((item) => compare(item, expected));
+    if (!actual || typeof actual !== "object" || !expected || typeof expected !== "object") return false;
+    return Object.entries(expected).every(([name, value]) => {
+      if (flags.nested) {
+        const result = pathResult(actual, name);
+        return result.found && compare(result.value, value);
+      }
+      const exists = flags.own ? Object.prototype.hasOwnProperty.call(actual, name) : name in Object(actual);
+      return exists && compare(actual[name], value);
+    });
+  };
+  const memberSubset = (actual, expected, deep) => expected.every((item) => actual.some((candidate) => deep ? same(candidate, item) : candidate === item));
+  const readMutation = (target, property) => typeof target === "function" && property === void 0 ? target() : target?.[property ?? ""];
+  const expect = ((initial, baseMessage) => {
+    const make = (actual, flags = {}) => {
+      let proxy;
+      const verify = (condition, fallback, message) => {
+        if (flags.negated ? Boolean(condition) : !condition) throw new Error(typeof message === "string" ? message : baseMessage || fallback);
+      };
+      const next = (value = actual, nextFlags = flags) => make(value, nextFlags);
+      const method = (name, args2) => {
+        if (name === "a") {
+          const expected = String(args2[0]).toLowerCase();
+          verify(typeName(actual) === expected, `Expected value to be a ${expected}`, args2[1]);
+          return proxy;
+        }
+        if (name === "include") {
+          verify(includes(actual, args2[0], flags), "Expected value to include the requested member", args2[1]);
+          return proxy;
+        }
+        if (name === "equal") {
+          verify(flags.deep ? same(actual, args2[0]) : actual === args2[0], "Expected values to equal", args2[1]);
+          return proxy;
+        }
+        if (name === "eql") {
+          verify(same(actual, args2[0]), "Expected values to deeply equal", args2[1]);
+          return proxy;
+        }
+        if (name === "above") {
+          verify(actual > args2[0], `Expected ${actual} to be above ${args2[0]}`, args2[1]);
+          return proxy;
+        }
+        if (name === "least") {
+          verify(actual >= args2[0], `Expected ${actual} to be at least ${args2[0]}`, args2[1]);
+          return proxy;
+        }
+        if (name === "below") {
+          verify(actual < args2[0], `Expected ${actual} to be below ${args2[0]}`, args2[1]);
+          return proxy;
+        }
+        if (name === "most") {
+          verify(actual <= args2[0], `Expected ${actual} to be at most ${args2[0]}`, args2[1]);
+          return proxy;
+        }
+        if (name === "within") {
+          verify(actual >= args2[0] && actual <= args2[1], `Expected ${actual} to be within the requested range`, args2[2]);
+          return proxy;
+        }
+        if (name === "instanceof") {
+          verify(typeof args2[0] === "function" && actual instanceof args2[0], "Expected value to be an instance of the constructor", args2[1]);
+          return proxy;
+        }
+        if (name === "property" || name === "ownProperty") {
+          const property = String(args2[0]);
+          const result = flags.nested && name !== "ownProperty" ? pathResult(actual, property) : { found: actual != null && (name === "ownProperty" || flags.own ? Object.prototype.hasOwnProperty.call(actual, property) : property in Object(actual)), value: actual == null ? void 0 : actual[property] };
+          verify(result.found && (args2.length < 2 || (flags.deep ? same(result.value, args2[1]) : result.value === args2[1])), `Expected value to have property ${property}`, args2[2]);
+          return next(result.value);
+        }
+        if (name === "ownPropertyDescriptor") {
+          const descriptor = actual == null ? void 0 : Object.getOwnPropertyDescriptor(Object(actual), String(args2[0]));
+          verify(Boolean(descriptor) && (args2.length < 2 || same(descriptor, args2[1])), `Expected an own property descriptor for ${args2[0]}`, args2[2]);
+          return next(descriptor);
+        }
+        if (name === "lengthOf") {
+          const length = sizeOf(actual);
+          verify(length === args2[0], `Expected length or size ${args2[0]} but got ${length}`, args2[1]);
+          return proxy;
+        }
+        if (name === "match") {
+          verify(args2[0] instanceof RegExp && args2[0].test(String(actual)), `Expected value to match ${args2[0]}`, args2[1]);
+          return proxy;
+        }
+        if (name === "string") {
+          verify(typeof actual === "string" && actual.includes(String(args2[0])), `Expected string to contain ${args2[0]}`, args2[1]);
+          return proxy;
+        }
+        if (name === "keys") {
+          const single = args2[0];
+          const expected = (args2.length === 1 && Array.isArray(single) ? single : args2.length === 1 && single && typeof single === "object" && !(single instanceof Map) && !(single instanceof Set) ? Object.keys(single) : args2).map((value) => value);
+          const actualKeys = keysOf(actual);
+          const has = (key) => actualKeys.some((candidate) => flags.deep ? same(candidate, key) : candidate === key || String(candidate) === String(key));
+          const condition = flags.any ? expected.some(has) : expected.every(has) && (flags.contains || actualKeys.length === expected.length);
+          verify(condition, `Expected value to have ${flags.any ? "any" : "all"} requested keys`);
+          return proxy;
+        }
+        if (name === "throw") {
+          let thrown;
+          try {
+            actual();
+          } catch (error) {
+            thrown = error;
+          }
+          const expected = args2[0];
+          const matcher = expected instanceof RegExp || typeof expected === "string" ? expected : args2[1];
+          const typeMatches = thrown !== void 0 && (!expected || expected instanceof RegExp || typeof expected === "string" || typeof expected === "function" && thrown instanceof expected || thrown === expected);
+          const text2 = String(thrown?.message ?? thrown);
+          const messageMatches = !matcher || (matcher instanceof RegExp ? matcher.test(text2) : text2.includes(String(matcher)));
+          verify(typeMatches && messageMatches, "Expected function to throw a matching error", args2[2]);
+          return next(thrown);
+        }
+        if (name === "respondTo") {
+          const target2 = typeof actual === "function" && !flags.itself ? actual.prototype : actual;
+          verify(typeof target2?.[String(args2[0])] === "function", `Expected value to respond to ${args2[0]}`, args2[1]);
+          return proxy;
+        }
+        if (name === "satisfy") {
+          verify(typeof args2[0] === "function" && Boolean(args2[0](actual)), "Expected value to satisfy predicate", args2[1]);
+          return proxy;
+        }
+        if (name === "closeTo") {
+          verify(typeof actual === "number" && Math.abs(actual - Number(args2[0])) <= Number(args2[1]), `Expected ${actual} to be close to ${args2[0]}`, args2[2]);
+          return proxy;
+        }
+        if (name === "members") {
+          const expected = Array.isArray(args2[0]) ? args2[0] : [];
+          const values = Array.isArray(actual) ? actual : [];
+          const condition = flags.ordered ? same(values.slice(0, flags.contains ? expected.length : values.length), expected) : memberSubset(values, expected, Boolean(flags.deep)) && (flags.contains || values.length === expected.length);
+          verify(condition, "Expected arrays to have the requested members", args2[1]);
+          return proxy;
+        }
+        if (name === "oneOf") {
+          verify(Array.isArray(args2[0]) && args2[0].includes(actual), "Expected value to be one of the requested values", args2[1]);
+          return proxy;
+        }
+        if (name === "change" || name === "increase" || name === "decrease") {
+          const target2 = args2[0];
+          const property = typeof target2 === "function" ? void 0 : typeof args2[1] === "string" ? args2[1] : void 0;
+          const before = readMutation(target2, property);
+          actual();
+          const after = readMutation(target2, property);
+          const delta = Number(after) - Number(before);
+          const condition = name === "change" ? !same(before, after) : name === "increase" ? delta > 0 : delta < 0;
+          verify(condition, `Expected function to ${name}`, typeof target2 === "function" ? args2[1] : args2[2]);
+          return next(delta, { ...flags, mutation: name });
+        }
+        if (name === "by") {
+          const expected = flags.mutation === "decrease" ? -Math.abs(Number(args2[0])) : Number(args2[0]);
+          verify(actual === expected, `Expected change by ${args2[0]}`, args2[1]);
+          return proxy;
+        }
+        if (name === "toBe") {
+          verify(actual === args2[0], "Expected values to be identical", args2[1]);
+          return proxy;
+        }
+        if (name === "toEqual") {
+          verify(same(actual, args2[0]), "Expected values to deeply equal", args2[1]);
+          return proxy;
+        }
+        if (name === "toContain") {
+          verify(includes(actual, args2[0], flags), "Expected value to contain member", args2[1]);
+          return proxy;
+        }
+        if (name === "toBeTruthy") {
+          verify(Boolean(actual), "Expected value to be truthy");
+          return proxy;
+        }
+        if (name === "toBeLessThan") {
+          verify(Number(actual) < Number(args2[0]), `Expected ${actual} to be less than ${args2[0]}`);
+          return proxy;
+        }
+        if (name === "toBeGreaterThan") {
+          verify(Number(actual) > Number(args2[0]), `Expected ${actual} to be greater than ${args2[0]}`);
+          return proxy;
+        }
+        return proxy;
+      };
+      const aliases = {
+        an: "a",
+        includes: "include",
+        contain: "include",
+        contains: "include",
+        equals: "equal",
+        eq: "equal",
+        eqls: "eql",
+        gt: "above",
+        greaterThan: "above",
+        gte: "least",
+        lt: "below",
+        lessThan: "below",
+        lte: "most",
+        instanceOf: "instanceof",
+        ownProperty: "ownProperty",
+        haveOwnProperty: "ownProperty",
+        haveOwnPropertyDescriptor: "ownPropertyDescriptor",
+        length: "lengthOf",
+        matches: "match",
+        key: "keys",
+        throws: "throw",
+        Throw: "throw",
+        respondsTo: "respondTo",
+        satisfies: "satisfy",
+        approximately: "closeTo",
+        changes: "change",
+        increases: "increase",
+        decreases: "decrease"
+      };
+      const methods = /* @__PURE__ */ new Set(["a", "include", "equal", "eql", "above", "least", "below", "most", "within", "instanceof", "property", "ownProperty", "ownPropertyDescriptor", "lengthOf", "match", "string", "keys", "throw", "respondTo", "satisfy", "closeTo", "members", "oneOf", "change", "increase", "decrease", "by", "toBe", "toEqual", "toContain", "toBeTruthy", "toBeLessThan", "toBeGreaterThan"]);
+      const language = /* @__PURE__ */ new Set(["to", "be", "been", "is", "that", "which", "and", "has", "have", "with", "at", "of", "same", "but", "does", "still", "also"]);
+      const target = {};
+      proxy = new Proxy(target, {
+        get(_object, key) {
+          if (typeof key !== "string") return void 0;
+          if (language.has(key)) return proxy;
+          if (key === "not") return next(actual, { ...flags, negated: !flags.negated });
+          if (key === "all") return next(actual, { ...flags, any: false });
+          if (["deep", "nested", "own", "ordered", "any", "itself"].includes(key)) return next(actual, { ...flags, [key]: true });
+          const getterConditions = {
+            ok: [Boolean(actual), "Expected value to be truthy"],
+            true: [actual === true, "Expected value to be true"],
+            false: [actual === false, "Expected value to be false"],
+            null: [actual === null, "Expected value to be null"],
+            undefined: [actual === void 0, "Expected value to be undefined"],
+            NaN: [typeof actual === "number" && Number.isNaN(actual), "Expected value to be NaN"],
+            exist: [actual !== null && actual !== void 0, "Expected value to exist"],
+            empty: [(sizeOf(actual) ?? (actual && typeof actual === "object" ? Object.keys(actual).length : void 0)) === 0, "Expected value to be empty"],
+            arguments: [tag(actual) === "arguments", "Expected value to be arguments"],
+            extensible: [Boolean(actual && typeof actual === "object" && Object.isExtensible(actual)), "Expected value to be extensible"],
+            sealed: [Boolean(actual && typeof actual === "object" && Object.isSealed(actual)), "Expected value to be sealed"],
+            frozen: [Boolean(actual && typeof actual === "object" && Object.isFrozen(actual)), "Expected value to be frozen"],
+            finite: [typeof actual === "number" && Number.isFinite(actual), "Expected value to be finite"]
+          };
+          if (key === "exists") return Reflect.get(proxy, "exist");
+          if (key === "Arguments") return Reflect.get(proxy, "arguments");
+          if (key in getterConditions) {
+            const [condition, message] = getterConditions[key];
+            verify(condition, message);
+            return proxy;
+          }
+          const canonical = aliases[key] ?? key;
+          if (!methods.has(canonical)) return void 0;
+          const callable = (...args2) => method(canonical, args2);
+          return new Proxy(callable, {
+            get(_function, child) {
+              const chainFlags = canonical === "include" ? { ...flags, contains: true } : flags;
+              const chainActual = canonical === "lengthOf" ? sizeOf(actual) : actual;
+              return Reflect.get(make(chainActual, chainFlags), child);
+            }
+          });
+        }
+      });
+      return proxy;
+    };
+    return make(initial);
+  });
+  expect.fail = (...args2) => {
+    throw new Error(typeof args2[0] === "string" && args2.length === 1 ? args2[0] : typeof args2[2] === "string" ? args2[2] : "Assertion failed");
+  };
+  return expect;
+};
+
+// src/lib/scriptModules.ts
+var createScriptModules = (runtime) => {
+  const maximumInput = 5e6;
+  const boundedText = (value) => {
+    const text2 = String(value ?? "");
+    if (text2.length > maximumInput) throw new Error("Script module input exceeds 5 MB.");
+    return text2;
+  };
+  const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const typeName = (value) => value === null ? "null" : Array.isArray(value) ? "array" : value instanceof RegExp ? "regexp" : value instanceof Date ? "date" : value instanceof Map ? "map" : value instanceof Set ? "set" : typeof value;
+  const pathValue = (value, path) => String(path).replace(/\[(?:'([^']+)'|"([^"]+)"|(\w+))\]/g, (_match, single, quoted, plain) => `.${single ?? quoted ?? plain}`).split(".").filter(Boolean).reduce((current, key) => current?.[key], value);
+  const includes = (haystack, needle, deep = false) => {
+    if (typeof haystack === "string") return haystack.includes(String(needle));
+    if (Array.isArray(haystack)) return haystack.some((item) => deep ? same(item, needle) : item === needle);
+    if (haystack instanceof Set) return [...haystack].some((item) => deep ? same(item, needle) : item === needle);
+    if (haystack && typeof haystack === "object" && needle && typeof needle === "object") return Object.entries(needle).every(([key, value]) => Object.prototype.hasOwnProperty.call(haystack, key) && (deep ? same(haystack[key], value) : haystack[key] === value));
+    return false;
+  };
+  const nestedIncludes = (haystack, needle, deep = false) => Boolean(needle && typeof needle === "object") && Object.entries(needle).every(([path, expected]) => deep ? same(pathValue(haystack, path), expected) : pathValue(haystack, path) === expected);
+  const objectKeys = (value) => value instanceof Map ? [...value.keys()] : value instanceof Set ? [...value.values()] : value && typeof value === "object" ? Object.keys(value) : [];
+  const expectedKeys = (value) => Array.isArray(value) ? value : value && typeof value === "object" && !(value instanceof Map) && !(value instanceof Set) ? Object.keys(value) : [value];
+  const hasKey = (keys, expected, deep = false) => keys.some((key) => deep ? same(key, expected) : key === expected);
+  const memberSubset = (actual, expected, deep = false) => Array.isArray(actual) && Array.isArray(expected) && expected.every((item) => actual.some((candidate) => deep ? same(candidate, item) : candidate === item));
+  const lengthOrSize = (value) => value instanceof Map || value instanceof Set ? value.size : value?.length;
+  const assertCondition = (condition, message) => {
+    if (!condition) throw new Error(message);
+  };
+  const measuredValue = (target, property) => property === void 0 && typeof target === "function" ? target() : target?.[property ?? ""];
+  const measureMutation = (modifier2, target, property) => {
+    const before = measuredValue(target, property);
+    modifier2();
+    return { before, after: measuredValue(target, property) };
+  };
+  const measureChange = (modifier2, target, property) => {
+    const measured = measureMutation(modifier2, target, property);
+    return Number(measured.after) - Number(measured.before);
+  };
+  const mutationProperty = (target, property) => typeof target === "function" ? void 0 : typeof property === "string" ? property : void 0;
+  const mutationDelta = (target, propertyOrDelta, deltaOrMessage) => Number(typeof target === "function" ? propertyOrDelta : deltaOrMessage);
+  const mutationMessage = (target, propertyOrMessage, message) => typeof (typeof target === "function" ? propertyOrMessage : message) === "string" ? String(typeof target === "function" ? propertyOrMessage : message) : void 0;
+  const deltaMessage = (target, deltaOrMessage, message) => typeof (typeof target === "function" ? deltaOrMessage : message) === "string" ? String(typeof target === "function" ? deltaOrMessage : message) : void 0;
+  const assertion = Object.assign((condition, message) => {
+    if (!condition) throw new Error(message || "Assertion failed");
+  }, {
+    ok(condition, message) {
+      if (!condition) throw new Error(message || "Expected value to be truthy");
+    },
+    equal(actual, expected, message) {
+      if (actual != expected) throw new Error(message || "Expected values to be equal");
+    },
+    notEqual(actual, expected, message) {
+      if (actual == expected) throw new Error(message || "Expected values not to be equal");
+    },
+    strictEqual(actual, expected, message) {
+      if (actual !== expected) throw new Error(message || "Expected values to be strictly equal");
+    },
+    notStrictEqual(actual, expected, message) {
+      if (actual === expected) throw new Error(message || "Expected values not to be strictly equal");
+    },
+    deepEqual(actual, expected, message) {
+      if (!same(actual, expected)) throw new Error(message || "Expected values to be deeply equal");
+    },
+    deepStrictEqual(actual, expected, message) {
+      if (!same(actual, expected)) throw new Error(message || "Expected values to be deeply equal");
+    },
+    fail(message) {
+      throw new Error(message || "Assertion failed");
+    },
+    match(value, expression, message) {
+      if (!expression.test(String(value))) throw new Error(message || "Expected value to match expression");
+    },
+    doesNotMatch(value, expression, message) {
+      if (expression.test(String(value))) throw new Error(message || "Expected value not to match expression");
+    },
+    throws(callback, expression) {
+      try {
+        callback();
+      } catch (error) {
+        if (!expression || expression.test(String(error))) return error;
+        throw error;
+      }
+      throw new Error("Expected function to throw");
+    },
+    doesNotThrow(callback) {
+      callback();
+    },
+    async rejects(callback, expression) {
+      try {
+        await (typeof callback === "function" ? callback() : callback);
+      } catch (error) {
+        if (!expression || expression.test(String(error))) return error;
+        throw error;
+      }
+      throw new Error("Expected promise to reject");
+    }
+  });
+  Object.assign(assertion, {
+    notOk(value, message) {
+      assertCondition(!value, message || "Expected value to be falsy");
+    },
+    isOk(value, message) {
+      assertCondition(Boolean(value), message || "Expected value to be truthy");
+    },
+    isNotOk(value, message) {
+      assertCondition(!value, message || "Expected value to be falsy");
+    },
+    notDeepEqual(actual, expected, message) {
+      assertCondition(!same(actual, expected), message || "Expected values not to be deeply equal");
+    },
+    notDeepStrictEqual(actual, expected, message) {
+      assertCondition(!same(actual, expected), message || "Expected values not to be deeply equal");
+    },
+    isTrue(value, message) {
+      assertCondition(value === true, message || "Expected value to be true");
+    },
+    isNotTrue(value, message) {
+      assertCondition(value !== true, message || "Expected value not to be true");
+    },
+    isFalse(value, message) {
+      assertCondition(value === false, message || "Expected value to be false");
+    },
+    isNotFalse(value, message) {
+      assertCondition(value !== false, message || "Expected value not to be false");
+    },
+    isNull(value, message) {
+      assertCondition(value === null, message || "Expected value to be null");
+    },
+    isNotNull(value, message) {
+      assertCondition(value !== null, message || "Expected value not to be null");
+    },
+    isNaN(value, message) {
+      assertCondition(typeof value === "number" && Number.isNaN(value), message || "Expected value to be NaN");
+    },
+    isNotNaN(value, message) {
+      assertCondition(!(typeof value === "number" && Number.isNaN(value)), message || "Expected value not to be NaN");
+    },
+    exists(value, message) {
+      assertCondition(value !== null && value !== void 0, message || "Expected value to exist");
+    },
+    notExists(value, message) {
+      assertCondition(value === null || value === void 0, message || "Expected value not to exist");
+    },
+    isUndefined(value, message) {
+      assertCondition(value === void 0, message || "Expected value to be undefined");
+    },
+    isDefined(value, message) {
+      assertCondition(value !== void 0, message || "Expected value to be defined");
+    },
+    isFunction(value, message) {
+      assertCondition(typeof value === "function", message || "Expected value to be a function");
+    },
+    isNotFunction(value, message) {
+      assertCondition(typeof value !== "function", message || "Expected value not to be a function");
+    },
+    isObject(value, message) {
+      assertCondition(typeName(value) === "object", message || "Expected value to be an object");
+    },
+    isNotObject(value, message) {
+      assertCondition(typeName(value) !== "object", message || "Expected value not to be an object");
+    },
+    isArray(value, message) {
+      assertCondition(Array.isArray(value), message || "Expected value to be an array");
+    },
+    isNotArray(value, message) {
+      assertCondition(!Array.isArray(value), message || "Expected value not to be an array");
+    },
+    isString(value, message) {
+      assertCondition(typeof value === "string", message || "Expected value to be a string");
+    },
+    isNotString(value, message) {
+      assertCondition(typeof value !== "string", message || "Expected value not to be a string");
+    },
+    isNumber(value, message) {
+      assertCondition(typeof value === "number", message || "Expected value to be a number");
+    },
+    isNotNumber(value, message) {
+      assertCondition(typeof value !== "number", message || "Expected value not to be a number");
+    },
+    isFinite(value, message) {
+      assertCondition(typeof value === "number" && Number.isFinite(value), message || "Expected value to be finite");
+    },
+    isBoolean(value, message) {
+      assertCondition(typeof value === "boolean", message || "Expected value to be a boolean");
+    },
+    isNotBoolean(value, message) {
+      assertCondition(typeof value !== "boolean", message || "Expected value not to be a boolean");
+    },
+    typeOf(value, expected, message) {
+      assertCondition(typeName(value) === expected.toLowerCase(), message || `Expected value to have type ${expected}`);
+    },
+    notTypeOf(value, expected, message) {
+      assertCondition(typeName(value) !== expected.toLowerCase(), message || `Expected value not to have type ${expected}`);
+    },
+    instanceOf(value, expected, message) {
+      assertCondition(value instanceof expected, message || `Expected value to be an instance of ${expected.name}`);
+    },
+    notInstanceOf(value, expected, message) {
+      assertCondition(!(value instanceof expected), message || `Expected value not to be an instance of ${expected.name}`);
+    },
+    include(haystack, needle, message) {
+      assertCondition(includes(haystack, needle), message || "Expected value to include member");
+    },
+    notInclude(haystack, needle, message) {
+      assertCondition(!includes(haystack, needle), message || "Expected value not to include member");
+    },
+    deepInclude(haystack, needle, message) {
+      assertCondition(includes(haystack, needle, true), message || "Expected value to deeply include member");
+    },
+    notDeepInclude(haystack, needle, message) {
+      assertCondition(!includes(haystack, needle, true), message || "Expected value not to deeply include member");
+    },
+    nestedInclude(haystack, needle, message) {
+      assertCondition(nestedIncludes(haystack, needle), message || "Expected value to include nested properties");
+    },
+    notNestedInclude(haystack, needle, message) {
+      assertCondition(!nestedIncludes(haystack, needle), message || "Expected value not to include nested properties");
+    },
+    deepNestedInclude(haystack, needle, message) {
+      assertCondition(nestedIncludes(haystack, needle, true), message || "Expected value to deeply include nested properties");
+    },
+    notDeepNestedInclude(haystack, needle, message) {
+      assertCondition(!nestedIncludes(haystack, needle, true), message || "Expected value not to deeply include nested properties");
+    },
+    ownInclude(haystack, needle, message) {
+      assertCondition(includes(haystack, needle), message || "Expected value to include own properties");
+    },
+    notOwnInclude(haystack, needle, message) {
+      assertCondition(!includes(haystack, needle), message || "Expected value not to include own properties");
+    },
+    deepOwnInclude(haystack, needle, message) {
+      assertCondition(includes(haystack, needle, true), message || "Expected value to deeply include own properties");
+    },
+    notDeepOwnInclude(haystack, needle, message) {
+      assertCondition(!includes(haystack, needle, true), message || "Expected value not to deeply include own properties");
+    },
+    notMatch(value, expression, message) {
+      assertCondition(!expression.test(String(value)), message || "Expected value not to match expression");
+    },
+    property(value, name, message) {
+      assertCondition(value != null && name in Object(value), message || `Expected property '${name}'`);
+    },
+    notProperty(value, name, message) {
+      assertCondition(value == null || !(name in Object(value)), message || `Expected no property '${name}'`);
+    },
+    propertyVal(value, name, expected, message) {
+      assertCondition(value != null && name in Object(value) && value[name] === expected, message || `Expected property '${name}' to equal value`);
+    },
+    notPropertyVal(value, name, expected, message) {
+      assertCondition(value == null || !(name in Object(value)) || value[name] !== expected, message || `Expected property '${name}' not to equal value`);
+    },
+    deepPropertyVal(value, name, expected, message) {
+      assertCondition(value != null && name in Object(value) && same(value[name], expected), message || `Expected property '${name}' to deeply equal value`);
+    },
+    notDeepPropertyVal(value, name, expected, message) {
+      assertCondition(value == null || !(name in Object(value)) || !same(value[name], expected), message || `Expected property '${name}' not to deeply equal value`);
+    },
+    nestedProperty(value, path, message) {
+      assertCondition(pathValue(value, path) !== void 0, message || `Expected nested property '${path}'`);
+    },
+    notNestedProperty(value, path, message) {
+      assertCondition(pathValue(value, path) === void 0, message || `Expected no nested property '${path}'`);
+    },
+    nestedPropertyVal(value, path, expected, message) {
+      assertCondition(pathValue(value, path) === expected, message || `Expected nested property '${path}' to equal value`);
+    },
+    notNestedPropertyVal(value, path, expected, message) {
+      assertCondition(pathValue(value, path) !== expected, message || `Expected nested property '${path}' not to equal value`);
+    },
+    deepNestedPropertyVal(value, path, expected, message) {
+      assertCondition(same(pathValue(value, path), expected), message || `Expected nested property '${path}' to deeply equal value`);
+    },
+    notDeepNestedPropertyVal(value, path, expected, message) {
+      assertCondition(!same(pathValue(value, path), expected), message || `Expected nested property '${path}' not to deeply equal value`);
+    },
+    lengthOf(value, expected, message) {
+      assertCondition(lengthOrSize(value) === expected, message || `Expected length or size ${expected}`);
+    },
+    hasAnyKeys(value, keys, message) {
+      const actual = objectKeys(value);
+      assertCondition(expectedKeys(keys).some((key) => hasKey(actual, key)), message || "Expected value to have any key");
+    },
+    hasAllKeys(value, keys, message) {
+      const actual = objectKeys(value);
+      const expected = expectedKeys(keys);
+      assertCondition(actual.length === expected.length && expected.every((key) => hasKey(actual, key)), message || "Expected value to have all keys");
+    },
+    containsAllKeys(value, keys, message) {
+      const actual = objectKeys(value);
+      assertCondition(expectedKeys(keys).every((key) => hasKey(actual, key)), message || "Expected value to contain all keys");
+    },
+    containsAnyKeys(value, keys, message) {
+      const actual = objectKeys(value);
+      assertCondition(expectedKeys(keys).some((key) => hasKey(actual, key)), message || "Expected value to contain any key");
+    },
+    doesNotHaveAnyKeys(value, keys, message) {
+      const actual = objectKeys(value);
+      assertCondition(expectedKeys(keys).every((key) => !hasKey(actual, key)), message || "Expected value to have none of the keys");
+    },
+    doesNotHaveAllKeys(value, keys, message) {
+      const actual = objectKeys(value);
+      assertCondition(!expectedKeys(keys).every((key) => hasKey(actual, key)), message || "Expected value not to have all keys");
+    },
+    hasAnyDeepKeys(value, keys, message) {
+      const actual = objectKeys(value);
+      assertCondition(expectedKeys(keys).some((key) => hasKey(actual, key, true)), message || "Expected value to have any deep key");
+    },
+    hasAllDeepKeys(value, keys, message) {
+      const actual = objectKeys(value);
+      const expected = expectedKeys(keys);
+      assertCondition(actual.length === expected.length && expected.every((key) => hasKey(actual, key, true)), message || "Expected value to have all deep keys");
+    },
+    containsAllDeepKeys(value, keys, message) {
+      const actual = objectKeys(value);
+      assertCondition(expectedKeys(keys).every((key) => hasKey(actual, key, true)), message || "Expected value to contain all deep keys");
+    },
+    doesNotHaveAnyDeepKeys(value, keys, message) {
+      const actual = objectKeys(value);
+      assertCondition(expectedKeys(keys).every((key) => !hasKey(actual, key, true)), message || "Expected value to have none of the deep keys");
+    },
+    doesNotHaveAllDeepKeys(value, keys, message) {
+      const actual = objectKeys(value);
+      assertCondition(!expectedKeys(keys).every((key) => hasKey(actual, key, true)), message || "Expected value not to have all deep keys");
+    },
+    operator(left, operator, right, message) {
+      const valid = operator === "==" ? left == right : operator === "===" ? left === right : operator === "!=" ? left != right : operator === "!==" ? left !== right : operator === ">" ? left > right : operator === ">=" ? left >= right : operator === "<" ? left < right : operator === "<=" ? left <= right : false;
+      assertCondition(valid, message || `Expected ${left} ${operator} ${right}`);
+    },
+    closeTo(actual, expected, delta, message) {
+      assertCondition(Math.abs(actual - expected) <= delta, message || `Expected ${actual} to be within ${delta} of ${expected}`);
+    },
+    approximately(actual, expected, delta, message) {
+      assertCondition(Math.abs(actual - expected) <= delta, message || `Expected ${actual} to approximate ${expected}`);
+    },
+    isAbove(actual, expected, message) {
+      assertCondition(actual > expected, message || `Expected ${actual} to be above ${expected}`);
+    },
+    isAtLeast(actual, expected, message) {
+      assertCondition(actual >= expected, message || `Expected ${actual} to be at least ${expected}`);
+    },
+    isBelow(actual, expected, message) {
+      assertCondition(actual < expected, message || `Expected ${actual} to be below ${expected}`);
+    },
+    isAtMost(actual, expected, message) {
+      assertCondition(actual <= expected, message || `Expected ${actual} to be at most ${expected}`);
+    },
+    isWithin(actual, start, finish, message) {
+      assertCondition(actual >= start && actual <= finish, message || `Expected ${actual} to be within ${start}..${finish}`);
+    },
+    oneOf(value, list, message) {
+      assertCondition(list.includes(value), message || "Expected value to be one of the list");
+    },
+    sameMembers(actual, expected, message) {
+      assertCondition(actual.length === expected.length && memberSubset(actual, expected), message || "Expected arrays to have the same members");
+    },
+    notSameMembers(actual, expected, message) {
+      assertCondition(!(actual.length === expected.length && memberSubset(actual, expected)), message || "Expected arrays not to have the same members");
+    },
+    sameDeepMembers(actual, expected, message) {
+      assertCondition(actual.length === expected.length && memberSubset(actual, expected, true), message || "Expected arrays to have the same deep members");
+    },
+    notSameDeepMembers(actual, expected, message) {
+      assertCondition(!(actual.length === expected.length && memberSubset(actual, expected, true)), message || "Expected arrays not to have the same deep members");
+    },
+    includeMembers(actual, expected, message) {
+      assertCondition(memberSubset(actual, expected), message || "Expected array to include members");
+    },
+    notIncludeMembers(actual, expected, message) {
+      assertCondition(!memberSubset(actual, expected), message || "Expected array not to include all members");
+    },
+    includeDeepMembers(actual, expected, message) {
+      assertCondition(memberSubset(actual, expected, true), message || "Expected array to deeply include members");
+    },
+    notIncludeDeepMembers(actual, expected, message) {
+      assertCondition(!memberSubset(actual, expected, true), message || "Expected array not to deeply include all members");
+    },
+    sameOrderedMembers(actual, expected, message) {
+      assertCondition(same(actual, expected), message || "Expected arrays to have ordered members");
+    },
+    notSameOrderedMembers(actual, expected, message) {
+      assertCondition(!same(actual, expected), message || "Expected arrays not to have ordered members");
+    },
+    sameDeepOrderedMembers(actual, expected, message) {
+      assertCondition(same(actual, expected), message || "Expected arrays to have deep ordered members");
+    },
+    notSameDeepOrderedMembers(actual, expected, message) {
+      assertCondition(!same(actual, expected), message || "Expected arrays not to have deep ordered members");
+    },
+    includeOrderedMembers(actual, expected, message) {
+      assertCondition(same(actual.slice(0, expected.length), expected), message || "Expected array to include ordered members");
+    },
+    notIncludeOrderedMembers(actual, expected, message) {
+      assertCondition(!same(actual.slice(0, expected.length), expected), message || "Expected array not to include ordered members");
+    },
+    includeDeepOrderedMembers(actual, expected, message) {
+      assertCondition(same(actual.slice(0, expected.length), expected), message || "Expected array to include deep ordered members");
+    },
+    notIncludeDeepOrderedMembers(actual, expected, message) {
+      assertCondition(!same(actual.slice(0, expected.length), expected), message || "Expected array not to include deep ordered members");
+    },
+    changes(modifier2, target, propertyOrMessage, message) {
+      const property = mutationProperty(target, propertyOrMessage);
+      const measured = measureMutation(modifier2, target, property);
+      assertCondition(!same(measured.before, measured.after), mutationMessage(target, propertyOrMessage, message) || "Expected value to change");
+    },
+    changesBy(modifier2, target, propertyOrDelta, deltaOrMessage, message) {
+      const delta = mutationDelta(target, propertyOrDelta, deltaOrMessage);
+      assertCondition(measureChange(modifier2, target, mutationProperty(target, propertyOrDelta)) === delta, deltaMessage(target, deltaOrMessage, message) || `Expected value to change by ${delta}`);
+    },
+    doesNotChange(modifier2, target, propertyOrMessage, message) {
+      const property = mutationProperty(target, propertyOrMessage);
+      const measured = measureMutation(modifier2, target, property);
+      assertCondition(same(measured.before, measured.after), mutationMessage(target, propertyOrMessage, message) || "Expected value not to change");
+    },
+    changesButNotBy(modifier2, target, propertyOrDelta, deltaOrMessage, message) {
+      const delta = mutationDelta(target, propertyOrDelta, deltaOrMessage);
+      const change = measureChange(modifier2, target, mutationProperty(target, propertyOrDelta));
+      assertCondition(change !== 0 && change !== delta, deltaMessage(target, deltaOrMessage, message) || `Expected value to change but not by ${delta}`);
+    },
+    increases(modifier2, target, propertyOrMessage, message) {
+      assertCondition(measureChange(modifier2, target, mutationProperty(target, propertyOrMessage)) > 0, mutationMessage(target, propertyOrMessage, message) || "Expected value to increase");
+    },
+    increasesBy(modifier2, target, propertyOrDelta, deltaOrMessage, message) {
+      const delta = mutationDelta(target, propertyOrDelta, deltaOrMessage);
+      assertCondition(measureChange(modifier2, target, mutationProperty(target, propertyOrDelta)) === delta && delta > 0, deltaMessage(target, deltaOrMessage, message) || `Expected value to increase by ${delta}`);
+    },
+    doesNotIncrease(modifier2, target, propertyOrMessage, message) {
+      assertCondition(measureChange(modifier2, target, mutationProperty(target, propertyOrMessage)) <= 0, mutationMessage(target, propertyOrMessage, message) || "Expected value not to increase");
+    },
+    increasesButNotBy(modifier2, target, propertyOrDelta, deltaOrMessage, message) {
+      const delta = mutationDelta(target, propertyOrDelta, deltaOrMessage);
+      const change = measureChange(modifier2, target, mutationProperty(target, propertyOrDelta));
+      assertCondition(change > 0 && change !== delta, deltaMessage(target, deltaOrMessage, message) || `Expected value to increase but not by ${delta}`);
+    },
+    decreases(modifier2, target, propertyOrMessage, message) {
+      assertCondition(measureChange(modifier2, target, mutationProperty(target, propertyOrMessage)) < 0, mutationMessage(target, propertyOrMessage, message) || "Expected value to decrease");
+    },
+    decreasesBy(modifier2, target, propertyOrDelta, deltaOrMessage, message) {
+      const delta = mutationDelta(target, propertyOrDelta, deltaOrMessage);
+      assertCondition(measureChange(modifier2, target, mutationProperty(target, propertyOrDelta)) === -Math.abs(delta), deltaMessage(target, deltaOrMessage, message) || `Expected value to decrease by ${delta}`);
+    },
+    doesNotDecrease(modifier2, target, propertyOrMessage, message) {
+      assertCondition(measureChange(modifier2, target, mutationProperty(target, propertyOrMessage)) >= 0, mutationMessage(target, propertyOrMessage, message) || "Expected value not to decrease");
+    },
+    doesNotDecreaseBy(modifier2, target, propertyOrDelta, deltaOrMessage, message) {
+      const delta = mutationDelta(target, propertyOrDelta, deltaOrMessage);
+      assertCondition(measureChange(modifier2, target, mutationProperty(target, propertyOrDelta)) !== -Math.abs(delta), deltaMessage(target, deltaOrMessage, message) || `Expected value not to decrease by ${delta}`);
+    },
+    decreasesButNotBy(modifier2, target, propertyOrDelta, deltaOrMessage, message) {
+      const delta = mutationDelta(target, propertyOrDelta, deltaOrMessage);
+      const change = measureChange(modifier2, target, mutationProperty(target, propertyOrDelta));
+      assertCondition(change < 0 && change !== -Math.abs(delta), deltaMessage(target, deltaOrMessage, message) || `Expected value to decrease but not by ${delta}`);
+    },
+    throws(callback, errorLike, matcher, message) {
+      try {
+        callback();
+      } catch (error) {
+        const typeMatches = !errorLike || errorLike instanceof RegExp || typeof errorLike === "string" || typeof errorLike === "function" && error instanceof errorLike || error === errorLike;
+        const expectedMessage = errorLike instanceof RegExp || typeof errorLike === "string" ? errorLike : matcher;
+        const messageMatches = !expectedMessage || (expectedMessage instanceof RegExp ? expectedMessage.test(String(error.message ?? error)) : String(error.message ?? error).includes(expectedMessage));
+        assertCondition(typeMatches && messageMatches, message || "Thrown error did not match expectation");
+        return error;
+      }
+      throw new Error(message || "Expected function to throw");
+    },
+    doesNotThrow(callback, message) {
+      try {
+        callback();
+      } catch (error) {
+        throw new Error(message || `Expected function not to throw: ${error}`);
+      }
+    },
+    respondTo(value, method, message) {
+      const target = typeof value === "function" ? value.prototype : value;
+      assertCondition(typeof target?.[method] === "function", message || `Expected value to respond to '${method}'`);
+    },
+    notRespondTo(value, method, message) {
+      const target = typeof value === "function" ? value.prototype : value;
+      assertCondition(typeof target?.[method] !== "function", message || `Expected value not to respond to '${method}'`);
+    },
+    satisfies(value, predicate, message) {
+      assertCondition(Boolean(predicate(value)), message || "Expected value to satisfy predicate");
+    },
+    ifError(value) {
+      if (value) throw value;
+    },
+    isExtensible(value, message) {
+      assertCondition(Object.isExtensible(value), message || "Expected object to be extensible");
+    },
+    isNotExtensible(value, message) {
+      assertCondition(!Object.isExtensible(value), message || "Expected object not to be extensible");
+    },
+    isSealed(value, message) {
+      assertCondition(Object.isSealed(value), message || "Expected object to be sealed");
+    },
+    isNotSealed(value, message) {
+      assertCondition(!Object.isSealed(value), message || "Expected object not to be sealed");
+    },
+    isFrozen(value, message) {
+      assertCondition(Object.isFrozen(value), message || "Expected object to be frozen");
+    },
+    isNotFrozen(value, message) {
+      assertCondition(!Object.isFrozen(value), message || "Expected object not to be frozen");
+    },
+    isEmpty(value, message) {
+      assertCondition((lengthOrSize(value) ?? (value && typeof value === "object" ? Object.keys(value).length : void 0)) === 0, message || "Expected value to be empty");
+    },
+    isNotEmpty(value, message) {
+      assertCondition((lengthOrSize(value) ?? (value && typeof value === "object" ? Object.keys(value).length : void 0)) !== 0, message || "Expected value not to be empty");
+    }
+  });
+  const pathParts = (path) => Array.isArray(path) ? path.map(String) : String(path).replace(/\[(\w+)\]/g, ".$1").split(".").filter(Boolean);
+  const lodash = {};
+  const lodashGet = (value, path, fallback) => pathParts(path).reduce((current, key) => current?.[key], value) ?? fallback;
+  const lodashSet = (value, path, next) => {
+    const parts = pathParts(path);
+    let current = value;
+    parts.forEach((part, index) => {
+      if (index === parts.length - 1) current[part] = next;
+      else current = current[part] && typeof current[part] === "object" ? current[part] : current[part] = {};
+    });
+    return value;
+  };
+  const deepMerge = (target, source) => {
+    Object.entries(source).forEach(([key, value]) => {
+      if (value && typeof value === "object" && !Array.isArray(value)) target[key] = deepMerge(target[key] && typeof target[key] === "object" && !Array.isArray(target[key]) ? target[key] : {}, value);
+      else target[key] = runtime.structuredClone(value);
+    });
+    return target;
+  };
+  const words = (value) => String(value).trim().replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[^A-Za-z0-9]+/).filter(Boolean).map((word) => word.toLowerCase());
+  Object.assign(lodash, {
+    clone: (value) => Array.isArray(value) ? [...value] : value && typeof value === "object" ? { ...value } : value,
+    cloneDeep: runtime.structuredClone,
+    get: lodashGet,
+    set: lodashSet,
+    has: (value, path) => lodashGet(value, path, void 0) !== void 0,
+    merge: (target, ...sources) => sources.reduce(deepMerge, target),
+    isEqual: same,
+    isEmpty: (value) => value == null || (typeof value === "string" || Array.isArray(value) ? value.length === 0 : typeof value === "object" ? Object.keys(value).length === 0 : true),
+    isArray: Array.isArray,
+    isObject: (value) => value !== null && typeof value === "object",
+    map: (value, callback) => Array.isArray(value) ? value.map(callback) : Object.entries(value ?? {}).map(([key, item]) => callback(item, key)),
+    filter: (value, callback) => Array.from(value ?? []).filter(callback),
+    find: (value, callback) => Array.from(value ?? []).find(callback),
+    reduce: (value, callback, initial) => Array.from(value ?? []).reduce(callback, initial),
+    each: (value, callback) => {
+      (Array.isArray(value) ? value.map((item, index) => [index, item]) : Object.entries(value ?? {})).forEach(([key, item]) => callback(item, key));
+      return value;
+    },
+    forEach: (value, callback) => {
+      (Array.isArray(value) ? value.map((item, index) => [index, item]) : Object.entries(value ?? {})).forEach(([key, item]) => callback(item, key));
+      return value;
+    },
+    keys: (value) => Object.keys(value ?? {}),
+    values: (value) => Object.values(value ?? {}),
+    pick: (value, names) => Object.fromEntries(names.filter((name) => Object.prototype.hasOwnProperty.call(value, name)).map((name) => [name, value[name]])),
+    omit: (value, names) => Object.fromEntries(Object.entries(value).filter(([name]) => !names.includes(name))),
+    groupBy: (value, callback) => Array.from(value ?? []).reduce((groups, item) => {
+      const key = String(typeof callback === "function" ? callback(item) : lodashGet(item, callback));
+      (groups[key] ??= []).push(item);
+      return groups;
+    }, {}),
+    uniq: (value) => [...new Set(value)],
+    uniqBy: (value, callback) => {
+      const seen = /* @__PURE__ */ new Set();
+      return Array.from(value ?? []).filter((item) => {
+        const key = typeof callback === "function" ? callback(item) : lodashGet(item, callback);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    },
+    flatten: (value) => Array.from(value ?? []).flat(),
+    flattenDeep: (value) => Array.from(value ?? []).flat(Infinity),
+    sortBy: (value, callback) => [...value].sort((left, right) => {
+      const a = typeof callback === "function" ? callback(left) : lodashGet(left, callback);
+      const b = typeof callback === "function" ? callback(right) : lodashGet(right, callback);
+      return a < b ? -1 : a > b ? 1 : 0;
+    }),
+    camelCase: (value) => words(value).map((word, index) => index ? word[0].toUpperCase() + word.slice(1) : word).join(""),
+    kebabCase: (value) => words(value).join("-"),
+    snakeCase: (value) => words(value).join("_"),
+    startCase: (value) => words(value).map((word) => word[0].toUpperCase() + word.slice(1)).join(" ")
+  });
+  const querystring = {
+    escape: encodeURIComponent,
+    unescape: decodeURIComponent,
+    parse(value, separator = "&", equals = "=") {
+      const output = {};
+      boundedText(value).split(separator).filter(Boolean).slice(0, 1e4).forEach((part) => {
+        const index = part.indexOf(equals);
+        const key = decodeURIComponent((index < 0 ? part : part.slice(0, index)).replace(/\+/g, " "));
+        const item = decodeURIComponent((index < 0 ? "" : part.slice(index + equals.length)).replace(/\+/g, " "));
+        output[key] = output[key] === void 0 ? item : Array.isArray(output[key]) ? [...output[key], item] : [output[key], item];
+      });
+      return output;
+    },
+    stringify(value, separator = "&", equals = "=") {
+      return Object.entries(value ?? {}).flatMap(([key, item]) => (Array.isArray(item) ? item : [item]).map((entry) => `${encodeURIComponent(key)}${equals}${encodeURIComponent(String(entry ?? ""))}`)).join(separator);
+    }
+  };
+  const parseCsv = (input, options = {}) => {
+    const text2 = boundedText(input);
+    const delimiter = String(options.delimiter ?? ",");
+    const records = [];
+    let row = [];
+    let value = "";
+    let quoted = false;
+    for (let index = 0; index < text2.length; index += 1) {
+      const character = text2[index];
+      if (character === '"' && quoted && text2[index + 1] === '"') {
+        value += '"';
+        index += 1;
+      } else if (character === '"') quoted = !quoted;
+      else if (!quoted && text2.startsWith(delimiter, index)) {
+        row.push(options.trim ? value.trim() : value);
+        value = "";
+        index += delimiter.length - 1;
+      } else if (!quoted && (character === "\n" || character === "\r")) {
+        if (character === "\r" && text2[index + 1] === "\n") index += 1;
+        row.push(options.trim ? value.trim() : value);
+        value = "";
+        if (!(options.skip_empty_lines && row.every((item) => !item))) records.push(row);
+        row = [];
+        if (records.length > 1e5) throw new Error("CSV input exceeds 100,000 records.");
+      } else value += character;
+    }
+    if (quoted) throw new Error("CSV input has an unterminated quoted field.");
+    if (value || row.length) {
+      row.push(options.trim ? value.trim() : value);
+      if (!(options.skip_empty_lines && row.every((item) => !item))) records.push(row);
+    }
+    if (options.columns) {
+      const headers = Array.isArray(options.columns) ? options.columns.map(String) : records.shift() ?? [];
+      return records.map((record5) => Object.fromEntries(headers.map((header, index) => [header, record5[index] ?? ""])));
+    }
+    return records;
+  };
+  const csvParse = Object.assign((input, options, callback) => {
+    const done = typeof options === "function" ? options : callback;
+    try {
+      const result = parseCsv(input, typeof options === "object" ? options : {});
+      if (done) {
+        runtime.setTimeout(() => done(void 0, result), 0);
+        return void 0;
+      }
+      return result;
+    } catch (error) {
+      if (done) {
+        runtime.setTimeout(() => done(error instanceof Error ? error : new Error(String(error))), 0);
+        return void 0;
+      }
+      throw error;
+    }
+  }, { parse: parseCsv, sync: parseCsv });
+  const validateSchema = (schema, data, schemas, path = "", depth = 0) => {
+    if (depth > 100) return [{ instancePath: path, message: "schema nesting exceeds 100 levels" }];
+    if (typeof schema === "boolean") return schema ? [] : [{ instancePath: path, message: "boolean schema rejected value" }];
+    if (!schema || typeof schema !== "object") return [];
+    const source = schema;
+    if (typeof source.$ref === "string") {
+      if (source.$ref.startsWith("#/")) return [{ instancePath: path, message: "local $ref requires compilation through a root schema" }];
+      const referenced = schemas.get(source.$ref);
+      return referenced ? validateSchema(referenced, data, schemas, path, depth + 1) : [{ instancePath: path, message: `unresolved reference ${source.$ref}` }];
+    }
+    const errors = [];
+    const types = Array.isArray(source.type) ? source.type : source.type ? [source.type] : [];
+    const matchesType = (type) => type === "null" ? data === null : type === "array" ? Array.isArray(data) : type === "integer" ? Number.isInteger(data) : type === "number" ? typeof data === "number" && Number.isFinite(data) : type === "object" ? Boolean(data) && typeof data === "object" && !Array.isArray(data) : typeof data === type;
+    if (types.length && !types.some(matchesType)) errors.push({ instancePath: path, message: `must be ${types.join(" or ")}` });
+    if (source.const !== void 0 && !same(data, source.const)) errors.push({ instancePath: path, message: "must equal constant" });
+    if (Array.isArray(source.enum) && !source.enum.some((value) => same(value, data))) errors.push({ instancePath: path, message: "must be equal to one of the allowed values" });
+    if (typeof data === "string") {
+      if (typeof source.minLength === "number" && data.length < source.minLength) errors.push({ instancePath: path, message: `must NOT have fewer than ${source.minLength} characters` });
+      if (typeof source.maxLength === "number" && data.length > source.maxLength) errors.push({ instancePath: path, message: `must NOT have more than ${source.maxLength} characters` });
+      if (typeof source.pattern === "string" && !new RegExp(source.pattern).test(data)) errors.push({ instancePath: path, message: `must match pattern ${source.pattern}` });
+      if (source.format === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data)) errors.push({ instancePath: path, message: "must match format email" });
+      if (source.format === "uri" || source.format === "url") {
+        try {
+          new runtime.URL(data);
+        } catch {
+          errors.push({ instancePath: path, message: `must match format ${source.format}` });
+        }
+      }
+    }
+    if (typeof data === "number") {
+      if (typeof source.minimum === "number" && data < source.minimum) errors.push({ instancePath: path, message: `must be >= ${source.minimum}` });
+      if (typeof source.maximum === "number" && data > source.maximum) errors.push({ instancePath: path, message: `must be <= ${source.maximum}` });
+    }
+    if (Array.isArray(data)) {
+      if (typeof source.minItems === "number" && data.length < source.minItems) errors.push({ instancePath: path, message: `must NOT have fewer than ${source.minItems} items` });
+      if (typeof source.maxItems === "number" && data.length > source.maxItems) errors.push({ instancePath: path, message: `must NOT have more than ${source.maxItems} items` });
+      if (source.uniqueItems && new Set(data.map((item) => JSON.stringify(item))).size !== data.length) errors.push({ instancePath: path, message: "must NOT have duplicate items" });
+      if (source.items !== void 0) data.forEach((item, index) => errors.push(...validateSchema(source.items, item, schemas, `${path}/${index}`, depth + 1)));
+    }
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      const object = data;
+      const required = Array.isArray(source.required) ? source.required.map(String) : [];
+      required.filter((name) => !Object.prototype.hasOwnProperty.call(object, name)).forEach((name) => errors.push({ instancePath: path, message: `must have required property '${name}'` }));
+      const properties = source.properties && typeof source.properties === "object" ? source.properties : {};
+      Object.entries(properties).filter(([name]) => Object.prototype.hasOwnProperty.call(object, name)).forEach(([name, child]) => errors.push(...validateSchema(child, object[name], schemas, `${path}/${name}`, depth + 1)));
+      if (source.additionalProperties === false) Object.keys(object).filter((name) => !Object.prototype.hasOwnProperty.call(properties, name)).forEach((name) => errors.push({ instancePath: `${path}/${name}`, message: "must NOT have additional properties" }));
+    }
+    if (Array.isArray(source.allOf)) source.allOf.forEach((item) => errors.push(...validateSchema(item, data, schemas, path, depth + 1)));
+    if (Array.isArray(source.anyOf) && !source.anyOf.some((item) => validateSchema(item, data, schemas, path, depth + 1).length === 0)) errors.push({ instancePath: path, message: "must match a schema in anyOf" });
+    if (Array.isArray(source.oneOf) && source.oneOf.filter((item) => validateSchema(item, data, schemas, path, depth + 1).length === 0).length !== 1) errors.push({ instancePath: path, message: "must match exactly one schema in oneOf" });
+    if (source.not && validateSchema(source.not, data, schemas, path, depth + 1).length === 0) errors.push({ instancePath: path, message: "must NOT be valid" });
+    return errors.slice(0, 1e3);
+  };
+  class Ajv {
+    schemas = /* @__PURE__ */ new Map();
+    errors = null;
+    constructor(options) {
+      void options;
+    }
+    addSchema(schema, key) {
+      const id = key ?? schema?.$id;
+      if (id) this.schemas.set(String(id), schema);
+      return this;
+    }
+    getSchema(key) {
+      const schema = this.schemas.get(key);
+      return schema === void 0 ? void 0 : this.compile(schema);
+    }
+    compile(schema) {
+      const validate = ((data) => {
+        const errors = validateSchema(schema, data, this.schemas);
+        validate.errors = errors.length ? errors : null;
+        this.errors = validate.errors;
+        return errors.length === 0;
+      });
+      validate.errors = null;
+      return validate;
+    }
+    validate(schema, data) {
+      const candidate = typeof schema === "string" ? this.schemas.get(schema) : schema;
+      if (candidate === void 0) throw new Error(`Unknown schema '${schema}'`);
+      return this.compile(candidate)(data);
+    }
+  }
+  Object.assign(Ajv, { default: Ajv });
+  const tv4Schemas = /* @__PURE__ */ new Map();
+  const tv4 = {
+    error: null,
+    addSchema(key, schema) {
+      if (typeof key === "string") tv4Schemas.set(key, schema);
+      else if (key.id || key.$id) tv4Schemas.set(String(key.id ?? key.$id), key);
+      return tv4;
+    },
+    getSchema: (key) => tv4Schemas.get(key),
+    validate(data, schema) {
+      const errors = validateSchema(schema, data, tv4Schemas);
+      tv4.error = errors[0] ?? null;
+      return errors.length === 0;
+    },
+    validateResult(data, schema) {
+      const errors = validateSchema(schema, data, tv4Schemas);
+      return { valid: errors.length === 0, error: errors[0] ?? null, missing: [] };
+    },
+    validateMultiple(data, schema) {
+      const errors = validateSchema(schema, data, tv4Schemas);
+      return { valid: errors.length === 0, errors, missing: [] };
+    },
+    reset() {
+      tv4Schemas.clear();
+      tv4.error = null;
+    }
+  };
+  const bytesToHex = (bytes) => [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+  const hexToBytes = (hex) => new Uint8Array((hex.match(/.{1,2}/g) ?? []).map((value) => parseInt(value, 16)));
+  const bytesToBase64 = (bytes) => runtime.btoa([...bytes].map((value) => String.fromCharCode(value)).join(""));
+  const base64ToBytes = (value) => new Uint8Array([...runtime.atob(value)].map((character) => character.charCodeAt(0)));
+  const wordArray = (bytes) => ({ sigBytes: bytes.length, words: Array.from({ length: Math.ceil(bytes.length / 4) }, (_, index) => (bytes[index * 4] ?? 0) << 24 | (bytes[index * 4 + 1] ?? 0) << 16 | (bytes[index * 4 + 2] ?? 0) << 8 | (bytes[index * 4 + 3] ?? 0)), bytes, toString(encoder) {
+    return (encoder ?? cryptoEnc.Hex).stringify(this);
+  } });
+  const inputBytes = (value) => value && typeof value === "object" && "bytes" in value ? value.bytes : new runtime.TextEncoder().encode(boundedText(value));
+  const sha256Hex = (input) => {
+    const bytes = inputBytes(input);
+    const k = new Uint32Array([1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298]);
+    const length = bytes.length;
+    const paddedLength = Math.ceil((length + 9) / 64) * 64;
+    const padded = new Uint8Array(paddedLength);
+    padded.set(bytes);
+    padded[length] = 128;
+    const bits = length * 8;
+    for (let index = 0; index < 8; index += 1) padded[paddedLength - 1 - index] = Math.floor(bits / 2 ** (index * 8)) & 255;
+    const hash = new Uint32Array([1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225]);
+    const rotate = (value, amount) => value >>> amount | value << 32 - amount;
+    for (let offset = 0; offset < padded.length; offset += 64) {
+      const w = new Uint32Array(64);
+      for (let index = 0; index < 16; index += 1) w[index] = padded[offset + index * 4] << 24 | padded[offset + index * 4 + 1] << 16 | padded[offset + index * 4 + 2] << 8 | padded[offset + index * 4 + 3];
+      for (let index = 16; index < 64; index += 1) {
+        const a2 = rotate(w[index - 15], 7) ^ rotate(w[index - 15], 18) ^ w[index - 15] >>> 3;
+        const b2 = rotate(w[index - 2], 17) ^ rotate(w[index - 2], 19) ^ w[index - 2] >>> 10;
+        w[index] = w[index - 16] + a2 + w[index - 7] + b2 >>> 0;
+      }
+      let [a, b, c, d, e, f, g, h] = hash;
+      for (let index = 0; index < 64; index += 1) {
+        const s1 = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25);
+        const choice = e & f ^ ~e & g;
+        const t1 = h + s1 + choice + k[index] + w[index] >>> 0;
+        const s0 = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22);
+        const majority = a & b ^ a & c ^ b & c;
+        const t2 = s0 + majority >>> 0;
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1 >>> 0;
+        d = c;
+        c = b;
+        b = a;
+        a = t1 + t2 >>> 0;
+      }
+      [a, b, c, d, e, f, g, h].forEach((value, index) => {
+        hash[index] = hash[index] + value >>> 0;
+      });
+    }
+    return [...hash].map((value) => value.toString(16).padStart(8, "0")).join("");
+  };
+  const cryptoEnc = {
+    Hex: { stringify: (value) => bytesToHex(value.bytes), parse: (value) => wordArray(hexToBytes(value)) },
+    Utf8: { stringify: (value) => new runtime.TextDecoder().decode(value.bytes), parse: (value) => wordArray(new runtime.TextEncoder().encode(boundedText(value))) },
+    Base64: { stringify: (value) => bytesToBase64(value.bytes), parse: (value) => wordArray(base64ToBytes(value)) }
+  };
+  const cryptoJs = {
+    enc: cryptoEnc,
+    lib: { WordArray: { create: (wordsOrBytes, sigBytes) => {
+      if (wordsOrBytes instanceof Uint8Array) return wordArray(wordsOrBytes.slice(0, sigBytes));
+      const values = wordsOrBytes ?? [];
+      const bytes = new Uint8Array(sigBytes ?? values.length * 4);
+      values.forEach((word, index) => {
+        bytes[index * 4] = word >>> 24;
+        bytes[index * 4 + 1] = word >>> 16;
+        bytes[index * 4 + 2] = word >>> 8;
+        bytes[index * 4 + 3] = word;
+      });
+      return wordArray(bytes);
+    }, random: (length) => wordArray(runtime.crypto.getRandomValues(new Uint8Array(Math.min(1e6, Math.max(0, length))))) } },
+    SHA256: (value) => wordArray(hexToBytes(sha256Hex(value)))
+  };
+  const parseMarkup = (input) => {
+    const root = { type: "root", name: "root", attrs: {}, children: [] };
+    const stack = [root];
+    const tokens = boundedText(input).match(/<!--[\s\S]*?-->|<\/?[^>]+>|[^<]+/g) ?? [];
+    tokens.slice(0, 1e5).forEach((token) => {
+      if (token.startsWith("<!--")) return;
+      if (token.startsWith("</")) {
+        if (stack.length > 1) stack.pop();
+        return;
+      }
+      if (token.startsWith("<")) {
+        const match = token.match(/^<\s*([^\s/>]+)([\s\S]*?)\/?\s*>$/);
+        if (!match) return;
+        const node = { type: "tag", name: match[1].toLowerCase(), attrs: {}, children: [], parent: stack.at(-1) };
+        match[2].replace(/([^\s=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g, (_all, name, quoted, single, plain) => {
+          node.attrs[String(name).toLowerCase()] = String(quoted ?? single ?? plain ?? "");
+          return "";
+        });
+        stack.at(-1).children.push(node);
+        if (!token.endsWith("/>") && !/^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/.test(node.name)) stack.push(node);
+      } else if (token) stack.at(-1).children.push({ type: "text", name: "#text", attrs: {}, children: [], parent: stack.at(-1), text: token });
+    });
+    return root;
+  };
+  const descendants = (node) => node.children.flatMap((child) => [child, ...descendants(child)]);
+  const nodeText = (node) => node.type === "text" ? node.text ?? "" : node.children.map(nodeText).join("");
+  const serializeNode = (node) => node.type === "text" ? node.text ?? "" : node.type === "root" ? node.children.map(serializeNode).join("") : `<${node.name}${Object.entries(node.attrs).map(([name, value]) => ` ${name}="${value}"`).join("")}>${node.children.map(serializeNode).join("")}</${node.name}>`;
+  const matchesSelector = (node, selector) => {
+    if (node.type !== "tag") return false;
+    const attr = selector.match(/\[([^=\]]+)(?:=['"]?([^'"\]]+)['"]?)?\]/);
+    if (attr && (!(attr[1].toLowerCase() in node.attrs) || attr[2] !== void 0 && node.attrs[attr[1].toLowerCase()] !== attr[2])) return false;
+    const id = selector.match(/#([\w-]+)/)?.[1];
+    if (id && node.attrs.id !== id) return false;
+    const classes = [...selector.matchAll(/\.([\w-]+)/g)].map((match) => match[1]);
+    const classNames = (node.attrs.class ?? "").split(/\s+/);
+    if (classes.some((name) => !classNames.includes(name))) return false;
+    const tag = selector.match(/^([A-Za-z][\w-]*)/)?.[1];
+    return !tag || node.name === tag.toLowerCase();
+  };
+  const queryNodes = (root, selector) => selector.split(",").flatMap((group) => {
+    const chain = group.trim().split(/\s+/);
+    return descendants(root).filter((node) => {
+      if (!matchesSelector(node, chain.at(-1))) return false;
+      let ancestor = node.parent;
+      for (let index = chain.length - 2; index >= 0; index -= 1) {
+        while (ancestor && !matchesSelector(ancestor, chain[index])) ancestor = ancestor.parent;
+        if (!ancestor) return false;
+        ancestor = ancestor.parent;
+      }
+      return true;
+    });
+  });
+  const cheerioLoad = (input) => {
+    const root = parseMarkup(input);
+    const wrap = (nodes) => {
+      const selection = {
+        length: nodes.length,
+        get: (index) => index === void 0 ? nodes : nodes[index < 0 ? nodes.length + index : index],
+        toArray: () => [...nodes],
+        first: () => wrap(nodes.slice(0, 1)),
+        last: () => wrap(nodes.slice(-1)),
+        eq: (index) => wrap(nodes.slice(index < 0 ? nodes.length + index : index, (index < 0 ? nodes.length + index : index) + 1)),
+        text: (value) => {
+          if (value === void 0) return nodes.map(nodeText).join("");
+          nodes.forEach((node) => {
+            node.children = [{ type: "text", name: "#text", attrs: {}, children: [], parent: node, text: String(value) }];
+          });
+          return selection;
+        },
+        html: (value) => {
+          if (value === void 0) return nodes[0]?.children.map(serializeNode).join("") ?? null;
+          nodes.forEach((node) => {
+            const parsed = parseMarkup(value);
+            node.children = parsed.children.map((child) => ({ ...child, parent: node }));
+          });
+          return selection;
+        },
+        attr: (name, value) => {
+          if (value === void 0) return nodes[0]?.attrs[name.toLowerCase()];
+          nodes.forEach((node) => {
+            node.attrs[name.toLowerCase()] = String(value);
+          });
+          return selection;
+        },
+        find: (selector) => wrap(nodes.flatMap((node) => queryNodes(node, selector))),
+        each: (callback) => {
+          nodes.forEach((node, index) => callback(index, node));
+          return selection;
+        },
+        map: (callback) => {
+          const values = nodes.map((node, index) => callback(index, node));
+          return { get: () => values, toArray: () => values };
+        }
+      };
+      nodes.forEach((node, index) => {
+        selection[index] = node;
+      });
+      return selection;
+    };
+    const select = ((selectorOrNode) => typeof selectorOrNode === "string" ? wrap(queryNodes(root, selectorOrNode)) : wrap([selectorOrNode]));
+    select.root = () => wrap([root]);
+    select.html = () => serializeNode(root);
+    select.text = () => nodeText(root);
+    return select;
+  };
+  const cheerio = { load: cheerioLoad };
+  const xmlNodeObject = (node, options) => {
+    const children = node.children.filter((child) => child.type === "tag");
+    const text2 = node.children.filter((child) => child.type === "text").map(nodeText).join("").trim();
+    if (!children.length && !Object.keys(node.attrs).length) return text2;
+    const output = {};
+    if (Object.keys(node.attrs).length) output[String(options.attrkey ?? "$")] = { ...node.attrs };
+    if (text2) output[String(options.charkey ?? "_")] = text2;
+    children.forEach((child) => {
+      const value = xmlNodeObject(child, options);
+      const key = child.name;
+      if (output[key] === void 0) output[key] = options.explicitArray === false ? value : [value];
+      else if (Array.isArray(output[key])) output[key].push(value);
+      else output[key] = [output[key], value];
+    });
+    return output;
+  };
+  const parseXml = (input, options = {}) => {
+    const root = parseMarkup(input);
+    const first = root.children.find((child) => child.type === "tag");
+    if (!first) throw new Error("XML contains no root element.");
+    return { [first.name]: xmlNodeObject(first, options) };
+  };
+  class XmlParser {
+    constructor(options = {}) {
+      this.options = options;
+    }
+    options;
+    parseString(input, callback) {
+      try {
+        callback(null, parseXml(input, this.options));
+      } catch (error) {
+        callback(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+    parseStringPromise(input) {
+      return Promise.resolve(parseXml(input, this.options));
+    }
+  }
+  class XmlBuilder {
+    constructor(options = {}) {
+      this.options = options;
+    }
+    options;
+    buildObject(value) {
+      void this.options;
+      const build = (name2, item2) => {
+        if (Array.isArray(item2)) return item2.map((entry) => build(name2, entry)).join("");
+        if (item2 && typeof item2 === "object") {
+          const object = item2;
+          const attrs = object.$ && typeof object.$ === "object" ? Object.entries(object.$).map(([key, entry]) => ` ${key}="${String(entry)}"`).join("") : "";
+          return `<${name2}${attrs}>${object._ ?? ""}${Object.entries(object).filter(([key]) => key !== "$" && key !== "_").map(([key, entry]) => build(key, entry)).join("")}</${name2}>`;
+        }
+        return `<${name2}>${String(item2 ?? "")}</${name2}>`;
+      };
+      const [name, item] = Object.entries(value)[0] ?? ["root", ""];
+      return build(name, item);
+    }
+  }
+  const xml2js = { Parser: XmlParser, Builder: XmlBuilder, parseString: (input, options, callback) => {
+    const done = typeof options === "function" ? options : callback;
+    return new XmlParser(typeof options === "object" ? options : {}).parseString(input, done ?? (() => void 0));
+  }, parseStringPromise: (input, options) => Promise.resolve(parseXml(input, options)), processors: {} };
+  const momentFormat = (date, pattern = "YYYY-MM-DDTHH:mm:ssZ", utc = false) => {
+    const get = (name) => date[`get${utc ? "UTC" : ""}${name}`]();
+    const offset = utc ? 0 : -date.getTimezoneOffset();
+    const zone = offset === 0 ? "+00:00" : `${offset < 0 ? "-" : "+"}${String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0")}:${String(Math.abs(offset) % 60).padStart(2, "0")}`;
+    return pattern.replace(/YYYY|MM|DD|HH|mm|ss|SSS|X|x|Z/g, (token) => ({ YYYY: String(get("FullYear")), MM: String(get("Month") + 1).padStart(2, "0"), DD: String(get("Date")).padStart(2, "0"), HH: String(get("Hours")).padStart(2, "0"), mm: String(get("Minutes")).padStart(2, "0"), ss: String(get("Seconds")).padStart(2, "0"), SSS: String(get("Milliseconds")).padStart(3, "0"), X: String(Math.floor(date.getTime() / 1e3)), x: String(date.getTime()), Z: zone })[token]);
+  };
+  const moment = ((input) => {
+    const date = input && typeof input === "object" && "_date" in input ? new Date(input._date) : input === void 0 ? /* @__PURE__ */ new Date() : new Date(input);
+    let utc = false;
+    const api = { _date: date };
+    const unitMs = (unit) => /^s/.test(String(unit)) ? 1e3 : /^m(?!o)/.test(String(unit)) ? 6e4 : /^h/.test(String(unit)) ? 36e5 : /^d/.test(String(unit)) ? 864e5 : /^w/.test(String(unit)) ? 6048e5 : 0;
+    Object.assign(api, { isValid: () => !Number.isNaN(date.getTime()), toDate: () => new Date(date), toISOString: () => date.toISOString(), valueOf: () => date.getTime(), unix: () => Math.floor(date.getTime() / 1e3), format: (pattern) => momentFormat(date, pattern, utc), clone: () => moment(api), utc: () => {
+      utc = true;
+      return api;
+    }, local: () => {
+      utc = false;
+      return api;
+    }, add: (amount, unit) => {
+      if (/^mo/.test(unit)) date.setMonth(date.getMonth() + amount);
+      else if (/^y/.test(unit)) date.setFullYear(date.getFullYear() + amount);
+      else date.setTime(date.getTime() + amount * unitMs(unit));
+      return api;
+    }, subtract: (amount, unit) => {
+      api.add(-amount, unit);
+      return api;
+    }, diff: (other, unit = "milliseconds") => {
+      const difference = date.getTime() - moment(other).valueOf();
+      const divisor = unitMs(unit) || 1;
+      return Math.trunc(difference / divisor);
+    } });
+    return api;
+  });
+  moment.utc = (input) => moment(input).utc();
+  moment.unix = (value) => moment(value * 1e3);
+  moment.isMoment = (value) => Boolean(value && typeof value === "object" && "_date" in value);
+  moment.duration = (value, unit = "milliseconds") => ({ asMilliseconds: () => value * (/^s/.test(unit) ? 1e3 : /^m/.test(unit) ? 6e4 : /^h/.test(unit) ? 36e5 : /^d/.test(unit) ? 864e5 : 1), humanize: () => `${value} ${unit}` });
+  class PropertyList {
+    members;
+    constructor(_parent, initial = []) {
+      this.members = Array.isArray(initial) ? initial.map((item) => item) : [];
+    }
+    add(item) {
+      this.members.push(item);
+      return item;
+    }
+    get(id) {
+      return this.members.find((item) => item.id === id || item.key === id || item.name === id);
+    }
+    remove(id) {
+      const index = this.members.findIndex((item) => item.id === id || item.key === id || item.name === id);
+      return index < 0 ? void 0 : this.members.splice(index, 1)[0];
+    }
+    all() {
+      return [...this.members];
+    }
+    each(callback) {
+      this.members.forEach(callback);
+    }
+    toJSON() {
+      return this.members.map((item) => typeof item.toJSON === "function" ? item.toJSON() : item);
+    }
+    get count() {
+      return this.members.length;
+    }
+  }
+  class Variable {
+    id;
+    key;
+    value;
+    type;
+    constructor(input = {}) {
+      this.id = String(input.id ?? runtime.crypto.randomUUID());
+      this.key = String(input.key ?? input.name ?? "");
+      this.value = input.value ?? "";
+      this.type = String(input.type ?? "any");
+    }
+    toJSON() {
+      return { id: this.id, key: this.key, value: this.value, type: this.type };
+    }
+  }
+  class Header {
+    id;
+    key;
+    value;
+    disabled;
+    constructor(input = {}) {
+      const source = typeof input === "string" ? { key: input.split(":")[0], value: input.split(":").slice(1).join(":").trim() } : input;
+      this.id = String(source.id ?? runtime.crypto.randomUUID());
+      this.key = String(source.key ?? source.name ?? "");
+      this.value = String(source.value ?? "");
+      this.disabled = source.disabled === true;
+    }
+    toJSON() {
+      return { key: this.key, value: this.value, disabled: this.disabled };
+    }
+  }
+  class Url {
+    raw;
+    constructor(input = "") {
+      this.raw = typeof input === "string" ? input : String(input?.raw ?? "");
+    }
+    toString() {
+      return this.raw;
+    }
+    toJSON() {
+      return this.raw;
+    }
+  }
+  class RequestBody {
+    mode;
+    raw;
+    constructor(input = {}) {
+      this.mode = String(input.mode ?? "raw");
+      this.raw = String(input.raw ?? "");
+      Object.assign(this, input);
+    }
+    toJSON() {
+      return { ...this };
+    }
+  }
+  class Request {
+    id;
+    name;
+    method;
+    url;
+    headers;
+    body;
+    constructor(input = {}) {
+      this.id = String(input.id ?? runtime.crypto.randomUUID());
+      this.name = String(input.name ?? "");
+      this.method = String(input.method ?? "GET");
+      this.url = new Url(input.url);
+      this.headers = new PropertyList(this, (Array.isArray(input.header) ? input.header : Array.isArray(input.headers) ? input.headers : []).map((item) => new Header(item)));
+      this.body = new RequestBody(input.body);
+    }
+    toJSON() {
+      return { id: this.id, name: this.name, method: this.method, url: this.url.toJSON(), header: this.headers.toJSON(), body: this.body.toJSON() };
+    }
+  }
+  class Response {
+    id;
+    name;
+    code;
+    status;
+    body;
+    headers;
+    constructor(input = {}) {
+      this.id = String(input.id ?? runtime.crypto.randomUUID());
+      this.name = String(input.name ?? "");
+      this.code = Number(input.code ?? 0);
+      this.status = String(input.status ?? "");
+      this.body = String(input.body ?? "");
+      this.headers = new PropertyList(this, (Array.isArray(input.header) ? input.header : []).map((item) => new Header(item)));
+    }
+    toJSON() {
+      return { id: this.id, name: this.name, code: this.code, status: this.status, body: this.body, header: this.headers.toJSON() };
+    }
+  }
+  class Item {
+    id;
+    name;
+    request;
+    items;
+    constructor(input = {}) {
+      this.id = String(input.id ?? runtime.crypto.randomUUID());
+      this.name = String(input.name ?? "");
+      if (input.request) this.request = new Request(input.request);
+      if (Array.isArray(input.item)) this.items = new PropertyList(this, input.item.map((item) => new Item(item)));
+    }
+    toJSON() {
+      return { id: this.id, name: this.name, ...this.request ? { request: this.request.toJSON() } : {}, ...this.items ? { item: this.items.toJSON() } : {} };
+    }
+  }
+  class Collection {
+    id;
+    name;
+    items;
+    variables;
+    constructor(input = {}) {
+      const info = input.info && typeof input.info === "object" ? input.info : {};
+      this.id = String(info._postman_id ?? input.id ?? runtime.crypto.randomUUID());
+      this.name = String(info.name ?? input.name ?? "");
+      this.items = new PropertyList(this, (Array.isArray(input.item) ? input.item : []).map((item) => new Item(item)));
+      this.variables = new PropertyList(this, (Array.isArray(input.variable) ? input.variable : []).map((item) => new Variable(item)));
+    }
+    toJSON() {
+      return { info: { _postman_id: this.id, name: this.name }, item: this.items.toJSON(), variable: this.variables.toJSON() };
+    }
+  }
+  const postmanCollection = { Collection, Item, ItemGroup: Item, Request, Response, Header, HeaderList: PropertyList, Variable, VariableList: PropertyList, PropertyList, Url, RequestBody };
+  class BufferPolyfill extends Uint8Array {
+    static from(value, encodingOrMap = "utf8", thisArg) {
+      if (typeof value === "string") return new BufferPolyfill(encodingOrMap === "base64" ? base64ToBytes(value) : encodingOrMap === "hex" ? hexToBytes(value) : new runtime.TextEncoder().encode(value));
+      if (value instanceof ArrayBuffer) return new BufferPolyfill(new Uint8Array(value));
+      const values = Array.from(value, typeof encodingOrMap === "function" ? encodingOrMap : (item) => Number(item), thisArg);
+      return new BufferPolyfill(values);
+    }
+    static alloc(length, fill = 0) {
+      const buffer = new BufferPolyfill(Math.min(5e6, Math.max(0, length)));
+      buffer.fill(typeof fill === "number" ? fill : 0);
+      return buffer;
+    }
+    static concat(values) {
+      return BufferPolyfill.from(values.flatMap((value) => [...value]));
+    }
+    static isBuffer(value) {
+      return value instanceof BufferPolyfill;
+    }
+    static byteLength(value) {
+      return new runtime.TextEncoder().encode(value).length;
+    }
+    toString(encoding = "utf8") {
+      return encoding === "hex" ? bytesToHex(this) : encoding === "base64" ? bytesToBase64(this) : new runtime.TextDecoder().decode(this);
+    }
+  }
+  class EventEmitter {
+    listeners = /* @__PURE__ */ new Map();
+    on(name, callback) {
+      const values = this.listeners.get(name) ?? [];
+      values.push(callback);
+      this.listeners.set(name, values);
+      return this;
+    }
+    addListener(name, callback) {
+      return this.on(name, callback);
+    }
+    once(name, callback) {
+      const wrapped = (...args2) => {
+        this.off(name, wrapped);
+        callback(...args2);
+      };
+      return this.on(name, wrapped);
+    }
+    off(name, callback) {
+      this.listeners.set(name, (this.listeners.get(name) ?? []).filter((item) => item !== callback));
+      return this;
+    }
+    removeListener(name, callback) {
+      return this.off(name, callback);
+    }
+    removeAllListeners(name) {
+      if (name === void 0) this.listeners.clear();
+      else this.listeners.delete(name);
+      return this;
+    }
+    emit(name, ...args2) {
+      (this.listeners.get(name) ?? []).slice().forEach((callback) => callback(...args2));
+      return (this.listeners.get(name)?.length ?? 0) > 0;
+    }
+    listenerCount(name) {
+      return this.listeners.get(name)?.length ?? 0;
+    }
+  }
+  const pathModule = {
+    sep: "/",
+    delimiter: ":",
+    normalize: (value) => {
+      const absolute = value.startsWith("/");
+      const trailing = value.length > 1 && value.endsWith("/");
+      const output = [];
+      value.split("/").forEach((part) => {
+        if (!part || part === ".") return;
+        if (part === "..") {
+          if (output.length && output.at(-1) !== "..") output.pop();
+          else if (!absolute) output.push("..");
+        } else output.push(part);
+      });
+      const normalized = `${absolute ? "/" : ""}${output.join("/")}` || (absolute ? "/" : ".");
+      return trailing && normalized !== "/" && normalized !== "." ? `${normalized}/` : normalized;
+    },
+    join: (...values) => pathModule.normalize(values.filter(Boolean).join("/")),
+    resolve: (...values) => {
+      let joined = "";
+      for (let index = values.length - 1; index >= 0; index -= 1) {
+        joined = `${values[index]}/${joined}`;
+        if (values[index].startsWith("/")) break;
+      }
+      return pathModule.normalize(joined.startsWith("/") ? joined : `/${joined}`);
+    },
+    dirname: (value) => value.replace(/\/[^/]*\/?$/, "") || ".",
+    basename: (value, suffix) => {
+      const name = value.split("/").filter(Boolean).at(-1) ?? "";
+      return suffix && name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+    },
+    extname: (value) => {
+      const name = value.split("/").at(-1) ?? "";
+      const index = name.lastIndexOf(".");
+      return index > 0 ? name.slice(index) : "";
+    },
+    isAbsolute: (value) => value.startsWith("/"),
+    parse: (value) => {
+      const dir = pathModule.dirname(value);
+      const base = pathModule.basename(value);
+      const ext = pathModule.extname(value);
+      return { root: value.startsWith("/") ? "/" : "", dir, base, ext, name: base.slice(0, base.length - ext.length) };
+    },
+    format: (value) => `${value.dir || value.root || ""}${value.dir || value.root ? "/" : ""}${value.base || `${value.name || ""}${value.ext || ""}`}`.replace(/\/+/g, "/")
+  };
+  const util = {
+    format: (format, ...values) => typeof format !== "string" ? [format, ...values].map((value) => typeof value === "object" ? JSON.stringify(value) : String(value)).join(" ") : boundedText(format).replace(/%[sdifoOj%]/g, (token) => {
+      if (token === "%%") return "%";
+      const value = values.shift();
+      if (token === "%d" || token === "%i") return String(parseInt(String(value), 10));
+      if (token === "%f") return String(parseFloat(String(value)));
+      if (token === "%j" || token === "%o" || token === "%O") return JSON.stringify(value);
+      return String(value);
+    }) + (values.length ? ` ${values.map(String).join(" ")}` : ""),
+    inspect: (value) => typeof value === "string" ? `'${value}'` : JSON.stringify(value, null, 2),
+    types: { isDate: (value) => value instanceof Date, isRegExp: (value) => value instanceof RegExp, isPromise: (value) => Boolean(value && typeof value.then === "function") },
+    promisify: (callback) => (...args2) => new Promise((resolve, reject) => callback(...args2, (error, value) => error ? reject(error) : resolve(value)))
+  };
+  class Readable extends EventEmitter {
+    chunks = [];
+    push(chunk) {
+      if (chunk === null) {
+        this.emit("end");
+        return false;
+      }
+      this.chunks.push(chunk);
+      this.emit("data", chunk);
+      return true;
+    }
+    pipe(destination) {
+      this.on("data", (chunk) => destination.write(chunk));
+      this.on("end", () => destination.end?.());
+      return destination;
+    }
+  }
+  class Writable extends EventEmitter {
+    chunks = [];
+    write(chunk) {
+      this.chunks.push(chunk);
+      this.emit("data", chunk);
+      return true;
+    }
+    end(chunk) {
+      if (chunk !== void 0) this.write(chunk);
+      this.emit("finish");
+    }
+  }
+  class Transform extends Readable {
+    write(chunk) {
+      return this.push(chunk);
+    }
+    end(chunk) {
+      if (chunk !== void 0) this.write(chunk);
+      this.push(null);
+    }
+  }
+  class StringDecoder {
+    decoder;
+    constructor(encoding = "utf-8") {
+      this.decoder = new runtime.TextDecoder(encoding);
+    }
+    write(value) {
+      return this.decoder.decode(value, { stream: true });
+    }
+    end(value) {
+      return (value ? this.decoder.decode(value, { stream: true }) : "") + this.decoder.decode();
+    }
+  }
+  const uuid = { v4: () => runtime.crypto.randomUUID(), v1: () => {
+    const bytes = runtime.crypto.getRandomValues(new Uint8Array(16));
+    const time = BigInt(Date.now()) * 10000n + 0x01b21dd213814000n;
+    bytes[0] = Number(time >> 24n) & 255;
+    bytes[1] = Number(time >> 16n) & 255;
+    bytes[2] = Number(time >> 8n) & 255;
+    bytes[3] = Number(time) & 255;
+    bytes[6] = bytes[6] & 15 | 16;
+    bytes[8] = bytes[8] & 63 | 128;
+    const hex = bytesToHex(bytes);
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }, validate: (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value)), version: (value) => parseInt(String(value).split("-")[2]?.[0] ?? "0", 16) };
+  const punycode = { toASCII: (value) => {
+    try {
+      return new runtime.URL(`http://${value}`).hostname;
+    } catch {
+      return value;
+    }
+  }, toUnicode: (value) => value, ucs2: { decode: (value) => [...value].map((character) => character.codePointAt(0)), encode: (values) => String.fromCodePoint(...values) }, version: "bounded" };
+  const modules = {
+    ajv: Ajv,
+    assert: assertion,
+    atob: runtime.atob,
+    btoa: runtime.btoa,
+    buffer: { Buffer: BufferPolyfill, SlowBuffer: BufferPolyfill, INSPECT_MAX_BYTES: 50 },
+    chai: { expect: runtime.expect, assert: assertion },
+    cheerio,
+    "crypto-js": cryptoJs,
+    "csv-parse": csvParse,
+    "csv-parse/sync": { parse: parseCsv },
+    "csv-parse/lib/sync": parseCsv,
+    events: Object.assign(EventEmitter, { EventEmitter, once: (emitter, name) => new Promise((resolve) => emitter.once(name, (...values) => resolve(values))) }),
+    lodash,
+    moment,
+    path: Object.assign({}, pathModule, { posix: pathModule }),
+    "postman-collection": postmanCollection,
+    punycode,
+    querystring,
+    stream: { Readable, Writable, Transform, Duplex: Transform, PassThrough: Transform },
+    "string-decoder": { StringDecoder },
+    timers: { setTimeout: runtime.setTimeout, clearTimeout: runtime.clearTimeout, setInterval: runtime.setInterval, clearInterval: runtime.clearInterval },
+    tv4,
+    url: { URL: runtime.URL, URLSearchParams: runtime.URLSearchParams, parse: (value) => {
+      const url = new runtime.URL(value);
+      return { href: url.href, protocol: url.protocol, host: url.host, hostname: url.hostname, port: url.port, pathname: url.pathname, search: url.search, query: querystring.parse(url.search.slice(1)), hash: url.hash };
+    }, format: (value) => value.href ? String(value.href) : `${value.protocol ?? "http:"}//${value.host ?? value.hostname ?? ""}${value.pathname ?? ""}${value.search ?? ""}${value.hash ?? ""}`, resolve: (from, to) => new runtime.URL(to, from).toString() },
+    util,
+    uuid,
+    xml2js
+  };
+  return modules;
+};
+
+// src/lib/scriptSandbox.ts
+var payloadBytes = (payload) => Math.floor(payload.dataBase64.length * 3 / 4) - (payload.dataBase64.endsWith("==") ? 2 : payload.dataBase64.endsWith("=") ? 1 : 0);
+var payloadText = (payload) => {
+  try {
+    const bytes = Uint8Array.from(atob(payload.dataBase64), (character) => character.charCodeAt(0));
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(`Script certificate file '${payload.fileName}' is not valid UTF-8 PEM text.`);
+  }
+};
+var hydrateScriptFileReferences = async (request, references, readFile2, budget = { files: 0, bytes: 0 }) => {
+  if (!references.length) return request;
+  if (!readFile2) throw new Error("Script file access is disabled. Enable it in Preferences.");
+  if (budget.files + references.length > 20) throw new Error("Script request exceeds the 20-file attachment limit.");
+  budget.files += references.length;
+  for (const reference of references) {
+    const payload = await readFile2(reference.path);
+    const bytes = payloadBytes(payload);
+    if (bytes < 0 || bytes > 5e6) throw new Error(`Script file '${payload.fileName}' exceeds the 5 MB per-file limit.`);
+    budget.bytes += bytes;
+    if (budget.bytes > 2e7) throw new Error("Script request files exceed the 20 MB aggregate limit.");
+    if (reference.kind === "body") {
+      request.bodyMode = "binary";
+      request.binaryBody = payload;
+    } else if (reference.kind === "multipart") {
+      const part = request.multipartBody.find((candidate) => candidate.id === reference.partId);
+      if (!part) throw new Error(`Script multipart file target '${reference.partId}' was not found.`);
+      part.kind = "file";
+      part.file = payload;
+      part.fileName = reference.fileName || payload.fileName;
+      part.contentType = reference.contentType || payload.mimeType;
+    } else if (reference.kind === "certificate-cert") {
+      request.transport.clientCertificatePem = payloadText(payload);
+    } else {
+      request.transport.clientKeyPem = payloadText(payload);
+    }
+  }
+  return request;
+};
+var resolveScriptFileReferencePaths = (references, variables) => references.map((reference) => {
+  const path = reference.path.replace(/{{\s*([^{}]+?)\s*}}/g, (match, name) => variables[name] ?? match).trim();
+  if (!path) throw new Error("Script file path cannot be empty.");
+  if (path.length > 1e4) throw new Error("Script file path exceeds 10,000 characters.");
+  return { ...reference, path };
+});
+var record2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+var stringValue = (value, fallback = "") => typeof value === "string" ? value : value === void 0 || value === null ? fallback : String(value);
+var scriptRow = (value, index, prefix) => {
+  const source = record2(value);
+  if (!source) return void 0;
+  const name = stringValue(source.key ?? source.name).trim();
+  if (!name) return void 0;
+  return { id: `${prefix}-${index}`, name, value: stringValue(source.value), enabled: source.enabled !== false, description: stringValue(source.description) };
+};
+var scriptHeaders = (value) => {
+  if (Array.isArray(value)) return value.map((item, index) => scriptRow(item, index, "script-header")).filter((item) => Boolean(item));
+  const source = record2(value);
+  return source ? Object.entries(source).flatMap(([name, item], index) => {
+    const values = Array.isArray(item) ? item : [item];
+    return values.map((entry, offset) => ({ id: `script-header-${index}-${offset}`, name, value: stringValue(entry), enabled: true }));
+  }) : [];
+};
+var assertHttpUrl = (value) => {
+  const url = stringValue(value).trim();
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d+)?(?:\/|$)/.test(url)) throw new Error("Script requests require an HTTP(S) URL or bare hostname.");
+    try {
+      parsed = new URL(`https://${url}`);
+    } catch {
+      throw new Error("Script requests require an HTTP(S) URL or bare hostname.");
+    }
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Script requests are limited to http:// and https:// URLs.");
+  return parsed.toString();
+};
+var normalizeScriptSubrequestInput = (input, sourceRequest, allowFileReferences) => {
+  const serialized = JSON.stringify(input);
+  if (serialized && new Blob([serialized]).size > 256e3) throw new Error("Script request input exceeds the 256 KB bridge limit.");
+  const source = typeof input === "string" ? { url: input } : record2(input);
+  if (!source) throw new Error("Script requests must be a URL string or request object.");
+  const request = createBlankRequest("Script request");
+  const fileReferences = [];
+  request.id = `script-request-${crypto.randomUUID()}`;
+  request.url = assertHttpUrl(source.url);
+  request.method = stringValue(source.method, "GET").trim().toUpperCase() || "GET";
+  if (!/^[A-Z][A-Z0-9!#$%&'*+.^_`|~-]{0,31}$/.test(request.method)) throw new Error("Script request method is not a valid HTTP token.");
+  request.headers = scriptHeaders(source.header ?? source.headers);
+  request.transport = { ...sourceRequest.transport, timeoutMode: "custom", timeoutMs: Math.min(1e4, Math.max(1e3, sourceRequest.transport.timeoutMs)) };
+  request.preRequestScript = "";
+  request.tests = "";
+  const auth = record2(source.auth);
+  if (auth) {
+    const type = stringValue(auth.type, "none").toLowerCase();
+    const keyed = (name, key, fallback) => Array.isArray(auth[name]) ? record2(auth[name].find((item) => record2(item)?.key === key))?.value ?? fallback : fallback;
+    request.auth.disabled = false;
+    if (type === "basic") {
+      request.auth.type = "basic";
+      request.auth.username = stringValue(keyed("basic", "username", auth.username));
+      request.auth.password = stringValue(keyed("basic", "password", auth.password));
+    } else if (type === "bearer") {
+      request.auth.type = "bearer";
+      request.auth.token = stringValue(keyed("bearer", "token", auth.token ?? auth.accessToken));
+      request.auth.prefix = stringValue(keyed("bearer", "prefix", auth.prefix), "Bearer");
+    } else if (type === "apikey" || type === "api-key") {
+      request.auth.type = "api-key";
+      request.auth.apiKeyName = stringValue(keyed("apikey", "key", auth.key ?? auth.name));
+      request.auth.apiKeyValue = stringValue(keyed("apikey", "value", auth.value));
+      const location = keyed("apikey", "in", auth.in ?? auth.location);
+      request.auth.apiKeyLocation = location === "query" ? "query" : "header";
+    } else if (type !== "none" && type !== "noauth") throw new Error(`Script request auth type '${type}' is not supported.`);
+  }
+  const proxy = record2(source.proxy);
+  if (proxy) {
+    request.transport.proxyMode = "custom";
+    if (proxy.url) request.transport.proxyUrl = stringValue(proxy.url);
+    else if (proxy.host) request.transport.proxyUrl = `${stringValue(proxy.protocol, "http")}://${stringValue(proxy.host)}${proxy.port ? `:${stringValue(proxy.port)}` : ""}`;
+    request.transport.proxyExclusions = Array.isArray(proxy.exclusions) ? proxy.exclusions.map(String).join(",") : stringValue(proxy.exclusions);
+  }
+  const certificate = record2(source.certificate);
+  if (certificate) {
+    const cert = record2(certificate.cert);
+    const key = record2(certificate.key);
+    const pfx = record2(certificate.pfx);
+    if (pfx?.src || certificate.pfxPath || certificate.path) throw new Error("PFX certificate files are not supported by the native PEM transport.");
+    const certPath = certificate.certPath ?? cert?.src;
+    const keyPath = certificate.keyPath ?? key?.src;
+    if ((certPath || keyPath) && !allowFileReferences) throw new Error("Script requests cannot read certificate file paths without script file access.");
+    if (certPath) fileReferences.push({ kind: "certificate-cert", path: stringValue(certPath) });
+    else request.transport.clientCertificatePem = stringValue(cert?.pem ?? certificate.cert ?? certificate.certificate);
+    if (keyPath) fileReferences.push({ kind: "certificate-key", path: stringValue(keyPath) });
+    else request.transport.clientKeyPem = stringValue(key?.pem ?? certificate.key);
+    request.transport.clientCertificateDomains = Array.isArray(certificate.domains) ? certificate.domains.map(String).join(",") : stringValue(certificate.domains);
+  }
+  const body = source.body;
+  if (typeof body === "string") {
+    request.bodyMode = "text";
+    request.body = body;
+  } else if (record2(body)) {
+    const bodySource = body;
+    const mode = stringValue(bodySource.mode, "raw").toLowerCase();
+    if (mode === "raw") {
+      request.bodyMode = "text";
+      request.body = stringValue(bodySource.raw);
+    } else if (mode === "urlencoded") {
+      request.bodyMode = "form-urlencoded";
+      request.formBody = (Array.isArray(bodySource.urlencoded) ? bodySource.urlencoded : []).map((item, index) => scriptRow(item, index, "script-form")).filter((item) => Boolean(item));
+    } else if (mode === "graphql") {
+      const graphql = record2(bodySource.graphql) ?? bodySource;
+      request.protocol = "graphql";
+      request.method = "POST";
+      request.graphql.query = stringValue(graphql.query);
+      request.graphql.variables = typeof graphql.variables === "string" ? graphql.variables : JSON.stringify(graphql.variables ?? {}, null, 2);
+      request.graphql.operationName = stringValue(graphql.operationName);
+    } else if (mode === "formdata") {
+      const parts = Array.isArray(bodySource.formdata) ? bodySource.formdata : [];
+      request.bodyMode = "multipart";
+      request.multipartBody = parts.flatMap((item, index) => {
+        const part = record2(item);
+        if (!part) return [];
+        const row = scriptRow(part, index, "script-part");
+        if (!row) return [];
+        const isFile = part.type === "file" || part.src !== void 0;
+        if (!isFile) return [{ ...row, kind: "text" }];
+        if (!allowFileReferences) throw new Error("Script requests cannot read multipart file paths without script file access.");
+        const path = Array.isArray(part.src) ? part.src[0] : part.src ?? part.value;
+        fileReferences.push({ kind: "multipart", path: stringValue(path), partId: row.id, fileName: stringValue(part.fileName ?? part.filename), contentType: stringValue(part.contentType) });
+        return [{ ...row, value: "", kind: "file", fileName: stringValue(part.fileName ?? part.filename), contentType: stringValue(part.contentType) }];
+      });
+    } else if (mode === "file") {
+      if (!allowFileReferences) throw new Error("Script requests cannot read file paths without script file access.");
+      const file = bodySource.file;
+      const path = record2(file)?.src ?? file ?? bodySource.src;
+      fileReferences.push({ kind: "body", path: stringValue(path) });
+      request.bodyMode = "binary";
+    } else {
+      throw new Error(`Script request body mode '${mode}' is not supported.`);
+    }
+  }
+  if (fileReferences.length > 20) throw new Error("Script request exceeds the 20-file attachment limit.");
+  return { request, fileReferences };
+};
+var normalizeScriptSubrequestWithFiles = (input, sourceRequest) => normalizeScriptSubrequestInput(input, sourceRequest, true);
+var prepareScriptSubrequest = async (input, sourceRequest, variables, readFile2, budget = { files: 0, bytes: 0 }) => {
+  const normalized = normalizeScriptSubrequestWithFiles(input, sourceRequest);
+  const references = resolveScriptFileReferencePaths(normalized.fileReferences, variables);
+  return hydrateScriptFileReferences(normalized.request, references, readFile2, budget);
+};
+var sandboxPrefix = `
+const pendingSubrequests = new Map();
+self.addEventListener('message', ({ data }) => {
+  if (data?.type !== 'subresponse') return;
+  const pending = pendingSubrequests.get(data.id);
+  if (!pending) return;
+  pendingSubrequests.delete(data.id);
+  if (data.error) pending.reject(new Error(data.error));
+  else pending.resolve(data.response);
+});
+self.onmessage = async ({ data }) => {
+  if (data?.type !== 'run') return;
+  const state = structuredClone(data.state);
+  const testNamePattern = state.testNamePattern === undefined ? undefined : new RegExp(state.testNamePattern);
+  let registeredTests = 0;
+  const hostPostMessage = self.postMessage.bind(self);
+  const logs = [];
+  const tests = [];
+  const pendingTests = [];
+  const fileReferences = [];
+  let subrequestCount = 0;
+  const constructors = [Function, (async () => {}).constructor, (function* () {}).constructor, (async function* () {}).constructor];
+  constructors.forEach((constructor) => {
+    try { Object.defineProperty(constructor.prototype, 'constructor', { value: undefined, writable: false, configurable: false }); }
+    catch { /* The worker boundary remains the outer permission boundary. */ }
+  });
+  const denied = (capability) => () => { throw new Error(capability + ' is not available in the script sandbox.'); };
+  const fetch = denied('Direct network access; enable and use insomnia.sendRequest()');
+  const XMLHttpRequest = undefined;
+  const WebSocket = undefined;
+  const WebTransport = undefined;
+  const EventSource = undefined;
+  const Worker = undefined;
+  const SharedWorker = undefined;
+  const BroadcastChannel = undefined;
+  const importScripts = denied('Module imports');
+  const indexedDB = undefined;
+  const caches = undefined;
+  const navigator = undefined;
+  const location = undefined;
+  const document = undefined;
+  const window = undefined;
+  const pushLog = (value) => { if (logs.length < 1000) logs.push(String(value).slice(0, 20000)); };
+  const console = {
+    log: (...values) => pushLog(values.map((value) => typeof value === 'string' ? value : JSON.stringify(value)).join(' ')),
+    info: (...values) => pushLog(values.map(String).join(' ')),
+    warn: (...values) => pushLog('[warn] ' + values.map(String).join(' ')),
+    error: (...values) => pushLog('[error] ' + values.map(String).join(' ')),
+  };
+  const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  if (state.globalsAreBase) state.environment = state.baseGlobals;
+  if (state.collectionVariablesAreBase) state.collectionVariables = state.baseEnvironment;
+  const applyScope = (values, scope, disabled) => {
+    (disabled || []).forEach((name) => delete values[name]);
+    Object.assign(values, scope);
+  };
+  const mergedVariables = () => {
+    const values = {};
+    applyScope(values, state.baseGlobals, state.baseGlobalDisabled);
+    if (!state.globalsAreBase) applyScope(values, state.environment, state.globalDisabled);
+    applyScope(values, state.baseEnvironment, state.baseEnvironmentDisabled);
+    if (!state.collectionVariablesAreBase) applyScope(values, state.collectionVariables, state.collectionDisabled);
+    state.folders.forEach((folder) => { (folder.disabled || []).forEach((name) => delete values[name]); Object.assign(values, folder.environment); });
+    return Object.assign(values, state.iterationData, state.localVariables);
+  };
+  const replaceIn = (value) => String(value).replace(/{{\\s*([^{}]+?)\\s*}}/g, (match, name) => mergedVariables()[name] ?? match);
+  const removeFileReferences = (...kinds) => {
+    for (let index = fileReferences.length - 1; index >= 0; index -= 1) if (kinds.includes(fileReferences[index].kind)) fileReferences.splice(index, 1);
+  };
+  const addFileReference = (reference) => {
+    if (!state.permissions.files) throw new Error('Script file access is disabled. Enable it in Preferences.');
+    const path = replaceIn(reference.path ?? '').trim();
+    if (!path) throw new Error('Script file path cannot be empty.');
+    if (path.length > 10000) throw new Error('Script file path exceeds 10,000 characters.');
+    if (fileReferences.length >= 20) throw new Error('Script request exceeds the 20-file attachment limit.');
+    fileReferences.push({ ...reference, path });
+    return path;
+  };
+  const variableApi = (values, disabled = []) => ({
+    get: (name) => values[name],
+    set: (name, value) => {
+      const key = String(name);
+      const text = String(value);
+      if (key.length > 256 || text.length > 1000000) throw new Error('Script variable exceeds the name or 1 MB value limit.');
+      if (!Object.prototype.hasOwnProperty.call(values, key) && Object.keys(values).length >= 10000) throw new Error('Script variable scope exceeds 10,000 entries.');
+      values[key] = text;
+      const disabledIndex = disabled.indexOf(key);
+      if (disabledIndex >= 0) disabled.splice(disabledIndex, 1);
+    },
+    unset: (name) => { const key = String(name); delete values[key]; const disabledIndex = disabled.indexOf(key); if (disabledIndex >= 0) disabled.splice(disabledIndex, 1); },
+    has: (name) => Object.prototype.hasOwnProperty.call(values, name),
+    clear: () => { Object.keys(values).forEach((name) => delete values[name]); disabled.splice(0); },
+    toObject: () => ({ ...values }),
+    replaceIn,
+  });
+  const expect = (${createScriptExpect.toString()})();
+  const modules = (${createScriptModules.toString()})({
+    atob,
+    btoa,
+    crypto,
+    expect,
+    structuredClone,
+    TextDecoder,
+    TextEncoder,
+    URL,
+    URLSearchParams,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+  });
+  const require = (name) => {
+    if (Object.prototype.hasOwnProperty.call(modules, name)) return modules[name];
+    throw new Error("Module '" + name + "' is not bundled in Brunomnia's script sandbox.");
+  };
+  const headerApi = {
+    add: ({ key, name, value }) => { if (state.request.headers.length >= 500) throw new Error('Script request exceeds 500 headers.'); state.request.headers.push({ id: 'script-' + Date.now() + '-' + state.request.headers.length, name: String(key || name || '').slice(0, 1000), value: String(value).slice(0, 100000), enabled: true }); },
+    remove: (name) => { state.request.headers = state.request.headers.filter((header) => header.name.toLowerCase() !== String(name).toLowerCase()); },
+    get: (name) => state.request.headers.find((header) => header.enabled && header.name.toLowerCase() === String(name).toLowerCase())?.value,
+    has: (name) => state.request.headers.some((header) => header.enabled && header.name.toLowerCase() === String(name).toLowerCase()),
+    set: (name, value) => {
+      const existing = state.request.headers.find((header) => header.name.toLowerCase() === String(name).toLowerCase());
+      if (existing) { existing.value = String(value).slice(0, 100000); existing.enabled = true; }
+      else { if (state.request.headers.length >= 500) throw new Error('Script request exceeds 500 headers.'); state.request.headers.push({ id: 'script-' + Date.now() + '-' + state.request.headers.length, name: String(name).slice(0, 1000), value: String(value).slice(0, 100000), enabled: true }); }
+    },
+  };
+  let requestUrl = String(state.request.url || '');
+  const urlApi = {
+    addQueryParams: (items) => {
+      const entries = typeof items === 'string'
+        ? [...new URLSearchParams(items).entries()].map(([name, value]) => ({ name, value }))
+        : Array.isArray(items) ? items : Object.entries(items || {}).map(([name, value]) => ({ name, value }));
+      try {
+        const url = new URL(requestUrl);
+        entries.forEach((item) => { const name = item.name ?? item.key; if (name) url.searchParams.append(String(name), String(item.value ?? '')); });
+        requestUrl = url.toString();
+      } catch {
+        const query = entries.flatMap((item) => { const name = item.name ?? item.key; return name ? [encodeURIComponent(String(name)) + '=' + encodeURIComponent(String(item.value ?? ''))] : []; }).join('&');
+        if (query) requestUrl += (requestUrl.includes('?') ? '&' : '?') + query;
+      }
+      if (requestUrl.length > 100000) throw new Error('Script request URL exceeds 100 KB.');
+      return urlApi;
+    },
+    getQueryString: () => { try { return new URL(requestUrl).searchParams.toString(); } catch { return requestUrl.split('?')[1]?.split('#')[0] || ''; } },
+    toString: () => requestUrl,
+    valueOf: () => requestUrl,
+    [Symbol.toPrimitive]: () => requestUrl,
+  };
+  let requestBody = String(state.request.body || '');
+  const bodyApi = {
+    update: (body) => {
+      const input = typeof body === 'string' ? { mode: 'raw', raw: body } : body || {};
+      const mode = String(input.mode || 'raw').toLowerCase();
+      if (mode === 'raw') { removeFileReferences('body', 'multipart'); delete state.request.binaryBody; const next = String(input.raw ?? ''); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); state.request.bodyMode = 'text'; requestBody = next; }
+      else if (mode === 'urlencoded') { removeFileReferences('body', 'multipart'); delete state.request.binaryBody; state.request.bodyMode = 'form-urlencoded'; state.request.formBody = (input.urlencoded || []).map((item, index) => ({ id: 'script-form-' + index, name: String(item.key ?? item.name ?? ''), value: String(item.value ?? ''), enabled: item.enabled !== false, description: String(item.description ?? '') })).filter((item) => item.name); }
+      else if (mode === 'graphql') { removeFileReferences('body', 'multipart'); delete state.request.binaryBody; const graphql = input.graphql || input; state.request.protocol = 'graphql'; state.request.method = 'POST'; state.request.graphql.query = String(graphql.query ?? ''); state.request.graphql.variables = typeof graphql.variables === 'string' ? graphql.variables : JSON.stringify(graphql.variables || {}, null, 2); state.request.graphql.operationName = String(graphql.operationName ?? ''); }
+      else if (mode === 'formdata') {
+        removeFileReferences('body', 'multipart'); delete state.request.binaryBody; state.request.bodyMode = 'multipart';
+        const parts = Array.isArray(input.formdata) ? input.formdata : [];
+        state.request.multipartBody = parts.slice(0, 1000).map((item, index) => {
+          const id = 'script-part-' + index; const name = String(item.key ?? item.name ?? ''); const isFile = item.type === 'file' || item.src !== undefined;
+          if (!name) return { id, name: '', value: '', enabled: false, kind: 'text' };
+          if (isFile) { addFileReference({ kind: 'multipart', path: item.src ?? item.value, partId: id, fileName: String(item.fileName ?? item.filename ?? ''), contentType: String(item.contentType ?? '') }); return { id, name, value: '', enabled: item.enabled !== false, description: String(item.description ?? ''), kind: 'file', fileName: String(item.fileName ?? item.filename ?? ''), contentType: String(item.contentType ?? '') }; }
+          return { id, name, value: String(item.value ?? ''), enabled: item.enabled !== false, description: String(item.description ?? ''), kind: 'text' };
+        }).filter((item) => item.name);
+      }
+      else if (mode === 'file') { removeFileReferences('body', 'multipart'); const path = input.file?.src ?? input.file ?? input.src; addFileReference({ kind: 'body', path }); state.request.bodyMode = 'binary'; delete state.request.binaryBody; requestBody = ''; }
+      else throw new Error("Request body mode '" + mode + "' is not supported.");
+      return bodyApi;
+    },
+    toString: () => requestBody,
+    valueOf: () => requestBody,
+    [Symbol.toPrimitive]: () => requestBody,
+  };
+  Object.defineProperty(state.request, 'url', { configurable: true, enumerable: true, get: () => urlApi, set: (value) => { const next = String(value); if (next.length > 100000) throw new Error('Script request URL exceeds 100 KB.'); requestUrl = next; } });
+  Object.defineProperty(state.request, 'body', { configurable: true, enumerable: true, get: () => bodyApi, set: (value) => { removeFileReferences('body', 'multipart'); delete state.request.binaryBody; const next = typeof value === 'string' ? value : JSON.stringify(value); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); requestBody = next; state.request.bodyMode = 'text'; } });
+  state.request.auth.update = (auth, requestedType) => {
+    const input = auth || {};
+    const type = String(requestedType || input.type || 'none').toLowerCase();
+    const keyed = (name, key, fallback) => Array.isArray(input[name]) ? input[name].find((item) => item.key === key)?.value ?? fallback : fallback;
+    state.request.auth.disabled = false;
+    if (type === 'basic') { state.request.auth.type = 'basic'; state.request.auth.username = String(keyed('basic', 'username', input.username ?? '')); state.request.auth.password = String(keyed('basic', 'password', input.password ?? '')); }
+    else if (type === 'bearer') { state.request.auth.type = 'bearer'; state.request.auth.token = String(keyed('bearer', 'token', input.token ?? input.accessToken ?? '')); state.request.auth.prefix = String(keyed('bearer', 'prefix', input.prefix ?? 'Bearer')); }
+    else if (type === 'apikey' || type === 'api-key') { state.request.auth.type = 'api-key'; state.request.auth.apiKeyName = String(keyed('apikey', 'key', input.key ?? input.name ?? '')); state.request.auth.apiKeyValue = String(keyed('apikey', 'value', input.value ?? '')); const location = keyed('apikey', 'in', input.in ?? input.location); state.request.auth.apiKeyLocation = location === 'query' ? 'query' : 'header'; }
+    else if (type === 'none' || type === 'noauth') { state.request.auth.type = 'none'; state.request.auth.disabled = true; }
+    else throw new Error("Request auth type '" + type + "' is not supported by script mutation yet.");
+  };
+  state.request.proxy = {
+    getProxyUrl: () => state.request.transport.proxyUrl,
+    update: (proxy) => {
+      const input = proxy || {};
+      state.request.transport.proxyMode = 'custom';
+      if (input.url) state.request.transport.proxyUrl = String(input.url);
+      else if (input.host) state.request.transport.proxyUrl = String(input.protocol || 'http') + '://' + String(input.host) + (input.port ? ':' + String(input.port) : '');
+      state.request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(',') : String(input.exclusions ?? state.request.transport.proxyExclusions);
+    },
+  };
+  const certificateApi = state.request.certificate = {
+    key: { src: '' },
+    cert: { src: '' },
+    pfx: { src: '' },
+    passphrase: '',
+    update: (certificate) => {
+      const input = certificate || {};
+      removeFileReferences('certificate-cert', 'certificate-key');
+      if (input.disabled === true) { state.request.transport.clientCertificatePem = ''; state.request.transport.clientKeyPem = ''; state.request.transport.clientCertificateDomains = ''; certificateApi.key.src = ''; certificateApi.cert.src = ''; certificateApi.pfx.src = ''; return; }
+      if (input.pfx?.src || input.pfxPath) throw new Error('PFX certificate files are not supported by the native PEM transport.');
+      const certPath = input.certPath ?? input.cert?.src; const keyPath = input.keyPath ?? input.key?.src;
+      if (certPath) { certificateApi.cert.src = addFileReference({ kind: 'certificate-cert', path: certPath }); state.request.transport.clientCertificatePem = ''; }
+      else state.request.transport.clientCertificatePem = String(input.cert?.pem ?? input.cert ?? input.certificate ?? '');
+      if (keyPath) { certificateApi.key.src = addFileReference({ kind: 'certificate-key', path: keyPath }); state.request.transport.clientKeyPem = ''; }
+      else state.request.transport.clientKeyPem = String(input.key?.pem ?? input.key ?? '');
+      state.request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(',') : String(input.domains ?? '');
+    },
+  };
+  const responseFacade = (response) => {
+    if (!response) return undefined;
+    const headers = Object.entries(response.headers || {}).map(([key, value]) => ({ key, value }));
+    headers.get = (name) => headers.find((header) => header.key.toLowerCase() === String(name).toLowerCase())?.value;
+    headers.has = (name) => headers.some((header) => header.key.toLowerCase() === String(name).toLowerCase());
+    headers.toObject = () => Object.fromEntries(headers.map(({ key, value }) => [key, value]));
+    const cookieValues = (response.setCookies || []).map((header) => header.split(';')[0]);
+    return {
+      status: response.status,
+      code: response.status,
+      statusText: response.statusText,
+      responseTime: response.durationMs,
+      json: () => JSON.parse(response.body),
+      text: () => response.body,
+      headers,
+      hasHeader: (name) => headers.has(name),
+      getHeader: (name) => headers.get(name),
+      cookies: {
+        toObject: () => Object.fromEntries(cookieValues.map((pair) => { const split = pair.indexOf('='); return split > 0 ? [pair.slice(0, split).trim(), pair.slice(split + 1).trim()] : ['', '']; }).filter(([name]) => name)),
+        get: (name) => { const pair = cookieValues.find((value) => value.slice(0, value.indexOf('=')).trim() === String(name)); return pair ? pair.slice(pair.indexOf('=') + 1).trim() : undefined; },
+      },
+    };
+  };
+  const sendRequest = (input, callback) => {
+    const run = () => {
+      if (!state.permissions.network) throw new Error('Script-initiated requests are disabled. Enable them in Preferences.');
+      if (subrequestCount >= state.permissions.maxSubrequests) throw new Error('Script exceeded the secondary-request limit.');
+      subrequestCount += 1;
+      const id = 'subrequest-' + subrequestCount + '-' + Date.now();
+      const promise = new Promise((resolve, reject) => pendingSubrequests.set(id, { resolve, reject }));
+      hostPostMessage({ type: 'subrequest', id, input, variables: mergedVariables() });
+      return promise.then(responseFacade);
+    };
+    if (typeof callback === 'function') { Promise.resolve().then(run).then((response) => callback(null, response), (error) => callback(error)); return undefined; }
+    return Promise.resolve().then(run);
+  };
+  const baseGlobalApi = variableApi(state.baseGlobals, state.baseGlobalDisabled);
+  const globalApi = variableApi(state.environment, state.globalsAreBase ? state.baseGlobalDisabled : state.globalDisabled);
+  const baseEnvironmentApi = variableApi(state.baseEnvironment, state.baseEnvironmentDisabled);
+  const collectionApi = variableApi(state.collectionVariables, state.collectionVariablesAreBase ? state.baseEnvironmentDisabled : state.collectionDisabled);
+  const localApi = variableApi(state.localVariables);
+  const iterationApi = variableApi(state.iterationData);
+  const variablesApi = {
+    get: (name) => mergedVariables()[name],
+    set: localApi.set,
+    unset: localApi.unset,
+    has: (name) => Object.prototype.hasOwnProperty.call(mergedVariables(), name),
+    clear: localApi.clear,
+    toObject: mergedVariables,
+    replaceIn,
+    baseGlobalVars: baseGlobalApi,
+    globalVars: globalApi,
+    collectionVars: baseEnvironmentApi,
+    collectionVariables: baseEnvironmentApi,
+    environmentVars: collectionApi,
+    localVars: localApi,
+    iterationDataVars: iterationApi,
+  };
+  const folderFacade = (folder) => ({ id: folder.id, name: folder.name, environment: variableApi(folder.environment, folder.disabled) });
+  const parentFolders = {
+    get: (selector) => { const folder = [...state.folders].reverse().find((item) => item.id === String(selector) || item.name === String(selector)); return folder ? folderFacade(folder) : undefined; },
+    getById: (id) => { const folder = state.folders.find((item) => item.id === String(id)); return folder ? folderFacade(folder) : undefined; },
+    getByName: (name) => { const folder = [...state.folders].reverse().find((item) => item.name === String(name)); return folder ? folderFacade(folder) : undefined; },
+    getEnvironments: () => [...state.folders].reverse().map((folder) => variableApi(folder.environment, folder.disabled)),
+  };
+  const insomnia = {
+    baseGlobals: baseGlobalApi,
+    globals: globalApi,
+    environment: collectionApi,
+    baseEnvironment: baseEnvironmentApi,
+    CollectionVariables: baseEnvironmentApi,
+    collectionVariables: baseEnvironmentApi,
+    variables: variablesApi,
+    localVars: localApi,
+    iterationData: iterationApi,
+    parentFolders,
+    request: state.request,
+    response: responseFacade(state.response),
+    sendRequest,
+    replaceIn,
+    vault: { get: (name) => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); return state.vault[String(name)]; } },
+    expect,
+    test: (name, callback) => {
+      registeredTests += 1;
+      if (registeredTests > 1000) throw new Error('Script exceeds 1,000 test registrations.');
+      const testName = String(name);
+      if (testNamePattern && !testNamePattern.test(testName)) return;
+      const result = { name: testName, passed: true };
+      tests.push(result);
+      try {
+        const outcome = callback();
+        if (outcome && typeof outcome.then === 'function') pendingTests.push(Promise.resolve(outcome).catch((error) => { result.passed = false; result.error = error instanceof Error ? error.message : String(error); }));
+      }
+      catch (error) { result.passed = false; result.error = error instanceof Error ? error.message : String(error); }
+    },
+  };
+  insomnia.request.headersApi = headerApi;
+  insomnia.request.addHeader = headerApi.add;
+  insomnia.request.removeHeader = headerApi.remove;
+  insomnia.request.setHeader = headerApi.set;
+  insomnia.request.getHeader = headerApi.get;
+  insomnia.request.hasHeader = headerApi.has;
+  insomnia.request.getUrl = () => requestUrl;
+  insomnia.request.setUrl = (url) => { const next = String(url); if (next.length > 100000) throw new Error('Script request URL exceeds 100 KB.'); requestUrl = next; };
+  insomnia.request.getMethod = () => insomnia.request.method;
+  insomnia.request.setMethod = (method) => { insomnia.request.method = String(method).toUpperCase(); };
+  insomnia.request.getBody = () => requestBody;
+  insomnia.request.setBody = (body) => { removeFileReferences('body', 'multipart'); delete insomnia.request.binaryBody; const next = typeof body === 'string' ? body : JSON.stringify(body); if (next.length > 5000000) throw new Error('Script request body exceeds 5 MB.'); requestBody = next; insomnia.request.bodyMode = 'text'; };
+  const cleanupRequest = () => {
+    delete state.request.headersApi;
+    delete state.request.addHeader;
+    delete state.request.removeHeader;
+    delete state.request.setHeader;
+    delete state.request.getHeader;
+    delete state.request.hasHeader;
+    delete state.request.getUrl;
+    delete state.request.setUrl;
+    delete state.request.getMethod;
+    delete state.request.setMethod;
+    delete state.request.getBody;
+    delete state.request.setBody;
+    delete state.request.auth.update;
+    delete state.request.proxy;
+    delete state.request.certificate;
+    delete state.request.url;
+    state.request.url = requestUrl;
+    delete state.request.body;
+    state.request.body = requestBody;
+  };
+  try {
+    const runUserScript = async function () {
+      'use strict';
+      const globalThis = undefined;
+      const self = undefined;
+      const state = undefined;
+      const hostPostMessage = undefined;
+      const pendingSubrequests = undefined;
+      const constructors = undefined;
+      const cleanupRequest = undefined;
+      const subrequestCount = undefined;
+      const requestUrl = undefined;
+      const requestBody = undefined;
+      const logs = undefined;
+      const tests = undefined;
+      const registeredTests = undefined;
+      const testNamePattern = undefined;
+      const pendingTests = undefined;
+      const fileReferences = undefined;
+      const Function = undefined;
+      const WebAssembly = undefined;
+      const WebTransport = undefined;
+      const SharedWorker = undefined;
+      const BroadcastChannel = undefined;
+      const location = undefined;
+      const postMessage = undefined;
+      const onmessage = undefined;
+`;
+
+// cli/brunomnia.ts
+init_transport();
+
+// src/lib/storage.ts
+init_core();
+
+// src/lib/graphql.ts
+init_http();
+var record3 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+var text = (value) => typeof value === "string" ? value : "";
+var normalizeTypeRef = (value, depth = 0) => {
+  const source = record3(value);
+  const ofType = depth < 12 && source?.ofType ? normalizeTypeRef(source.ofType, depth + 1) : void 0;
+  return { kind: text(source?.kind), name: text(source?.name), ...ofType?.kind || ofType?.name ? { ofType } : {} };
+};
+var normalizeInputValues = (value) => !Array.isArray(value) ? [] : value.flatMap((item) => {
+  const source = record3(item);
+  const name = text(source?.name);
+  return source && name ? [{ name, description: text(source.description), defaultValue: text(source.defaultValue), type: normalizeTypeRef(source.type) }] : [];
+}).slice(0, 500);
+var normalizeGraphqlSchema = (value) => {
+  const source = record3(value);
+  const rawTypes = Array.isArray(source?.types) ? source.types : [];
+  const types = rawTypes.flatMap((item) => {
+    const type = record3(item);
+    const name = text(type?.name);
+    if (!type || !name) return [];
+    const fields = !Array.isArray(type.fields) ? [] : type.fields.flatMap((item2) => {
+      const field = record3(item2);
+      const fieldName = text(field?.name);
+      return field && fieldName ? [{
+        name: fieldName,
+        description: text(field.description),
+        isDeprecated: field.isDeprecated === true,
+        deprecationReason: text(field.deprecationReason),
+        args: normalizeInputValues(field.args).slice(0, 100),
+        type: normalizeTypeRef(field.type)
+      }] : [];
+    }).slice(0, 1e3);
+    const enumValues = !Array.isArray(type.enumValues) ? [] : type.enumValues.flatMap((item2) => {
+      const entry = record3(item2);
+      const entryName = text(entry?.name);
+      return entry && entryName ? [{ name: entryName, description: text(entry.description), isDeprecated: entry.isDeprecated === true, deprecationReason: text(entry.deprecationReason) }] : [];
+    }).slice(0, 5e3);
+    const possibleTypes = !Array.isArray(type.possibleTypes) ? [] : type.possibleTypes.map((entry) => normalizeTypeRef(entry)).filter((entry) => entry.name).slice(0, 1e3);
+    return [{ kind: text(type.kind), name, description: text(type.description), fields, inputFields: normalizeInputValues(type.inputFields), enumValues, possibleTypes }];
+  }).slice(0, 5e3);
+  if (!types.length) return void 0;
+  return {
+    queryType: text(record3(source?.queryType)?.name),
+    mutationType: text(record3(source?.mutationType)?.name),
+    subscriptionType: text(record3(source?.subscriptionType)?.name),
+    types
+  };
+};
+
+// src/lib/storage.ts
+init_request();
+var isWorkspaceEnvelope = (value) => {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value;
+  return candidate.format === "brunomnia" && Array.isArray(candidate.collections);
+};
+var requestDefaults = () => cloneSeedWorkspace().collections[0].requests[0];
+var knownPluginPermissions = ["request:read", "request:write", "response:read", "response:write", "store", "network", "app:prompt", "app:clipboard", "template", "action", "theme"];
+var governanceRoles = ["owner", "admin", "editor", "viewer"];
+var storageModes = ["local", "folder", "git", "encrypted-file"];
+var record4 = (value) => value && typeof value === "object" ? value : void 0;
+var stringValue2 = (value, fallback = "") => typeof value === "string" ? value : fallback;
+var normalizeRows = (value, prefix) => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
+  const row = record4(item);
+  if (!row) return [];
+  return [{ id: stringValue2(row.id, `${prefix}-${index}`), name: stringValue2(row.name), value: stringValue2(row.value), enabled: row.enabled !== false, description: stringValue2(row.description).slice(0, 2e4) }];
+}).slice(0, 1e3);
+var normalizePlugins = (value) => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
+  if (!item || typeof item !== "object") return [];
+  const plugin = item;
+  if (typeof plugin.source !== "string" || !plugin.source.trim()) return [];
+  const permissions = (candidate) => Array.isArray(candidate) ? knownPluginPermissions.filter((permission) => candidate.includes(permission)) : [];
+  return [{
+    id: typeof plugin.id === "string" && plugin.id ? plugin.id : `migrated-plugin-${index}`,
+    name: typeof plugin.name === "string" && plugin.name ? plugin.name : "Local plugin",
+    version: typeof plugin.version === "string" && plugin.version ? plugin.version : "0.0.0-local",
+    description: typeof plugin.description === "string" ? plugin.description : "",
+    source: plugin.source,
+    sourcePath: typeof plugin.sourcePath === "string" ? plugin.sourcePath : void 0,
+    sourceFormat: plugin.sourceFormat === "brunomnia" ? "brunomnia" : "insomnia-commonjs",
+    enabled: plugin.enabled === true,
+    requestedPermissions: permissions(plugin.requestedPermissions),
+    grantedPermissions: permissions(plugin.grantedPermissions),
+    installedAt: typeof plugin.installedAt === "string" ? plugin.installedAt : (/* @__PURE__ */ new Date(0)).toISOString(),
+    error: typeof plugin.error === "string" ? plugin.error : void 0
+  }];
+});
+var normalizeGovernance = (value, defaults) => {
+  const source = record4(value);
+  const rawMembers = Array.isArray(source?.members) ? source.members : [];
+  const members = rawMembers.flatMap((value2, index) => {
+    const member = record4(value2);
+    if (!member) return [];
+    const role = governanceRoles.includes(member.role) ? member.role : "viewer";
+    return [{
+      id: typeof member.id === "string" && member.id ? member.id : `migrated-member-${index}`,
+      name: typeof member.name === "string" && member.name ? member.name : "Imported member",
+      email: typeof member.email === "string" ? member.email : "",
+      role,
+      active: member.active !== false
+    }];
+  });
+  const safeMembers = members.length ? members : defaults.members;
+  if (!safeMembers.some((member) => member.active && member.role === "owner")) safeMembers[0] = { ...safeMembers[0], role: "owner", active: true };
+  const rawPolicy = record4(source?.policy);
+  const requestedStorage = Array.isArray(rawPolicy?.allowedStorage) ? rawPolicy.allowedStorage : [];
+  const externalVaultAllowlist = Array.isArray(rawPolicy?.externalVaultAllowlist) ? rawPolicy.externalVaultAllowlist : [];
+  const allowedStorage = requestedStorage.length ? storageModes.filter((mode) => requestedStorage.includes(mode)) : defaults.policy.allowedStorage;
+  const auditRetention = Math.min(1e4, Math.max(1, Number(rawPolicy?.auditRetention) || defaults.policy.auditRetention));
+  const policy = {
+    allowedStorage: allowedStorage.length ? allowedStorage : defaults.policy.allowedStorage,
+    requireEncryptedSync: rawPolicy?.requireEncryptedSync !== false,
+    requireVaultForSecrets: rawPolicy?.requireVaultForSecrets !== false,
+    externalVaultAllowlist: externalVaultAllowlist.filter((value2) => typeof value2 === "string").slice(0, 1e3),
+    auditRetention
+  };
+  const audit = (Array.isArray(source?.audit) ? source.audit : []).flatMap((value2) => {
+    const event = record4(value2);
+    if (!event || typeof event.action !== "string" || typeof event.timestamp !== "string") return [];
+    return [{ id: typeof event.id === "string" ? event.id : `audit-${crypto.randomUUID()}`, timestamp: event.timestamp, actorId: typeof event.actorId === "string" ? event.actorId : safeMembers[0].id, action: event.action, detail: typeof event.detail === "string" ? event.detail : "" }];
+  }).slice(0, auditRetention);
+  const requestedCurrent = typeof source?.currentMemberId === "string" ? source.currentMemberId : "";
+  const currentMemberId = safeMembers.some((member) => member.id === requestedCurrent && member.active) ? requestedCurrent : safeMembers.find((member) => member.active)?.id ?? safeMembers[0].id;
+  return { currentMemberId, members: safeMembers, policy, audit };
+};
+var normalizeCollaboration = (value, defaults) => {
+  const source = record4(value);
+  return {
+    mode: source?.mode === "encrypted-file" ? "encrypted-file" : "off",
+    path: typeof source?.path === "string" ? source.path : defaults.path,
+    actor: typeof source?.actor === "string" ? source.actor : defaults.actor,
+    revision: Math.max(0, Number(source?.revision) || 0),
+    lastPulledAt: typeof source?.lastPulledAt === "string" ? source.lastPulledAt : void 0,
+    lastPushedAt: typeof source?.lastPushedAt === "string" ? source.lastPushedAt : void 0
+  };
+};
+var normalizeMcpResources = (value) => !Array.isArray(value) ? [] : value.flatMap((item) => {
+  const resource = record4(item);
+  const uriTemplate = stringValue2(resource?.uriTemplate);
+  const uri = stringValue2(resource?.uri, uriTemplate);
+  if (!resource || !uri) return [];
+  let variables = [];
+  if (uriTemplate) {
+    variables = [...uriTemplate.matchAll(/\{[+#./;?&]?([^{}]+)\}/g)].flatMap((match) => match[1].split(",").map((name) => name.replace(/\*$/, "").replace(/:\d+$/, ""))).filter((name, index, all) => Boolean(name) && all.indexOf(name) === index).slice(0, 100);
+  }
+  return [{ uri, uriTemplate, variables, name: stringValue2(resource.name, uri), description: stringValue2(resource.description), mimeType: stringValue2(resource.mimeType) }];
+}).slice(0, 5e3);
+var normalizeMcpClients = (value) => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
+  const client = record4(item);
+  if (!client) return [];
+  const authType = client.authType === "bearer" || client.authType === "basic" || client.authType === "oauth2" ? client.authType : "none";
+  const tools = !Array.isArray(client.tools) ? [] : client.tools.flatMap((item2) => {
+    const tool = record4(item2);
+    const name = stringValue2(tool?.name);
+    if (!tool || !name) return [];
+    return [{ name, description: stringValue2(tool.description), inputSchema: tool.inputSchema ?? {} }];
+  }).slice(0, 5e3);
+  const prompts = !Array.isArray(client.prompts) ? [] : client.prompts.flatMap((item2) => {
+    const prompt = record4(item2);
+    const name = stringValue2(prompt?.name);
+    if (!prompt || !name) return [];
+    const args2 = Array.isArray(prompt.arguments) ? prompt.arguments.flatMap((item3) => {
+      const argument = record4(item3);
+      const argumentName = stringValue2(argument?.name);
+      return argument && argumentName ? [{ name: argumentName, description: stringValue2(argument.description), required: argument.required === true }] : [];
+    }).slice(0, 500) : [];
+    return [{ name, description: stringValue2(prompt.description), arguments: args2 }];
+  }).slice(0, 5e3);
+  return [{
+    id: stringValue2(client.id, `migrated-mcp-${index}`),
+    name: stringValue2(client.name, `MCP Client ${index + 1}`),
+    enabled: client.enabled === true,
+    transport: client.transport === "stdio" ? "stdio" : "http",
+    url: stringValue2(client.url),
+    command: stringValue2(client.command),
+    args: Array.isArray(client.args) ? client.args.filter((arg) => typeof arg === "string").slice(0, 100) : [],
+    headers: normalizeRows(client.headers, `mcp-${index}-header`),
+    authType,
+    token: stringValue2(client.token),
+    username: stringValue2(client.username),
+    password: stringValue2(client.password),
+    oauthAuthorizationUrl: stringValue2(client.oauthAuthorizationUrl),
+    oauthAccessTokenUrl: stringValue2(client.oauthAccessTokenUrl),
+    oauthClientId: stringValue2(client.oauthClientId),
+    oauthClientSecret: stringValue2(client.oauthClientSecret),
+    oauthScope: stringValue2(client.oauthScope),
+    oauthState: stringValue2(client.oauthState),
+    oauthRefreshToken: stringValue2(client.oauthRefreshToken),
+    oauthIdentityToken: stringValue2(client.oauthIdentityToken),
+    oauthExpiresAt: typeof client.oauthExpiresAt === "number" && Number.isFinite(client.oauthExpiresAt) ? Math.max(0, Math.trunc(client.oauthExpiresAt)) : 0,
+    oauthTokenPrefix: stringValue2(client.oauthTokenPrefix, "Bearer"),
+    oauthRegisteredClientId: stringValue2(client.oauthRegisteredClientId),
+    oauthRegisteredClientSecret: stringValue2(client.oauthRegisteredClientSecret),
+    oauthRegisteredClientIdIssuedAt: typeof client.oauthRegisteredClientIdIssuedAt === "number" && Number.isFinite(client.oauthRegisteredClientIdIssuedAt) ? Math.max(0, Math.trunc(client.oauthRegisteredClientIdIssuedAt)) : 0,
+    oauthRegisteredClientSecretExpiresAt: typeof client.oauthRegisteredClientSecretExpiresAt === "number" && Number.isFinite(client.oauthRegisteredClientSecretExpiresAt) ? Math.max(0, Math.trunc(client.oauthRegisteredClientSecretExpiresAt)) : 0,
+    oauthRegisteredTokenEndpointAuthMethod: client.oauthRegisteredTokenEndpointAuthMethod === "client_secret_basic" || client.oauthRegisteredTokenEndpointAuthMethod === "client_secret_post" ? client.oauthRegisteredTokenEndpointAuthMethod : "none",
+    roots: Array.isArray(client.roots) ? client.roots.filter((root) => typeof root === "string").slice(0, 100) : [],
+    tools,
+    prompts,
+    resources: normalizeMcpResources(client.resources),
+    resourceTemplates: normalizeMcpResources(client.resourceTemplates),
+    lastSyncedAt: typeof client.lastSyncedAt === "string" ? client.lastSyncedAt : void 0
+  }];
+}).slice(0, 100);
+var normalizeAi = (value, defaults) => {
+  const source = record4(value);
+  const provider = source?.provider === "openai" || source?.provider === "anthropic" || source?.provider === "gemini" || source?.provider === "openai-compatible" ? source.provider : defaults.provider;
+  return {
+    enabled: source?.enabled === true,
+    provider,
+    baseUrl: stringValue2(source?.baseUrl, defaults.baseUrl),
+    model: stringValue2(source?.model),
+    apiKey: stringValue2(source?.apiKey),
+    mockGeneration: source?.mockGeneration === true,
+    commitSuggestions: source?.commitSuggestions === true
+  };
+};
+var normalizeKonnect = (value, defaults) => {
+  const source = record4(value);
+  const controlPlanes = !Array.isArray(source?.controlPlanes) ? [] : source.controlPlanes.flatMap((item) => {
+    const plane = record4(item);
+    const id = stringValue2(plane?.id);
+    return plane && id ? [{ id, name: stringValue2(plane.name, id), description: stringValue2(plane.description) }] : [];
+  }).slice(0, 1e3);
+  return {
+    enabled: source?.enabled === true,
+    baseUrl: stringValue2(source?.baseUrl, defaults.baseUrl),
+    token: stringValue2(source?.token),
+    controlPlaneId: stringValue2(source?.controlPlaneId),
+    controlPlanes,
+    lastSyncedAt: typeof source?.lastSyncedAt === "string" ? source.lastSyncedAt : void 0
+  };
+};
+var normalizePreferences = (value) => {
+  const source = record4(value);
+  const rawShortcuts = record4(source?.shortcuts);
+  const shortcuts = Object.fromEntries(Object.keys(defaultShortcuts).map((action) => {
+    const candidate = typeof rawShortcuts?.[action] === "string" ? normalizeShortcut(rawShortcuts[action].slice(0, 64)) : "";
+    return [action, candidate || defaultShortcuts[action]];
+  }));
+  return {
+    theme: source?.theme === "dark" || source?.theme === "light" ? source.theme : "system",
+    density: source?.density === "compact" ? "compact" : "comfortable",
+    fontSize: Math.min(24, Math.max(8, Number(source?.fontSize) || defaultPreferences.fontSize)),
+    interfaceFontSize: Math.min(24, Math.max(8, Number(source?.interfaceFontSize) || defaultPreferences.interfaceFontSize)),
+    fontInterface: stringValue2(source?.fontInterface).replace(/[\r\n]/g, " ").slice(0, 512),
+    fontMonospace: stringValue2(source?.fontMonospace).replace(/[\r\n]/g, " ").slice(0, 512),
+    showPasswords: source?.showPasswords === true,
+    allowHtmlPreviewRemoteResources: source?.allowHtmlPreviewRemoteResources === true,
+    allowHtmlPreviewScripts: source?.allowHtmlPreviewScripts === true,
+    disableResponsePreviewLinks: source?.disableResponsePreviewLinks === true,
+    preferredHttpVersion: source?.preferredHttpVersion === "http1.0" || source?.preferredHttpVersion === "http1.1" || source?.preferredHttpVersion === "http2" || source?.preferredHttpVersion === "http2-prior-knowledge" ? source.preferredHttpVersion : "default",
+    maxRedirects: typeof source?.maxRedirects === "number" && Number.isFinite(source.maxRedirects) ? Math.max(-1, Math.trunc(source.maxRedirects)) : defaultPreferences.maxRedirects,
+    followRedirects: source?.followRedirects !== false,
+    maxTimelineDataSizeKB: typeof source?.maxTimelineDataSizeKB === "number" && Number.isFinite(source.maxTimelineDataSizeKB) ? Math.max(0, Math.trunc(source.maxTimelineDataSizeKB)) : defaultPreferences.maxTimelineDataSizeKB,
+    maxHistoryResponses: typeof source?.maxHistoryResponses === "number" && Number.isFinite(source.maxHistoryResponses) ? Math.max(-1, Math.trunc(source.maxHistoryResponses)) : defaultPreferences.maxHistoryResponses,
+    filterResponsesByEnv: source?.filterResponsesByEnv === true,
+    requestTimeoutMs: typeof source?.requestTimeoutMs === "number" && Number.isFinite(source.requestTimeoutMs) ? Math.min(2147483647, Math.max(0, Math.trunc(source.requestTimeoutMs))) : defaultPreferences.requestTimeoutMs,
+    validateCertificates: source?.validateCertificates !== false,
+    validateAuthCertificates: source?.validateAuthCertificates !== false,
+    proxyEnabled: source?.proxyEnabled === true,
+    httpProxy: stringValue2(source?.httpProxy).slice(0, 4096),
+    httpsProxy: stringValue2(source?.httpsProxy).slice(0, 4096),
+    noProxy: stringValue2(source?.noProxy).slice(0, 2e4),
+    useBulkHeaderEditor: source?.useBulkHeaderEditor === true,
+    useBulkParametersEditor: source?.useBulkParametersEditor === true,
+    forceVerticalLayout: source?.forceVerticalLayout === true,
+    editorIndentWithTabs: source?.editorIndentWithTabs !== false,
+    editorIndentSize: Math.min(16, Math.max(1, Math.trunc(Number(source?.editorIndentSize) || defaultPreferences.editorIndentSize))),
+    editorLineWrapping: source?.editorLineWrapping !== false,
+    fontVariantLigatures: source?.fontVariantLigatures === true,
+    scriptTimeoutMs: Math.min(6e4, Math.max(1e3, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
+    allowScriptRequests: source?.allowScriptRequests === true,
+    allowScriptFileAccess: source?.allowScriptFileAccess === true,
+    dataFolders: Array.isArray(source?.dataFolders) ? [...new Set(source.dataFolders.filter((value2) => typeof value2 === "string").map((value2) => value2.trim().slice(0, 4096)).filter(Boolean))].slice(0, 100) : [],
+    enableVaultInScripts: source?.enableVaultInScripts === true,
+    autoFetchGraphqlSchema: source?.autoFetchGraphqlSchema !== false,
+    confirmDestructive: source?.confirmDestructive !== false,
+    shortcuts
+  };
+};
+var normalizeResponseTimeline = (value) => !Array.isArray(value) ? [] : value.slice(0, 1e3).flatMap((entry) => {
+  const source = record4(entry);
+  if (!source) return [];
+  const name = source.name === "DataOut" ? "DataOut" : "Text";
+  const elapsedMs = Number(source.elapsedMs);
+  return [{
+    name,
+    value: stringValue2(source.value),
+    elapsedMs: Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0,
+    ...source.hidden === true ? { hidden: true } : {}
+  }];
+});
+var normalizeStoredResponses = (value) => Array.isArray(value) ? value.flatMap((entry, index) => {
+  const source = record4(entry);
+  if (!source) return [];
+  const { bodyBase64: encodedBody, ...response } = source;
+  const bodyBase64 = typeof encodedBody === "string" && encodedBody.length ? encodedBody : void 0;
+  return [{
+    ...response,
+    id: stringValue2(source.id, `legacy-response-${index}`),
+    requestId: stringValue2(source.requestId),
+    requestName: stringValue2(source.requestName),
+    requestUrl: stringValue2(source.requestUrl),
+    environmentId: stringValue2(source.environmentId),
+    receivedAt: stringValue2(source.receivedAt, (/* @__PURE__ */ new Date(0)).toISOString()),
+    body: stringValue2(source.body),
+    ...bodyBase64 ? { bodyBase64 } : {},
+    timeline: normalizeResponseTimeline(source.timeline)
+  }];
+}) : [];
+var normalizeStreamMessages = (value, sessionId) => {
+  const messages = (Array.isArray(value) ? value : []).slice(-5e3).flatMap((entry, index) => {
+    const source = record4(entry);
+    if (!source) return [];
+    const direction = source.direction === "incoming" || source.direction === "outgoing" ? source.direction : "system";
+    return [{
+      id: stringValue2(source.id, `${sessionId}-event-${index}`),
+      sessionId,
+      direction,
+      kind: stringValue2(source.kind, "event").slice(0, 500),
+      text: stringValue2(source.text).slice(0, 1048576),
+      timestamp: stringValue2(source.timestamp, (/* @__PURE__ */ new Date(0)).toISOString())
+    }];
+  });
+  let characters = messages.reduce((total, message) => total + message.text.length, 0);
+  while (messages.length > 1 && characters > 5e6) characters -= messages.shift().text.length;
+  return messages;
+};
+var normalizeStoredStreamSessions = (value, requestIds) => (Array.isArray(value) ? value : []).slice(0, 5e3).flatMap((entry, index) => {
+  const source = record4(entry);
+  if (!source) return [];
+  const requestId = stringValue2(source.requestId);
+  if (!requestIds.has(requestId)) return [];
+  const protocol = source.protocol === "websocket" || source.protocol === "sse" ? source.protocol : "socketio";
+  const id = stringValue2(source.id, `legacy-stream-${index}`);
+  const endedAt = stringValue2(source.endedAt);
+  return [{
+    id,
+    requestId,
+    requestName: stringValue2(source.requestName),
+    requestUrl: stringValue2(source.requestUrl),
+    environmentId: stringValue2(source.environmentId),
+    protocol,
+    startedAt: stringValue2(source.startedAt, (/* @__PURE__ */ new Date(0)).toISOString()),
+    ...endedAt ? { endedAt } : {},
+    messages: normalizeStreamMessages(source.messages, id)
+  }];
+});
+var normalizeResponseFilters = (value, requestIds) => {
+  const source = record4(value);
+  if (!source) return {};
+  return Object.fromEntries(Object.entries(source).flatMap(([requestId, entry]) => {
+    if (!requestIds.has(requestId)) return [];
+    const state = record4(entry);
+    const filter = stringValue2(state?.filter).trim().slice(0, 2e3);
+    const previewMode = state?.previewMode === "friendly" || state?.previewMode === "raw" ? state.previewMode : "source";
+    const seen = /* @__PURE__ */ new Set();
+    const history = (Array.isArray(state?.history) ? state.history : []).flatMap((candidate) => {
+      const normalized = stringValue2(candidate).trim().slice(0, 2e3);
+      return normalized && !seen.has(normalized) && Boolean(seen.add(normalized)) ? [normalized] : [];
+    }).slice(0, 10);
+    return [[requestId, { filter, history, previewMode }]];
+  }));
+};
+var normalizeFolders = (value, defaultAuth) => {
+  const source = !Array.isArray(value) ? [] : value.slice(0, 1e3);
+  const folders = source.flatMap((item, index) => {
+    const folder = record4(item);
+    if (!folder) return [];
+    const id = stringValue2(folder.id, `migrated-folder-${index}`);
+    return [{
+      id,
+      name: stringValue2(folder.name, `Folder ${index + 1}`),
+      parentId: stringValue2(folder.parentId),
+      expanded: folder.expanded !== false,
+      headers: normalizeRows(folder.headers, `${id}-header`),
+      environment: normalizeRows(folder.environment, `${id}-environment`),
+      auth: folder.auth ? { ...defaultAuth, ...record4(folder.auth) } : void 0,
+      preRequestScript: stringValue2(folder.preRequestScript),
+      tests: stringValue2(folder.tests),
+      documentation: stringValue2(folder.documentation)
+    }];
+  });
+  const ids = new Set(folders.map((folder) => folder.id));
+  const normalized = folders.map((folder) => ({ ...folder, parentId: folder.parentId !== folder.id && ids.has(folder.parentId) ? folder.parentId : "" }));
+  const byId = new Map(normalized.map((folder) => [folder.id, folder]));
+  normalized.forEach((folder) => {
+    const visited = /* @__PURE__ */ new Set([folder.id]);
+    let current = folder;
+    while (current.parentId) {
+      if (visited.has(current.parentId)) {
+        folder.parentId = "";
+        break;
+      }
+      visited.add(current.parentId);
+      const parent = byId.get(current.parentId);
+      if (!parent) break;
+      current = parent;
+    }
+  });
+  return normalized;
+};
+var normalizeCollectionEnvironments = (value, collectionId) => !Array.isArray(value) ? [] : value.slice(0, 500).flatMap((item, index) => {
+  const environment = record4(item);
+  if (!environment) return [];
+  const id = stringValue2(environment.id, `${collectionId}-sub-environment-${index}`);
+  return [{
+    id,
+    name: stringValue2(environment.name, `Environment ${index + 1}`),
+    variables: normalizeRows(environment.variables, `${id}-variable`)
+  }];
+});
+var normalizeEnvironments = (value, fallback) => {
+  if (!Array.isArray(value) || !value.length) return fallback;
+  const environments = value.slice(0, 500).flatMap((item, index) => {
+    const environment = record4(item);
+    if (!environment) return [];
+    const id = stringValue2(environment.id, `migrated-environment-${index}`);
+    const color = stringValue2(environment.color);
+    return [{ id, name: stringValue2(environment.name, `Environment ${index + 1}`), variables: normalizeRows(environment.variables, `${id}-variable`), parentId: stringValue2(environment.parentId), private: environment.private === true, color: /^#[0-9a-f]{6}$/i.test(color) ? color : "", source: environment.source }];
+  });
+  if (!environments.length) return fallback;
+  const ids = new Set(environments.map((environment) => environment.id));
+  const normalized = environments.map((environment) => ({ ...environment, parentId: environment.parentId !== environment.id && ids.has(environment.parentId ?? "") ? environment.parentId : "" }));
+  const byId = new Map(normalized.map((environment) => [environment.id, environment]));
+  normalized.forEach((environment) => {
+    const visited = /* @__PURE__ */ new Set([environment.id]);
+    let current = environment;
+    while (current.parentId) {
+      if (visited.has(current.parentId)) {
+        environment.parentId = "";
+        break;
+      }
+      visited.add(current.parentId);
+      const parent = byId.get(current.parentId);
+      if (!parent) break;
+      current = parent;
+    }
+  });
+  for (let pass = 0; pass < normalized.length; pass += 1) {
+    let changed = false;
+    normalized.forEach((environment) => {
+      const parent = environment.parentId ? byId.get(environment.parentId) : void 0;
+      if (parent?.private && !environment.private) {
+        environment.private = true;
+        changed = true;
+      }
+    });
+    if (!changed) break;
+  }
+  return normalized;
+};
+var migrateWorkspace = (value) => {
+  if (!isWorkspaceEnvelope(value)) throw new Error("This is not a Brunomnia workspace export.");
+  const seed = cloneSeedWorkspace();
+  const workspace = value;
+  const defaults = requestDefaults();
+  const importedCollections = workspace.collections.map((collection2) => ({
+    ...collection2,
+    folders: normalizeFolders(collection2.folders, defaults.auth),
+    environment: normalizeRows(collection2.environment, `${collection2.id}-environment`),
+    subEnvironments: normalizeCollectionEnvironments(collection2.subEnvironments, collection2.id),
+    activeSubEnvironmentId: stringValue2(collection2.activeSubEnvironmentId),
+    documentation: stringValue2(collection2.documentation),
+    requests: collection2.requests.map((request) => {
+      const graphql = record4(request.graphql);
+      const socketIo = record4(request.socketIo);
+      const requestId = stringValue2(request.id, `migrated-request-${crypto.randomUUID()}`);
+      const method = normalizeHttpMethod(stringValue2(request.method, defaults.method), defaults.method);
+      const protocol = request.protocol === "http" || request.protocol === "graphql" || request.protocol === "websocket" || request.protocol === "socketio" || request.protocol === "sse" || request.protocol === "grpc" ? request.protocol : defaults.protocol;
+      const followRedirectsMode = request.transport?.followRedirectsMode === "global" || request.transport?.followRedirectsMode === "on" || request.transport?.followRedirectsMode === "off" ? request.transport.followRedirectsMode : request.transport?.followRedirects === false ? "off" : "global";
+      const timeoutMode = request.transport?.timeoutMode === "global" || request.transport?.timeoutMode === "custom" ? request.transport.timeoutMode : typeof request.transport?.timeoutMs === "number" ? "custom" : "global";
+      const validateCertificatesMode = request.transport?.validateCertificatesMode === "global" || request.transport?.validateCertificatesMode === "on" || request.transport?.validateCertificatesMode === "off" ? request.transport.validateCertificatesMode : typeof request.transport?.validateCertificates === "boolean" ? request.transport.validateCertificates ? "on" : "off" : "global";
+      const proxyMode = request.transport?.proxyMode === "global" || request.transport?.proxyMode === "custom" || request.transport?.proxyMode === "disabled" ? request.transport.proxyMode : stringValue2(request.transport?.proxyUrl).trim() || stringValue2(request.transport?.proxyExclusions).trim() ? "custom" : "global";
+      return {
+        ...defaults,
+        ...request,
+        id: requestId,
+        protocol,
+        method,
+        folderId: stringValue2(request.folderId),
+        inheritFolderAuth: request.inheritFolderAuth === true,
+        documentation: stringValue2(request.documentation),
+        pathParams: normalizeRows(request.pathParams, `${requestId}-path`),
+        params: normalizeRows(request.params, `${requestId}-query`),
+        headers: normalizeRows(request.headers, `${requestId}-header`),
+        bodyMode: request.bodyMode ?? (method === "GET" || method === "HEAD" ? "none" : "json"),
+        auth: {
+          ...defaults.auth,
+          ...request.auth,
+          expiresAt: typeof request.auth?.expiresAt === "number" && Number.isFinite(request.auth.expiresAt) ? Math.max(0, Math.trunc(request.auth.expiresAt)) : 0
+        },
+        graphql: {
+          ...defaults.graphql,
+          ...request.graphql,
+          schema: normalizeGraphqlSchema(graphql?.schema),
+          schemaEndpoint: stringValue2(graphql?.schemaEndpoint),
+          schemaFetchedAt: stringValue2(graphql?.schemaFetchedAt)
+        },
+        grpc: { ...defaults.grpc, ...request.grpc, metadata: normalizeRows(record4(request.grpc)?.metadata, `${requestId}-metadata`) },
+        transport: {
+          ...defaults.transport,
+          ...request.transport,
+          followRedirects: followRedirectsMode !== "off",
+          followRedirectsMode,
+          timeoutMode,
+          timeoutMs: typeof request.transport?.timeoutMs === "number" && Number.isFinite(request.transport.timeoutMs) ? Math.min(2147483647, Math.max(0, Math.trunc(request.transport.timeoutMs))) : defaults.transport.timeoutMs,
+          validateCertificates: validateCertificatesMode !== "off",
+          validateCertificatesMode,
+          proxyMode
+        },
+        sse: {
+          ...defaults.sse,
+          ...request.sse,
+          autoReconnect: request.sse?.autoReconnect !== false,
+          reconnectDelayMs: Math.min(6e4, Math.max(100, Number(request.sse?.reconnectDelayMs) || defaults.sse.reconnectDelayMs)),
+          maxReconnects: Math.min(1e3, Math.max(0, Number(request.sse?.maxReconnects) || 0)),
+          respectServerRetry: request.sse?.respectServerRetry !== false,
+          sendLastEventId: request.sse?.sendLastEventId !== false
+        },
+        socketIo: {
+          path: stringValue2(socketIo?.path, defaults.socketIo.path).slice(0, 2048),
+          eventName: stringValue2(socketIo?.eventName, defaults.socketIo.eventName).slice(0, 500),
+          args: (Array.isArray(socketIo?.args) ? socketIo.args : defaults.socketIo.args).flatMap((value2, index) => {
+            const arg = record4(value2);
+            if (!arg) return [];
+            return [{
+              id: stringValue2(arg.id, `${requestId}-socketio-arg-${index}`),
+              value: stringValue2(arg.value).slice(0, 1048576),
+              mode: arg.mode === "text" ? "text" : "json"
+            }];
+          }).slice(0, 100),
+          ack: socketIo?.ack === true,
+          eventListeners: (Array.isArray(socketIo?.eventListeners) ? socketIo.eventListeners : []).flatMap((value2, index) => {
+            const listener = record4(value2);
+            if (!listener) return [];
+            return [{
+              id: stringValue2(listener.id, `${requestId}-socketio-listener-${index}`),
+              eventName: stringValue2(listener.eventName).slice(0, 500),
+              description: stringValue2(listener.description ?? listener.desc).slice(0, 2e4),
+              enabled: listener.enabled === true || listener.isOpen === true
+            }];
+          }).slice(0, 500)
+        },
+        formBody: normalizeRows(request.formBody, `${requestId}-form`),
+        multipartBody: (request.multipartBody ?? []).map((part) => ({ ...part, contentType: part.contentType ?? part.file?.mimeType ?? "", fileName: part.fileName ?? part.file?.fileName ?? "" }))
+      };
+    })
+  }));
+  const collections = (importedCollections.length ? importedCollections : seed.collections).map((collection2) => {
+    const folderIds = new Set((collection2.folders ?? []).map((folder) => folder.id));
+    const resourceIds = /* @__PURE__ */ new Set([...folderIds, ...collection2.requests.map((request) => request.id)]);
+    const orderedIds = Array.isArray(collection2.resourceOrder) ? collection2.resourceOrder : [];
+    const seenResourceIds = /* @__PURE__ */ new Set();
+    const resourceOrder = [
+      ...orderedIds,
+      ...(collection2.folders ?? []).map((folder) => folder.id),
+      ...collection2.requests.map((request) => request.id)
+    ].filter((id) => typeof id === "string" && resourceIds.has(id) && !seenResourceIds.has(id) && Boolean(seenResourceIds.add(id)));
+    const subEnvironmentIds = new Set((collection2.subEnvironments ?? []).map((environment) => environment.id));
+    return {
+      ...collection2,
+      resourceOrder,
+      activeSubEnvironmentId: subEnvironmentIds.has(collection2.activeSubEnvironmentId ?? "") ? collection2.activeSubEnvironmentId : "",
+      requests: collection2.requests.map((request) => ({ ...request, folderId: request.folderId && folderIds.has(request.folderId) ? request.folderId : "" }))
+    };
+  });
+  const environments = normalizeEnvironments(workspace.environments, seed.environments);
+  const requestIds = new Set(collections.flatMap((collection2) => collection2.requests.map((request) => request.id)));
+  const environmentIds = new Set(environments.map((environment) => environment.id));
+  const governance = normalizeGovernance(workspace.governance, seed.governance);
+  return {
+    ...workspace,
+    version: 24,
+    name: workspace.name || "Imported Workspace",
+    activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? "",
+    activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
+    environments,
+    history: Array.isArray(workspace.history) ? workspace.history : [],
+    apiDesigns: (workspace.apiDesigns ?? seed.apiDesigns).map((design) => ({ ...design, ruleset: design.ruleset ?? "" })),
+    mockServers: workspace.mockServers ?? seed.mockServers,
+    runnerReports: workspace.runnerReports ?? [],
+    imports: workspace.imports ?? [],
+    cookies: workspace.cookies ?? [],
+    responses: normalizeStoredResponses(workspace.responses),
+    streamSessions: normalizeStoredStreamSessions(workspace.streamSessions, requestIds),
+    responseFilters: normalizeResponseFilters(workspace.responseFilters, requestIds),
+    project: { ...seed.project, ...workspace.project },
+    plugins: normalizePlugins(workspace.plugins),
+    pluginData: workspace.pluginData ?? {},
+    activePluginTheme: workspace.activePluginTheme ?? "",
+    collaboration: normalizeCollaboration(workspace.collaboration, seed.collaboration),
+    governance,
+    mcpClients: normalizeMcpClients(workspace.mcpClients),
+    ai: normalizeAi(workspace.ai, seed.ai),
+    konnect: normalizeKonnect(workspace.konnect, seed.konnect),
+    preferences: normalizePreferences(workspace.preferences),
+    collections
+  };
+};
+
 // cli/brunomnia.ts
 var args = process.argv.slice(2);
 var flag = (name) => {
@@ -8169,50 +11733,106 @@ var fail = (message, code = 1) => {
   process.exit(code);
 };
 var loadText = async (path) => (0, import_promises.readFile)(path, "utf8").catch((error) => fail(`Unable to read ${path}: ${error.message}`));
+var scriptFileMime = (path) => ({
+  ".cer": "application/x-pem-file",
+  ".crt": "application/x-pem-file",
+  ".csv": "text/csv",
+  ".gif": "image/gif",
+  ".htm": "text/html",
+  ".html": "text/html",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".json": "application/json",
+  ".key": "application/x-pem-file",
+  ".pdf": "application/pdf",
+  ".pem": "application/x-pem-file",
+  ".png": "image/png",
+  ".txt": "text/plain",
+  ".xml": "application/xml"
+})[(0, import_node_path.extname)(path).toLowerCase()] ?? "application/octet-stream";
+var readCliScriptFile = async (path) => {
+  const bytes = await (0, import_promises.readFile)(path);
+  if (bytes.byteLength > 5e6) throw new Error(`Script file '${path}' exceeds the 5 MB per-file limit.`);
+  return { fileName: (0, import_node_path.basename)(path) || "attachment.bin", mimeType: scriptFileMime(path), dataBase64: bytes.toString("base64") };
+};
 var loadWorkspace = async (path) => {
   const parsed = JSON.parse(await loadText(path));
-  if (parsed.format !== "brunomnia" || !Array.isArray(parsed.collections)) fail("The input is not a Brunomnia workspace.");
-  return parsed;
-};
-var expectApi = (actual) => ({
-  toBe(expected) {
-    if (actual !== expected) throw new Error(`Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`);
-  },
-  toEqual(expected) {
-    if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`Expected ${JSON.stringify(actual)} to equal ${JSON.stringify(expected)}`);
-  },
-  toContain(expected) {
-    if (!actual?.includes?.(expected)) throw new Error(`Expected value to contain ${JSON.stringify(expected)}`);
-  },
-  toBeTruthy() {
-    if (!actual) throw new Error("Expected value to be truthy");
-  },
-  toBeLessThan(expected) {
-    if (!(Number(actual) < expected)) throw new Error(`Expected ${actual} to be less than ${expected}`);
-  },
-  toBeGreaterThan(expected) {
-    if (!(Number(actual) > expected)) throw new Error(`Expected ${actual} to be greater than ${expected}`);
+  try {
+    return migrateWorkspace(parsed);
+  } catch {
+    return fail("The input is not a Brunomnia workspace.");
   }
-});
-var runNodeScript = async (source, originalRequest, originalEnvironment, response, _timeoutMs = 2e3, originalLocalVariables = {}, iterationData = {}) => {
+};
+var expectApi = createScriptExpect();
+var runNodeScript = async (source, originalRequest, originalEnvironment, response, timeoutMs = 1e4, originalLocalVariables = {}, iterationData = {}, options = {}) => {
   const request = structuredClone(originalRequest);
-  const environment = { ...originalEnvironment };
+  const globalsAreBase = options.globalsAreBase === true;
+  const collectionVariablesAreBase = options.collectionVariablesAreBase === true;
+  const baseGlobals = { ...options.baseGlobals ?? (globalsAreBase ? originalEnvironment : {}) };
+  const environment = globalsAreBase ? baseGlobals : { ...originalEnvironment };
+  const baseEnvironment = { ...options.baseEnvironment ?? (collectionVariablesAreBase ? options.collectionVariables : {}) };
+  const collectionVariables = collectionVariablesAreBase ? baseEnvironment : { ...options.collectionVariables ?? {} };
+  const baseGlobalDisabled = [...options.baseGlobalDisabled ?? []];
+  const globalDisabled = [...options.globalDisabled ?? []];
+  const baseEnvironmentDisabled = [...options.baseEnvironmentDisabled ?? []];
+  const collectionDisabled = [...options.collectionDisabled ?? []];
+  const folders = structuredClone(options.folders ?? []);
   const localVariables = { ...originalLocalVariables };
   const logs = [];
   const tests = [];
-  if (!source.trim()) return { request, environment, localVariables, logs, tests };
-  const variableApi = (values) => ({
+  const pendingTests = [];
+  const testNamePattern = options.testNamePattern === void 0 ? void 0 : new RegExp(options.testNamePattern);
+  let registeredTests = 0;
+  const fileReferences = [];
+  const fileBudget = { files: 0, bytes: 0 };
+  if (!source.trim()) return { request, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
+  const mergedVariables = () => {
+    const values = {};
+    const applyScope = (scope, disabled = []) => {
+      disabled.forEach((name) => delete values[name]);
+      Object.assign(values, scope);
+    };
+    applyScope(baseGlobals, baseGlobalDisabled);
+    if (!globalsAreBase) applyScope(environment, globalDisabled);
+    applyScope(baseEnvironment, baseEnvironmentDisabled);
+    if (!collectionVariablesAreBase) applyScope(collectionVariables, collectionDisabled);
+    folders.forEach((folder) => {
+      (folder.disabled ?? []).forEach((name) => delete values[name]);
+      Object.assign(values, folder.environment);
+    });
+    return { ...values, ...iterationData, ...localVariables };
+  };
+  const removeFileReferences = (...kinds) => {
+    for (let index = fileReferences.length - 1; index >= 0; index -= 1) if (kinds.includes(fileReferences[index].kind)) fileReferences.splice(index, 1);
+  };
+  const addFileReference = (reference) => {
+    if (!options.readFile) throw new Error("Script file access is disabled. Re-run trusted workspaces with --allow-script-files.");
+    const path = reference.path.replace(/{{\s*([^{}]+?)\s*}}/g, (match, name) => mergedVariables()[name] ?? match).trim();
+    if (!path) throw new Error("Script file path cannot be empty.");
+    if (path.length > 1e4) throw new Error("Script file path exceeds 10,000 characters.");
+    if (fileReferences.length >= 20) throw new Error("Script request exceeds the 20-file attachment limit.");
+    fileReferences.push({ ...reference, path });
+    return path;
+  };
+  const variableApi = (values, disabled = []) => ({
     get: (name) => values[name],
     set: (name, value) => {
       values[name] = String(value);
+      const index = disabled.indexOf(name);
+      if (index >= 0) disabled.splice(index, 1);
     },
     unset: (name) => {
       delete values[name];
+      const index = disabled.indexOf(name);
+      if (index >= 0) disabled.splice(index, 1);
     },
     has: (name) => Object.hasOwn(values, name),
-    clear: () => Object.keys(values).forEach((name) => delete values[name]),
+    clear: () => {
+      Object.keys(values).forEach((name) => delete values[name]);
+      disabled.splice(0);
+    },
     toObject: () => ({ ...values }),
-    replaceIn: (value) => String(value).replace(/{{\s*([^{}]+?)\s*}}/g, (match, name) => values[name] ?? localVariables[name] ?? match)
+    replaceIn: (value) => String(value).replace(/{{\s*([^{}]+?)\s*}}/g, (match, name) => mergedVariables()[name] ?? match)
   });
   const requestWithHelpers = request;
   requestWithHelpers.addHeader = ({ key, name, value }) => {
@@ -8221,33 +11841,324 @@ var runNodeScript = async (source, originalRequest, originalEnvironment, respons
   requestWithHelpers.removeHeader = (name) => {
     request.headers = request.headers.filter((header) => header.name.toLowerCase() !== name.toLowerCase());
   };
-  const insomnia = {
-    environment: variableApi(environment),
-    baseEnvironment: variableApi(environment),
-    collectionVariables: variableApi(environment),
-    variables: variableApi(localVariables),
-    localVars: variableApi(localVariables),
-    iterationData: variableApi(iterationData),
-    request,
-    response: response ? {
-      status: response.status,
-      responseTime: response.durationMs,
-      json: () => JSON.parse(response.body),
-      text: () => response.body,
-      headers: Object.entries(response.headers).map(([key, value]) => ({ key, value }))
-    } : void 0,
-    test: (name, callback) => {
+  requestWithHelpers.setHeader = (name, value) => {
+    const existing = request.headers.find((header) => header.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      existing.value = String(value);
+      existing.enabled = true;
+    } else request.headers.push({ id: `cli-script-${Date.now()}-${request.headers.length}`, name, value: String(value), enabled: true });
+  };
+  requestWithHelpers.getHeader = (name) => request.headers.find((header) => header.enabled && header.name.toLowerCase() === name.toLowerCase())?.value;
+  requestWithHelpers.hasHeader = (name) => request.headers.some((header) => header.enabled && header.name.toLowerCase() === name.toLowerCase());
+  let requestUrl = request.url;
+  const urlApi = {
+    addQueryParams: (items) => {
+      const entries = typeof items === "string" ? [...new URLSearchParams(items).entries()].map(([name, value]) => ({ name, value })) : Array.isArray(items) ? items : Object.entries(items ?? {}).map(([name, value]) => ({ name, value }));
       try {
-        callback();
-        tests.push({ name, passed: true });
+        const parsed = new URL(requestUrl);
+        entries.forEach((item) => {
+          const name = item.name ?? item.key;
+          if (name) parsed.searchParams.append(name, String(item.value ?? ""));
+        });
+        requestUrl = parsed.toString();
+      } catch {
+        const query = entries.flatMap((item) => {
+          const name = item.name ?? item.key;
+          return name ? [`${encodeURIComponent(name)}=${encodeURIComponent(String(item.value ?? ""))}`] : [];
+        }).join("&");
+        if (query) requestUrl += `${requestUrl.includes("?") ? "&" : "?"}${query}`;
+      }
+      return urlApi;
+    },
+    getQueryString: () => {
+      try {
+        return new URL(requestUrl).searchParams.toString();
+      } catch {
+        return requestUrl.split("?")[1]?.split("#")[0] ?? "";
+      }
+    },
+    toString: () => requestUrl,
+    valueOf: () => requestUrl,
+    [Symbol.toPrimitive]: () => requestUrl
+  };
+  let requestBody = request.body;
+  const bodyApi = {
+    update: (body) => {
+      const input = typeof body === "string" ? { mode: "raw", raw: body } : body && typeof body === "object" ? body : {};
+      const mode = String(input.mode ?? "raw").toLowerCase();
+      if (mode === "raw") {
+        removeFileReferences("body", "multipart");
+        delete request.binaryBody;
+        request.bodyMode = "text";
+        requestBody = String(input.raw ?? "");
+      } else if (mode === "urlencoded") {
+        removeFileReferences("body", "multipart");
+        delete request.binaryBody;
+        request.bodyMode = "form-urlencoded";
+        request.formBody = (Array.isArray(input.urlencoded) ? input.urlencoded : []).flatMap((item, index) => {
+          const row = item;
+          const name = String(row.key ?? row.name ?? "");
+          return name ? [{ id: `cli-form-${index}`, name, value: String(row.value ?? ""), enabled: row.enabled !== false }] : [];
+        });
+      } else if (mode === "graphql") {
+        removeFileReferences("body", "multipart");
+        delete request.binaryBody;
+        const graphql = input.graphql && typeof input.graphql === "object" ? input.graphql : input;
+        request.protocol = "graphql";
+        request.method = "POST";
+        request.graphql.query = String(graphql.query ?? "");
+        request.graphql.variables = typeof graphql.variables === "string" ? graphql.variables : JSON.stringify(graphql.variables ?? {}, null, 2);
+        request.graphql.operationName = String(graphql.operationName ?? "");
+      } else if (mode === "formdata") {
+        removeFileReferences("body", "multipart");
+        delete request.binaryBody;
+        request.bodyMode = "multipart";
+        const parts = (Array.isArray(input.formdata) ? input.formdata : []).slice(0, 1e3);
+        request.multipartBody = parts.flatMap((part, index) => {
+          const id = `cli-part-${index}`;
+          const name = String(part.key ?? part.name ?? "");
+          if (!name) return [];
+          const isFile = part.type === "file" || part.src !== void 0;
+          if (isFile) {
+            addFileReference({ kind: "multipart", path: String(part.src ?? part.value ?? ""), partId: id, fileName: String(part.fileName ?? part.filename ?? ""), contentType: String(part.contentType ?? "") });
+            return [{ id, name, value: "", enabled: part.enabled !== false, kind: "file", fileName: String(part.fileName ?? part.filename ?? ""), contentType: String(part.contentType ?? "") }];
+          }
+          return [{ id, name, value: String(part.value ?? ""), enabled: part.enabled !== false, kind: "text" }];
+        });
+      } else if (mode === "file") {
+        removeFileReferences("body", "multipart");
+        const file = input.file;
+        const path = file && typeof file === "object" ? file.src : file ?? input.src;
+        addFileReference({ kind: "body", path: String(path ?? "") });
+        request.bodyMode = "binary";
+        delete request.binaryBody;
+        requestBody = "";
+      } else throw new Error(`Request body mode '${mode}' is not supported.`);
+      return bodyApi;
+    },
+    toString: () => requestBody,
+    valueOf: () => requestBody,
+    [Symbol.toPrimitive]: () => requestBody
+  };
+  Object.defineProperty(request, "url", { configurable: true, enumerable: true, get: () => urlApi, set: (value) => {
+    requestUrl = String(value);
+  } });
+  Object.defineProperty(request, "body", { configurable: true, enumerable: true, get: () => bodyApi, set: (value) => {
+    removeFileReferences("body", "multipart");
+    delete request.binaryBody;
+    requestBody = typeof value === "string" ? value : JSON.stringify(value);
+    request.bodyMode = "text";
+  } });
+  requestWithHelpers.getUrl = () => requestUrl;
+  requestWithHelpers.setUrl = (url) => {
+    requestUrl = String(url);
+  };
+  requestWithHelpers.getMethod = () => request.method;
+  requestWithHelpers.setMethod = (method) => {
+    request.method = String(method).toUpperCase();
+  };
+  requestWithHelpers.getBody = () => requestBody;
+  requestWithHelpers.setBody = (body) => {
+    removeFileReferences("body", "multipart");
+    delete request.binaryBody;
+    requestBody = typeof body === "string" ? body : JSON.stringify(body);
+    request.bodyMode = "text";
+  };
+  const authWithUpdate = request.auth;
+  authWithUpdate.update = (input, requestedType) => {
+    const type = String(requestedType ?? input.type ?? "none").toLowerCase();
+    const keyed = (name, key, fallback) => Array.isArray(input[name]) ? input[name].find((item) => item.key === key)?.value ?? fallback : fallback;
+    request.auth.disabled = false;
+    if (type === "basic") {
+      request.auth.type = "basic";
+      request.auth.username = String(keyed("basic", "username", input.username ?? ""));
+      request.auth.password = String(keyed("basic", "password", input.password ?? ""));
+    } else if (type === "bearer") {
+      request.auth.type = "bearer";
+      request.auth.token = String(keyed("bearer", "token", input.token ?? input.accessToken ?? ""));
+      request.auth.prefix = String(keyed("bearer", "prefix", input.prefix ?? "Bearer"));
+    } else if (type === "apikey" || type === "api-key") {
+      request.auth.type = "api-key";
+      request.auth.apiKeyName = String(keyed("apikey", "key", input.key ?? input.name ?? ""));
+      request.auth.apiKeyValue = String(keyed("apikey", "value", input.value ?? ""));
+      const location = keyed("apikey", "in", input.in ?? input.location);
+      request.auth.apiKeyLocation = location === "query" ? "query" : "header";
+    } else if (type === "none" || type === "noauth") {
+      request.auth.type = "none";
+      request.auth.disabled = true;
+    } else throw new Error(`Request auth type '${type}' is not supported by script mutation yet.`);
+  };
+  requestWithHelpers.proxy = { getProxyUrl: () => request.transport.proxyUrl, update: (input) => {
+    request.transport.proxyMode = "custom";
+    if (input.url) request.transport.proxyUrl = String(input.url);
+    else if (input.host) request.transport.proxyUrl = `${String(input.protocol ?? "http")}://${String(input.host)}${input.port ? `:${String(input.port)}` : ""}`;
+    request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(",") : String(input.exclusions ?? request.transport.proxyExclusions);
+  } };
+  const certificateApi = requestWithHelpers.certificate = { key: { src: "" }, cert: { src: "" }, pfx: { src: "" }, passphrase: "", update: (input) => {
+    removeFileReferences("certificate-cert", "certificate-key");
+    if (input.disabled === true) {
+      request.transport.clientCertificatePem = "";
+      request.transport.clientKeyPem = "";
+      request.transport.clientCertificateDomains = "";
+      certificateApi.key.src = "";
+      certificateApi.cert.src = "";
+      certificateApi.pfx.src = "";
+      return;
+    }
+    const key = input.key;
+    const cert = input.cert;
+    const pfx = input.pfx;
+    if (pfx?.src || input.pfxPath) throw new Error("PFX certificate files are not supported by the native PEM transport.");
+    const certPath = input.certPath ?? cert?.src;
+    const keyPath = input.keyPath ?? key?.src;
+    if (certPath) {
+      certificateApi.cert.src = addFileReference({ kind: "certificate-cert", path: String(certPath) });
+      request.transport.clientCertificatePem = "";
+    } else request.transport.clientCertificatePem = String(cert?.pem ?? input.cert ?? input.certificate ?? "");
+    if (keyPath) {
+      certificateApi.key.src = addFileReference({ kind: "certificate-key", path: String(keyPath) });
+      request.transport.clientKeyPem = "";
+    } else request.transport.clientKeyPem = String(key?.pem ?? input.key ?? "");
+    request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(",") : String(input.domains ?? "");
+  } };
+  const baseGlobalApi = variableApi(baseGlobals, baseGlobalDisabled);
+  const globalApi = variableApi(environment, globalsAreBase ? baseGlobalDisabled : globalDisabled);
+  const baseEnvironmentApi = variableApi(baseEnvironment, baseEnvironmentDisabled);
+  const collectionApi = variableApi(collectionVariables, collectionVariablesAreBase ? baseEnvironmentDisabled : collectionDisabled);
+  const localApi = variableApi(localVariables);
+  const iterationApi = variableApi(iterationData);
+  const variablesApi = {
+    get: (name) => mergedVariables()[name],
+    set: localApi.set,
+    unset: localApi.unset,
+    has: (name) => Object.hasOwn(mergedVariables(), name),
+    clear: localApi.clear,
+    toObject: mergedVariables,
+    replaceIn: localApi.replaceIn,
+    baseGlobalVars: baseGlobalApi,
+    globalVars: globalApi,
+    collectionVars: baseEnvironmentApi,
+    collectionVariables: baseEnvironmentApi,
+    environmentVars: collectionApi,
+    localVars: localApi,
+    iterationDataVars: iterationApi
+  };
+  const responseFacade = (candidate) => {
+    if (!candidate) return void 0;
+    const headers = Object.entries(candidate.headers).map(([key, value]) => ({ key, value }));
+    headers.get = (name) => headers.find((header) => header.key.toLowerCase() === name.toLowerCase())?.value;
+    headers.has = (name) => headers.some((header) => header.key.toLowerCase() === name.toLowerCase());
+    headers.toObject = () => Object.fromEntries(headers.map(({ key, value }) => [key, value]));
+    const cookieValues = (candidate.setCookies ?? []).map((header) => header.split(";")[0]);
+    return {
+      status: candidate.status,
+      code: candidate.status,
+      statusText: candidate.statusText,
+      responseTime: candidate.durationMs,
+      json: () => JSON.parse(candidate.body),
+      text: () => candidate.body,
+      headers,
+      hasHeader: (name) => headers.has(name),
+      getHeader: (name) => headers.get(name),
+      cookies: {
+        toObject: () => Object.fromEntries(cookieValues.flatMap((pair) => {
+          const split = pair.indexOf("=");
+          return split > 0 ? [[pair.slice(0, split).trim(), pair.slice(split + 1).trim()]] : [];
+        })),
+        get: (name) => {
+          const pair = cookieValues.find((value) => value.slice(0, value.indexOf("=")).trim() === name);
+          return pair ? pair.slice(pair.indexOf("=") + 1).trim() : void 0;
+        }
+      }
+    };
+  };
+  const insomnia = {
+    baseGlobals: baseGlobalApi,
+    globals: globalApi,
+    environment: collectionApi,
+    baseEnvironment: baseEnvironmentApi,
+    CollectionVariables: baseEnvironmentApi,
+    collectionVariables: baseEnvironmentApi,
+    variables: variablesApi,
+    localVars: localApi,
+    iterationData: iterationApi,
+    parentFolders: {
+      get: (selector) => {
+        const folder = [...folders].reverse().find((item) => item.id === selector || item.name === selector);
+        return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment, folder.disabled) } : void 0;
+      },
+      getById: (id) => {
+        const folder = folders.find((item) => item.id === id);
+        return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment, folder.disabled) } : void 0;
+      },
+      getByName: (name) => {
+        const folder = [...folders].reverse().find((item) => item.name === name);
+        return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment, folder.disabled) } : void 0;
+      },
+      getEnvironments: () => [...folders].reverse().map((folder) => variableApi(folder.environment, folder.disabled))
+    },
+    request,
+    response: responseFacade(response),
+    replaceIn: (value) => String(value).replace(/{{\s*([^{}]+?)\s*}}/g, (match, name) => mergedVariables()[name] ?? match),
+    vault: { get: (name) => {
+      if (!options.vault) throw new Error("Script vault access is disabled.");
+      return options.vault[name];
+    } },
+    sendRequest: async (input, callback) => {
+      const run = async () => {
+        if (!options.sendRequest) throw new Error("Script-initiated requests are disabled.");
+        const variables = mergedVariables();
+        const subrequest = await prepareScriptSubrequest(input, request, variables, options.readFile, fileBudget);
+        return responseFacade(await options.sendRequest(subrequest, variables));
+      };
+      if (callback) {
+        void run().then((result) => callback(null, result), (error) => callback(error instanceof Error ? error : new Error(String(error))));
+        return void 0;
+      }
+      return run();
+    },
+    expect: expectApi,
+    test: (name, callback) => {
+      registeredTests += 1;
+      if (registeredTests > 1e3) throw new Error("Script exceeds 1,000 test registrations.");
+      const testName = String(name);
+      if (testNamePattern && !testNamePattern.test(testName)) return;
+      const result = { name: testName, passed: true };
+      tests.push(result);
+      try {
+        const outcome = callback();
+        if (outcome && typeof outcome.then === "function") pendingTests.push(Promise.resolve(outcome).catch((error) => {
+          result.passed = false;
+          result.error = error instanceof Error ? error.message : String(error);
+        }));
       } catch (error) {
-        tests.push({ name, passed: false, error: error instanceof Error ? error.message : String(error) });
+        result.passed = false;
+        result.error = error instanceof Error ? error.message : String(error);
       }
     }
   };
+  const scriptModules = createScriptModules({
+    atob,
+    btoa,
+    crypto,
+    expect: expectApi,
+    structuredClone,
+    TextDecoder,
+    TextEncoder,
+    URL,
+    URLSearchParams,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval
+  });
   const context = import_node_vm.default.createContext({
     insomnia,
     expect: expectApi,
+    require: (name) => {
+      if (!Object.hasOwn(scriptModules, name)) throw new Error(`Module '${name}' is not bundled in Brunomnia's script sandbox.`);
+      return scriptModules[name];
+    },
     console: {
       log: (...values) => logs.push(values.map(String).join(" ")),
       info: (...values) => logs.push(values.map(String).join(" ")),
@@ -8255,26 +12166,46 @@ var runNodeScript = async (source, originalRequest, originalEnvironment, respons
       error: (...values) => logs.push(`[error] ${values.map(String).join(" ")}`)
     },
     structuredClone,
-    JSON
+    JSON,
+    URL,
+    URLSearchParams
   }, { codeGeneration: { strings: false, wasm: false } });
   const script = new import_node_vm.default.Script(`(async () => { ${source}
  })()`, { filename: `${request.name}.script.js` });
   let timeout;
   try {
     await Promise.race([
-      Promise.resolve(script.runInContext(context, { timeout: 2e3 })),
+      Promise.resolve(script.runInContext(context, { timeout: timeoutMs })),
       new Promise((_, reject) => {
-        timeout = setTimeout(() => reject(new Error("Script exceeded the 2000 ms execution limit.")), 2e3);
+        timeout = setTimeout(() => reject(new Error(`Script exceeded the ${timeoutMs} ms execution limit.`)), timeoutMs);
       })
     ]);
+    await Promise.all(pendingTests);
   } finally {
     if (timeout) clearTimeout(timeout);
     delete requestWithHelpers.addHeader;
     delete requestWithHelpers.removeHeader;
+    delete requestWithHelpers.setHeader;
+    delete requestWithHelpers.getHeader;
+    delete requestWithHelpers.hasHeader;
+    delete requestWithHelpers.getUrl;
+    delete requestWithHelpers.setUrl;
+    delete requestWithHelpers.getMethod;
+    delete requestWithHelpers.setMethod;
+    delete requestWithHelpers.getBody;
+    delete requestWithHelpers.setBody;
+    delete requestWithHelpers.proxy;
+    delete requestWithHelpers.certificate;
+    delete authWithUpdate.update;
+    delete request.url;
+    request.url = requestUrl;
+    delete request.body;
+    request.body = requestBody;
   }
-  return { request, environment, localVariables, logs, tests };
+  const hydratedRequest = await hydrateScriptFileReferences(request, fileReferences, options.readFile, fileBudget);
+  return { request: hydratedRequest, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
 };
-var executeHttp = async (request, variables) => {
+var executeHttp = async (request, variables, requestTimeoutMs = 3e4, proxyPreferences) => {
   if (request.protocol !== "http" && request.protocol !== "graphql") throw new Error(`CLI collection execution does not yet support ${request.protocol}.`);
   const url = buildRequestUrl(request, variables);
   const headers = buildHeaders(request, variables);
@@ -8296,23 +12227,29 @@ var executeHttp = async (request, variables) => {
     body = form;
   } else if (request.bodyMode === "binary" && request.binaryBody) body = Buffer.from(request.binaryBody.dataBase64, "base64");
   const started = performance.now();
+  const timeoutMs = resolveRequestTimeout(request.transport, requestTimeoutMs);
+  if (resolveProxyTransport(request.transport, url, proxyPreferences).proxyMode === "custom") {
+    throw new Error("The CLI cannot use a manual proxy because Node Fetch does not expose per-request proxy configuration. Use the native desktop transport or configure a supported runner-level proxy.");
+  }
   const response = await fetch(url, {
     method: request.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled && header.name).map((header) => [header.name, header.value])),
     body: request.method === "GET" || request.method === "HEAD" ? void 0 : body,
     redirect: request.transport.followRedirects ? "follow" : "manual",
-    signal: AbortSignal.timeout(request.transport.timeoutMs)
+    signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : void 0
   });
   const responseBody = await response.text();
-  return { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody) };
+  return { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url };
 };
 var usage = `Brunomnia CLI
 
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>]
-  brunomnia run test <workspace> <collection-name-or-id> [same options]
+  brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files]
+  brunomnia run test <workspace> <collection-name-or-id> [-t, --testNamePattern <regex>] [same options]
+
+Reporters: dot, list, min, progress, spec, tap, json, junit
 `;
 var main = async () => {
   const [command, subject] = args;
@@ -8354,17 +12291,51 @@ var main = async () => {
     const workspace = await loadWorkspace(args[2] ?? fail("Provide a workspace file."));
     const identifier = args[3] ?? fail("Provide a collection name or ID.");
     const collection2 = workspace.collections.find((candidate) => candidate.id === identifier || candidate.name === identifier) ?? fail(`Collection '${identifier}' was not found.`);
-    const environmentIdentifier = flag("--env");
+    const environmentIdentifier = flag("--env") ?? workspace.activeEnvironmentId;
     const selectedEnvironment = workspace.environments.find((candidate) => candidate.id === environmentIdentifier || candidate.name === environmentIdentifier) ?? workspace.environments[0] ?? fail("The workspace has no environment.");
     const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
     const dataPath = flag("--data");
+    const requestedTestNamePattern = flag("--testNamePattern") ?? flag("-t") ?? flag("--test-name-pattern");
+    if (subject === "collection" && requestedTestNamePattern !== void 0) fail("--testNamePattern is only available for run test.");
+    const testNamePattern = subject === "test" ? validateTestNamePattern(requestedTestNamePattern) : void 0;
+    const executeWorkspaceHttp = (request, variables) => {
+      const validateCertificates = workspace.preferences.validateCertificates;
+      if (!resolveCertificateValidation(request.transport, validateCertificates)) {
+        throw new Error("The CLI cannot disable TLS certificate validation because Node Fetch does not expose that authority. Use the native desktop transport for explicitly untrusted development certificates.");
+      }
+      return executeHttp(request, variables, workspace.preferences.requestTimeoutMs, {
+        enabled: workspace.preferences.proxyEnabled,
+        httpProxy: workspace.preferences.httpProxy,
+        httpsProxy: workspace.preferences.httpsProxy,
+        noProxy: workspace.preferences.noProxy
+      });
+    };
     const report = await runCollection(collection2, environment, {
       iterations: Number(flag("--iterations") ?? 1),
       retries: Number(flag("--retries") ?? 0),
+      bail: hasFlag("--bail"),
       delayMs: 0,
+      testNamePattern,
+      scriptTimeoutMs: Math.min(6e4, Math.max(1e3, Number(flag("--script-timeout") ?? 1e4))),
+      environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
       dataRows: dataPath ? parseRunnerData(await loadText(dataPath)) : []
-    }, executeHttp, runNodeScript);
-    console.log(JSON.stringify(report, null, 2));
+    }, executeWorkspaceHttp, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => {
+      if (source.trim() && !hasFlag("--allow-scripts")) throw new Error("CLI script execution is disabled. Re-run trusted workspaces with --allow-scripts.");
+      return runNodeScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
+        ...scriptOptions,
+        sendRequest: hasFlag("--allow-script-requests") ? executeWorkspaceHttp : void 0,
+        readFile: hasFlag("--allow-script-files") ? readCliScriptFile : void 0
+      });
+    });
+    const reporter = parseRunnerReporter(flag("--reporter") ?? flag("-r"), subject === "test" ? "spec" : "json");
+    const artifact = createRunnerReportArtifact(report, reporter);
+    const output = flag("--output") ?? flag("-o");
+    if (output) {
+      await (0, import_promises.writeFile)(output, artifact.contents);
+      console.log(`Wrote ${reporter} report to ${output}`);
+    } else {
+      process.stdout.write(artifact.contents);
+    }
     if (report.failed > 0) process.exitCode = 1;
     return;
   }

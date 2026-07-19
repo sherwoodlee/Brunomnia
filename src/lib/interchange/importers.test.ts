@@ -10,13 +10,13 @@ describe('artifact import adapters', () => {
       id: 'plugin-one', name: 'Imported', version: '1.0.0', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true,
       requestedPermissions: ['network'], grantedPermissions: ['network'], installedAt: new Date().toISOString(),
     }];
-    workspace.mcpClients = [{ id: 'mcp-one', name: 'Imported MCP', enabled: true, transport: 'stdio', url: '', command: '/tmp/server', args: [], headers: [], authType: 'bearer', token: 'secret', username: '', password: '', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [] }];
+    workspace.mcpClients = [{ id: 'mcp-one', name: 'Imported MCP', enabled: true, transport: 'http', url: 'https://mcp.example', command: '', args: [], headers: [], authType: 'oauth2', token: 'secret', username: '', password: '', oauthAuthorizationUrl: 'https://identity.example/authorize', oauthAccessTokenUrl: 'https://identity.example/token', oauthClientId: 'client', oauthClientSecret: 'client-secret', oauthScope: 'mcp', oauthState: '', oauthRefreshToken: 'refresh', oauthIdentityToken: 'identity', oauthExpiresAt: 123, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: 'registered-client', oauthRegisteredClientSecret: 'registered-secret', oauthRegisteredClientIdIssuedAt: 1, oauthRegisteredClientSecretExpiresAt: 2, oauthRegisteredTokenEndpointAuthMethod: 'client_secret_post', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [] }];
     workspace.ai = { ...workspace.ai, enabled: true, apiKey: 'secret' };
     const result = importArtifact(JSON.stringify(workspace), 'workspace.brunomnia.json');
     expect(result.warnings[0].message).toContain('capability grants were cleared');
     expect(result.warnings.some((warning) => warning.code === 'integrations-disabled')).toBe(true);
     expect(result.replacement?.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
-    expect(result.replacement?.mcpClients[0]).toMatchObject({ enabled: false, token: '' });
+    expect(result.replacement?.mcpClients[0]).toMatchObject({ enabled: false, token: '', oauthClientSecret: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none' });
     expect(result.replacement?.ai).toMatchObject({ enabled: false, apiKey: '' });
   });
 
@@ -227,7 +227,7 @@ environments:
     expect(appliedCollection.folders?.[0].id).not.toBe(v5.collections[0].folders?.[0].id);
   });
 
-  it('preserves unsupported Insomnia real-time request details with explicit warnings', () => {
+  it('imports Socket.IO requests and preserves unsupported MCP details with a warning', () => {
     const result = importArtifact(`type: collection.insomnia.rest/5.0
 schema_version: "5.1"
 name: Realtime
@@ -236,17 +236,27 @@ collection:
   - name: Rooms
     url: https://socket.example
     meta: { id: socketio-req-abc }
+    settings: { path: /custom-path, cookies: { send: false, store: true } }
     eventListeners: [{ id: ev1, eventName: join, isOpen: true }]
+    payload: { eventName: message, ack: true, args: [{ id: arg1, mode: json, value: '{"room":"orders"}' }] }
   - name: Tools
     url: https://mcp.example
     transportType: streamable-http
     meta: { id: mcp-req-abc }
 `, 'realtime.yaml');
 
-    expect(result.collections[0].requests[0]).toMatchObject({ protocol: 'websocket', method: 'GET' });
-    expect(result.collections[0].requests[0].source?.unsupported?.socketIo).toBeTruthy();
+    expect(result.collections[0].requests[0]).toMatchObject({
+      protocol: 'socketio',
+      method: 'GET',
+      transport: expect.objectContaining({ sendCookies: false, storeCookies: true }),
+      socketIo: {
+        path: '/custom-path', eventName: 'message', ack: true,
+        args: [{ id: 'arg1', mode: 'json', value: '{"room":"orders"}' }],
+        eventListeners: [{ id: 'ev1', eventName: 'join', description: '', enabled: true }],
+      },
+    });
     expect(result.collections[0].requests[1]).toMatchObject({ protocol: 'http', method: 'POST' });
-    expect(result.warnings.filter((warning) => warning.code === 'unsupported-protocol')).toHaveLength(2);
+    expect(result.warnings.filter((warning) => warning.code === 'unsupported-protocol')).toHaveLength(1);
   });
 
   it('imports Postman environments and applies resources with collision-safe IDs', () => {
@@ -254,7 +264,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(22);
+    expect(second.version).toBe(24);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

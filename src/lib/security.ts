@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { AuditEvent, Workspace } from '../types';
 import { migrateWorkspace } from './storage';
 import { defaultPreferences } from './preferences';
+import { mergeLocalOAuth2RuntimeCredentials, withoutOAuth2RuntimeCredentials } from './oauth2Tokens';
 import { publicEnvironments } from './resources';
 
 export type VaultEntry = { id: string; name: string; value: string; updatedAt: string };
@@ -14,24 +15,24 @@ const nativeOnly = () => {
   if (!isTauri()) throw new Error('Encrypted vault and sync files require the Tauri desktop app.');
 };
 
-export const vaultStatus = async () => {
+export const vaultStatus = async (workspaceId: string) => {
   nativeOnly();
-  return invoke<SecureFileStatus>('secure_vault_status');
+  return invoke<SecureFileStatus>('secure_vault_status', { workspaceId });
 };
 
-export const unlockVault = async (passphrase: string) => {
+export const unlockVault = async (workspaceId: string, passphrase: string) => {
   nativeOnly();
-  return invoke<VaultEntry[]>('secure_vault_unlock', { passphrase });
+  return invoke<VaultEntry[]>('secure_vault_unlock', { workspaceId, passphrase });
 };
 
-export const saveVault = async (passphrase: string, entries: VaultEntry[]) => {
+export const saveVault = async (workspaceId: string, passphrase: string, entries: VaultEntry[]) => {
   nativeOnly();
-  return invoke<SecureFileStatus>('secure_vault_save', { input: { passphrase, entries } });
+  return invoke<SecureFileStatus>('secure_vault_save', { workspaceId, input: { passphrase, entries } });
 };
 
-export const resetVault = async () => {
+export const resetVault = async (workspaceId: string) => {
   nativeOnly();
-  return invoke<void>('secure_vault_reset');
+  return invoke<void>('secure_vault_reset', { workspaceId });
 };
 
 export const encryptedSyncStatus = async (path: string) => {
@@ -80,7 +81,7 @@ export const isProtectedSecretReference = (value: string) => /^\s*\{\{\s*vault\.
 const sensitiveVariable = /(secret|password|token|api.?key|private.?key|client.?secret)/i;
 export const isSensitiveSecretName = (value: string) => /(authorization|api[-_]?key|token|secret|password)/i.test(value);
 const embeddedUrlCredential = /^[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s]+@/i;
-const sensitiveAuthFields = ['token', 'password', 'apiKeyValue', 'consumerSecret', 'tokenSecret', 'privateKey', 'clientSecret', 'accessToken', 'refreshToken', 'awsSecretAccessKey', 'awsSessionToken', 'hawkKey', 'asapPrivateKey', 'netrc'] as const;
+const sensitiveAuthFields = ['token', 'password', 'apiKeyValue', 'consumerSecret', 'tokenSecret', 'privateKey', 'clientSecret', 'code', 'codeVerifier', 'accessToken', 'identityToken', 'refreshToken', 'awsSecretAccessKey', 'awsSessionToken', 'hawkKey', 'asapPrivateKey', 'netrc'] as const;
 
 export const plaintextSecretCandidates = (workspace: Workspace): string[] => {
   const candidates = publicEnvironments(workspace.environments).flatMap((environment) => environment.variables
@@ -114,8 +115,9 @@ export const plaintextSecretCandidates = (workspace: Workspace): string[] => {
     });
   });
   workspace.mcpClients.forEach((client) => {
-    if (client.token && !isProtectedSecretReference(client.token)) candidates.push(`MCP ${client.name}: bearer token`);
-    if (client.password && !isProtectedSecretReference(client.password)) candidates.push(`MCP ${client.name}: password`);
+    if (client.authType === 'bearer' && client.token && !isProtectedSecretReference(client.token)) candidates.push(`MCP ${client.name}: bearer token`);
+    if (client.authType === 'basic' && client.password && !isProtectedSecretReference(client.password)) candidates.push(`MCP ${client.name}: password`);
+    if (client.authType === 'oauth2' && client.oauthClientSecret && !isProtectedSecretReference(client.oauthClientSecret)) candidates.push(`MCP ${client.name}: OAuth client secret`);
     client.headers.filter((header) => header.value && isSensitiveSecretName(header.name) && !isProtectedSecretReference(header.value))
       .forEach((header) => candidates.push(`MCP ${client.name}: header ${header.name}`));
   });
@@ -126,7 +128,7 @@ export const plaintextSecretCandidates = (workspace: Workspace): string[] => {
 
 export const shareableWorkspace = (workspace: Workspace): Workspace => {
   const environments = publicEnvironments(workspace.environments);
-  return {
+  return withoutOAuth2RuntimeCredentials({
     ...structuredClone(workspace),
     environments,
     activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',
@@ -135,6 +137,7 @@ export const shareableWorkspace = (workspace: Workspace): Workspace => {
     imports: [],
     cookies: [],
     responses: [],
+    streamSessions: [],
     project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
     plugins: [],
     pluginData: {},
@@ -143,7 +146,7 @@ export const shareableWorkspace = (workspace: Workspace): Workspace => {
     konnect: { ...workspace.konnect, enabled: false, token: '', controlPlanes: [], controlPlaneId: '' },
     preferences: structuredClone(defaultPreferences),
     collaboration: { ...workspace.collaboration, path: '' },
-  };
+  });
 };
 
 export const mergeSyncedWorkspace = (current: Workspace, payload: SyncPayload): Workspace => {
@@ -155,7 +158,7 @@ export const mergeSyncedWorkspace = (current: Workspace, payload: SyncPayload): 
   const currentMemberId = shared.governance.members.some((member) => member.id === current.governance.currentMemberId)
     ? current.governance.currentMemberId
     : shared.governance.currentMemberId;
-  return {
+  return mergeLocalOAuth2RuntimeCredentials(current, {
     ...shared,
     environments: [...sharedEnvironments, ...privateEnvironments],
     activeEnvironmentId: privateEnvironments.some((environment) => environment.id === current.activeEnvironmentId) ? current.activeEnvironmentId : sharedEnvironments.some((environment) => environment.id === shared.activeEnvironmentId) ? shared.activeEnvironmentId : sharedEnvironments[0]?.id ?? privateEnvironments[0]?.id ?? '',
@@ -164,6 +167,7 @@ export const mergeSyncedWorkspace = (current: Workspace, payload: SyncPayload): 
     imports: current.imports,
     cookies: current.cookies,
     responses: current.responses,
+    streamSessions: current.streamSessions,
     project: current.project,
     plugins: current.plugins,
     pluginData: current.pluginData,
@@ -173,7 +177,7 @@ export const mergeSyncedWorkspace = (current: Workspace, payload: SyncPayload): 
     preferences: current.preferences,
     collaboration: { ...current.collaboration, mode: 'encrypted-file', revision: payload.revision, lastPulledAt: new Date().toISOString() },
     governance: { ...shared.governance, currentMemberId },
-  };
+  });
 };
 
 export const appendAudit = (workspace: Workspace, action: string, detail: string): Workspace => {

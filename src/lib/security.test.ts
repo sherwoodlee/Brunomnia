@@ -6,18 +6,24 @@ describe('encrypted collaboration boundaries', () => {
   it('keeps local response, credential, Git, and plugin state out of shared payloads', () => {
     const workspace = cloneSeedWorkspace();
     workspace.history = [{ id: 'history', requestId: 'request', name: 'Private', method: 'GET', url: 'https://private.example', status: 200, durationMs: 1, createdAt: new Date().toISOString() }];
+    const request = workspace.collections[0].requests[0];
+    workspace.streamSessions = [{ id: 'stream', requestId: request.id, requestName: request.name, requestUrl: request.url, environmentId: workspace.activeEnvironmentId, protocol: 'socketio', startedAt: new Date().toISOString(), messages: [] }];
     workspace.cookies = [{ id: 'cookie', name: 'session', value: 'secret', domain: 'private.example', path: '/', secure: true, httpOnly: true, sameSite: 'strict', hostOnly: true, createdAt: new Date().toISOString() }];
     workspace.project.path = '/private/repository';
     workspace.plugins = [{ id: 'plugin', name: 'Private plugin', version: '1', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true, requestedPermissions: [], grantedPermissions: [], installedAt: new Date().toISOString() }];
     workspace.collaboration.path = '/private/share.enc.json';
+    workspace.collections[0].requests[0].auth = { ...workspace.collections[0].requests[0].auth, type: 'oauth2', code: 'code', codeVerifier: 'verifier', accessToken: 'access', identityToken: 'identity', refreshToken: 'refresh', expiresAt: 123 };
 
     const shared = shareableWorkspace(workspace);
     expect(shared.history).toEqual([]);
     expect(shared.cookies).toEqual([]);
+    expect(shared.streamSessions).toEqual([]);
     expect(shared.project.path).toBe('');
     expect(shared.plugins).toEqual([]);
     expect(shared.collaboration.path).toBe('');
     expect(shared.collections).toHaveLength(workspace.collections.length);
+    expect(shared.collections[0].requests[0].auth).toMatchObject({ code: '', codeVerifier: '', accessToken: '', identityToken: '', refreshToken: '', expiresAt: 0 });
+    expect(workspace.collections[0].requests[0].auth.accessToken).toBe('access');
   });
 
   it('removes private environment trees and repairs the shared active environment', () => {
@@ -35,19 +41,25 @@ describe('encrypted collaboration boundaries', () => {
 
   it('preserves device-local data and the current actor while applying a pulled revision', () => {
     const current = cloneSeedWorkspace();
+    const request = current.collections[0].requests[0];
+    current.streamSessions = [{ id: 'stream', requestId: request.id, requestName: request.name, requestUrl: request.url, environmentId: current.activeEnvironmentId, protocol: 'sse', startedAt: new Date().toISOString(), messages: [] }];
     current.history = [{ id: 'history', requestId: 'request', name: 'Keep', method: 'GET', url: 'https://local.example', status: 200, durationMs: 1, createdAt: new Date().toISOString() }];
     current.collaboration.path = '/local/team.enc.json';
+    current.collections[0].requests[0].auth = { ...current.collections[0].requests[0].auth, type: 'oauth2', accessToken: 'local-access', refreshToken: 'local-refresh', expiresAt: 123 };
     const remote = cloneSeedWorkspace();
     remote.name = 'Remote workspace';
+    remote.collections[0].requests[0].auth = { ...remote.collections[0].requests[0].auth, type: 'oauth2', clientId: 'remote-client' };
     remote.governance.members.push({ id: 'remote-editor', name: 'Remote editor', email: '', role: 'editor', active: true });
     remote.governance.currentMemberId = 'remote-editor';
 
     const merged = mergeSyncedWorkspace(current, { revision: 4, actor: 'Remote editor', savedAt: new Date().toISOString(), workspace: remote });
     expect(merged.name).toBe('Remote workspace');
     expect(merged.history[0].name).toBe('Keep');
+    expect(merged.streamSessions.map((session) => session.id)).toEqual(['stream']);
     expect(merged.collaboration.path).toBe('/local/team.enc.json');
     expect(merged.collaboration.revision).toBe(4);
     expect(merged.governance.currentMemberId).toBe('local-owner');
+    expect(merged.collections[0].requests[0].auth).toMatchObject({ accessToken: 'local-access', refreshToken: 'local-refresh', expiresAt: 123 });
   });
 
   it('exposes vault-prefixed variables only while the vault is unlocked and bounds audit retention', () => {
@@ -68,7 +80,7 @@ describe('encrypted collaboration boundaries', () => {
     workspace.collections[0].requests[0].headers.push({ id: 'auth-header', name: 'Authorization', value: 'Bearer plaintext', enabled: false });
     workspace.ai.apiKey = 'plaintext-ai';
     workspace.konnect.token = 'plaintext-konnect';
-    workspace.mcpClients.push({ id: 'mcp', name: 'Local tools', transport: 'http', enabled: true, url: 'https://mcp.example', command: '', args: [], authType: 'bearer', username: '', password: '', token: 'plaintext-mcp', headers: [], roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [], lastSyncedAt: '' });
+    workspace.mcpClients.push({ id: 'mcp', name: 'Local tools', transport: 'http', enabled: true, url: 'https://mcp.example', command: '', args: [], authType: 'bearer', username: '', password: '', token: 'plaintext-mcp', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none', headers: [], roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [], lastSyncedAt: '' });
     expect(plaintextSecretCandidates(workspace)).toHaveLength(6);
     workspace.environments[0].variables.at(-1)!.value = '{{ vault.api_token }}';
     workspace.collections[0].requests[0].auth.token = "{% external 'aws', 'orders-token' %}";
@@ -76,6 +88,12 @@ describe('encrypted collaboration boundaries', () => {
     workspace.ai.apiKey = '{{ vault.ai_key }}';
     workspace.konnect.token = "{% external 'aws', 'konnect-token' %}";
     workspace.mcpClients[0].token = '{{ vault.mcp_token }}';
+    expect(plaintextSecretCandidates(workspace)).toEqual([]);
+    workspace.mcpClients[0].authType = 'oauth2';
+    workspace.mcpClients[0].token = 'device-local-runtime-token';
+    workspace.mcpClients[0].oauthClientSecret = 'plaintext-oauth-secret';
+    expect(plaintextSecretCandidates(workspace)).toEqual(['MCP Local tools: OAuth client secret']);
+    workspace.mcpClients[0].oauthClientSecret = '{{ vault.mcp_client_secret }}';
     expect(plaintextSecretCandidates(workspace)).toEqual([]);
   });
 
@@ -92,6 +110,21 @@ describe('encrypted collaboration boundaries', () => {
       'Orders: variable clientSecret',
       'Orders / Secured: auth.token',
       'Orders / Secured: header Authorization',
+    ]);
+  });
+
+  it('treats OAuth codes, verifiers, and identity tokens as plaintext secrets', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.collections[0].requests[0].auth = {
+      ...workspace.collections[0].requests[0].auth,
+      code: 'authorization-code',
+      codeVerifier: 'pkce-verifier',
+      identityToken: 'identity-token',
+    };
+    expect(plaintextSecretCandidates(workspace)).toEqual([
+      'Orders / List Orders: auth.code',
+      'Orders / List Orders: auth.codeVerifier',
+      'Orders / List Orders: auth.identityToken',
     ]);
   });
 

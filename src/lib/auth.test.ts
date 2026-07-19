@@ -47,4 +47,19 @@ describe('advanced request authentication', () => {
     expect(output.searchParams.get('code_challenge_method')).toBe('S256');
     expect(output.searchParams.get('code_challenge')).toBeTruthy();
   });
+
+  it('adds an OIDC nonce for implicit identity-token responses', async () => {
+    const value = request();
+    value.auth = { ...value.auth, type: 'oauth2', oauth2GrantType: 'implicit', responseType: 'id_token token', authorizationUrl: 'https://identity.example.com/authorize', clientId: 'client', redirectUrl: 'http://localhost/callback', state: 'state-1' };
+    const output = new URL(await createOAuth2AuthorizationUrl(value, {}));
+    expect(output.searchParams.get('response_type')).toBe('id_token token');
+    expect(output.searchParams.get('nonce')).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+  });
+
+  it('omits the OAuth header prefix for NO_PREFIX', async () => {
+    const value = request();
+    value.auth = { ...value.auth, type: 'oauth2', accessToken: 'raw-token', tokenPrefix: 'NO_PREFIX' };
+    const output = await applyAdvancedAuth(value, {}, { url: value.url, headers: [], body: '' });
+    expect(output.headers.find((header) => header.name === 'Authorization')?.value).toBe('raw-token');
+  });
 });

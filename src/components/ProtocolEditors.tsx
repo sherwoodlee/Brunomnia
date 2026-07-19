@@ -5,7 +5,6 @@ import type {
   FilePayload,
   GrpcSchema,
   MultipartPart,
-  StreamMessage,
 } from '../types';
 import { graphqlTypeLabel, insertGraphqlRootField, validateGraphqlDocument } from '../lib/graphql';
 import { prettyRequestBody } from '../lib/request';
@@ -259,7 +258,7 @@ export function StreamSetup({ request, onChange }: { request: ApiRequest; onChan
   const updateSse = (patch: Partial<ApiRequest['sse']>) => onChange({ sse: { ...sse, ...patch } });
   return (
     <div className="stream-setup">
-      <div className="empty-state compact"><span className={`protocol-glyph ${protocol}`}>{protocol === 'websocket' ? 'WS' : 'SSE'}</span><strong>{protocol === 'websocket' ? 'Bidirectional WebSocket session' : 'Server-sent event stream'}</strong><span>{protocol === 'websocket' ? 'Connect, then send text or binary frames from the response console.' : 'Connect to watch named events arrive in order.'}</span></div>
+      <div className="empty-state compact"><span className={`protocol-glyph ${protocol}`}>{protocol === 'websocket' ? 'WS' : protocol === 'socketio' ? 'IO' : 'SSE'}</span><strong>{protocol === 'websocket' ? 'Bidirectional WebSocket session' : protocol === 'socketio' ? 'Socket.IO event session' : 'Server-sent event stream'}</strong><span>{protocol === 'websocket' ? 'Connect, then send text or binary frames from the response console.' : protocol === 'socketio' ? 'Connect, emit ordered arguments, request acknowledgements, and listen to named events.' : 'Connect to watch named events arrive in order.'}</span></div>
       {protocol === 'websocket' ? <div className="editor-stack"><div className="editor-toolbar"><span>Runner startup text frame</span><small>Optional</small></div><CodeEditor ariaLabel="WebSocket runner startup frame" value={request.body} onChange={(body) => onChange({ body })} /></div> : null}
       {protocol === 'sse' ? <div className="sse-reconnect-settings">
         <header><strong>Long-running connection</strong><small>Reconnect after remote close or transport failure</small></header>
@@ -299,46 +298,6 @@ export function TransportEditor({ request, globalTimeoutMs, onChange }: { reques
         <label>Client private key (PEM)<textarea aria-label="Client private key PEM" placeholder="-----BEGIN PRIVATE KEY-----" value={transport.clientKeyPem} onChange={(event) => update({ clientKeyPem: event.target.value })} /></label>
       </div>
       <p className="transport-note">Transport secrets remain on this device and export only when you explicitly export this workspace.</p>
-    </div>
-  );
-}
-
-export function StreamConsole({
-  protocol,
-  messages,
-  connected,
-  draft,
-  onDraftChange,
-  frameKind,
-  onFrameKindChange,
-  onSend,
-}: {
-  protocol: ApiRequest['protocol'];
-  messages: StreamMessage[];
-  connected: boolean;
-  draft: string;
-  onDraftChange: (value: string) => void;
-  frameKind: 'text' | 'binary';
-  onFrameKindChange: (value: 'text' | 'binary') => void;
-  onSend: () => void;
-}) {
-  return (
-    <div className={`stream-console${protocol === 'websocket' ? ' with-composer' : ''}`}>
-      <div className="stream-log" aria-live="polite">
-        {messages.length ? messages.map((message) => (
-          <article className={`stream-message ${message.direction}`} key={message.id}>
-            <header><span>{message.direction}</span><strong>{message.kind}</strong><time>{new Date(message.timestamp).toLocaleTimeString()}</time></header>
-            <pre>{message.text}</pre>
-          </article>
-        )) : <div className="empty-state compact"><Icon name="history" size={26} /><strong>No stream activity yet</strong><span>Connect to start the ordered event log.</span></div>}
-      </div>
-      {protocol === 'websocket' ? (
-        <div className="stream-composer">
-          <div className="stream-frame-tools"><select aria-label="WebSocket frame type" disabled={!connected} value={frameKind} onChange={(event) => onFrameKindChange(event.target.value as 'text' | 'binary')}><option value="text">Text</option><option value="binary">Binary (base64)</option></select>{frameKind === 'binary' ? <label className="file-picker"><Icon name="import" size={14} /><span>{draft ? `${Math.floor(draft.length * .75)} bytes selected` : 'Choose binary file'}</span><input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void filePayload(file).then((payload) => onDraftChange(payload.dataBase64)); }} /></label> : null}</div>
-          <textarea aria-label="WebSocket message" disabled={!connected} placeholder={connected ? frameKind === 'binary' ? 'Paste base64 or choose a file…' : 'Type a text frame…' : 'Connect before sending a frame'} value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) onSend(); }} />
-          <button disabled={!connected || !draft.trim()} onClick={onSend} type="button">Send frame</button>
-        </div>
-      ) : null}
     </div>
   );
 }

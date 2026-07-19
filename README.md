@@ -2,14 +2,17 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the fifty-seventh runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the one-hundredth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
-- Native Rust transports for HTTP, GraphQL, WebSocket, SSE, and dynamic gRPC calls
+- Native Rust transports for HTTP, GraphQL, WebSocket, Socket.IO, SSE, and dynamic gRPC calls
+- Multiple account-free local projects with create/switch/rename/duplicate-any/reorder/delete/restore workflows, independent atomic files and encrypted vaults, legacy migration, rotating backups, catalog reconstruction, recently deleted management, and explicit corruption recovery
 - GraphQL operation/variables editor, bounded schema introspection cache, root-field validation, documentation explorer, and safe field insertion
 - WebSocket text/binary-frame sessions with an ordered bidirectional event log
+- Socket.IO Engine.IO v4 sessions with polling-first negotiation, standards-based WebSocket upgrade and polling-only fallback, custom paths and URL namespaces, headers/cookies/Bearer connect auth, ordered JSON/text event arguments, optional acknowledgements, nested binary Buffer reconstruction, live named listeners, and an ordered event console
 - Long-running Server-Sent Events sessions with incremental parsing, bounded or unlimited automatic reconnects, server retry hints, and `Last-Event-ID` resume
+- Persistent chronologically grouped WebSocket, Socket.IO, and SSE session history with finite/zero/unlimited retention, active-environment filtering, incremental event persistence, prior-session selection, and delete/clear actions
 - gRPC reflection, pasted `.proto` compilation, dynamic JSON messages, and unary/client/server/bidirectional streaming calls
 - JSON, text, URL-encoded, multipart file/part-metadata, and binary request bodies
 - Standard or custom HTTP methods, explicit encoded path parameters, repeated query keys, regular or device-persistent bulk query/header editing, row descriptions, multiline values, and local JSON/XML body beautification
@@ -19,14 +22,14 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Transparent native gzip, Brotli, deflate, and zstd response decoding with one decode-error-only raw fallback
 - Local collections with persistent mixed folder/request drag ordering, cross-collection moves, nested request folders, request/collection/folder documentation, and inherited folder headers, authentication, variables, and scripts
 - Distinct global-base/selected-global and collection-base/selected-collection environments, device-local private global sub-environments, folder/iteration/request-local variables, dynamic aliases, and template tags for UUIDs, time, Faker values, encoding, hashing, JSONPath, cookies, prompts, requests, and chained responses
-- Basic, Digest, OAuth 1.0/2.0, NTLM, AWS IAM v4, Bearer, API key, Hawk, Atlassian ASAP, and Netrc authentication
+- Basic, Digest, OAuth 1.0/2.0, NTLM, AWS IAM v4, Bearer, API key, Hawk, Atlassian ASAP, and Netrc authentication, including cancellable system-browser OAuth 2 loopback callbacks across direct, runner, script/plugin, and user-triggered integration sends, generated state/PKCE/nonce, authorization-code exchange, implicit access/identity tokens, send-time acquisition, and expiry-aware refresh
 - Persistent editable cookie jar with per-request send/store controls
 - A searchable 100-send activity log plus chronologically grouped per-request response history with finite/unlimited retention, active-environment filtering, rich URL/method/status/time/size evidence, delete/clear actions, historical request-version restoration, persistent Visual/Source/Raw preview modes with charset-aware and JSON/HTML content-detected text, bounded HTTP(S) links in JSON/source viewers with a device-local disable choice, safe-by-default HTML with response-URL-aware relative links, one-click preview reset, and separate opt-in remote-resource and isolated JavaScript authorities, byte-backed image/PDF/audio viewers, bounded CSV tables, and selectable byte-backed multipart sections with bounded recursive friendly viewers, JSONPath/XPath body filters, 5/100 MiB preview safety gates, byte-exact decoded-body/raw and prettified JSON downloads, selected-response HTTP debug/HAR exports, body/header inspection, and persisted size-bounded outgoing/response timeline evidence
 - Delayed one-shot sends and sequential repeating sends with explicit cancellation and a 1,000-run safety bound
 - Permission-bounded pre-request scripts and async after-response tests with documented seven-level environment lookup, exact base/selected scope aliases, folder/query/auth helpers, shared Chai `assert` and chainable `expect` surfaces, bounded adapters for every documented bundled module name, path-scoped opt-in primary/secondary local body and PEM attachment, and mediated HTTP/vault capabilities
-- Selectable drag/keyboard-ordered collection runs with JSON/CSV iteration data, retries, bail/cancellation, cookie/response chaining, bounded WebSocket/SSE samples, redacted request metadata, size-limited response inspection, saved reports, and downloadable JSON/JUnit evidence
+- Selectable drag/keyboard-ordered collection runs with JSON/CSV iteration data, retries, bail/cancellation, cookie/response chaining, bounded WebSocket/Socket.IO/SSE samples, redacted request metadata, size-limited response inspection, saved reports, and downloadable JSON/JUnit evidence
 - OpenAPI 3.x YAML/JSON editing, structural and safe Spectral-style custom linting, operation preview, formatting, and request generation
-- Native loopback mock servers with route parameters, delays, headers, CORS, request-aware header/query/decoded-path/JSON/form/multipart output templates, ordered repeated query/form/multipart arrays, bounded `assign`/`if`/`unless`/`raw` controls, all 118 currently documented Faker outputs, dynamic response tokens, and direct latest-response route creation/overwrite
+- Native loopback mock servers with live route editing, response-pane server/route create-or-overwrite selection, route parameters, delays, headers, CORS, request-aware header/query/decoded-path/JSON/form/multipart output templates, ordered repeated query/form/multipart arrays, computed bracket properties, LiquidJS-compatible quoted strings/escapes/comparisons/logic/`elsif` inside bounded `assign`/`if`/`unless`/`raw` controls, structured template-error responses, all 118 currently documented Faker outputs, and dynamic response tokens
 - A headless CLI for OpenAPI lint/generation/export and collection/test execution with regex test-name filtering, the documented Inso reporter names, and JSON/JUnit artifacts
 - File, pasted-text, and HTTP(S) URL imports with format detection and a warning preview
 - Insomnia JSON v4/v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports
@@ -40,11 +43,11 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and HashiCorp Vault template adapters through user-authenticated official CLIs, an in-memory cache, and an explicit per-reference-tuple allowlist
 - End-to-end encrypted shared-file revisions with optimistic conflict checks, explicit force, device-local data filtering, and self-hosted filesystem/WebDAV compatibility
 - Local owner/admin/editor/viewer metadata, storage and plaintext-secret policies, bounded audit records, and governance migration hardening
-- Project-scoped MCP clients over Streamable HTTP/JSON-RPC and native STDIO, with cached tools, prompts, resources, resource templates, roots, invocation, and an event console
+- Project-scoped MCP clients over Streamable HTTP/JSON-RPC and native STDIO, with cached tools/prompts/resources, guided prompt and scalar tool forms, guided RFC 6570 resource templates, per-primitive drafts, roots, an event console, and authorization-code/PKCE OAuth with discovery, dynamic registration, refresh, scope escalation, and device-local credentials
 - Optional OpenAI, Anthropic, Gemini, and custom/local OpenAI-compatible providers with vault-only credential execution, AI mock generation from manual, reviewed specification-URL, or explicitly selected active-request/latest-response context, and reviewable ordered Git commit groups with optional push
 - Pull-only Konnect control-plane discovery and Gateway Service/HTTP Route mapping that preserves local request work and isolates unsupported routes
-- Workspace v22 migrations, device-local bulk/editor/layout/typography/password-visibility/HTML-script and script-data-folder preferences, legacy-safe timeout/certificate/proxy overrides, bounded resource hierarchy and request-row normalization, collection sub-environment repair, private-global publication filtering, split-YAML serialization, import-time authority stripping, and device-local integration/script permissions
-- Atomic persistence in the OS application-data directory
+- Workspace v24 migrations, device-local bulk/editor/layout/typography/password-visibility/HTML-script and script-data-folder preferences, legacy-safe timeout/certificate/proxy overrides, bounded resource hierarchy, request-row/Socket.IO/session-history normalization, collection sub-environment repair, private-global publication filtering, split-YAML serialization, import-time authority stripping, and device-local integration/script permissions
+- Atomic per-project persistence in the OS application-data directory with recoverable prior revisions and restorable soft-deleted workspace/backup/vault snapshots in device-local trash
 - System/dark/light appearance, comfortable/compact density, horizontal/responsive or forced-vertical request layout, separate interface/editor font families and 8–24 px sizes, configurable editor wrapping/indentation/ligatures, masked authentication and integration credentials with device-wide or per-field reveal, request defaults, and customizable keyboard shortcuts
 - Responsive desktop UI with no login, upgrade, or cloud dependency
 
@@ -66,6 +69,7 @@ npm run dev
 The browser development build uses deterministic protocol demos for the `*.acme.dev` examples. Other HTTP URLs use browser `fetch`; the Tauri build routes protocol execution through Rust, so browser CORS rules do not apply.
 
 See [local mock servers](docs/MOCK_SERVERS.md) for request-aware response-template syntax, bounds, and current compatibility limits.
+See [local projects and recovery](docs/LOCAL_PROJECTS.md) for lifecycle, storage, backup, migration, and vault-isolation behavior.
 
 ## Use the CLI
 

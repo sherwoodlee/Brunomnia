@@ -1,6 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
-import { previewGrpcSchema, sseConnectConfig, streamTransportConfig } from './protocol';
+import { previewGrpcSchema } from './grpc';
+import { sseConnectConfig, streamTransportConfig } from './protocol';
+import { socketIoArgs } from './socketIo';
+
+describe('socketIoArgs', () => {
+  it('renders and parses ordered JSON/text arguments with string fallback', () => {
+    const workspace = cloneSeedWorkspace();
+    const request = workspace.collections[0].requests[0];
+    request.socketIo.args = [
+      { id: 'one', mode: 'json', value: '{"id":"{{ orderId }}"}' },
+      { id: 'two', mode: 'text', value: 'status={{ status }}' },
+      { id: 'three', mode: 'json', value: '{ invalid' },
+    ];
+    const environment = { ...workspace.environments[0], variables: [
+      { id: 'order', name: 'orderId', value: 'ord_42', enabled: true },
+      { id: 'status', name: 'status', value: 'ready', enabled: true },
+    ] };
+
+    expect(socketIoArgs(request, environment)).toEqual([{ id: 'ord_42' }, 'status=ready', '{ invalid']);
+  });
+});
 
 describe('previewGrpcSchema', () => {
   it('discovers unary and streaming RPC shapes from proto source', () => {

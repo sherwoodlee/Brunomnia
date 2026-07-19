@@ -1,11 +1,14 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import type { Environment, JsonValue, McpClient, McpPrompt, McpResource, McpTool } from '../types';
+import type { ApiRequest, AuthConfig, Environment, JsonValue, McpClient, McpPrompt, McpResource, McpTool } from '../types';
 import { createBlankRequest } from '../data/seed';
 import { sendRequest, type SendRequestContext } from './http';
+import { discoverMcpOAuthConfiguration, mcpOAuthClientCredentials, mcpOAuthConfigurationReady, mcpOAuthResource, parseMcpOAuthChallenge } from './mcpOAuthDiscovery';
+import { expandMcpUriTemplate, mcpUriTemplateVariables } from './mcpUriTemplate';
 import { isProtectedSecretReference, isSensitiveSecretName } from './security';
 
 type McpEvent = { direction: 'client' | 'server' | 'stderr'; method: string; detail: string; timestamp: string };
-type McpOperationResult = { result: unknown; events: McpEvent[]; sessionId?: string };
+type McpOperationResult = { result: unknown; events: McpEvent[]; client: McpClient; sessionId?: string };
+export type McpRequestContext = SendRequestContext & { onMcpClient?: (client: McpClient) => void };
 type StdioOutput = { result: unknown; events: unknown[]; stderr: string };
 
 const now = () => new Date().toISOString();
@@ -28,6 +31,11 @@ const assertProtectedCredentials = (client: McpClient) => {
   }
   if (client.authType === 'basic' && (!client.password.trim() || !isProtectedSecretReference(client.password))) {
     throw new Error('MCP Basic passwords must be a complete local-vault or approved external-vault reference.');
+  }
+  if (client.authType === 'oauth2') {
+    if (client.oauthClientSecret.trim() && !isProtectedSecretReference(client.oauthClientSecret)) {
+      throw new Error('MCP OAuth client secrets must be a complete local-vault or approved external-vault reference.');
+    }
   }
   const unsafeHeader = client.headers.find((header) => header.enabled && header.value.trim() && isSensitiveSecretName(header.name) && !isProtectedSecretReference(header.value));
   if (unsafeHeader) throw new Error(`MCP sensitive header '${unsafeHeader.name}' must use a complete local-vault or approved external-vault reference.`);
@@ -72,14 +80,61 @@ const operationResult = (messages: unknown[], id: string): { result: unknown; ev
 
 export const parseMcpJsonRpcResponse = (body: string, id: string) => operationResult(responseMessages(body), id);
 
+export const mcpAuthentication = (client: McpClient, defaults: AuthConfig): AuthConfig => {
+  if (client.authType === 'oauth2') {
+    const credentials = mcpOAuthClientCredentials(client);
+    return {
+      ...defaults,
+      type: 'oauth2',
+      disabled: false,
+      oauth2GrantType: 'authorization_code',
+      authorizationUrl: client.oauthAuthorizationUrl,
+      accessTokenUrl: client.oauthAccessTokenUrl,
+      clientId: credentials.clientId,
+      clientSecret: credentials.clientSecret,
+      scope: client.oauthScope,
+      state: client.oauthState,
+      redirectUrl: 'http://127.0.0.1/mcp/oauth/callback',
+      credentialsInBody: credentials.tokenEndpointAuthMethod !== 'client_secret_basic',
+      resource: mcpOAuthResource(client.url),
+      accessToken: client.token,
+      refreshToken: client.oauthRefreshToken,
+      identityToken: client.oauthIdentityToken,
+      expiresAt: client.oauthExpiresAt,
+      tokenPrefix: client.oauthTokenPrefix || 'Bearer',
+      usePkce: true,
+      pkceMethod: 'S256',
+      responseType: 'code',
+    };
+  }
+  return {
+    ...defaults,
+    type: client.authType,
+    token: client.token,
+    username: client.username,
+    password: client.password,
+    disabled: client.authType === 'none',
+  };
+};
+
+export const mcpClientWithOAuth2Auth = (client: McpClient, auth: AuthConfig): McpClient => client.authType !== 'oauth2' || auth.type !== 'oauth2' ? client : ({
+  ...client,
+  token: auth.accessToken,
+  oauthRefreshToken: auth.refreshToken,
+  oauthIdentityToken: auth.identityToken,
+  oauthExpiresAt: auth.expiresAt,
+  oauthTokenPrefix: auth.tokenPrefix || 'Bearer',
+});
+
 const httpRequest = async (
   client: McpClient,
   method: string,
   params: unknown,
   environment: Environment | undefined,
-  context: SendRequestContext,
+  context: McpRequestContext,
   sessionId = '',
   notification = false,
+  oauthRetry = false,
 ): Promise<McpOperationResult> => {
   assertProtectedCredentials(client);
   const id = requestId();
@@ -97,33 +152,63 @@ const httpRequest = async (
     ...(sessionId ? [{ id: `${id}-session`, name: 'Mcp-Session-Id', value: sessionId, enabled: true }] : []),
     ...client.headers,
   ];
-  request.auth = {
-    ...request.auth,
-    type: client.authType,
-    token: client.token,
-    username: client.username,
-    password: client.password,
-    disabled: client.authType === 'none',
-  };
+  const discoveryProbe = client.authType === 'oauth2'
+    && !mcpOAuthConfigurationReady(client)
+    && !client.token.trim()
+    && !client.oauthRefreshToken.trim();
+  request.auth = discoveryProbe
+    ? { ...request.auth, type: 'none', disabled: true }
+    : mcpAuthentication(client, request.auth);
   request.transport = { ...request.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMode: 'custom', timeoutMs: 30_000, sendCookies: false, storeCookies: false };
-  const response = await sendRequest(request, environment, context);
-  if (response.status === 401) throw new Error('MCP authentication failed with 401. Configure a PAT, Basic credentials, or a supported OAuth token.');
+  let updatedClient = client;
+  const response = await sendRequest(request, environment, {
+    ...context,
+    onOAuth2Token: (updatedRequest: ApiRequest) => {
+      updatedClient = mcpClientWithOAuth2Auth(updatedClient, updatedRequest.auth);
+      context.onMcpClient?.(updatedClient);
+    },
+  });
+  if (response.status === 401 && client.authType === 'oauth2' && !oauthRetry) {
+    const discovered = await discoverMcpOAuthConfiguration(updatedClient, response, environment, context);
+    context.onMcpClient?.(discovered.client);
+    const retryClient = { ...discovered.client, token: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0 };
+    const retried = await httpRequest(retryClient, method, params, environment, context, sessionId, notification, true);
+    return {
+      ...retried,
+      events: [
+        { direction: 'server', method: 'MCP OAuth', detail: '401 authentication challenge', timestamp: now() },
+        ...discovered.traces,
+        ...retried.events,
+      ],
+    };
+  }
+  const challenge = response.status === 403 && client.authType === 'oauth2' ? parseMcpOAuthChallenge(response) : undefined;
+  if (challenge?.error === 'insufficient_scope' && challenge.scope && !oauthRetry) {
+    const retryClient = { ...updatedClient, oauthScope: challenge.scope, token: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0 };
+    context.onMcpClient?.(retryClient);
+    const retried = await httpRequest(retryClient, method, params, environment, context, sessionId, notification, true);
+    return {
+      ...retried,
+      events: [{ direction: 'server', method: 'MCP OAuth', detail: `403 insufficient_scope · ${challenge.scope}`, timestamp: now() }, ...retried.events],
+    };
+  }
+  if (response.status === 401) throw new Error('MCP authentication failed with 401 after credential acquisition. Review the server, OAuth, PAT, or Basic configuration.');
   if (response.status < 200 || response.status >= 300) throw new Error(`MCP HTTP request failed (${response.status}): ${response.body.slice(0, 2_000)}`);
   const nextSession = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'mcp-session-id')?.[1] ?? sessionId;
   const events: McpEvent[] = [{ direction: 'client', method, detail: notification ? 'notification' : id, timestamp: now() }];
-  if (notification || !response.body.trim()) return { result: undefined, events, sessionId: nextSession };
+  if (notification || !response.body.trim()) return { result: undefined, events, client: updatedClient, sessionId: nextSession };
   const parsed = parseMcpJsonRpcResponse(response.body, id);
-  return { result: parsed.result, events: [...events, ...parsed.events], sessionId: nextSession };
+  return { result: parsed.result, events: [...events, ...parsed.events], client: updatedClient, sessionId: nextSession };
 };
 
-const httpSession = async (client: McpClient, environment: Environment | undefined, context: SendRequestContext) => {
+const httpSession = async (client: McpClient, environment: Environment | undefined, context: McpRequestContext) => {
   const initialized = await httpRequest(client, 'initialize', {
     protocolVersion: '2025-06-18',
     capabilities: { roots: { listChanged: false } },
     clientInfo: { name: 'Brunomnia', version: '0.1.0' },
   }, environment, context);
-  const notification = await httpRequest(client, 'notifications/initialized', {}, environment, context, initialized.sessionId, true);
-  return { sessionId: notification.sessionId ?? initialized.sessionId ?? '', events: [...initialized.events, ...notification.events] };
+  const notification = await httpRequest(initialized.client, 'notifications/initialized', {}, environment, context, initialized.sessionId, true);
+  return { client: notification.client, sessionId: notification.sessionId ?? initialized.sessionId ?? '', events: [...initialized.events, ...notification.events] };
 };
 
 const stdioRequest = async (client: McpClient, method: string, params: unknown): Promise<McpOperationResult> => {
@@ -132,7 +217,7 @@ const stdioRequest = async (client: McpClient, method: string, params: unknown):
   const output = await invoke<StdioOutput>('mcp_stdio_call', { input: { command: client.command, args: client.args, method, params, roots: client.roots, timeoutMs: 30_000 } });
   const events: McpEvent[] = output.events.map((event) => ({ direction: 'server', method: asString(asRecord(event)?.method) || 'message', detail: JSON.stringify(event), timestamp: now() }));
   if (output.stderr) events.push({ direction: 'stderr', method: 'stderr', detail: output.stderr, timestamp: now() });
-  return { result: output.result, events };
+  return { result: output.result, events, client };
 };
 
 const operation = async (
@@ -140,7 +225,7 @@ const operation = async (
   method: string,
   params: unknown,
   environment: Environment | undefined,
-  context: SendRequestContext,
+  context: McpRequestContext,
   sessionId?: string,
 ) => client.transport === 'stdio'
   ? stdioRequest(client, method, params)
@@ -174,14 +259,27 @@ const resourceList = (value: unknown, key: 'resources' | 'resourceTemplates'): M
   const resources = asRecord(value)?.[key];
   return !Array.isArray(resources) ? [] : resources.flatMap((item): McpResource[] => {
     const resource = asRecord(item);
-    const uri = asString(resource?.uri) || asString(resource?.uriTemplate);
-    return resource && uri ? [{ uri, name: asString(resource.name) || uri, description: asString(resource.description), mimeType: asString(resource.mimeType) }] : [];
+    const uriTemplate = key === 'resourceTemplates' ? asString(resource?.uriTemplate) : '';
+    const uri = asString(resource?.uri) || uriTemplate;
+    if (!resource || !uri) return [];
+    let variables: string[] = [];
+    if (uriTemplate) {
+      try { variables = mcpUriTemplateVariables(uriTemplate); }
+      catch { variables = []; }
+    }
+    return [{ uri, uriTemplate, variables, name: asString(resource.name) || uri, description: asString(resource.description), mimeType: asString(resource.mimeType) }];
   });
 };
 
-export const discoverMcpClient = async (client: McpClient, environment: Environment | undefined, context: SendRequestContext) => {
+export const mcpResourceUri = (client: McpClient, value: string, parameters: Record<string, unknown>) => {
+  const template = client.resourceTemplates.find((resource) => resource.uri === value || resource.uriTemplate === value);
+  return template ? expandMcpUriTemplate(template.uriTemplate || template.uri, parameters) : value;
+};
+
+export const discoverMcpClient = async (client: McpClient, environment: Environment | undefined, context: McpRequestContext) => {
   if (!client.enabled) throw new Error('Review the MCP endpoint or command, then enable this client before connecting.');
-  const session = client.transport === 'http' ? await httpSession(client, environment, context) : { sessionId: '', events: [] as McpEvent[] };
+  const session = client.transport === 'http' ? await httpSession(client, environment, context) : { client, sessionId: '', events: [] as McpEvent[] };
+  let activeClient = session.client;
   const events = [...session.events];
   const warnings: string[] = [];
   const list = async (method: string, key: 'tools' | 'prompts' | 'resources' | 'resourceTemplates') => {
@@ -189,7 +287,8 @@ export const discoverMcpClient = async (client: McpClient, environment: Environm
     let cursor = '';
     for (let page = 0; page < 100; page += 1) {
       try {
-        const response = await operation(client, method, cursor ? { cursor } : {}, environment, context, session.sessionId);
+        const response = await operation(activeClient, method, cursor ? { cursor } : {}, environment, context, session.sessionId);
+        activeClient = response.client;
         events.push(...response.events);
         values.push(response.result);
         cursor = asString(asRecord(response.result)?.nextCursor);
@@ -207,7 +306,7 @@ export const discoverMcpClient = async (client: McpClient, environment: Environm
   const prompts = await list('prompts/list', 'prompts') as McpPrompt[];
   const resources = await list('resources/list', 'resources') as McpResource[];
   const resourceTemplates = await list('resources/templates/list', 'resourceTemplates') as McpResource[];
-  return { client: { ...client, tools, prompts, resources, resourceTemplates, lastSyncedAt: now() }, events, warnings };
+  return { client: { ...activeClient, tools, prompts, resources, resourceTemplates, lastSyncedAt: now() }, events, warnings };
 };
 
 export const invokeMcpOperation = async (
@@ -216,14 +315,14 @@ export const invokeMcpOperation = async (
   name: string,
   parameters: Record<string, unknown>,
   environment: Environment | undefined,
-  context: SendRequestContext,
+  context: McpRequestContext,
 ) => {
   if (!client.enabled) throw new Error('Enable this MCP client before invoking operations.');
-  const session = client.transport === 'http' ? await httpSession(client, environment, context) : { sessionId: '', events: [] as McpEvent[] };
+  const session = client.transport === 'http' ? await httpSession(client, environment, context) : { client, sessionId: '', events: [] as McpEvent[] };
   const method = kind === 'tool' ? 'tools/call' : kind === 'prompt' ? 'prompts/get' : 'resources/read';
-  const params = kind === 'tool' ? { name, arguments: parameters } : kind === 'prompt' ? { name, arguments: parameters } : { uri: name };
-  const response = await operation(client, method, params, environment, context, session.sessionId);
-  return { result: response.result, events: [...session.events, ...response.events] };
+  const params = kind === 'tool' ? { name, arguments: parameters } : kind === 'prompt' ? { name, arguments: parameters } : { uri: mcpResourceUri(session.client, name, parameters) };
+  const response = await operation(session.client, method, params, environment, context, session.sessionId);
+  return { result: response.result, events: [...session.events, ...response.events], client: response.client };
 };
 
 export type { McpEvent };
