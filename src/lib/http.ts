@@ -12,6 +12,13 @@ import { applyDefaultAcceptHeader } from './calculatedHeaders';
 import { renderApiRequest, type RequestRenderContext } from './requestRender';
 import { clearTemplatePromptValuesForRequest } from './templates';
 
+type NativeHttpResponse = HttpResponse & {
+  headerLines?: Array<{ name: string; value: string }>;
+  redirects?: Array<{ status: number; fromUrl: string; toUrl: string; elapsedMs: number }>;
+  redirectsTruncated?: boolean;
+  effectiveUrl?: string;
+};
+
 export type SendRequestContext = {
   cookies?: CookieRecord[];
   responses?: StoredResponse[];
@@ -172,9 +179,9 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
   const authenticated = await applyAdvancedAuth(prepared, variables, { url, headers, body: signingBody(prepared, variables) });
   url = authenticated.url;
   headers = authenticated.headers;
-  const withTimeline = (response: HttpResponse): HttpResponse => {
-    const output = { ...response, requestUrl: url };
-    return { ...output, timeline: buildResponseTimeline(prepared, url, output, context.maxTimelineDataSizeKB ?? 10, graphqlPayload) };
+  const withTimeline = (response: HttpResponse, transport: Parameters<typeof buildResponseTimeline>[5] = {}): HttpResponse => {
+    const output = { ...response, requestUrl: transport.effectiveUrl ?? url };
+    return { ...output, timeline: buildResponseTimeline(prepared, url, output, context.maxTimelineDataSizeKB ?? 10, graphqlPayload, transport) };
   };
 
   throwIfAborted(context.signal);
@@ -188,7 +195,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     const cancel = () => { if (cancellationId) void invoke('cancel_http_request', { cancellationId }).catch(() => undefined); };
     context.signal?.addEventListener('abort', cancel, { once: true });
     try {
-      const output = await invoke<HttpResponse>('send_http_request', {
+      const output = await invoke<NativeHttpResponse>('send_http_request', {
         cancellationId,
         input: {
           method: prepared.method,
@@ -219,7 +226,15 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
           },
         },
       });
-      return finish(withTimeline(decodeHttpResponseBody(output)));
+      const decoded = decodeHttpResponseBody(output);
+      const { headerLines, redirects, redirectsTruncated, effectiveUrl, ...response } = decoded;
+      return finish(withTimeline(response, {
+        requestHeaders: headers.filter((header) => header.enabled).map((header) => ({ name: header.name, value: header.value })),
+        responseHeaders: headerLines,
+        redirects,
+        redirectsTruncated,
+        effectiveUrl,
+      }));
     } finally {
       context.signal?.removeEventListener('abort', cancel);
     }
@@ -251,6 +266,10 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     ...responseBody,
     durationMs: Math.round(performance.now() - startedAt),
     sizeBytes: bytes.byteLength,
+  }, {
+    requestHeaders: headers.filter((header) => header.enabled).map((header) => ({ name: header.name, value: header.value })),
+    responseHeaders: Object.entries(responseHeaders).map(([name, value]) => ({ name, value })),
+    effectiveUrl: response.url,
   }));
 };
 

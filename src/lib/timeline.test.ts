@@ -64,6 +64,25 @@ describe('response timeline evidence', () => {
     expect(buildResponseTimeline(request, 'https://example.test/graphql', response, 10, payload)[1]).toMatchObject({ name: 'DataOut', value: payload });
   });
 
+  it('retains configured duplicate request headers and native redirect/response evidence', () => {
+    const request = createBlankRequest('transport-timeline');
+    const timeline = buildResponseTimeline(request, 'https://example.test/start', response, 10, undefined, {
+      requestHeaders: [{ name: 'X-Trace', value: 'one' }, { name: 'X-Trace', value: 'two' }],
+      responseHeaders: [{ name: 'set-cookie', value: 'first=1' }, { name: 'set-cookie', value: 'second=2' }],
+      redirects: [{ status: 302, fromUrl: 'https://example.test/start', toUrl: 'https://example.test/final', elapsedMs: 12 }],
+      redirectsTruncated: true,
+      effectiveUrl: 'https://example.test/final',
+    });
+
+    expect(timeline).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'HeaderOut', value: 'X-Trace: one\nX-Trace: two' }),
+      expect.objectContaining({ name: 'Text', value: 'Redirect 302: https://example.test/start -> https://example.test/final', elapsedMs: 12 }),
+      expect.objectContaining({ name: 'Text', value: 'Redirect trace truncated after 100 hops' }),
+      expect.objectContaining({ name: 'HeaderIn', value: 'HTTP/2.0 201 Created\nset-cookie: first=1\nset-cookie: second=2' }),
+      expect.objectContaining({ name: 'Text', value: 'Effective URL https://example.test/final' }),
+    ]));
+  });
+
   it('formats byte evidence with IEC units', () => {
     expect(describeTimelineBytes(0)).toBe('0 B');
     expect(describeTimelineBytes(1_024)).toBe('1.0 KiB');

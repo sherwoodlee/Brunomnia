@@ -31,6 +31,14 @@ export const formatResponseTimeline = (timeline: ResponseTimelineEntry[]) => tim
 
 type TimelinePayload = { bytes: number; value: string; binary?: boolean; approximate?: boolean };
 
+export type ResponseTransportEvidence = {
+  requestHeaders?: Array<{ name: string; value: string }>;
+  responseHeaders?: Array<{ name: string; value: string }>;
+  redirects?: Array<{ status: number; fromUrl: string; toUrl: string; elapsedMs: number }>;
+  redirectsTruncated?: boolean;
+  effectiveUrl?: string;
+};
+
 const requestPayload = (request: ApiRequest, graphqlPayload?: string): TimelinePayload | undefined => {
   if (request.protocol === 'graphql') {
     const value = graphqlPayload ?? request.body;
@@ -63,9 +71,15 @@ export const buildResponseTimeline = (
   response: HttpResponse,
   maxTimelineDataSizeKB = 10,
   graphqlPayload?: string,
+  transport: ResponseTransportEvidence = {},
 ): ResponseTimelineEntry[] => {
   const elapsedMs = Math.max(0, response.durationMs);
   const entries: ResponseTimelineEntry[] = [{ name: 'Text', value: `Preparing ${request.method} request to ${url}`, elapsedMs: 0 }];
+  if (transport.requestHeaders?.length) entries.push({
+    name: 'HeaderOut',
+    value: transport.requestHeaders.map((header) => `${header.name}: ${header.value}`).join('\n'),
+    elapsedMs: 0,
+  });
   const payload = requestPayload(request, graphqlPayload);
   if (payload && payload.bytes > 0) {
     // Current Insomnia treats zero as a 1 KiB fallback and hides a chunk exactly at the limit.
@@ -79,7 +93,25 @@ export const buildResponseTimeline = (
       ...(hidden ? { hidden: true } : {}),
     });
   }
+  transport.redirects?.slice(0, 100).forEach((redirect) => entries.push({
+    name: 'Text',
+    value: `Redirect ${redirect.status}: ${redirect.fromUrl} -> ${redirect.toUrl}`,
+    elapsedMs: Number.isFinite(redirect.elapsedMs) ? Math.max(0, redirect.elapsedMs) : 0,
+  }));
+  if (transport.redirectsTruncated) entries.push({ name: 'Text', value: 'Redirect trace truncated after 100 hops', elapsedMs });
+  const responseHeaders = transport.responseHeaders?.length
+    ? transport.responseHeaders
+    : Object.entries(response.headers).map(([name, value]) => ({ name, value }));
+  entries.push({
+    name: 'HeaderIn',
+    value: [
+      `${response.httpVersion ?? 'HTTP'} ${response.status} ${response.statusText}`.trim(),
+      ...responseHeaders.map((header) => `${header.name}: ${header.value}`),
+    ].join('\n'),
+    elapsedMs,
+  });
   entries.push({ name: 'Text', value: `Response ${response.status} ${response.statusText}; received ${describeTimelineBytes(response.sizeBytes)} decoded body`, elapsedMs });
+  if (transport.effectiveUrl && transport.effectiveUrl !== url) entries.push({ name: 'Text', value: `Effective URL ${transport.effectiveUrl}`, elapsedMs });
   if (response.httpVersion) entries.push({ name: 'Text', value: `Negotiated ${response.httpVersion}`, elapsedMs });
   entries.push({ name: 'Text', value: 'Response body decoded and available to scripts and preview', elapsedMs });
   return entries;

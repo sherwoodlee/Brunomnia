@@ -166,10 +166,27 @@ pub struct HttpRequestInput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HttpHeaderOutput {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpRedirectOutput {
+    pub status: u16,
+    pub from_url: String,
+    pub to_url: String,
+    pub elapsed_ms: u128,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HttpResponseOutput {
     pub status: u16,
     pub status_text: String,
     pub headers: BTreeMap<String, String>,
+    pub header_lines: Vec<HttpHeaderOutput>,
     pub body: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body_base64: Option<String>,
@@ -177,6 +194,9 @@ pub struct HttpResponseOutput {
     pub size_bytes: usize,
     pub set_cookies: Vec<String>,
     pub http_version: String,
+    pub effective_url: String,
+    pub redirects: Vec<HttpRedirectOutput>,
+    pub redirects_truncated: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]

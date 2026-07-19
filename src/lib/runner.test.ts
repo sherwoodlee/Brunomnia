@@ -519,6 +519,8 @@ describe('collection runner', () => {
       timeline: [
         { name: 'Text' as const, value: 'Preparing GET request to https://example.test/orders?access_token=secret&view=full', elapsedMs: 0 },
         { name: 'HeaderOut' as const, value: 'Authorization: Bearer secret\nAccept: application/json', elapsedMs: 0 },
+        { name: 'Text' as const, value: 'Redirect 302: https://example.test/orders?token=secret -> https://example.test/final?token=secret', elapsedMs: 2 },
+        { name: 'HeaderIn' as const, value: 'HTTP/1.1 200 OK\nSet-Cookie: first=secret\nSet-Cookie: second=secret\nX-Trace: visible', elapsedMs: 4 },
         { name: 'DataIn' as const, value: 'Received 2 B chunk', elapsedMs: Number.NaN, hidden: true },
       ],
     });
@@ -537,6 +539,8 @@ describe('collection runner', () => {
       entries: [
         { name: 'Text', value: 'Preparing GET request to https://example.test/orders?access_token=%5Bredacted%5D&view=full' },
         { name: 'HeaderOut', value: 'Authorization: [redacted]\nAccept: application/json' },
+        { name: 'Text', value: 'Redirect 302: https://example.test/orders?token=%5Bredacted%5D -> https://example.test/final?token=%5Bredacted%5D' },
+        { name: 'HeaderIn', value: 'HTTP/1.1 200 OK\nSet-Cookie: [redacted]\nSet-Cookie: [redacted]\nX-Trace: visible' },
         { name: 'DataIn', value: 'Received 2 B chunk', elapsedMs: 0, hidden: true },
       ],
     });

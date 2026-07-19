@@ -304,7 +304,9 @@ describe('native HTTP transport preferences', () => {
   });
 
   it('attaches size-bounded outgoing and response timeline evidence', async () => {
-    tauri.invoke.mockResolvedValue({ status: 201, statusText: 'Created', headers: {}, body: '{}', durationMs: 3, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
+    tauri.invoke.mockResolvedValue({
+      status: 201, statusText: 'Created', headers: { 'x-duplicate': 'first, second' }, headerLines: [{ name: 'x-duplicate', value: 'first' }, { name: 'x-duplicate', value: 'second' }], body: '{}', durationMs: 3, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1', effectiveUrl: 'https://example.test/final', redirects: [{ status: 307, fromUrl: 'https://example.test/items', toUrl: 'https://example.test/final', elapsedMs: 2 }],
+    });
     const request = createBlankRequest('timeline-evidence');
     request.method = 'POST';
     request.url = 'https://example.test/items';
@@ -312,10 +314,15 @@ describe('native HTTP transport preferences', () => {
     request.body = 'x'.repeat(1_024);
 
     const response = await sendRequest(request, undefined, { maxTimelineDataSizeKB: 0 });
+    expect(response.requestUrl).toBe('https://example.test/final');
     expect(response.timeline).toEqual([
       expect.objectContaining({ name: 'Text', value: 'Preparing POST request to https://example.test/items' }),
+      expect.objectContaining({ name: 'HeaderOut', value: expect.stringContaining('Accept: */*') }),
       expect.objectContaining({ name: 'DataOut', value: '(1.0 KiB hidden)', hidden: true }),
+      expect.objectContaining({ name: 'Text', value: 'Redirect 307: https://example.test/items -> https://example.test/final', elapsedMs: 2 }),
+      expect.objectContaining({ name: 'HeaderIn', value: 'HTTP/1.1 201 Created\nx-duplicate: first\nx-duplicate: second' }),
       expect.objectContaining({ value: 'Response 201 Created; received 2 B decoded body' }),
+      expect.objectContaining({ value: 'Effective URL https://example.test/final' }),
       expect.objectContaining({ value: 'Negotiated HTTP/1.1' }),
       expect.objectContaining({ value: 'Response body decoded and available to scripts and preview' }),
     ]);

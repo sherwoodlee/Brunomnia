@@ -1,6 +1,8 @@
 use crate::{
     client_identity::{effective_client_identity_pem, validate_certificate_material},
-    models::{HttpRequestInput, HttpResponseOutput, TransportConfig},
+    models::{
+        HttpHeaderOutput, HttpRedirectOutput, HttpRequestInput, HttpResponseOutput, TransportConfig,
+    },
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use digest_auth::{AuthContext, HttpMethod as DigestMethod};
@@ -10,7 +12,7 @@ use reqwest::{
 };
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::Instant,
 };
 use tokio::sync::oneshot;
@@ -32,6 +34,50 @@ enum RedirectMode {
     Disabled,
     Limited(usize),
     Unlimited,
+}
+
+struct RedirectTrace {
+    started: Instant,
+    state: Mutex<RedirectTraceState>,
+}
+
+#[derive(Default)]
+struct RedirectTraceState {
+    entries: Vec<HttpRedirectOutput>,
+    truncated: bool,
+}
+
+impl RedirectTrace {
+    fn new(started: Instant) -> Self {
+        Self {
+            started,
+            state: Mutex::new(RedirectTraceState::default()),
+        }
+    }
+
+    fn record(&self, attempt: &reqwest::redirect::Attempt<'_>) {
+        let from_url = attempt
+            .previous()
+            .last()
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        let mut state = self.state.lock().expect("redirect trace lock poisoned");
+        if state.entries.len() >= 100 {
+            state.truncated = true;
+            return;
+        }
+        state.entries.push(HttpRedirectOutput {
+            status: attempt.status().as_u16(),
+            from_url,
+            to_url: attempt.url().to_string(),
+            elapsed_ms: self.started.elapsed().as_millis(),
+        });
+    }
+
+    fn snapshot(&self) -> (Vec<HttpRedirectOutput>, bool) {
+        let state = self.state.lock().expect("redirect trace lock poisoned");
+        (state.entries.clone(), state.truncated)
+    }
 }
 
 #[derive(Default)]
@@ -119,21 +165,22 @@ pub fn build_client(
     transport: &TransportConfig,
     request_url: Option<&str>,
 ) -> Result<Client, String> {
-    build_client_with_options(transport, request_url, true, true)
+    build_client_with_options(transport, request_url, true, true, None)
 }
 
 pub fn build_streaming_client(
     transport: &TransportConfig,
     request_url: Option<&str>,
 ) -> Result<Client, String> {
-    build_client_with_options(transport, request_url, false, true)
+    build_client_with_options(transport, request_url, false, true, None)
 }
 
+#[cfg(test)]
 fn build_client_without_decompression(
     transport: &TransportConfig,
     request_url: Option<&str>,
 ) -> Result<Client, String> {
-    build_client_with_options(transport, request_url, true, false)
+    build_client_with_options(transport, request_url, true, false, None)
 }
 
 fn build_client_with_options(
@@ -141,13 +188,24 @@ fn build_client_with_options(
     request_url: Option<&str>,
     total_timeout: bool,
     automatic_decompression: bool,
+    redirect_trace: Option<Arc<RedirectTrace>>,
 ) -> Result<Client, String> {
     validate_certificate_material(transport)?;
-    let redirect = match redirect_mode(transport) {
+    let redirect_mode = redirect_mode(transport);
+    let base_redirect = match redirect_mode {
         RedirectMode::Disabled => reqwest::redirect::Policy::none(),
         RedirectMode::Limited(limit) => reqwest::redirect::Policy::limited(limit),
         RedirectMode::Unlimited => reqwest::redirect::Policy::custom(|attempt| attempt.follow()),
     };
+    let redirect =
+        if let Some(trace) = redirect_trace.filter(|_| redirect_mode != RedirectMode::Disabled) {
+            reqwest::redirect::Policy::custom(move |attempt| {
+                trace.record(&attempt);
+                base_redirect.redirect(attempt)
+            })
+        } else {
+            base_redirect
+        };
     let mut builder = Client::builder()
         .redirect(redirect)
         .danger_accept_invalid_certs(!transport.validate_certificates);
@@ -511,9 +569,12 @@ async fn send_with_auth(
 async fn read_response(
     response: Response,
     started: Instant,
+    redirects: Vec<HttpRedirectOutput>,
+    redirects_truncated: bool,
 ) -> Result<HttpResponseOutput, reqwest::Error> {
     let status = response.status();
     let http_version = format!("{:?}", response.version());
+    let effective_url = response.url().to_string();
     let set_cookies = response
         .headers()
         .get_all(SET_COOKIE)
@@ -522,6 +583,14 @@ async fn read_response(
         .map(str::to_string)
         .collect();
     let headers = flatten_headers(response.headers());
+    let header_lines = response
+        .headers()
+        .iter()
+        .map(|(name, value)| HttpHeaderOutput {
+            name: name.to_string(),
+            value: value.to_str().unwrap_or("<binary header>").to_string(),
+        })
+        .collect();
     let bytes = response.bytes().await?;
     let size_bytes = bytes.len();
     let (body, body_base64) = response_body_fields(&bytes);
@@ -530,12 +599,16 @@ async fn read_response(
         status: status.as_u16(),
         status_text: status.canonical_reason().unwrap_or("Unknown").to_string(),
         headers,
+        header_lines,
         size_bytes,
         body,
         body_base64,
         duration_ms: started.elapsed().as_millis(),
         set_cookies,
         http_version,
+        effective_url,
+        redirects,
+        redirects_truncated,
     })
 }
 
@@ -551,16 +624,31 @@ fn response_body_fields(bytes: &[u8]) -> (String, Option<String>) {
 
 pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
     let url = url::Url::parse(&input.url).map_err(|error| format!("Invalid URL: {error}"))?;
-    let client = build_client(&input.transport, Some(&input.url))?;
-
     let started = Instant::now();
+    let trace = Arc::new(RedirectTrace::new(started));
+    let client = build_client_with_options(
+        &input.transport,
+        Some(&input.url),
+        true,
+        true,
+        Some(Arc::clone(&trace)),
+    )?;
     let response = send_with_auth(&client, &input, url.clone()).await?;
-    match read_response(response, started).await {
+    let (redirects, redirects_truncated) = trace.snapshot();
+    match read_response(response, started, redirects, redirects_truncated).await {
         Ok(output) => Ok(output),
         Err(error) if error.is_decode() => {
-            let client = build_client_without_decompression(&input.transport, Some(&input.url))?;
+            let fallback_trace = Arc::new(RedirectTrace::new(started));
+            let client = build_client_with_options(
+                &input.transport,
+                Some(&input.url),
+                true,
+                false,
+                Some(Arc::clone(&fallback_trace)),
+            )?;
             let response = send_with_auth(&client, &input, url).await?;
-            read_response(response, started)
+            let (redirects, redirects_truncated) = fallback_trace.snapshot();
+            read_response(response, started, redirects, redirects_truncated)
                 .await
                 .map_err(|fallback_error| fallback_error.to_string())
         }
@@ -671,6 +759,56 @@ mod tests {
             .unwrap();
         assert_eq!(result.unwrap_err(), "Request canceled.");
         server.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn captures_redirects_effective_url_and_duplicate_response_headers() {
+        use tokio::{io::AsyncWriteExt, net::TcpListener};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for index in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let _ = read_loopback_request(&mut socket).await;
+                let response = if index == 0 {
+                    "HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    "HTTP/1.1 200 OK\r\nX-Duplicate: first\r\nX-Duplicate: second\r\nSet-Cookie: one=1\r\nSet-Cookie: two=2\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                };
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let mut input = body_test_input("none");
+        input.method = "GET".into();
+        input.url = format!("http://{address}/start");
+
+        let output = send(input).await.unwrap();
+
+        assert_eq!(output.status, 200);
+        assert_eq!(output.effective_url, format!("http://{address}/final"));
+        assert_eq!(output.redirects.len(), 1);
+        assert_eq!(output.redirects[0].status, 302);
+        assert_eq!(
+            output.redirects[0].from_url,
+            format!("http://{address}/start")
+        );
+        assert_eq!(
+            output.redirects[0].to_url,
+            format!("http://{address}/final")
+        );
+        assert_eq!(
+            output
+                .header_lines
+                .iter()
+                .filter(|header| header.name == "x-duplicate")
+                .map(|header| header.value.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first", "second"]
+        );
+        assert_eq!(output.headers["x-duplicate"], "first, second");
+        assert_eq!(output.set_cookies, vec!["one=1", "two=2"]);
+        server.await.unwrap();
     }
 
     async fn read_loopback_request<S>(stream: &mut S) -> (String, Vec<u8>)
