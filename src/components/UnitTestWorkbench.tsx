@@ -12,6 +12,7 @@ import { createPluginRuntime, type PluginHostCallbacks, type PluginRunState } fr
 import { readDesktopScriptFile, readDesktopTemplateFile } from '../lib/scriptFiles';
 import { resolveAuthorizedExternalSecret } from '../lib/security';
 import { createUnitTest, createUnitTestSuite, moveUnitTest, moveUnitTestSuite, moveUnitTestSuiteToCollection, orderedTestSuites, orderedUnitTests, unitTestScript, type UnitTestPlacement } from '../lib/unitTests';
+import { scriptTestFailed } from '../lib/scriptTests';
 import { CodeEditor } from './ProtocolEditors';
 import { Icon } from './Icon';
 import { OAuthAuthorizationDialog, type OAuthAuthorizationStatus } from './OAuthAuthorizationDialog';
@@ -314,7 +315,7 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
           maxSubrequests: 20,
         };
         const output = await runBrowserScript(unitTestScript(test), request, globalScopes.globals.values, undefined, workspace.preferences.scriptTimeoutMs, {}, {}, scriptOptions);
-        const failed = output.tests.find((result) => !result.passed);
+        const failed = output.tests.find(scriptTestFailed);
         const result: UnitTestCaseResult = {
           testId: test.id,
           name: test.name,

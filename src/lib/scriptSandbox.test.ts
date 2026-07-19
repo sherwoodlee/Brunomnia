@@ -57,7 +57,22 @@ describe('script sandbox source validation', () => {
       insomnia.test('keep: status', () => insomnia.expect(insomnia.response.status).to.equal(201));
     `, { testNamePattern: '^keep:' });
     expect(output.ok).toBe(true);
-    expect(output.tests).toEqual([{ name: 'keep: status', passed: true }]);
+    expect(output.tests).toMatchObject([{ name: 'keep: status', passed: true, status: 'passed', category: 'unknown', durationMs: expect.any(Number) }]);
+  });
+
+  it('captures assertion status, category, timing, and explicit skips', async () => {
+    const output = await runWorkerSource(`
+      await insomnia.test('sync pass', () => insomnia.expect(true).to.be.true);
+      insomnia.test('async fail', async () => { await Promise.resolve(); throw new Error('boom'); });
+      await insomnia.test.skip('not in this environment', () => { throw new Error('skipped callback executed'); });
+    `, { testCategory: 'after-response' });
+
+    expect(output.ok).toBe(true);
+    expect(output.tests).toMatchObject([
+      { name: 'sync pass', passed: true, status: 'passed', category: 'after-response', durationMs: expect.any(Number) },
+      { name: 'async fail', passed: false, status: 'failed', category: 'after-response', durationMs: expect.any(Number), error: 'boom' },
+      { name: 'not in this environment', passed: false, status: 'skipped', category: 'after-response', durationMs: 0 },
+    ]);
   });
 
   it('exposes bounded execution location, skip, and next-request controls', async () => {
@@ -162,7 +177,7 @@ describe('script sandbox source validation', () => {
     expect(output.localVariables).toMatchObject({ localWrite: '42' });
     expect((output.folders as Array<{ environment: Record<string, string> }>)[1].environment).toMatchObject({ folder: 'child', folderWrite: 'yes' });
     expect(output.request).toMatchObject({ url: 'https://api.example.com/items?page=1&page=2', auth: { type: 'basic', username: 'Ada', password: 'secret' } });
-    expect(output.tests).toEqual([{ name: 'async contract', passed: true }]);
+    expect(output.tests).toMatchObject([{ name: 'async contract', passed: true, status: 'passed', category: 'unknown', durationMs: expect.any(Number) }]);
   });
 
   it('executes the documented bundled module surface inside the disposable Worker', async () => {
@@ -186,7 +201,7 @@ describe('script sandbox source validation', () => {
       });
     `);
     expect(output.ok).toBe(true);
-    expect(output.tests).toEqual([{ name: 'documented modules', passed: true }]);
+    expect(output.tests).toMatchObject([{ name: 'documented modules', passed: true, status: 'passed', category: 'unknown', durationMs: expect.any(Number) }]);
   });
 
   it('keeps unlisted modules outside the Worker capability boundary', async () => {
@@ -307,7 +322,7 @@ describe('script sandbox source validation', () => {
       localVariables: { priority: 'local' },
     });
     expect(output.ok).toBe(true);
-    expect(output.tests).toEqual([{ name: 'seven-level priority', passed: true }]);
+    expect(output.tests).toMatchObject([{ name: 'seven-level priority', passed: true, status: 'passed', category: 'unknown', durationMs: expect.any(Number) }]);
     expect(output.baseGlobals).toMatchObject({ baseWrite: 'yes' });
     expect(output.environment).toMatchObject({ masked: 'unmasked' });
     expect(output.globalDisabled).toEqual([]);

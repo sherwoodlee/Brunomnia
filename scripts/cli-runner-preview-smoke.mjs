@@ -43,6 +43,8 @@ try {
     preRequestScript: '',
     tests: '',
   });
+  const scripted = request('request-third', 'Third', 'third');
+  scripted.tests = "await insomnia.test.skip('production only', () => { throw new Error('skipped callback executed'); }); await insomnia.test('status is 200', () => insomnia.expect(insomnia.response.status).to.equal(200));";
   const collection = {
     ...source.collections[0],
     id: 'preview-collection',
@@ -50,7 +52,7 @@ try {
     requests: [
       request('request-first', 'First', 'first'),
       request('request-second', 'Second', 'second'),
-      request('request-third', 'Third', 'third'),
+      scripted,
     ],
   };
   const environment = { id: 'preview-environment', name: 'Preview environment', variables: [] };
@@ -72,6 +74,7 @@ try {
     '--iterations', '2',
     '--delay-request', '35',
     '--data', join(temporary, 'iterations.csv'),
+    '--allow-scripts',
     '--reporter', 'json',
   ]);
   const artifact = JSON.parse(output);
@@ -81,8 +84,17 @@ try {
     'request-third', 'request-first', 'request-third', 'request-first',
   ]);
   assert.deepEqual(arrivals.map((arrival) => arrival.path), ['/third', '/first', '/third', '/first']);
+  const scriptedResults = artifact.report.results.filter((result) => result.requestId === 'request-third');
+  assert.equal(scriptedResults.length, 2);
+  scriptedResults.forEach((result) => {
+    assert.equal(result.passed, true);
+    assert.deepEqual(result.tests.map((test) => test.status), ['skipped', 'passed']);
+    assert.deepEqual(result.tests.map((test) => test.category), ['after-response', 'after-response']);
+    assert.equal(result.tests[0].durationMs, 0);
+    assert.equal(typeof result.tests[1].durationMs, 'number');
+  });
   for (let index = 1; index < arrivals.length; index += 1) assert.ok(arrivals[index].at - arrivals[index - 1].at >= 20, 'request delay was not applied');
-  console.log('CLI runner preview smoke passed: split project, selected order, data, and delay.');
+  console.log('CLI runner preview smoke passed: split project, selected order, data, delay, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });

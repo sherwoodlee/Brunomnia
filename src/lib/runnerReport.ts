@@ -1,4 +1,5 @@
 import type { RunnerItemResult, RunnerReport } from '../types';
+import { scriptTestFailed } from './scriptTests';
 
 export const runnerReporters = ['dot', 'list', 'min', 'progress', 'spec', 'tap', 'json', 'junit'] as const;
 
@@ -31,7 +32,7 @@ const runDuration = (report: RunnerReport) => {
 
 const failureDetails = (result: RunnerItemResult) => {
   if (result.error) return result.error;
-  const failedTests = result.tests.filter((test) => !test.passed);
+  const failedTests = result.tests.filter(scriptTestFailed);
   if (failedTests.length) return failedTests.map((test) => `${test.name}: ${test.error || 'assertion failed'}`).join('\n');
   if (result.status <= 0) return 'The request did not return a response.';
   if (result.status >= 400) return `HTTP status ${result.status}.`;

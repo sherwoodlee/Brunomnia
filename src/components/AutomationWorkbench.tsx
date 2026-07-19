@@ -17,6 +17,7 @@ import type {
 import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
 import { aggregateRunnerTimeline, discardRunnerReport, filterRunnerLiveItems, parseRunnerData, resolveRunnerTarget, runnerResultForLiveItem, runCollection, runnerReportsForTarget, type RunnerResultFilter, type RunnerWorkbenchDraft } from '../lib/runner';
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
+import { scriptTestStatus } from '../lib/scriptTests';
 import { formatResponseTimeline } from '../lib/timeline';
 import { applyCollectionConfiguration, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
 import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
@@ -532,8 +533,10 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
   ].filter(Boolean).join(' · ') || '—';
   const testSummary = (item: RunnerLiveItem) => {
     const tests = item.tests ?? [];
-    const failed = tests.filter((test) => !test.passed).length;
-    if (tests.length) return failed ? `${tests.length - failed} passed · ${failed} failed` : `${tests.length} passed`;
+    const failed = tests.filter((test) => scriptTestStatus(test) === 'failed').length;
+    const skipped = tests.filter((test) => scriptTestStatus(test) === 'skipped').length;
+    const passed = tests.length - failed - skipped;
+    if (tests.length) return [`${passed} passed`, failed ? `${failed} failed` : '', skipped ? `${skipped} skipped` : ''].filter(Boolean).join(' · ');
     return item.errorMessage || 'No tests';
   };
   const selectedResultCandidate = visibleResults.find((result) => result.id === selectedResultId);

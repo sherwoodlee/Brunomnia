@@ -1064,9 +1064,12 @@ kbd {
 .test-results article > i { font: 700 13px var(--font-mono); }
 .test-results article.passing > i { color: var(--mint); }
 .test-results article.failing > i { color: var(--red); }
+.test-results article.skipped > i { color: var(--muted); }
 .test-results article span { display: flex; flex-direction: column; gap: 3px; }
 .test-results article strong { font: 10px var(--font-mono); }
-.test-results article small { color: var(--red); font: 9px var(--font-mono); }
+.test-results article small { font: 9px var(--font-mono); }
+.test-results article .test-result-meta { color: var(--muted); }
+.test-results article .test-result-error { color: var(--red); }
 .test-results > pre { background: var(--panel-soft); color: var(--text-soft); font: 9px/1.6 var(--font-mono); margin: 8px 0 0; padding: 8px; white-space: pre-wrap; }
 .cookie-manager { display: flex; flex-direction: column; min-height: 100%; }
 .cookie-manager > header { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 13px 15px; }
@@ -1209,6 +1212,9 @@ kbd {
 .runner-assertion-status { font: 700 8px var(--font-mono); letter-spacing: .04em; padding-top: 1px; }
 .runner-assertion-list article.passed .runner-assertion-status { color: var(--mint); }
 .runner-assertion-list article.failed .runner-assertion-status { color: var(--red); }
+.runner-assertion-list article.skipped .runner-assertion-status { color: var(--muted); }
+.runner-assertion-meta { color: var(--muted); font: 8px var(--font-mono); }
+.runner-assertion-meta span.slow { color: var(--red); }
 .runner-request-content { background: var(--panel-soft); border-bottom: 1px solid var(--border-soft); display: grid; gap: 10px; grid-template-columns: minmax(260px, 1.2fr) minmax(180px, .7fr) minmax(220px, .8fr); padding: 12px 16px; }
 .runner-request-content > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .runner-request-content small { color: var(--muted); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }

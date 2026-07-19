@@ -16,6 +16,7 @@ import type {
 import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, type ScriptEnvironmentScopes } from './resources';
 import type { ScriptRunOptions } from './scriptSandbox';
+import { scriptTestFailed } from './scriptTests';
 
 export type RunnerExecutionContext = { key: string; attempt: number; signal: AbortSignal };
 
@@ -107,7 +108,7 @@ export const filterRunnerLiveItems = (items: RunnerLiveItem[], results: RunnerIt
   return items.filter((item) => {
     const result = runnerResultForLiveItem(item, results);
     const tests = result?.tests ?? item.tests ?? [];
-    const passed = result?.passed ?? (item.status === 'completed' && (item.statusCode ?? 0) > 0 && (item.statusCode ?? 0) < 400 && tests.every((test) => test.passed));
+    const passed = result?.passed ?? (item.status === 'completed' && (item.statusCode ?? 0) > 0 && (item.statusCode ?? 0) < 400 && tests.every((test) => !scriptTestFailed(test)));
     const failed = result ? !result.passed : item.status === 'failed' || item.status === 'canceled' || (item.status === 'completed' && !passed);
     const matchesStatus = filter === 'all'
       || (filter === 'passed' && passed)
@@ -553,6 +554,7 @@ export const runCollection = async (
               collectionDisabled,
               collectionVariablesAreBase,
               folders: scriptFolders,
+              testCategory: 'pre-request',
               executionLocation: [collection.name, ...configured.folders.map((folder) => folder.name), request.name],
             };
             const preRequest = await executeScript(request.preRequestScript, request, globalVariables, undefined, options.scriptTimeoutMs ?? 10_000, {}, iterationData, scriptScopes);
@@ -608,6 +610,7 @@ export const runCollection = async (
               collectionVariablesAreBase,
               folders: scriptFolders.map((folder) => ({ ...folder, environment: { ...(folderVariables.get(folder.id) ?? {}) }, disabled: [...(folderDisabled.get(folder.id) ?? [])] })),
               testNamePattern,
+              testCategory: 'after-response',
               execution: preRequest.execution,
               executionLocation: [collection.name, ...configured.folders.map((folder) => folder.name), request.name],
             });
@@ -650,7 +653,7 @@ export const runCollection = async (
             failureDurationMs = Number.isFinite(caughtDuration) ? Math.max(0, caughtDuration) : undefined;
             error = (caught instanceof Error ? caught.message : String(caught)).replace(/https?:\/\/[^\s]+/gi, (url) => redactSensitiveQuery(url));
           }
-          const passed = !error && response !== undefined && response.status > 0 && response.status < 400 && tests.every((test) => test.passed);
+          const passed = !error && response !== undefined && response.status > 0 && response.status < 400 && tests.every((test) => !scriptTestFailed(test));
           const retainResult = testNamePattern === undefined || tests.length > 0 || !passed;
           const result: RunnerItemResult = {
             id: runId(),

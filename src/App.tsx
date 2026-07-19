@@ -31,6 +31,7 @@ import { clearDeletedUnitTestRequest, createUnitTestSuite } from './lib/unitTest
 import { withoutOAuth2RuntimeCredentials } from './lib/oauth2Tokens';
 import { userAgentDisabledAfterHeaderChange } from './lib/userAgent';
 import { calculatedRequestHeaders, type CalculatedHeader } from './lib/calculatedHeaders';
+import { scriptTestCategoryLabel, scriptTestDurationLabel, scriptTestPassed, scriptTestStatus } from './lib/scriptTests';
 import type { ClientCodeSnippet, ClientCodeTarget } from './lib/codegen';
 import type { TemplatePromptInput } from './lib/templates';
 import {
@@ -55,6 +56,8 @@ import type {
   ResponsePreviewMode,
   ResponseTab,
   ScriptRunResult,
+  ScriptTestCategory,
+  ScriptTestResult,
   SidebarMode,
   StreamMessage,
   StoredResponse,
@@ -1030,7 +1033,7 @@ type ResponsePanelProps = {
   streamStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
   streamDraft: string;
   streamFrameKind: 'text' | 'binary';
-  scriptTests: Array<{ name: string; passed: boolean; error?: string }>;
+  scriptTests: ScriptTestResult[];
   scriptLogs: string[];
   cookies: CookieRecord[];
   requestUrl: string;
@@ -1134,10 +1137,10 @@ function ResponsePanel({
           {!streaming ? <span>{formatBytes(response.sizeBytes)}</span> : null}
           {(streaming ? streamSession?.httpVersion : response.httpVersion) ? <span>{streaming ? streamSession?.httpVersion : response.httpVersion}</span> : null}
         </div>
-          {streaming && streamHistory.length ? <Suspense fallback={<div className="dialog-loading">Loading stream history…</div>}><StreamHistoryControls activeEnvironmentCount={activeEnvironmentStreamHistoryCount} onClear={onClearStreamHistory} onDelete={onDeleteStreamSession} onSelect={onSelectStreamSession} selectedSessionId={selectedStreamSessionId} sessions={streamHistory} /></Suspense> : !streaming && responseHistory.length ? <div className="response-history-controls"><label className="response-history-picker"><Icon name="history" size={15} /><select aria-label="Saved response" onChange={(event) => onSelectResponse(event.target.value)} value={selectedResponseId}>{selectedResponseId ? null : <option value="">Live response</option>}{historySections.map((section) => <optgroup key={section.label} label={section.label}>{section.responses.map((saved) => <option key={saved.id} value={saved.id}>{new Date(saved.receivedAt).toLocaleTimeString()} · {saved.status || 'ERR'} · {saved.requestSnapshot?.method ?? ''} {saved.requestUrl} · {saved.durationMs} ms · {formatBytes(saved.sizeBytes)}{saved.requestTestResults?.length ? ` · ${saved.requestTestResults.filter((test) => test.passed).length}/${saved.requestTestResults.length} tests` : ''}{saved.requestSnapshot ? '' : ' · legacy request not restorable'}</option>)}</optgroup>)}</select></label><button aria-label="Delete saved response" disabled={!selectedResponseId} onClick={onDeleteResponse} type="button"><Icon name="trash" size={14} /></button><button aria-label="Clear environment history" disabled={!activeEnvironmentHistoryCount} onClick={onClearHistory} type="button">Clear {activeEnvironmentHistoryCount}</button></div> : <button aria-label="Response source" className="icon-button subtle" disabled type="button"><Icon name="globe" size={18} /></button>}
+          {streaming && streamHistory.length ? <Suspense fallback={<div className="dialog-loading">Loading stream history…</div>}><StreamHistoryControls activeEnvironmentCount={activeEnvironmentStreamHistoryCount} onClear={onClearStreamHistory} onDelete={onDeleteStreamSession} onSelect={onSelectStreamSession} selectedSessionId={selectedStreamSessionId} sessions={streamHistory} /></Suspense> : !streaming && responseHistory.length ? <div className="response-history-controls"><label className="response-history-picker"><Icon name="history" size={15} /><select aria-label="Saved response" onChange={(event) => onSelectResponse(event.target.value)} value={selectedResponseId}>{selectedResponseId ? null : <option value="">Live response</option>}{historySections.map((section) => <optgroup key={section.label} label={section.label}>{section.responses.map((saved) => <option key={saved.id} value={saved.id}>{new Date(saved.receivedAt).toLocaleTimeString()} · {saved.status || 'ERR'} · {saved.requestSnapshot?.method ?? ''} {saved.requestUrl} · {saved.durationMs} ms · {formatBytes(saved.sizeBytes)}{saved.requestTestResults?.length ? ` · ${saved.requestTestResults.filter(scriptTestPassed).length}/${saved.requestTestResults.length} tests` : ''}{saved.requestSnapshot ? '' : ' · legacy request not restorable'}</option>)}</optgroup>)}</select></label><button aria-label="Delete saved response" disabled={!selectedResponseId} onClick={onDeleteResponse} type="button"><Icon name="trash" size={14} /></button><button aria-label="Clear environment history" disabled={!activeEnvironmentHistoryCount} onClick={onClearHistory} type="button">Clear {activeEnvironmentHistoryCount}</button></div> : <button aria-label="Response source" className="icon-button subtle" disabled type="button"><Icon name="globe" size={18} /></button>}
       </div>
       <nav className="tab-strip response-tabs" aria-label="Response details">
-        {responseTabs.map((tab) => <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">{titleCase(tab)}{tab === 'tests' && scriptTests.length ? <small>{scriptTests.filter((test) => test.passed).length}/{scriptTests.length}</small> : tab === 'cookies' && cookies.length ? <small>{cookies.length}</small> : null}</button>)}
+        {responseTabs.map((tab) => <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">{titleCase(tab)}{tab === 'tests' && scriptTests.length ? <small>{scriptTests.filter(scriptTestPassed).length}/{scriptTests.length}</small> : tab === 'cookies' && cookies.length ? <small>{cookies.length}</small> : null}</button>)}
       </nav>
       <div className="response-content">
         {activeTab === 'preview' && streaming ? (
@@ -1157,8 +1160,11 @@ function ResponsePanel({
         ) : null}
         {activeTab === 'tests' ? (
           <div className="test-results">
-            <header><strong>{scriptTests.filter((test) => test.passed).length}/{scriptTests.length || 0} passing</strong><span>{scriptLogs.length} console messages</span></header>
-            {scriptTests.map((test, index) => <article className={test.passed ? 'passing' : 'failing'} key={`${test.name}-${index}`}><i>{test.passed ? '✓' : '×'}</i><span><strong>{test.name}</strong>{test.error ? <small>{test.error}</small> : null}</span></article>)}
+            <header><strong>{scriptTests.filter(scriptTestPassed).length}/{scriptTests.length || 0} passing</strong><span>{scriptLogs.length} console messages</span></header>
+            {scriptTests.map((test, index) => {
+              const status = scriptTestStatus(test);
+              return <article className={status === 'passed' ? 'passing' : status === 'skipped' ? 'skipped' : 'failing'} key={`${test.name}-${index}`}><i>{status === 'passed' ? '✓' : status === 'skipped' ? '−' : '×'}</i><span><strong>{test.name}</strong><small className="test-result-meta">{scriptTestCategoryLabel(test.category)} ({scriptTestDurationLabel(test.durationMs)})</small>{test.error ? <small className="test-result-error">{test.error}</small> : null}</span></article>;
+            })}
             {scriptLogs.map((log, index) => <pre key={`${log}-${index}`}>{log}</pre>)}
             {!scriptTests.length && !scriptLogs.length ? <div className="empty-state compact"><Icon name="code" size={26} /><strong>No script results</strong><span>Send a request with an after-response script to see assertions here.</span></div> : null}
           </div>
@@ -1402,7 +1408,7 @@ export default function App() {
   const [graphqlSchemaLoading, setGraphqlSchemaLoading] = useState(false);
   const [graphqlSchemaError, setGraphqlSchemaError] = useState<{ requestId: string; message: string }>();
   const [workbenchSection, setWorkbenchSection] = useState<WorkbenchSection>('requests');
-  const [scriptTests, setScriptTests] = useState<Array<{ name: string; passed: boolean; error?: string }>>([]);
+  const [scriptTests, setScriptTests] = useState<ScriptTestResult[]>([]);
   const [scriptLogs, setScriptLogs] = useState<string[]>([]);
   const [runningMocks, setRunningMocks] = useState<Record<string, RunningMock>>({});
   const [projectSyncError, setProjectSyncError] = useState('');
@@ -2521,6 +2527,7 @@ export default function App() {
         scriptResponse?: HttpResponse,
         localVariables: Record<string, string> = {},
         previous?: ScriptRunResult,
+        testCategory: ScriptTestCategory = 'unknown',
       ) => runBrowserScript(source, scriptRequest, previous?.environment ?? globalScopes.globals.values, scriptResponse, workspace.preferences.scriptTimeoutMs, localVariables, {}, {
         ...initialScriptScopes,
         baseGlobals: previous?.baseGlobals ?? initialScriptScopes.baseGlobals,
@@ -2532,6 +2539,7 @@ export default function App() {
         collectionDisabled: previous?.collectionDisabled ?? initialScriptScopes.collectionDisabled,
         folders: previous?.folders ?? scriptFolderVariables(configured.folders),
         execution: previous?.execution,
+        testCategory,
         readFile: workspace.preferences.allowScriptFileAccess && isTauri()
           ? async (path) => {
             const { readDesktopScriptFile } = await import('./lib/scriptFiles');
@@ -2564,7 +2572,7 @@ export default function App() {
           return subresponse;
         } : undefined,
       });
-      const preRequest = await runScript(request.preRequestScript, request);
+      const preRequest = await runScript(request.preRequestScript, request, undefined, {}, undefined, 'pre-request');
       let executableRequest = preRequest.request;
       const requestVariables = mergedScriptVariables(preRequest, initialScriptScopes);
       setScriptLogs(preRequest.logs);
@@ -2618,7 +2626,7 @@ export default function App() {
           variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
         }, { cookies: scriptCookies, responses: scriptResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, onOAuth2Token: (updated) => persistOAuth2Auth(collection.id, request.id, updated.auth), authorizeOAuth2: authorizeOAuth2WithStatus });
       }
-      const afterResponse = await runScript(executableRequest.tests, executableRequest, result, preRequest.localVariables, preRequest);
+      const afterResponse = await runScript(executableRequest.tests, executableRequest, result, preRequest.localVariables, preRequest, 'after-response');
       const requestTestResults = [...preRequest.tests, ...afterResponse.tests];
       setScriptTests(requestTestResults);
       setScriptLogs((current) => [...current, ...afterResponse.logs, ...pluginState.notifications.map((notification) => `[plugin] ${notification.title}: ${notification.message}`)]);

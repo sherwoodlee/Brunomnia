@@ -16,11 +16,13 @@ The runtime exposes:
 - raw, URL-encoded, text-only multipart, and GraphQL `request.body.update()` modes;
 - Basic, Bearer, API-key, and disabled `request.auth.update()` modes, including the documented keyed-array shape and explicit second type argument;
 - response status, text/JSON, timing, headers, and response-cookie helpers;
-- captured console output, ordered sync/async `insomnia.test` results, `insomnia.expect`, global `expect`, and the shared `require('chai').assert` adapter described below;
+- captured console output, ordered sync/async `insomnia.test` results, non-executing `insomnia.test.skip()` results, `insomnia.expect`, global `expect`, and the shared `require('chai').assert` adapter described below;
 - top-level `await`; and
 - local `require()` adapters for every external-library and Node-module name in the current Insomnia scripts reference.
 
 `insomnia.baseGlobals` changes persist to the root global environment, while `insomnia.globals` changes persist to the selected global sub-environment without flattening inherited enabled values. `insomnia.baseEnvironment`, `CollectionVariables`, lowercase `collectionVariables`, and `variables.collectionVars` mutate the collection base. `insomnia.environment` and `variables.environmentVars` mutate the selected collection sub-environment. When no sub-environment is selected, the selected API aliases the corresponding base store. Parent-folder changes also persist. Direct sends, runner iterations, and trusted CLI runs keep all stores separate and carry mutations forward in memory; disabled rows mask lower scopes until a script explicitly sets or unsets that name in the owning store.
+
+Every newly executed assertion retains a passed, failed, or skipped status; a pre-request, after-response, or unknown category; and monotonic callback duration in milliseconds. Async timing includes callback settlement. Skipped assertions use zero duration, do not execute their callback, and do not fail their containing request. The direct response Tests pane and Collection Runner attempt evidence use the same status/category/timing model; legacy saved assertions remain readable with explicit unknown/timing-unavailable labels.
 
 ## Bundled module adapters
 

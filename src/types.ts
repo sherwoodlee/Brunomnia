@@ -757,9 +757,16 @@ export type ImportRecord = {
   metadata: Record<string, string>;
 };
 
+export type ScriptTestStatus = 'passed' | 'failed' | 'skipped';
+
+export type ScriptTestCategory = 'unknown' | 'pre-request' | 'after-response';
+
 export type ScriptTestResult = {
   name: string;
   passed: boolean;
+  status?: ScriptTestStatus;
+  category?: ScriptTestCategory;
+  durationMs?: number;
   error?: string;
 };
 

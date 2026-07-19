@@ -14,6 +14,7 @@ import { applyCollectionConfiguration, collectionEnvironmentScopes, requestAnces
 import { hydrateScriptFileReferences, prepareScriptSubrequest, type ScriptFileBudget, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 import { createScriptExpect } from '../src/lib/scriptExpect';
 import { createScriptModules } from '../src/lib/scriptModules';
+import { scriptTestFailed } from '../src/lib/scriptTests';
 import { applyWorkspaceCertificates } from '../src/lib/certificates';
 import { resolveCertificateValidation, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from '../src/lib/transport';
 import { migrateWorkspace } from '../src/lib/storage';
@@ -317,6 +318,38 @@ const runNodeScript = async (
     headers: Object.fromEntries(Object.entries(candidate.headers).map(([name, value]) => [name.toLowerCase(), value])),
     responseTime: candidate.durationMs,
   });
+  const testCategory = options.testCategory ?? 'unknown';
+  const finishTest = (result: ScriptRunResult['tests'][number], startedAt: number) => { result.durationMs = Math.max(0, performance.now() - startedAt); };
+  const failTest = (result: ScriptRunResult['tests'][number], error: unknown) => { result.passed = false; result.status = 'failed'; result.error = error instanceof Error ? error.message : String(error); };
+  const test = (name: string, callback: () => unknown) => {
+    registeredTests += 1;
+    if (registeredTests > 1_000) throw new Error('Script exceeds 1,000 test registrations.');
+    const testName = String(name);
+    if (testNamePattern && !testNamePattern.test(testName)) return;
+    const result: ScriptRunResult['tests'][number] = { name: testName, passed: true, status: 'passed', category: testCategory, durationMs: 0 };
+    tests.push(result);
+    const startedAt = performance.now();
+    try {
+      const outcome = callback();
+      if (outcome && typeof (outcome as PromiseLike<unknown>).then === 'function') {
+        const pending = Promise.resolve(outcome).then(() => finishTest(result, startedAt), (error) => { failTest(result, error); finishTest(result, startedAt); });
+        pendingTests.push(pending);
+        return pending;
+      }
+      finishTest(result, startedAt);
+    } catch (error) {
+      failTest(result, error);
+      finishTest(result, startedAt);
+    }
+    return Promise.resolve();
+  };
+  test.skip = async (name: string) => {
+    registeredTests += 1;
+    if (registeredTests > 1_000) throw new Error('Script exceeds 1,000 test registrations.');
+    const testName = String(name);
+    if (testNamePattern && !testNamePattern.test(testName)) return;
+    tests.push({ name: testName, passed: false, status: 'skipped', category: testCategory, durationMs: 0 });
+  };
   const insomnia = {
     baseGlobals: baseGlobalApi,
     globals: globalApi,
@@ -363,16 +396,7 @@ const runNodeScript = async (
       return run();
     },
     expect: expectApi,
-    test: (name: string, callback: () => unknown) => {
-      registeredTests += 1;
-      if (registeredTests > 1_000) throw new Error('Script exceeds 1,000 test registrations.');
-      const testName = String(name);
-      if (testNamePattern && !testNamePattern.test(testName)) return;
-      const result: ScriptRunResult['tests'][number] = { name: testName, passed: true };
-      tests.push(result);
-      try { const outcome = callback(); if (outcome && typeof (outcome as PromiseLike<unknown>).then === 'function') pendingTests.push(Promise.resolve(outcome).catch((error) => { result.passed = false; result.error = error instanceof Error ? error.message : String(error); })); }
-      catch (error) { result.passed = false; result.error = error instanceof Error ? error.message : String(error); }
-    },
+    test,
   };
   const scriptModules = createScriptModules({
     atob,
@@ -752,7 +776,7 @@ const main = async () => {
               } catch (caught) {
                 error = caught instanceof Error ? caught.message : String(caught);
               }
-              const passed = !error && tests.length > 0 && tests.every((testResult) => testResult.passed);
+              const passed = !error && tests.length > 0 && tests.every((testResult) => !scriptTestFailed(testResult));
               results.push({
                 id: `run-${crypto.randomUUID()}`,
                 requestId: test.requestId ?? test.id,

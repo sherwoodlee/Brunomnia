@@ -317,8 +317,18 @@ const normalizeResponseTimeline = (value: unknown): ResponseTimelineEntry[] => !
 const normalizeResponseTestResults = (value: unknown): ScriptTestResult[] => !Array.isArray(value) ? [] : value.slice(0, 1_000).flatMap((entry): ScriptTestResult[] => {
   const source = record(entry);
   if (!source) return [];
+  const status = source.status === 'passed' || source.status === 'failed' || source.status === 'skipped' ? source.status : source.passed === true ? 'passed' : 'failed';
+  const category = source.category === 'pre-request' || source.category === 'after-response' ? source.category : 'unknown';
+  const duration = typeof source.durationMs === 'number' ? source.durationMs : Number.NaN;
   const error = stringValue(source.error).slice(0, 20_000);
-  return [{ name: stringValue(source.name, 'Unnamed test').slice(0, 2_000), passed: source.passed === true, ...(error ? { error } : {}) }];
+  return [{
+    name: stringValue(source.name, 'Unnamed test').slice(0, 2_000),
+    passed: status === 'passed',
+    status,
+    category,
+    ...(Number.isFinite(duration) ? { durationMs: Math.min(2_147_483_647, Math.max(0, duration)) } : {}),
+    ...(error ? { error } : {}),
+  }];
 });
 
 const normalizeStoredResponses = (value: unknown): StoredResponse[] => Array.isArray(value) ? value.flatMap((entry, index) => {

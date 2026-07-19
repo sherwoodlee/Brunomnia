@@ -1,5 +1,5 @@
 import { createBlankRequest } from '../data/seed';
-import type { ApiRequest, CookieRecord, FilePayload, HttpResponse, KeyValue, MultipartPart, ScriptRunResult, StoredResponse } from '../types';
+import type { ApiRequest, CookieRecord, FilePayload, HttpResponse, KeyValue, MultipartPart, ScriptRunResult, ScriptTestCategory, StoredResponse } from '../types';
 import { storeResponseCookies } from './cookies';
 import { createRequestSnapshot, retainResponseHistory } from './responseHistory';
 import { createScriptExpect } from './scriptExpect';
@@ -35,6 +35,7 @@ export type ScriptRunOptions = {
   maxSubrequestBytes?: number;
   readFile?: (path: string) => Promise<FilePayload>;
   testNamePattern?: string;
+  testCategory?: ScriptTestCategory;
   execution?: ScriptRunResult['execution'];
   executionLocation?: string[];
 };
@@ -618,6 +619,37 @@ self.onmessage = async ({ data }) => {
     getByName: (name) => { const folder = [...state.folders].reverse().find((item) => item.name === String(name)); return folder ? folderFacade(folder) : undefined; },
     getEnvironments: () => [...state.folders].reverse().map((folder) => variableApi(folder.environment, folder.disabled)),
   };
+  const testCategory = state.testCategory === 'pre-request' || state.testCategory === 'after-response' ? state.testCategory : 'unknown';
+  const testNow = () => typeof performance === 'object' && typeof performance.now === 'function' ? performance.now() : Date.now();
+  const finishTest = (result, startedAt) => { result.durationMs = Math.max(0, testNow() - startedAt); };
+  const failTest = (result, error) => { result.passed = false; result.status = 'failed'; result.error = error instanceof Error ? error.message : String(error); };
+  const test = (name, callback) => {
+    registeredTests += 1;
+    if (registeredTests > 1000) throw new Error('Script exceeds 1,000 test registrations.');
+    const testName = String(name);
+    if (testNamePattern && !testNamePattern.test(testName)) return;
+    const result = { name: testName, passed: true, status: 'passed', category: testCategory, durationMs: 0 };
+    tests.push(result);
+    const startedAt = testNow();
+    try {
+      const outcome = callback();
+      if (outcome && typeof outcome.then === 'function') {
+        const pending = Promise.resolve(outcome).then(() => finishTest(result, startedAt), (error) => { failTest(result, error); finishTest(result, startedAt); });
+        pendingTests.push(pending);
+        return pending;
+      }
+      finishTest(result, startedAt);
+    }
+    catch (error) { failTest(result, error); finishTest(result, startedAt); }
+    return Promise.resolve();
+  };
+  test.skip = async (name) => {
+    registeredTests += 1;
+    if (registeredTests > 1000) throw new Error('Script exceeds 1,000 test registrations.');
+    const testName = String(name);
+    if (testNamePattern && !testNamePattern.test(testName)) return;
+    tests.push({ name: testName, passed: false, status: 'skipped', category: testCategory, durationMs: 0 });
+  };
   const insomnia = {
     baseGlobals: baseGlobalApi,
     globals: globalApi,
@@ -645,19 +677,7 @@ self.onmessage = async ({ data }) => {
     replaceIn,
     vault: { get: (name) => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); return state.vault[String(name)]; } },
     expect,
-    test: (name, callback) => {
-      registeredTests += 1;
-      if (registeredTests > 1000) throw new Error('Script exceeds 1,000 test registrations.');
-      const testName = String(name);
-      if (testNamePattern && !testNamePattern.test(testName)) return;
-      const result = { name: testName, passed: true };
-      tests.push(result);
-      try {
-        const outcome = callback();
-        if (outcome && typeof outcome.then === 'function') pendingTests.push(Promise.resolve(outcome).catch((error) => { result.passed = false; result.error = error instanceof Error ? error.message : String(error); }));
-      }
-      catch (error) { result.passed = false; result.error = error instanceof Error ? error.message : String(error); }
-    },
+    test,
   };
   insomnia.request.headersApi = headerApi;
   insomnia.request.addHeader = headerApi.add;
@@ -709,6 +729,11 @@ self.onmessage = async ({ data }) => {
       const tests = undefined;
       const registeredTests = undefined;
       const testNamePattern = undefined;
+      const testCategory = undefined;
+      const testNow = undefined;
+      const finishTest = undefined;
+      const failTest = undefined;
+      const test = undefined;
       const pendingTests = undefined;
       const fileReferences = undefined;
       const executionLocation = undefined;
@@ -834,6 +859,7 @@ export const runBrowserScript = async (
           localVariables,
           iterationData,
           testNamePattern: options.testNamePattern,
+          testCategory: options.testCategory ?? 'unknown',
           execution,
           executionLocation: execution.location,
           vault: options.vault ?? {},

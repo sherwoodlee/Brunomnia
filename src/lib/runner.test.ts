@@ -224,24 +224,32 @@ describe('collection runner', () => {
     expect(report.total).toBe(1);
   });
 
-  it('retains pre-request and after-response assertions together', async () => {
+  it('retains categorized assertions and does not fail on explicit skips', async () => {
     const request = createBlankRequest('one');
+    const categories: Array<string | undefined> = [];
     const report = await runCollection(
       { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
       { id: 'env', name: 'Env', variables: [] },
       { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
       async () => ({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }),
-      async (_script, activeRequest, environment, response) => ({
-        request: activeRequest,
-        environment,
-        logs: [],
-        tests: [{ name: response ? 'after response' : 'before request', passed: true }],
-      }),
+      async (_script, activeRequest, environment, response, _timeout, _local, _iteration, options) => {
+        categories.push(options?.testCategory);
+        return {
+          request: activeRequest,
+          environment,
+          logs: [],
+          tests: response
+            ? [{ name: 'after response', passed: true, status: 'passed', category: options?.testCategory, durationMs: 1 }]
+            : [{ name: 'before request', passed: false, status: 'skipped', category: options?.testCategory, durationMs: 0 }],
+        };
+      },
     );
 
+    expect(categories).toEqual(['pre-request', 'after-response']);
+    expect(report).toMatchObject({ passed: 1, failed: 0 });
     expect(report.results[0].tests).toEqual([
-      { name: 'before request', passed: true },
-      { name: 'after response', passed: true },
+      { name: 'before request', passed: false, status: 'skipped', category: 'pre-request', durationMs: 0 },
+      { name: 'after response', passed: true, status: 'passed', category: 'after-response', durationMs: 1 },
     ]);
   });
 
