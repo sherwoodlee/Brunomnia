@@ -11,7 +11,7 @@ describe('Runner assertion evidence', () => {
       { name: 'runs only in production', passed: false, status: 'skipped', category: 'after-response', durationMs: 0 },
     ]} />);
 
-    expect(markup).toContain('4 assertions · 1 passed · 2 failed · 1 skipped');
+    expect(markup).toContain('4/4 shown · 1 passed · 2 failed · 1 skipped');
     expect(markup).toContain('creates the order');
     expect(markup).toContain('returns the created status');
     expect(markup).toContain('Pre-request Test');
@@ -30,5 +30,22 @@ describe('Runner assertion evidence', () => {
 
     expect(markup).toContain('No assertions recorded');
     expect(markup).toContain('No script assertions were recorded for this attempt.');
+  });
+
+  it('filters only assertion rows with pinned status and fuzzy-name semantics', () => {
+    const tests = [
+      { name: 'creates the order', passed: true, status: 'passed' as const },
+      { name: 'returns invoice', passed: false, status: 'failed' as const, error: 'Expected success' },
+      { name: 'production only', passed: false, status: 'skipped' as const },
+    ];
+    const failed = renderToStaticMarkup(<RunnerAssertionEvidence nameFilter="return inv" statusFilter="failed" tests={tests} />);
+    const noMatch = renderToStaticMarkup(<RunnerAssertionEvidence nameFilter="missing" statusFilter="all" tests={tests} />);
+
+    expect(failed).toContain('1/3 shown · 0 passed · 1 failed');
+    expect(failed).toContain('returns invoice');
+    expect(failed).not.toContain('creates the order');
+    expect(failed).not.toContain('production only');
+    expect(noMatch).toContain('0/3 shown · 0 passed · 0 failed');
+    expect(noMatch).toContain('No matching assertions.');
   });
 });

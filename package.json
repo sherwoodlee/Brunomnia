@@ -22,6 +22,7 @@
     "@tauri-apps/api": "^2.0.0",
     "@xmldom/xmldom": "0.8.13",
     "date-fns": "3.6.0",
+    "fuzzysort": "1.9.0",
     "graphql": "16.10.0",
     "graphql-language-service": "5.5.0",
     "js-md5": "0.8.3",

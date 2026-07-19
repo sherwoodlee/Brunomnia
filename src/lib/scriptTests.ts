@@ -1,4 +1,7 @@
+import fuzzysort from 'fuzzysort';
 import type { ScriptTestCategory, ScriptTestResult, ScriptTestStatus } from '../types';
+
+export type ScriptTestFilter = 'all' | ScriptTestStatus;
 
 export const scriptTestStatus = (test: ScriptTestResult): ScriptTestStatus => test.status ?? (test.passed ? 'passed' : 'failed');
 
@@ -19,3 +22,14 @@ export const scriptTestDurationLabel = (durationMs: number | undefined) => {
   const bounded = Math.max(0, durationMs);
   return `${bounded === 0 ? '< 0.1' : bounded.toFixed(1)} ms`;
 };
+
+export const scriptTestNameMatches = (query: string, name: string) => {
+  if (!query.trim()) return true;
+  const match = fuzzysort.single(query, name);
+  return Boolean(match && match.score >= -8_000);
+};
+
+export const filterScriptTests = (tests: ScriptTestResult[], filter: ScriptTestFilter, query: string) => tests.filter((test) => {
+  const matchesStatus = filter === 'all' || scriptTestStatus(test) === filter;
+  return matchesStatus && scriptTestNameMatches(query, test.name);
+});

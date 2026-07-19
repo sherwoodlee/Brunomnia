@@ -31,7 +31,7 @@ import { clearDeletedUnitTestRequest, createUnitTestSuite } from './lib/unitTest
 import { withoutOAuth2RuntimeCredentials } from './lib/oauth2Tokens';
 import { userAgentDisabledAfterHeaderChange } from './lib/userAgent';
 import { calculatedRequestHeaders, type CalculatedHeader } from './lib/calculatedHeaders';
-import { scriptTestCategoryLabel, scriptTestDurationLabel, scriptTestPassed, scriptTestStatus } from './lib/scriptTests';
+import { filterScriptTests, scriptTestCategoryLabel, scriptTestDurationLabel, scriptTestPassed, scriptTestStatus, type ScriptTestFilter } from './lib/scriptTests';
 import type { ClientCodeSnippet, ClientCodeTarget } from './lib/codegen';
 import type { TemplatePromptInput } from './lib/templates';
 import {
@@ -1110,6 +1110,9 @@ function ResponsePanel({
   onStreamFrameKindChange,
   onSendStreamMessage,
 }: ResponsePanelProps) {
+  const [scriptTestStatusFilter, setScriptTestStatusFilter] = useState<ScriptTestFilter>('all');
+  const [scriptTestNameFilter, setScriptTestNameFilter] = useState('');
+  const visibleScriptTests = filterScriptTests(scriptTests, scriptTestStatusFilter, scriptTestNameFilter);
   const streaming = isStreamingRequest(mockRequest);
   const canPrettify = Object.entries(response.headers).some(([name, value]) => name.toLowerCase() === 'content-type' && /json/i.test(value));
   const canExportHttpDiagnostics = !streaming && (protocol === 'http' || protocol === 'graphql');
@@ -1160,13 +1163,16 @@ function ResponsePanel({
         ) : null}
         {activeTab === 'tests' ? (
           <div className="test-results">
-            <header><strong>{scriptTests.filter(scriptTestPassed).length}/{scriptTests.length || 0} passing</strong><span>{scriptLogs.length} console messages</span></header>
-            {scriptTests.map((test, index) => {
+            {scriptTests.length ? <nav aria-label="Filter response test results" className="script-test-status-filters">{(['all', 'passed', 'failed', 'skipped'] as ScriptTestFilter[]).map((filter) => <button aria-pressed={scriptTestStatusFilter === filter} key={filter} onClick={() => setScriptTestStatusFilter(filter)} type="button">{filter[0].toUpperCase() + filter.slice(1)}</button>)}</nav> : null}
+            <header><strong>{visibleScriptTests.length}/{scriptTests.length} tests shown</strong><span>{scriptLogs.length} console messages</span></header>
+            {visibleScriptTests.map((test, index) => {
               const status = scriptTestStatus(test);
               return <article className={status === 'passed' ? 'passing' : status === 'skipped' ? 'skipped' : 'failing'} key={`${test.name}-${index}`}><i>{status === 'passed' ? '✓' : status === 'skipped' ? '−' : '×'}</i><span><strong>{test.name}</strong><small className="test-result-meta">{scriptTestCategoryLabel(test.category)} ({scriptTestDurationLabel(test.durationMs)})</small>{test.error ? <small className="test-result-error">{test.error}</small> : null}</span></article>;
             })}
+            {scriptTests.length && !visibleScriptTests.length ? <div className="script-test-no-match">No matching test results</div> : null}
             {scriptLogs.map((log, index) => <pre key={`${log}-${index}`}>{log}</pre>)}
             {!scriptTests.length && !scriptLogs.length ? <div className="empty-state compact"><Icon name="code" size={26} /><strong>No script results</strong><span>Send a request with an after-response script to see assertions here.</span></div> : null}
+            {scriptTests.length ? <div className="script-test-name-filter"><input aria-label="Filter test results" onChange={(event) => setScriptTestNameFilter(event.target.value)} placeholder="Filter test results with name" title="Filter test results" type="text" value={scriptTestNameFilter} /></div> : null}
           </div>
         ) : null}
         {activeTab === 'mock' ? <Suspense fallback={<div className="dialog-loading">Loading mock tools…</div>}><MockResponseExtractor environmentId={mockEnvironmentId} isServerRunning={isMockServerRunning} liveResponse={response} mockServers={mockServers} onApply={onApplyResponseToMock} onOpenMock={onOpenMock} request={mockRequest} response={mockSourceResponse} /></Suspense> : null}
