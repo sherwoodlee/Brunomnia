@@ -319,6 +319,7 @@ dependencies = [
  "digest_auth",
  "futures-util",
  "http",
+ "hyper-util",
  "libc",
  "ntlmclient",
  "p12-keystore",
@@ -343,6 +344,7 @@ dependencies = [
  "tokio-tungstenite",
  "tonic",
  "tonic-reflection",
+ "tower",
  "url",
  "uuid",
 ]

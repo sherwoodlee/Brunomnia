@@ -1959,7 +1959,21 @@ Compatibility bounds remain explicit: Digest, NTLM, Netrc, and IAM remain transp
 
 Compatibility bounds remain explicit: File tags are desktop-only and inherit the existing 5 MB approved-root safety ceiling. gRPC/stream execution and the portable CLI do not yet resolve external-vault or File tags. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 132 — remaining parity closure and release hardening
+## Milestone 132 — close gRPC endpoint and live-server parity (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned `parseGrpcUrl` treats a scheme-less host as plaintext, preserves `unix:` targets, recognizes `grpc:`/`grpcs:`, and current Kong documentation uses public plaintext/TLS `grpcb.in` examples for all four call shapes |
+| Endpoint grammar | Complete | Scheme-less `host:port`, `grpc:`, `grpcs:`, `http:`, and `https:` inputs normalize to the correct Tonic authority and TLS mode |
+| Unix-domain sockets | Complete | Unix desktop builds connect absolute `unix:` paths through Tonic's HTTP/2 connector, with a real local reflection server proving descriptor discovery |
+| Default TLS | Complete | Every secure channel installs Tonic native roots even when no custom CA or client identity is selected; custom trust, identity, and request-local Never behavior remain layered on that path |
+| Official external matrix | Complete | The opt-in native test passes reflection and unary calls on `grpcb.in:9000` plus trusted TLS reflection, unary, server-streaming, client-streaming, and bidirectional calls on `grpcs://grpcb.in:9001` |
+| Executable coverage | Complete | Local endpoint normalization, modern/v1alpha reflection, Unix reflection, custom CA/mTLS/validation, all call lifecycles, and the ignored-by-default public matrix cover every claimed path |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 132 verification](QA_MILESTONE_132.md); the gRPC row is Complete |
+
+Compatibility bounds remain explicit: the public matrix is opt-in so ordinary offline test runs remain deterministic. Pinned Insomnia keeps gRPC messages transient and does not install its HTTP/HTTPS proxy agent on gRPC channels, so persisted call history and custom gRPC proxying are not parity requirements. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 133 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -837,8 +837,17 @@ fn apply_metadata<T>(request: &mut Request<T>, metadata: &[KeyValue]) -> Result<
 }
 
 fn tonic_endpoint(endpoint: &str) -> Result<(String, bool), String> {
+    let endpoint = endpoint.trim();
+    if endpoint.is_empty() {
+        return Err("The gRPC endpoint requires a hostname.".into());
+    }
+    let source = if endpoint.contains("://") {
+        endpoint.to_string()
+    } else {
+        format!("grpc://{endpoint}")
+    };
     let url =
-        url::Url::parse(endpoint).map_err(|error| format!("Invalid gRPC endpoint: {error}"))?;
+        url::Url::parse(&source).map_err(|error| format!("Invalid gRPC endpoint: {error}"))?;
     let (scheme, secure) = match url.scheme() {
         "grpc" | "http" => ("http", false),
         "grpcs" | "https" => ("https", true),
@@ -850,7 +859,7 @@ fn tonic_endpoint(endpoint: &str) -> Result<(String, bool), String> {
     let normalized = if url.scheme() == scheme {
         url.to_string()
     } else {
-        let (_, remainder) = endpoint
+        let (_, remainder) = source
             .split_once("://")
             .ok_or_else(|| "The gRPC endpoint requires an authority.".to_string())?;
         url::Url::parse(&format!("{scheme}://{remainder}"))
@@ -860,7 +869,39 @@ fn tonic_endpoint(endpoint: &str) -> Result<(String, bool), String> {
     Ok((normalized, secure))
 }
 
+#[cfg(unix)]
+fn unix_socket_path(endpoint: &str) -> Result<Option<std::path::PathBuf>, String> {
+    let Some(source) = endpoint.trim().strip_prefix("unix:") else {
+        return Ok(None);
+    };
+    let source = source.strip_prefix("//").unwrap_or(source);
+    let path = std::path::PathBuf::from(source);
+    if source.is_empty() || !path.is_absolute() {
+        return Err("A gRPC Unix socket endpoint requires an absolute path.".into());
+    }
+    Ok(Some(path))
+}
+
 async fn connect_channel(endpoint: &str, transport: &TransportConfig) -> Result<Channel, String> {
+    #[cfg(unix)]
+    if let Some(path) = unix_socket_path(endpoint)? {
+        let mut builder = Endpoint::from_static("http://[::]:50051");
+        if transport.timeout_ms > 0 {
+            let timeout = std::time::Duration::from_millis(transport.timeout_ms);
+            builder = builder.connect_timeout(timeout).timeout(timeout);
+        }
+        return builder
+            .connect_with_connector(tower::service_fn(move |_| {
+                let path = path.clone();
+                async move {
+                    tokio::net::UnixStream::connect(path)
+                        .await
+                        .map(hyper_util::rt::TokioIo::new)
+                }
+            }))
+            .await
+            .map_err(|error| format!("gRPC Unix socket connection failed: {error}"));
+    }
     validate_certificate_material(transport)?;
     let (tonic_endpoint, secure) = tonic_endpoint(endpoint)?;
     let mut builder = Endpoint::from_shared(tonic_endpoint)
@@ -871,36 +912,30 @@ async fn connect_channel(endpoint: &str, transport: &TransportConfig) -> Result<
     }
     if secure {
         let identity = effective_client_identity_pem(transport, Some(endpoint))?;
-        if !transport.validate_certificates
-            || identity.is_some()
-            || !transport.ca_certificate_pem.trim().is_empty()
-        {
-            let mut tls = ClientTlsConfig::new();
-            if transport.timeout_ms > 0 {
-                tls = tls.timeout(std::time::Duration::from_millis(transport.timeout_ms));
-            }
-            if let Some(identity) = identity {
-                tls = tls.identity(Identity::from_pem(
-                    identity.certificate_pem,
-                    identity.private_key_pem,
-                ));
-            }
-            if transport.validate_certificates && !transport.ca_certificate_pem.trim().is_empty() {
-                tls =
-                    tls.ca_certificate(Certificate::from_pem(transport.ca_certificate_pem.clone()));
-            }
-            builder = if transport.validate_certificates {
-                builder.tls_config(tls.with_enabled_roots())
-            } else {
-                builder.tls_config_with_verifier(tls, Arc::new(AcceptInvalidServerCertificate))
-            }
-            .map_err(|error| format!("Invalid gRPC TLS configuration: {error}"))?;
+        let mut tls = ClientTlsConfig::new();
+        if transport.timeout_ms > 0 {
+            tls = tls.timeout(std::time::Duration::from_millis(transport.timeout_ms));
         }
+        if let Some(identity) = identity {
+            tls = tls.identity(Identity::from_pem(
+                identity.certificate_pem,
+                identity.private_key_pem,
+            ));
+        }
+        if transport.validate_certificates && !transport.ca_certificate_pem.trim().is_empty() {
+            tls = tls.ca_certificate(Certificate::from_pem(transport.ca_certificate_pem.clone()));
+        }
+        builder = if transport.validate_certificates {
+            builder.tls_config(tls.with_enabled_roots())
+        } else {
+            builder.tls_config_with_verifier(tls, Arc::new(AcceptInvalidServerCertificate))
+        }
+        .map_err(|error| format!("Invalid gRPC TLS configuration: {error}"))?;
     }
     builder
         .connect()
         .await
-        .map_err(|error| format!("gRPC connection failed: {error}"))
+        .map_err(|error| format!("gRPC connection failed: {error:?}"))
 }
 
 async fn reflect_schema(
@@ -1540,6 +1575,47 @@ mod tests {
     const TLS_CLIENT_CERTIFICATE: &str = include_str!("../tests/fixtures/tls/client.cert.pem");
     const TLS_CLIENT_KEY: &str = include_str!("../tests/fixtures/tls/client.key.pem");
 
+    async fn official_grpcb_schema(endpoint: &str) -> GrpcSchemaOutput {
+        load_schema(GrpcSchemaInput {
+            endpoint: endpoint.into(),
+            source: "reflection".into(),
+            proto_text: String::new(),
+            proto_files: vec![],
+            proto_entry_path: String::new(),
+            metadata: vec![],
+            reflection_api: GrpcReflectionApiInput::default(),
+            transport: TransportConfig {
+                timeout_ms: 30_000,
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("official grpcb.in reflection succeeds")
+    }
+
+    async fn official_grpcb_call(
+        endpoint: &str,
+        schema: &GrpcSchemaOutput,
+        service: &str,
+        method: &str,
+        messages_json: &str,
+    ) -> GrpcCallOutput {
+        call(GrpcCallInput {
+            endpoint: endpoint.into(),
+            service: service.into(),
+            method: method.into(),
+            descriptor_set_base64: schema.descriptor_set_base64.clone(),
+            messages_json: messages_json.into(),
+            metadata: vec![],
+            transport: TransportConfig {
+                timeout_ms: 30_000,
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("official grpcb.in call succeeds")
+    }
+
     #[derive(Clone)]
     struct LifecycleTestServer {
         request: MessageDescriptor,
@@ -2149,6 +2225,10 @@ mod tests {
     #[test]
     fn normalizes_grpc_endpoint_schemes_for_tonic() {
         assert_eq!(
+            tonic_endpoint("GRPCB.IN:9000").unwrap(),
+            ("http://grpcb.in:9000/".into(), false)
+        );
+        assert_eq!(
             tonic_endpoint("grpc://api.example.test:50051/orders?tenant=one").unwrap(),
             (
                 "http://api.example.test:50051/orders?tenant=one".into(),
@@ -2160,6 +2240,130 @@ mod tests {
             ("https://api.example.test/".into(), true)
         );
         assert!(tonic_endpoint("ws://api.example.test").is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn loads_reflection_over_a_unix_domain_socket() {
+        use tokio::net::UnixListener;
+        use tokio_stream::wrappers::UnixListenerStream;
+
+        let (_, descriptor_bytes) = compile_proto(TEST_PROTO, &[], "").unwrap();
+        let descriptor_set = FileDescriptorSet::decode(descriptor_bytes.as_slice()).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let socket_path = directory.path().join("grpc.sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let (shutdown, shutdown_receiver) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let reflection = tonic_reflection::server::Builder::configure()
+                .register_file_descriptor_set(descriptor_set)
+                .build_v1()
+                .unwrap();
+            Server::builder()
+                .add_service(reflection)
+                .serve_with_incoming_shutdown(UnixListenerStream::new(listener), async move {
+                    let _ = shutdown_receiver.await;
+                })
+                .await
+                .unwrap();
+        });
+        let (pool, encoded) = reflect_schema(
+            &format!("unix:{}", socket_path.display()),
+            &[],
+            &TransportConfig {
+                timeout_ms: 5_000,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(pool.get_service_by_name("brunomnia.test.Greeter").is_some());
+        assert!(!encoded.is_empty());
+        let _ = shutdown.send(());
+        server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires the public grpcb.in compatibility fixture"]
+    async fn validates_official_grpcb_plaintext_tls_and_all_call_shapes() {
+        let endpoints = ["grpcb.in:9000", "grpcs://grpcb.in:9001"];
+        let mut tls_schema = None;
+        for endpoint in endpoints {
+            let schema = official_grpcb_schema(endpoint).await;
+            let service = schema
+                .services
+                .iter()
+                .find(|service| service.full_name == "hello.HelloService")
+                .expect("hello.HelloService is reflected");
+            let unary = service
+                .methods
+                .iter()
+                .find(|method| !method.client_streaming && !method.server_streaming)
+                .expect("unary method is reflected");
+            let output = official_grpcb_call(
+                endpoint,
+                &schema,
+                &service.full_name,
+                &unary.name,
+                r#"{"greeting":"Brunomnia"}"#,
+            )
+            .await;
+            assert_eq!(output.call_type, "unary");
+            assert_eq!(output.messages.len(), 1);
+            assert!(output.messages[0]
+                .to_string()
+                .to_ascii_lowercase()
+                .contains("brunomnia"));
+            if endpoint.starts_with("grpcs:") {
+                tls_schema = Some(schema);
+            }
+        }
+
+        let schema = tls_schema.expect("TLS schema was loaded");
+        let service = schema
+            .services
+            .iter()
+            .find(|service| service.full_name == "hello.HelloService")
+            .unwrap();
+        for (client_streaming, server_streaming, messages, expected_type) in [
+            (
+                false,
+                true,
+                r#"{"greeting":"Brunomnia"}"#,
+                "server-streaming",
+            ),
+            (
+                true,
+                false,
+                r#"[{"greeting":"Ada"},{"greeting":"Grace"}]"#,
+                "client-streaming",
+            ),
+            (
+                true,
+                true,
+                r#"[{"greeting":"Ada"},{"greeting":"Grace"}]"#,
+                "bidirectional-streaming",
+            ),
+        ] {
+            let method = service
+                .methods
+                .iter()
+                .find(|method| {
+                    method.client_streaming == client_streaming
+                        && method.server_streaming == server_streaming
+                })
+                .expect("streaming method is reflected");
+            let output = official_grpcb_call(
+                "grpcs://grpcb.in:9001",
+                &schema,
+                &service.full_name,
+                &method.name,
+                messages,
+            )
+            .await;
+            assert_eq!(output.call_type, expected_type);
+            assert!(!output.messages.is_empty());
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
