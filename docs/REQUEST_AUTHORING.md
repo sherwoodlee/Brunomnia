@@ -233,33 +233,33 @@ Brunomnia's Rust and Fetch transports do not expose libcurl-style debug callback
 
 Choose **Code** beside the request URL or use `Mod+Shift+G`. The preview uses the effective request after collection/folder inheritance plus the resolved active environment. Available targets are:
 
-- C libcurl;
+- C Libcurl;
 - Clojure clj-http;
 - Crystal `HTTP::Client`;
-- C# `HttpClient`;
+- C# `HttpClient` and RestSharp;
 - Go `net/http`;
 - raw HTTP/1.1;
-- Java `HttpClient`;
-- JavaScript Fetch;
+- Java AsyncHttp, `HttpClient`, OkHttp, and Unirest;
+- JavaScript XMLHttpRequest, Axios, Fetch, and jQuery;
 - Kotlin OkHttp;
-- Node.js native HTTP;
+- Node.js native HTTP, Request, Unirest, Axios, and Fetch;
 - Objective-C `NSURLSession`;
 - OCaml CoHTTP;
-- PHP cURL;
-- PowerShell `Invoke-WebRequest`;
-- Python Requests;
+- PHP cURL, Guzzle, HTTP v1, and HTTP v2;
+- PowerShell `Invoke-WebRequest` and `Invoke-RestMethod`;
+- Python `http.client` and Requests;
 - R httr;
-- Ruby `Net::HTTP`;
+- Ruby `Net::HTTP` and Faraday;
 - Rust Reqwest;
-- Shell cURL; and
+- Shell cURL, HTTPie, and Wget; and
 - Swift `URLSession`.
 
 Bearer, Basic, header/query API keys, and an existing OAuth 2 access token are materialized. JSON, text, GraphQL, URL-encoded, multipart, and binary bodies are included. Multipart generation resolves active environment values in field names, text values, filenames, and content types; preserves duplicate fields, optional text-part content types, file metadata, and exact file bytes; replaces any stale authored multipart boundary; and chooses a generated boundary that does not occur in part metadata or data. Standalone binary bodies retain their exact bytes and default MIME type.
 
-Byte bodies are serialized once so all nineteen executable targets preserve the same payload without depending on a source file path that the WebView cannot retain. C and OCaml emit exact byte literals, Shell cURL decodes into a temporary file with GNU/BSD `base64` compatibility, and the other executable targets decode Base64 in memory. Raw HTTP/1.1 is a text representation rather than an executable client: text bodies remain inline with UTF-8 Content-Length, while arbitrary multipart/binary bytes appear as exact Base64 with a visible decode-before-sending warning. This makes copied snippets self-contained but also makes their text grow with selected files. Copying is the only dialog side effect: opening the preview does not decode bytes, create a temporary file, execute the request, or run the generated program.
+Byte bodies are serialized once so all thirty-eight executable clients preserve the same payload without depending on a source file path that the WebView cannot retain. C and OCaml emit exact byte literals, Shell clients decode through a temporary file with GNU/BSD `base64` compatibility, and the other executable clients decode Base64 in memory. Raw HTTP/1.1 is a text representation rather than an executable client: text bodies remain inline with UTF-8 Content-Length, while arbitrary multipart/binary bytes appear as exact Base64 with a visible decode-before-sending warning. This makes copied snippets self-contained but also makes their text grow with selected files. Copying is the only dialog side effect: opening the preview does not decode bytes, create a temporary file, execute the request, or run the generated program.
 
-Warnings are part of the result, not hidden conversion failures. The dialog identifies unresolved template/path values, collapsed duplicate headers in object-oriented targets, unattached or invalid saved file bytes, sanitized multipart header line breaks, and runtime-specific signing schemes that cannot be safely reproduced as static text. Target-language package availability and syntax/runtime validation remain the user's responsibility.
+Warnings are part of the result, not hidden conversion failures. The dialog identifies unresolved template/path values, collapsed duplicate headers in object-oriented targets, unattached or invalid saved file bytes, sanitized multipart header line breaks, runtime-specific signing schemes that cannot be safely reproduced as static text, raw HTTP binary representation, and custom methods unsupported by RestSharp or Faraday. Target-language package availability and syntax/runtime validation remain the user's responsibility.
 
 ## Compatibility boundary
 
-This milestone does not claim a universal code-generation engine. Brunomnia represents all twenty target families from the pinned HTTPSnippet release with one selected client each, but alternate clients, separate target/client choice persistence, advanced dynamic signing, target dependency installation, comprehensive syntax/runtime validation, and execution remain open work. The unrestricted upstream scripting API is also deliberately separate because expanding script network, module, and storage authority requires its own security review. Those gaps remain in the [feature-parity ledger](PARITY.md).
+Brunomnia exposes all thirty-nine clients across all twenty target families from the pinned HTTPSnippet release. Target and client choices use separate selectors, switch to each family's declared default, and persist locally between dialog sessions. Per-client formatting/transport options, advanced dynamic signing, target dependency installation, comprehensive syntax/runtime validation, and execution remain open work. The unrestricted upstream scripting API is also deliberately separate because expanding script network, module, and storage authority requires its own security review. Those gaps remain in the [feature-parity ledger](PARITY.md).

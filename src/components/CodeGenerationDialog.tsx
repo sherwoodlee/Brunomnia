@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ApiRequest } from '../types';
-import { clientCodeTargets, generateClientCode, type ClientCodeTarget } from '../lib/codegen';
+import { clientCodeFamilies, generateClientCode, resolveClientCodeSelection } from '../lib/codegen';
 import { Icon } from './Icon';
 
 type CodeGenerationDialogProps = {
@@ -10,9 +10,30 @@ type CodeGenerationDialogProps = {
 };
 
 export function CodeGenerationDialog({ request, variables, onClose }: CodeGenerationDialogProps) {
-  const [target, setTarget] = useState<ClientCodeTarget>('curl');
+  const [selection, setSelection] = useState(() => {
+    try {
+      return resolveClientCodeSelection(
+        JSON.parse(window.localStorage.getItem('brunomnia::generateCode::target') || 'null'),
+        JSON.parse(window.localStorage.getItem('brunomnia::generateCode::client') || 'null'),
+      );
+    } catch {
+      return resolveClientCodeSelection();
+    }
+  });
   const [copied, setCopied] = useState(false);
-  const snippet = useMemo(() => generateClientCode(target, request, variables), [request, target, variables]);
+  const family = clientCodeFamilies.find((candidate) => candidate.id === selection.familyId)!;
+  const snippet = useMemo(() => generateClientCode(selection.target, request, variables), [request, selection.target, variables]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('brunomnia::generateCode::target', JSON.stringify(selection.familyId));
+      window.localStorage.setItem('brunomnia::generateCode::client', JSON.stringify(selection.clientKey));
+    } catch {}
+  }, [selection.clientKey, selection.familyId]);
+
+  const select = (familyId: string, clientKey?: string) => {
+    setSelection(resolveClientCodeSelection(familyId, clientKey));
+  };
 
   const copy = async () => {
     try {
@@ -31,7 +52,8 @@ export function CodeGenerationDialog({ request, variables, onClose }: CodeGenera
         <button aria-label="Close" className="icon-button subtle" onClick={onClose} type="button"><Icon name="x" /></button>
       </header>
       <div className="codegen-toolbar">
-        <label>Target<select aria-label="Code generation target" onChange={(event) => setTarget(event.target.value as ClientCodeTarget)} value={target}>{clientCodeTargets.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}</select></label>
+        <label>Target<select aria-label="Code generation target" onChange={(event) => select(event.target.value)} value={selection.familyId}>{clientCodeFamilies.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}</select></label>
+        <label>Client<select aria-label="Code generation client" onChange={(event) => select(selection.familyId, event.target.value)} value={selection.clientKey}>{family.clients.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.label}</option>)}</select></label>
         <button className="secondary-button" onClick={() => void copy()} type="button"><Icon name={copied ? 'check' : 'copy'} size={14} /> {copied ? 'Copied' : 'Copy'}</button>
       </div>
       <p>Generated on this device from the effective request and active environment. The preview never sends a request.</p>

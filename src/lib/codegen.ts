@@ -1,50 +1,79 @@
 import type { ApiRequest, KeyValue } from '../types';
 import { buildHeaders, buildRequestUrl, resolveTemplate } from './request';
 
-export type ClientCodeTarget =
-  | 'curl'
-  | 'javascript-fetch'
-  | 'node-native'
-  | 'python-requests'
-  | 'php-curl'
-  | 'ruby-native'
-  | 'go'
-  | 'java-httpclient'
-  | 'csharp-httpclient'
-  | 'swift-urlsession'
-  | 'rust-reqwest'
-  | 'c-libcurl'
-  | 'clojure-clj-http'
-  | 'crystal-native'
-  | 'http-1.1'
-  | 'kotlin-okhttp'
-  | 'objc-nsurlsession'
-  | 'ocaml-cohttp'
-  | 'powershell-webrequest'
-  | 'r-httr';
+export const clientCodeFamilies = [
+  { id: 'c', label: 'C', defaultClient: 'libcurl', clients: [{ id: 'c-libcurl', key: 'libcurl', label: 'Libcurl' }] },
+  { id: 'clojure', label: 'Clojure', defaultClient: 'clj_http', clients: [{ id: 'clojure-clj-http', key: 'clj_http', label: 'clj-http' }] },
+  { id: 'crystal', label: 'Crystal', defaultClient: 'native', clients: [{ id: 'crystal-native', key: 'native', label: 'http::client' }] },
+  { id: 'csharp', label: 'C#', defaultClient: 'restsharp', clients: [
+    { id: 'csharp-httpclient', key: 'httpclient', label: 'HttpClient' },
+    { id: 'csharp-restsharp', key: 'restsharp', label: 'RestSharp' },
+  ] },
+  { id: 'go', label: 'Go', defaultClient: 'native', clients: [{ id: 'go', key: 'native', label: 'Native' }] },
+  { id: 'http', label: 'HTTP', defaultClient: 'http1.1', clients: [{ id: 'http-1.1', key: 'http1.1', label: 'HTTP/1.1' }] },
+  { id: 'java', label: 'Java', defaultClient: 'unirest', clients: [
+    { id: 'java-asynchttp', key: 'asynchttp', label: 'AsyncHttp' },
+    { id: 'java-httpclient', key: 'nethttp', label: 'HttpClient' },
+    { id: 'java-okhttp', key: 'okhttp', label: 'OkHttp' },
+    { id: 'java-unirest', key: 'unirest', label: 'Unirest' },
+  ] },
+  { id: 'javascript', label: 'JavaScript', defaultClient: 'xhr', clients: [
+    { id: 'javascript-xhr', key: 'xhr', label: 'XMLHttpRequest' },
+    { id: 'javascript-axios', key: 'axios', label: 'Axios' },
+    { id: 'javascript-fetch', key: 'fetch', label: 'Fetch' },
+    { id: 'javascript-jquery', key: 'jquery', label: 'jQuery' },
+  ] },
+  { id: 'kotlin', label: 'Kotlin', defaultClient: 'okhttp', clients: [{ id: 'kotlin-okhttp', key: 'okhttp', label: 'OkHttp' }] },
+  { id: 'node', label: 'Node.js', defaultClient: 'native', clients: [
+    { id: 'node-native', key: 'native', label: 'Native' },
+    { id: 'node-request', key: 'request', label: 'Request' },
+    { id: 'node-unirest', key: 'unirest', label: 'Unirest' },
+    { id: 'node-axios', key: 'axios', label: 'Axios' },
+    { id: 'node-fetch', key: 'fetch', label: 'Fetch' },
+  ] },
+  { id: 'objc', label: 'Objective-C', defaultClient: 'nsurlsession', clients: [{ id: 'objc-nsurlsession', key: 'nsurlsession', label: 'NSURLSession' }] },
+  { id: 'ocaml', label: 'OCaml', defaultClient: 'cohttp', clients: [{ id: 'ocaml-cohttp', key: 'cohttp', label: 'CoHTTP' }] },
+  { id: 'php', label: 'PHP', defaultClient: 'curl', clients: [
+    { id: 'php-curl', key: 'curl', label: 'cURL' },
+    { id: 'php-guzzle', key: 'guzzle', label: 'Guzzle' },
+    { id: 'php-http1', key: 'http1', label: 'HTTP v1' },
+    { id: 'php-http2', key: 'http2', label: 'HTTP v2' },
+  ] },
+  { id: 'powershell', label: 'PowerShell', defaultClient: 'webrequest', clients: [
+    { id: 'powershell-webrequest', key: 'webrequest', label: 'Invoke-WebRequest' },
+    { id: 'powershell-restmethod', key: 'restmethod', label: 'Invoke-RestMethod' },
+  ] },
+  { id: 'python', label: 'Python', defaultClient: 'python3', clients: [
+    { id: 'python-python3', key: 'python3', label: 'http.client' },
+    { id: 'python-requests', key: 'requests', label: 'Requests' },
+  ] },
+  { id: 'r', label: 'R', defaultClient: 'httr', clients: [{ id: 'r-httr', key: 'httr', label: 'httr' }] },
+  { id: 'ruby', label: 'Ruby', defaultClient: 'native', clients: [
+    { id: 'ruby-native', key: 'native', label: 'Native' },
+    { id: 'ruby-faraday', key: 'faraday', label: 'Faraday' },
+  ] },
+  { id: 'rust', label: 'Rust', defaultClient: 'reqwest', clients: [{ id: 'rust-reqwest', key: 'reqwest', label: 'Reqwest' }] },
+  { id: 'shell', label: 'Shell', defaultClient: 'curl', clients: [
+    { id: 'curl', key: 'curl', label: 'cURL' },
+    { id: 'shell-httpie', key: 'httpie', label: 'HTTPie' },
+    { id: 'shell-wget', key: 'wget', label: 'Wget' },
+  ] },
+  { id: 'swift', label: 'Swift', defaultClient: 'nsurlsession', clients: [{ id: 'swift-urlsession', key: 'nsurlsession', label: 'URLSession' }] },
+] as const;
 
-export const clientCodeTargets: Array<{ id: ClientCodeTarget; label: string }> = [
-  { id: 'c-libcurl', label: 'C · libcurl' },
-  { id: 'clojure-clj-http', label: 'Clojure · clj-http' },
-  { id: 'crystal-native', label: 'Crystal · HTTP::Client' },
-  { id: 'csharp-httpclient', label: 'C# · HttpClient' },
-  { id: 'go', label: 'Go · net/http' },
-  { id: 'http-1.1', label: 'HTTP · HTTP/1.1' },
-  { id: 'java-httpclient', label: 'Java · HttpClient' },
-  { id: 'javascript-fetch', label: 'JavaScript · Fetch' },
-  { id: 'kotlin-okhttp', label: 'Kotlin · OkHttp' },
-  { id: 'node-native', label: 'Node.js · Native' },
-  { id: 'objc-nsurlsession', label: 'Objective-C · NSURLSession' },
-  { id: 'ocaml-cohttp', label: 'OCaml · CoHTTP' },
-  { id: 'php-curl', label: 'PHP · cURL' },
-  { id: 'powershell-webrequest', label: 'PowerShell · Invoke-WebRequest' },
-  { id: 'python-requests', label: 'Python · Requests' },
-  { id: 'r-httr', label: 'R · httr' },
-  { id: 'ruby-native', label: 'Ruby · Net::HTTP' },
-  { id: 'rust-reqwest', label: 'Rust · Reqwest' },
-  { id: 'curl', label: 'Shell · cURL' },
-  { id: 'swift-urlsession', label: 'Swift · URLSession' },
-];
+export type ClientCodeFamilyId = typeof clientCodeFamilies[number]['id'];
+export type ClientCodeTarget = typeof clientCodeFamilies[number]['clients'][number]['id'];
+
+export const clientCodeTargets: Array<{ id: ClientCodeTarget; label: string }> = clientCodeFamilies.flatMap((family) => family.clients.map((client) => ({
+  id: client.id,
+  label: `${family.label} · ${client.label}`,
+})));
+
+export const resolveClientCodeSelection = (familyId?: string, clientKey?: string) => {
+  const family = clientCodeFamilies.find((candidate) => candidate.id === familyId) ?? clientCodeFamilies.find((candidate) => candidate.id === 'shell')!;
+  const client = family.clients.find((candidate) => candidate.key === clientKey) ?? family.clients.find((candidate) => candidate.key === family.defaultClient) ?? family.clients[0];
+  return { clientKey: client.key, familyId: family.id, target: client.id };
+};
 
 export type ClientCodeSnippet = {
   code: string;
@@ -670,32 +699,249 @@ response <- VERB(${json(method)}, url${headerEntries ? ', headers' : ''}${body ?
 cat(status_code(response), content(response, "text", encoding = "UTF-8"))`;
 };
 
+const csharpRestSharpSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const supportedMethods: Record<string, string> = { DELETE: 'Delete', GET: 'Get', HEAD: 'Head', OPTIONS: 'Options', PATCH: 'Patch', POST: 'Post', PUT: 'Put' };
+  const restMethod = supportedMethods[method.toUpperCase()];
+  if (!restMethod) return `throw new NotSupportedException(${json(`RestSharp cannot run ${method} requests for ${url}.`)});`;
+  const contentType = Object.entries(headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1] || 'application/octet-stream';
+  return `using System;
+using RestSharp;
+
+var client = new RestClient();
+var request = new RestRequest(${json(url)}, Method.${restMethod});
+${Object.entries(headers).map(([name, value]) => `request.AddHeader(${json(name)}, ${json(value)});`).join('\n')}${Object.keys(headers).length ? '\n' : ''}${body ? `var payload = Convert.FromBase64String(${json(bodyBase64(body))});
+request.AddParameter(${json(contentType)}, payload, ParameterType.RequestBody);
+` : ''}var response = await client.ExecuteAsync(request);
+Console.WriteLine($"{(int)response.StatusCode} {response.Content}");`;
+};
+
+const javaAsyncSnippet = ({ method, url, headers, body }: MaterializedRequest) => `import java.util.Base64;
+import org.asynchttpclient.AsyncHttpClient;
+import org.asynchttpclient.DefaultAsyncHttpClient;
+
+AsyncHttpClient client = new DefaultAsyncHttpClient();
+var request = client.prepare(${json(method)}, ${json(url)});
+${Object.entries(headers).map(([name, value]) => `request.setHeader(${json(name)}, ${json(value)});`).join('\n')}${Object.keys(headers).length ? '\n' : ''}${body ? `request.setBody(Base64.getDecoder().decode(${json(bodyBase64(body))}));
+` : ''}var response = request.execute().get();
+System.out.println(response.getStatusCode() + " " + response.getResponseBody());
+client.close();`;
+
+const javaOkHttpSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const needsRequestBody = body !== undefined || !['GET', 'HEAD'].includes(method.toUpperCase());
+  return `import java.util.Base64;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+
+OkHttpClient client = new OkHttpClient();
+${needsRequestBody ? `byte[] payload = ${body ? `Base64.getDecoder().decode(${json(bodyBase64(body))})` : 'new byte[0]'};
+RequestBody requestBody = RequestBody.create(null, payload);
+` : ''}Request request = new Request.Builder()
+    .url(${json(url)})
+    .method(${json(method)}, ${needsRequestBody ? 'requestBody' : 'null'})
+${Object.entries(headers).map(([name, value]) => `    .addHeader(${json(name)}, ${json(value)})`).join('\n')}${Object.keys(headers).length ? '\n' : ''}    .build();
+
+try (var response = client.newCall(request).execute()) {
+    System.out.println(response.code() + " " + (response.body() == null ? "" : response.body().string()));
+}`;
+};
+
+const javaUnirestSnippet = ({ method, url, headers, body }: MaterializedRequest) => `import java.util.Base64;
+import kong.unirest.Unirest;
+
+var request = Unirest.request(${json(method)}, ${json(url)});
+${Object.entries(headers).map(([name, value]) => `request.header(${json(name)}, ${json(value)});`).join('\n')}${Object.keys(headers).length ? '\n' : ''}${body ? `request.body(Base64.getDecoder().decode(${json(bodyBase64(body))}));
+` : ''}var response = request.asBytes();
+System.out.println(response.getStatus() + " " + new String(response.getBody()));`;
+
+const browserPayload = (body: MaterializedBody) => `Uint8Array.from(atob(${json(bodyBase64(body))}), character => character.charCodeAt(0))`;
+
+const javascriptXhrSnippet = ({ method, url, headers, body }: MaterializedRequest) => `${body ? `const payload = ${browserPayload(body)};\n` : ''}const xhr = new XMLHttpRequest();
+xhr.addEventListener('load', () => console.log(xhr.status, xhr.responseText));
+xhr.open(${json(method)}, ${json(url)});
+${Object.entries(headers).map(([name, value]) => `xhr.setRequestHeader(${json(name)}, ${json(value)});`).join('\n')}${Object.keys(headers).length ? '\n' : ''}xhr.send(${body ? 'payload' : ''});`;
+
+const javascriptAxiosSnippet = ({ method, url, headers, body }: MaterializedRequest) => `import axios from 'axios';
+
+${body ? `const payload = ${browserPayload(body)};\n` : ''}const response = await axios.request({
+  method: ${json(method)},
+  url: ${json(url)},
+  headers: ${prettyJson(headers)}${body ? ',\n  data: payload' : ''}
+});
+console.log(response.status, response.data);`;
+
+const javascriptJquerySnippet = ({ method, url, headers, body }: MaterializedRequest) => `${body ? `const payload = ${browserPayload(body)};\n` : ''}const response = await $.ajax({
+  method: ${json(method)},
+  url: ${json(url)},
+  headers: ${prettyJson(headers)}${body ? ',\n  data: payload,\n  processData: false' : ''}
+});
+console.log(response);`;
+
+const nodeRequestSnippet = ({ method, url, headers, body }: MaterializedRequest) => `import request from 'request';
+
+${body ? `const payload = Buffer.from(${json(bodyBase64(body))}, 'base64');\n` : ''}request({
+  method: ${json(method)},
+  url: ${json(url)},
+  headers: ${prettyJson(headers)}${body ? ',\n  body: payload' : ''}
+}, (error, response, responseBody) => {
+  if (error) throw error;
+  console.log(response.statusCode, responseBody);
+});`;
+
+const nodeUnirestSnippet = ({ method, url, headers, body }: MaterializedRequest) => `import unirest from 'unirest';
+
+${body ? `const payload = Buffer.from(${json(bodyBase64(body))}, 'base64');\n` : ''}const request = unirest(${json(method)}, ${json(url)}).headers(${prettyJson(headers)});
+${body ? 'request.send(payload);\n' : ''}request.end(response => {
+  if (response.error) throw response.error;
+  console.log(response.status, response.body);
+});`;
+
+const nodeAxiosSnippet = ({ method, url, headers, body }: MaterializedRequest) => `import axios from 'axios';
+
+${body ? `const payload = Buffer.from(${json(bodyBase64(body))}, 'base64');\n` : ''}const response = await axios.request({
+  method: ${json(method)},
+  url: ${json(url)},
+  headers: ${prettyJson(headers)}${body ? ',\n  data: payload' : ''}
+});
+console.log(response.status, response.data);`;
+
+const nodeFetchSnippet = ({ method, url, headers, body }: MaterializedRequest) => `import fetch from 'node-fetch';
+
+${body ? `const payload = Buffer.from(${json(bodyBase64(body))}, 'base64');\n` : ''}const response = await fetch(${json(url)}, {
+  method: ${json(method)},
+  headers: ${prettyJson(headers)}${body ? ',\n  body: payload' : ''}
+});
+console.log(response.status, await response.text());`;
+
+const phpHeaders = (headers: Record<string, string>) => `[${Object.entries(headers).map(([name, value]) => `${singleQuoted(name)} => ${singleQuoted(value)}`).join(', ')}]`;
+
+const phpGuzzleSnippet = ({ method, url, headers, body }: MaterializedRequest) => `<?php
+
+require __DIR__ . '/vendor/autoload.php';
+${body ? `$payload = base64_decode(${singleQuoted(bodyBase64(body))}, true);\nif ($payload === false) { throw new RuntimeException('Invalid generated Base64 payload.'); }\n` : ''}
+$client = new GuzzleHttp\\Client();
+$response = $client->request(${singleQuoted(method)}, ${singleQuoted(url)}, [
+    'headers' => ${phpHeaders(headers)}${body ? ",\n    'body' => $payload" : ''}
+]);
+echo $response->getStatusCode() . ' ' . $response->getBody() . PHP_EOL;`;
+
+const phpHttp1Snippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const standardMethods = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'];
+  const standard = standardMethods.includes(method.toUpperCase());
+  return `<?php
+
+${body ? `$payload = base64_decode(${singleQuoted(bodyBase64(body))}, true);\nif ($payload === false) { throw new RuntimeException('Invalid generated Base64 payload.'); }\n` : ''}${standard ? '' : `HttpRequest::methodRegister(${singleQuoted(method)});\n`}$request = new HttpRequest();
+$request->setUrl(${singleQuoted(url)});
+$request->setMethod(${standard ? `HTTP_METH_${method.toUpperCase()}` : `HttpRequest::HTTP_METH_${method.toUpperCase()}`});
+$request->setHeaders(${phpHeaders(headers)});
+${body ? '$request->setBody($payload);\n' : ''}$response = $request->send();
+echo $response->getResponseCode() . ' ' . $response->getBody() . PHP_EOL;`;
+};
+
+const phpHttp2Snippet = ({ method, url, headers, body }: MaterializedRequest) => `<?php
+
+${body ? `$payload = base64_decode(${singleQuoted(bodyBase64(body))}, true);\nif ($payload === false) { throw new RuntimeException('Invalid generated Base64 payload.'); }\n` : ''}$client = new http\\Client();
+$request = new http\\Client\\Request();
+$request->setRequestUrl(${singleQuoted(url)});
+$request->setRequestMethod(${singleQuoted(method)});
+$request->setHeaders(${phpHeaders(headers)});
+${body ? `$body = new http\\Message\\Body();\n$body->append($payload);\n$request->setBody($body);\n` : ''}$client->enqueue($request)->send();
+$response = $client->getResponse();
+echo $response->getResponseCode() . ' ' . $response->getBody() . PHP_EOL;`;
+
+const powershellRestSnippet = (input: MaterializedRequest) => powershellSnippet(input)
+  .replace('Invoke-WebRequest @parameters', 'Invoke-RestMethod @parameters')
+  .replace('Write-Output "$($response.StatusCode) $($response.Content)"', 'Write-Output $response');
+
+const pythonNativeSnippet = ({ method, url, headers, body }: MaterializedRequest) => `import base64
+import http.client
+from urllib.parse import urlsplit
+
+target = urlsplit(${json(url)})
+connection_type = http.client.HTTPSConnection if target.scheme == 'https' else http.client.HTTPConnection
+connection = connection_type(target.hostname, target.port) if target.port else connection_type(target.hostname)
+path = target.path or '/'
+if target.query:
+    path += '?' + target.query
+headers = ${prettyJson(headers)}
+${body ? `payload = base64.b64decode(${json(bodyBase64(body))})\n` : ''}connection.request(${json(method)}, path${body ? ', body=payload' : ''}, headers=headers)
+response = connection.getresponse()
+print(response.status, response.read().decode('utf-8', errors='replace'))`;
+
+const rubyFaradaySnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const supportedMethods = ['COPY', 'DELETE', 'GET', 'HEAD', 'LOCK', 'MOVE', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE', 'UNLOCK'];
+  if (!supportedMethods.includes(method.toUpperCase())) return `raise ArgumentError, ${singleQuoted(`Faraday cannot run ${method} requests for ${url}.`)}`;
+  const headerEntries = Object.entries(headers).map(([name, value]) => `${singleQuoted(name)} => ${singleQuoted(value)}`).join(', ');
+  return `require 'faraday'
+${body ? "require 'base64'\n" : ''}
+connection = Faraday.new
+headers = { ${headerEntries} }
+${body ? `payload = Base64.strict_decode64(${singleQuoted(bodyBase64(body))})\n` : ''}response = connection.run_request(${singleQuoted(method.toLowerCase())}.to_sym, ${singleQuoted(url)}, ${body ? 'payload' : 'nil'}, headers)
+puts "#{response.status} #{response.body}"`;
+};
+
+const shellPayloadSetup = (body: MaterializedBody) => `payload_file="$(mktemp)"
+trap 'rm -f "$payload_file"' EXIT
+if ! printf %s ${shell(bodyBase64(body))} | base64 --decode > "$payload_file" 2>/dev/null; then
+  printf %s ${shell(bodyBase64(body))} | base64 -D > "$payload_file"
+fi
+
+`;
+
+const shellHttpieSnippet = ({ method, url, headers, body }: MaterializedRequest) => `${body ? shellPayloadSetup(body) : ''}http ${shell(method)} ${shell(url)}${Object.entries(headers).map(([name, value]) => ` \\\n  ${shell(`${name}:${value}`)}`).join('')}${body ? ' < "$payload_file"' : ''}`;
+
+const shellWgetSnippet = ({ method, url, headers, body }: MaterializedRequest) => `${body ? shellPayloadSetup(body) : ''}wget --quiet \\
+  --method ${shell(method)}${Object.entries(headers).map(([name, value]) => ` \\\n  --header ${shell(`${name}: ${value}`)}`).join('')}${body ? ' \\\n  --body-file "$payload_file"' : ''} \\
+  --output-document - \\
+  ${shell(url)}`;
+
 export const generateClientCode = (target: ClientCodeTarget, request: ApiRequest, variables: Record<string, string>): ClientCodeSnippet => {
   const prepared = materialize(request, variables);
   const generators: Record<ClientCodeTarget, (input: MaterializedRequest) => string> = {
     curl: curlSnippet,
-    'javascript-fetch': javascriptSnippet,
-    'node-native': nodeSnippet,
-    'python-requests': pythonSnippet,
-    'php-curl': phpSnippet,
-    'ruby-native': rubySnippet,
-    go: goSnippet,
-    'java-httpclient': javaSnippet,
-    'csharp-httpclient': csharpSnippet,
-    'swift-urlsession': swiftSnippet,
-    'rust-reqwest': rustSnippet,
     'c-libcurl': cSnippet,
     'clojure-clj-http': clojureSnippet,
     'crystal-native': crystalSnippet,
+    'csharp-httpclient': csharpSnippet,
+    'csharp-restsharp': csharpRestSharpSnippet,
+    go: goSnippet,
     'http-1.1': http11Snippet,
+    'java-asynchttp': javaAsyncSnippet,
+    'java-httpclient': javaSnippet,
+    'java-okhttp': javaOkHttpSnippet,
+    'java-unirest': javaUnirestSnippet,
+    'javascript-xhr': javascriptXhrSnippet,
+    'javascript-axios': javascriptAxiosSnippet,
+    'javascript-fetch': javascriptSnippet,
+    'javascript-jquery': javascriptJquerySnippet,
     'kotlin-okhttp': kotlinSnippet,
+    'node-native': nodeSnippet,
+    'node-request': nodeRequestSnippet,
+    'node-unirest': nodeUnirestSnippet,
+    'node-axios': nodeAxiosSnippet,
+    'node-fetch': nodeFetchSnippet,
     'objc-nsurlsession': objcSnippet,
     'ocaml-cohttp': ocamlSnippet,
+    'php-curl': phpSnippet,
+    'php-guzzle': phpGuzzleSnippet,
+    'php-http1': phpHttp1Snippet,
+    'php-http2': phpHttp2Snippet,
     'powershell-webrequest': powershellSnippet,
+    'powershell-restmethod': powershellRestSnippet,
+    'python-python3': pythonNativeSnippet,
+    'python-requests': pythonSnippet,
     'r-httr': rSnippet,
+    'ruby-native': rubySnippet,
+    'ruby-faraday': rubyFaradaySnippet,
+    'rust-reqwest': rustSnippet,
+    'shell-httpie': shellHttpieSnippet,
+    'shell-wget': shellWgetSnippet,
+    'swift-urlsession': swiftSnippet,
   };
-  const targetWarnings = target === 'http-1.1' && prepared.body?.kind === 'bytes'
-    ? ['Raw HTTP/1.1 cannot carry arbitrary bytes in a text preview; the exact body is shown as Base64 and must be decoded before sending.']
-    : [];
+  const targetWarnings = [
+    ...(target === 'http-1.1' && prepared.body?.kind === 'bytes' ? ['Raw HTTP/1.1 cannot carry arbitrary bytes in a text preview; the exact body is shown as Base64 and must be decoded before sending.'] : []),
+    ...(target === 'csharp-restsharp' && !['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'].includes(prepared.method.toUpperCase()) ? [`RestSharp cannot run ${prepared.method} requests.`] : []),
+    ...(target === 'ruby-faraday' && !['COPY', 'DELETE', 'GET', 'HEAD', 'LOCK', 'MOVE', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE', 'UNLOCK'].includes(prepared.method.toUpperCase()) ? [`Faraday cannot run ${prepared.method} requests.`] : []),
+  ];
   return { code: generators[target](prepared), warnings: [...prepared.warnings, ...targetWarnings] };
 };

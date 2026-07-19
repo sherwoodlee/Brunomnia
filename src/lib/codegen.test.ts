@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { clientCodeTargets, generateClientCode } from './codegen';
+import { clientCodeFamilies, clientCodeTargets, generateClientCode, resolveClientCodeSelection } from './codegen';
 
 const javascriptInlineBytes = (code: string) => {
   const encoded = code.match(/atob\("([A-Za-z0-9+/=]+)"\)/)?.[1];
@@ -17,29 +17,79 @@ const ocamlInlineBytes = (bytes: Uint8Array) => `"${Array.from(bytes, (byte) => 
 }).join('')}"`;
 
 describe('local client code generation', () => {
-  it('exposes one selected client in pinned target-family registry order', () => {
+  it('exposes the exact pinned target and client registry order', () => {
+    expect(clientCodeFamilies.map((family) => [family.id, family.defaultClient, family.clients.map((client) => client.key)])).toEqual([
+      ['c', 'libcurl', ['libcurl']],
+      ['clojure', 'clj_http', ['clj_http']],
+      ['crystal', 'native', ['native']],
+      ['csharp', 'restsharp', ['httpclient', 'restsharp']],
+      ['go', 'native', ['native']],
+      ['http', 'http1.1', ['http1.1']],
+      ['java', 'unirest', ['asynchttp', 'nethttp', 'okhttp', 'unirest']],
+      ['javascript', 'xhr', ['xhr', 'axios', 'fetch', 'jquery']],
+      ['kotlin', 'okhttp', ['okhttp']],
+      ['node', 'native', ['native', 'request', 'unirest', 'axios', 'fetch']],
+      ['objc', 'nsurlsession', ['nsurlsession']],
+      ['ocaml', 'cohttp', ['cohttp']],
+      ['php', 'curl', ['curl', 'guzzle', 'http1', 'http2']],
+      ['powershell', 'webrequest', ['webrequest', 'restmethod']],
+      ['python', 'python3', ['python3', 'requests']],
+      ['r', 'httr', ['httr']],
+      ['ruby', 'native', ['native', 'faraday']],
+      ['rust', 'reqwest', ['reqwest']],
+      ['shell', 'curl', ['curl', 'httpie', 'wget']],
+      ['swift', 'nsurlsession', ['nsurlsession']],
+    ]);
     expect(clientCodeTargets.map((target) => target.id)).toEqual([
       'c-libcurl',
       'clojure-clj-http',
       'crystal-native',
       'csharp-httpclient',
+      'csharp-restsharp',
       'go',
       'http-1.1',
+      'java-asynchttp',
       'java-httpclient',
+      'java-okhttp',
+      'java-unirest',
+      'javascript-xhr',
+      'javascript-axios',
       'javascript-fetch',
+      'javascript-jquery',
       'kotlin-okhttp',
       'node-native',
+      'node-request',
+      'node-unirest',
+      'node-axios',
+      'node-fetch',
       'objc-nsurlsession',
       'ocaml-cohttp',
       'php-curl',
+      'php-guzzle',
+      'php-http1',
+      'php-http2',
       'powershell-webrequest',
+      'powershell-restmethod',
+      'python-python3',
       'python-requests',
       'r-httr',
       'ruby-native',
+      'ruby-faraday',
       'rust-reqwest',
       'curl',
+      'shell-httpie',
+      'shell-wget',
       'swift-urlsession',
     ]);
+  });
+
+  it('resolves saved target and client identities with pinned defaults', () => {
+    expect(resolveClientCodeSelection()).toEqual({ familyId: 'shell', clientKey: 'curl', target: 'curl' });
+    expect(resolveClientCodeSelection('java')).toEqual({ familyId: 'java', clientKey: 'unirest', target: 'java-unirest' });
+    expect(resolveClientCodeSelection('javascript', 'axios')).toEqual({ familyId: 'javascript', clientKey: 'axios', target: 'javascript-axios' });
+    expect(resolveClientCodeSelection('python', 'missing')).toEqual({ familyId: 'python', clientKey: 'python3', target: 'python-python3' });
+    expect(resolveClientCodeSelection('http')).toEqual({ familyId: 'http', clientKey: 'http1.1', target: 'http-1.1' });
+    expect(resolveClientCodeSelection('missing', 'missing')).toEqual({ familyId: 'shell', clientKey: 'curl', target: 'curl' });
   });
 
   it('generates every supported target from the materialized request', () => {
@@ -54,7 +104,9 @@ describe('local client code generation', () => {
       expect(snippet.code.toUpperCase()).toContain('PROPFIND');
       if (target.id === 'http-1.1') expect(snippet.code).toContain('/files/team%20docs?depth=1 HTTP/1.1');
       else expect(snippet.code).toContain('https://api.example.com/files/team%20docs?depth=1');
-      expect(snippet.warnings).toEqual([]);
+      if (target.id === 'csharp-restsharp') expect(snippet.warnings).toContain('RestSharp cannot run PROPFIND requests.');
+      else if (target.id === 'ruby-faraday') expect(snippet.warnings).toContain('Faraday cannot run PROPFIND requests.');
+      else expect(snippet.warnings).toEqual([]);
     }
   });
 
@@ -216,6 +268,47 @@ describe('local client code generation', () => {
     for (const [target, expected] of Object.entries(markers)) {
       const snippet = generateClientCode(target as keyof typeof markers, request, {});
       expect(snippet.warnings).toEqual([]);
+      expected.forEach((marker) => expect(snippet.code).toContain(marker));
+    }
+  });
+
+  it('renders every alternate client with the shared exact payload contract', () => {
+    const request = createBlankRequest('alternate-codegen-clients');
+    request.method = 'POST';
+    request.url = 'https://api.example.com/reports?scope=team%20docs';
+    request.headers = [{ id: 'quoted', name: 'X-Quoted', value: "one'\\two", enabled: true }];
+    request.bodyMode = 'text';
+    request.body = 'line one\nπ and \u0000';
+    const encoded = 'bGluZSBvbmUKz4AgYW5kIAA=';
+    const markers = {
+      'csharp-restsharp': ['using RestSharp;', 'Method.Post', 'Convert.FromBase64String'],
+      'java-asynchttp': ['DefaultAsyncHttpClient', 'request.setBody', 'Base64.getDecoder()'],
+      'java-okhttp': ['okhttp3.OkHttpClient', 'RequestBody.create', 'Base64.getDecoder()'],
+      'java-unirest': ['kong.unirest.Unirest', 'Unirest.request', 'Base64.getDecoder()'],
+      'javascript-xhr': ['XMLHttpRequest', 'xhr.send(payload)', 'atob('],
+      'javascript-axios': ["import axios from 'axios'", 'axios.request', 'atob('],
+      'javascript-jquery': ['$.ajax', 'processData: false', 'atob('],
+      'node-request': ["import request from 'request'", 'Buffer.from', 'body: payload'],
+      'node-unirest': ["import unirest from 'unirest'", 'request.send(payload)', 'Buffer.from'],
+      'node-axios': ["import axios from 'axios'", 'axios.request', 'Buffer.from'],
+      'node-fetch': ["import fetch from 'node-fetch'", 'body: payload', 'Buffer.from'],
+      'php-guzzle': ['GuzzleHttp\\Client', "'body' => $payload", 'base64_decode'],
+      'php-http1': ['new HttpRequest()', '$request->setBody($payload)', 'base64_decode'],
+      'php-http2': ['new http\\Client()', '$body->append($payload)', 'base64_decode'],
+      'powershell-restmethod': ['Invoke-RestMethod @parameters', '[Convert]::FromBase64String'],
+      'python-python3': ['import http.client', 'base64.b64decode', 'connection.request'],
+      'ruby-faraday': ["require 'faraday'", 'Base64.strict_decode64', 'connection.run_request'],
+      'shell-httpie': ["http 'POST'", '"$payload_file"', 'base64 --decode'],
+      'shell-wget': ['wget --quiet', '--body-file "$payload_file"', 'base64 --decode'],
+    } as const;
+
+    for (const [target, expected] of Object.entries(markers)) {
+      const snippet = generateClientCode(target as keyof typeof markers, request, {});
+      expect(snippet.warnings).toEqual([]);
+      expect(snippet.code.toUpperCase()).toContain('POST');
+      expect(snippet.code).toContain(request.url);
+      expect(snippet.code).toContain('X-Quoted');
+      expect(snippet.code).toContain(encoded);
       expected.forEach((marker) => expect(snippet.code).toContain(marker));
     }
   });

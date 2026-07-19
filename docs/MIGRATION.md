@@ -1898,9 +1898,24 @@ Compatibility bounds remain explicit: Milestone 127 later closes the nine-family
 | Executable coverage | Complete | Stable pinned-family ordering, custom methods, resolved URLs, exact multipart/binary/UTF-8 bytes, MIME, escaped metadata, raw HTTP framing/warnings, and available C/Objective-C parser checks pass |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 127 verification](QA_MILESTONE_127.md) |
 
-Compatibility bounds remain explicit: HTTPSnippet's alternate clients and pinned two-level target/client selection persistence remain open, as do runtime-only advanced signing, dependency installation, comprehensive target-language validation, and generated-code execution. The Client code generation ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: Milestone 128 later closes HTTPSnippet's alternate-client and two-level persisted-selection gaps. Runtime-only advanced signing, per-client formatting/transport options, dependency installation, comprehensive target-language validation, and generated-code execution remain open. The Client code generation ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 128 — remaining parity closure and release hardening
+## Milestone 128 — full HTTPSnippet client matrix (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned HTTPSnippet 3.0.10 exposes thirty-nine clients across twenty ordered families; Insomnia shows separate target/client dropdowns, changes families to the declared default client, stores both choices locally, and defaults initially to Shell/cURL |
+| Full client registry | Complete baseline | Nineteen alternate clients complete the exact family/client key and order matrix alongside the existing twenty selected clients, including RestSharp, Java/JavaScript/Node variants, Guzzle/pecl-http, Invoke-RestMethod, Python `http.client`, Faraday, HTTPie, and Wget |
+| Picker parity | Complete | The local dialog has separate Target and Client selectors, declared-default switching, Shell/cURL initial fallback, invalid saved selection recovery, and device-local target/client persistence |
+| Request fidelity | Complete | Every alternate consumes the same inherited/environment-resolved method, URL, headers, supported static authentication, MIME, warnings, and exact UTF-8/multipart/binary payload contract |
+| Explicit client limits | Complete | RestSharp and Faraday emit focused unsupported-method output plus warnings for methods outside their pinned client sets; raw HTTP retains its decode-before-send binary warning |
+| Account-free presentation | Complete | Every target and client is local and available without login, organization, plan, telemetry, hosted conversion, or entitlement checks |
+| Executable coverage | Complete | Exact registry/default order, saved-selection resolution, all-client request generation, exact payload identity, alternate-client markers, and available JavaScript/Node/Python/Ruby/Shell parser checks pass |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 128 verification](QA_MILESTONE_128.md) |
+
+Compatibility bounds remain explicit: per-client formatting/transport options, runtime-only advanced signing, dependency installation, comprehensive target-language validation, and generated-code execution remain open. The Client code generation ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 129 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
