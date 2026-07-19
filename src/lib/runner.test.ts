@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { RunnerItemResult, Workspace } from '../types';
-import { RUNNER_DATA_ENCODINGS, RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, decodeRunnerDataBytes, detectRunnerDataEncoding, discardRunnerDraftEntries, discardRunnerReport, parseRunnerData, parseRunnerDataFile, resolveRunnerTarget, runCollection, runnerDataBytesFromBase64, runnerDataBytesToBase64, runnerDraftKey, runnerReportsForTarget, validateTestNamePattern } from './runner';
+import { RUNNER_DATA_ENCODINGS, RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, decodeRunnerDataBytes, detectRunnerDataEncoding, discardRunnerDraftEntries, discardRunnerReport, filterRunnerLiveItems, parseRunnerData, parseRunnerDataFile, resolveRunnerTarget, runCollection, runnerDataBytesFromBase64, runnerDataBytesToBase64, runnerDraftKey, runnerReportsForTarget, validateTestNamePattern } from './runner';
 import { formatResponseTimeline } from './timeline';
 
 describe('collection runner', () => {
@@ -41,6 +41,30 @@ describe('collection runner', () => {
     expect(runnerReportsForTarget(reports, 'a', 'missing')).toEqual([]);
     expect(discardRunnerReport(reports, 'folder-a').map((item) => item.id)).toEqual(['root-a', 'root-b']);
     expect(discardRunnerReport(reports, 'missing')).toBe(reports);
+  });
+
+  it('filters live Runner attempts by outcome and request or test name', () => {
+    const items = [
+      { key: 'passed', iteration: 1, requestId: 'one', requestName: 'Create order', requestUrl: 'https://example.test/orders', status: 'completed' as const, statusCode: 201 },
+      { key: 'failed', iteration: 1, requestId: 'two', requestName: 'Read order', requestUrl: 'https://example.test/orders/1', status: 'completed' as const, statusCode: 500 },
+      { key: 'skipped', iteration: 1, requestId: 'three', requestName: 'Delete order', requestUrl: 'https://example.test/orders/1', status: 'skipped' as const },
+      { key: 'running', iteration: 1, requestId: 'four', requestName: 'List orders', requestUrl: 'https://example.test/orders', status: 'running' as const },
+    ];
+    const result = (key: string, passed: boolean, testName: string): RunnerItemResult => ({ id: key, key, requestId: key, requestName: key, iteration: 1, attempt: 1, status: passed ? 201 : 500, durationMs: 1, passed, tests: [{ name: testName, passed, ...(passed ? {} : { error: 'Expected success' }) }] });
+    const results = [result('passed', true, 'creates resource'), result('failed', false, 'returns invoice')];
+
+    expect(filterRunnerLiveItems(items, results, 'all', '')).toHaveLength(4);
+    expect(filterRunnerLiveItems(items, results, 'passed', '').map((item) => item.key)).toEqual(['passed']);
+    expect(filterRunnerLiveItems(items, results, 'failed', '').map((item) => item.key)).toEqual(['failed']);
+    expect(filterRunnerLiveItems(items, results, 'skipped', '').map((item) => item.key)).toEqual(['skipped']);
+    expect(filterRunnerLiveItems(items, results, 'all', 'INVOICE').map((item) => item.key)).toEqual(['failed']);
+    expect(filterRunnerLiveItems(items, results, 'all', 'delete order').map((item) => item.key)).toEqual(['skipped']);
+    expect(filterRunnerLiveItems(
+      [{ key: 'legacy-live', iteration: 2, requestId: 'legacy', requestName: 'Legacy request', requestUrl: '', status: 'completed', statusCode: 200 }],
+      [{ ...result('legacy-result', true, 'legacy assertion'), key: undefined, requestId: 'legacy', iteration: 2 }],
+      'passed',
+      'assertion',
+    ).map((item) => item.key)).toEqual(['legacy-live']);
   });
   it('parses JSON and quoted CSV iteration data', () => {
     expect(parseRunnerData('[{"id":1,"nested":{"ok":true}}]')).toEqual([{ id: '1', nested: '{"ok":true}' }]);

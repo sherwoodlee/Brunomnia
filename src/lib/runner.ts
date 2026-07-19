@@ -92,6 +92,40 @@ export const discardRunnerReport = (reports: RunnerReport[], reportId: string) =
   return next.length === reports.length ? reports : next;
 };
 
+export type RunnerResultFilter = 'all' | 'passed' | 'failed' | 'skipped';
+
+export const runnerResultForLiveItem = (item: RunnerLiveItem, results: RunnerItemResult[]) => {
+  for (let index = results.length - 1; index >= 0; index -= 1) {
+    const result = results[index];
+    if (result.key === item.key || (!result.key && result.requestId === item.requestId && result.iteration === item.iteration)) return result;
+  }
+  return undefined;
+};
+
+export const filterRunnerLiveItems = (items: RunnerLiveItem[], results: RunnerItemResult[], filter: RunnerResultFilter, query: string) => {
+  const normalizedQuery = query.trim().toLowerCase();
+  return items.filter((item) => {
+    const result = runnerResultForLiveItem(item, results);
+    const tests = result?.tests ?? item.tests ?? [];
+    const passed = result?.passed ?? (item.status === 'completed' && (item.statusCode ?? 0) > 0 && (item.statusCode ?? 0) < 400 && tests.every((test) => test.passed));
+    const failed = result ? !result.passed : item.status === 'failed' || item.status === 'canceled' || (item.status === 'completed' && !passed);
+    const matchesStatus = filter === 'all'
+      || (filter === 'passed' && passed)
+      || (filter === 'failed' && failed)
+      || (filter === 'skipped' && item.status === 'skipped');
+    if (!matchesStatus) return false;
+    if (!normalizedQuery) return true;
+    return [
+      item.requestName,
+      item.requestUrl,
+      item.statusMessage,
+      item.errorMessage,
+      result?.error,
+      ...tests.flatMap((test) => [test.name, test.error]),
+    ].some((value) => value?.toLowerCase().includes(normalizedQuery));
+  });
+};
+
 export const resolveRunnerTarget = (workspace: Workspace, target?: RunnerTarget) => {
   const collection = workspace.collections.find((candidate) => candidate.id === target?.collectionId) ?? workspace.collections[0];
   const folder = target?.folderId ? collection?.folders?.find((candidate) => candidate.id === target.folderId) : undefined;
