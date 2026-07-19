@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { RunnerItemResult, Workspace } from '../types';
-import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, discardRunnerDraftEntries, discardRunnerReport, parseRunnerData, parseRunnerDataFile, resolveRunnerTarget, runCollection, runnerDraftKey, runnerReportsForTarget, validateTestNamePattern } from './runner';
+import { RUNNER_DATA_ENCODINGS, RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, decodeRunnerDataBytes, detectRunnerDataEncoding, discardRunnerDraftEntries, discardRunnerReport, parseRunnerData, parseRunnerDataFile, resolveRunnerTarget, runCollection, runnerDraftKey, runnerReportsForTarget, validateTestNamePattern } from './runner';
 import { formatResponseTimeline } from './timeline';
 
 describe('collection runner', () => {
@@ -19,7 +19,7 @@ describe('collection runner', () => {
   });
 
   it('keys Runner drafts by workspace and clears only closed documents', () => {
-    const draft = { collectionId: 'collection', environmentId: 'environment', iterations: 2, retries: 1, bail: true, keepLog: true, delayMs: 25, streamWindowMs: 500, data: '[{}]', dataFileName: 'iterations.json', requestPlan: [{ id: 'request', enabled: false }] };
+    const draft = { collectionId: 'collection', environmentId: 'environment', iterations: 2, retries: 1, bail: true, keepLog: true, delayMs: 25, streamWindowMs: 500, data: '[{}]', dataFileName: 'iterations.json', dataFileEncoding: 'utf-8', requestPlan: [{ id: 'request', enabled: false }] };
     const drafts = {
       [runnerDraftKey('workspace-a', 'runner_one')]: draft,
       [runnerDraftKey('workspace-a', 'runner_two')]: { ...draft, iterations: 3 },
@@ -54,6 +54,17 @@ describe('collection runner', () => {
     expect(() => parseRunnerDataFile('id', 'iterations.csv')).toThrow(/header row and at least one data row/);
     expect(() => parseRunnerDataFile('[{"id":1}]', 'iterations.txt')).toThrow(/JSON or CSV/);
     expect(() => parseRunnerDataFile(JSON.stringify(Array.from({ length: 1_001 }, (_, id) => ({ id }))), 'iterations.json')).toThrow(/1,000 iterations/);
+  });
+
+  it('detects and decodes portable Runner data encodings', () => {
+    const utf16 = new Uint8Array([0xff, 0xfe, 0x69, 0x00, 0x64, 0x00, 0x0a, 0x00, 0x31, 0x00]);
+    expect(detectRunnerDataEncoding(utf16)).toBe('utf-16le');
+    expect(decodeRunnerDataBytes(utf16, 'utf-16le')).toBe('id\n1');
+    const western = new Uint8Array([0x69, 0x64, 0x2c, 0x6e, 0x61, 0x6d, 0x65, 0x0a, 0x31, 0x2c, 0xe9]);
+    expect(detectRunnerDataEncoding(western)).toBe('windows-1252');
+    expect(decodeRunnerDataBytes(western, 'windows-1252')).toBe('id,name\n1,é');
+    expect(RUNNER_DATA_ENCODINGS.map((encoding) => encoding.key)).toEqual(expect.arrayContaining(['utf-8', 'utf-16le', 'windows-1252', 'shift_jis']));
+    expect(() => decodeRunnerDataBytes(western, 'utf-8')).toThrow(/not valid utf-8/);
   });
 
   it('retries failures and keeps ordered results', async () => {

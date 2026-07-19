@@ -176,6 +176,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const [streamWindowMs, setStreamWindowMs] = useState(runnerDraft?.streamWindowMs ?? 1000);
   const [data, setData] = useState(runnerDraft?.data ?? '');
   const [dataFileName, setDataFileName] = useState(runnerDraft?.dataFileName ?? '');
+  const [dataFileEncoding, setDataFileEncoding] = useState(runnerDraft?.dataFileEncoding ?? 'utf-8');
   const [showDataDialog, setShowDataDialog] = useState(false);
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<RunnerItemResult[]>([]);
@@ -198,8 +199,8 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
 
   useEffect(() => {
     if (!runnerDraftKey || !onRunnerDraftChange) return;
-    onRunnerDraftChange(runnerDraftKey, { collectionId, environmentId, iterations, retries, bail, keepLog, delayMs, streamWindowMs, data, dataFileName, requestPlan });
-  }, [bail, collectionId, data, dataFileName, delayMs, environmentId, iterations, keepLog, onRunnerDraftChange, requestPlan, retries, runnerDraftKey, streamWindowMs]);
+    onRunnerDraftChange(runnerDraftKey, { collectionId, environmentId, iterations, retries, bail, keepLog, delayMs, streamWindowMs, data, dataFileName, dataFileEncoding, requestPlan });
+  }, [bail, collectionId, data, dataFileEncoding, dataFileName, delayMs, environmentId, iterations, keepLog, onRunnerDraftChange, requestPlan, retries, runnerDraftKey, streamWindowMs]);
 
   const cancelRunnerOAuthAuthorization = async () => {
     const flowId = oauthFlowId.current;
@@ -554,7 +555,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           <label className="runner-toggle"><input checked={keepLog} disabled={running} onChange={(event) => setKeepLog(event.target.checked)} type="checkbox" /><span>Keep logs after run</span></label>
           <label>Delay between requests (ms)<input min="0" max="30000" type="number" value={delayMs} onChange={(event) => setDelayMs(Number(event.target.value))} /></label>
           <label>Stream sample window (ms)<input min="100" max="30000" type="number" value={streamWindowMs} onChange={(event) => setStreamWindowMs(Number(event.target.value))} /></label>
-          <div className="runner-data-control"><label>Iteration data<textarea aria-label="Runner iteration data" placeholder={'JSON array or CSV\norderId,status\nord_1,open'} value={data} onChange={(event) => { setData(event.target.value); setDataFileName(''); }} /></label><button disabled={running} onClick={() => setShowDataDialog(true)} type="button"><Icon name={dataFileName ? 'history' : 'import'} size={13} /> {dataFileName ? `View data · ${dataFileName}` : 'Upload data'}</button></div>
+          <div className="runner-data-control"><label>Iteration data<textarea aria-label="Runner iteration data" placeholder={'JSON array or CSV\norderId,status\nord_1,open'} value={data} onChange={(event) => { setData(event.target.value); setDataFileName(''); setDataFileEncoding('utf-8'); }} /></label><button disabled={running} onClick={() => setShowDataDialog(true)} type="button"><Icon name={dataFileName ? 'history' : 'import'} size={13} /> {dataFileName ? `View data · ${dataFileName}` : 'Upload data'}</button></div>
           <p>Dataset values override environment variables for each iteration.</p>
         </aside>
         <div className="runner-results">
@@ -571,7 +572,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
         </div>
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}
-      {showDataDialog ? <RunnerDataDialog data={data} fileName={dataFileName} onApply={(nextData, nextFileName, rowCount) => { setData(nextData); setDataFileName(nextFileName); setIterations(rowCount); }} onClear={() => { setData(''); setDataFileName(''); }} onClose={() => setShowDataDialog(false)} /> : null}
+      {showDataDialog ? <RunnerDataDialog data={data} fileEncoding={dataFileEncoding} fileName={dataFileName} onApply={(nextData, nextFileName, nextFileEncoding, rowCount) => { setData(nextData); setDataFileName(nextFileName); setDataFileEncoding(nextFileEncoding); setIterations(rowCount); }} onClear={() => { setData(''); setDataFileName(''); setDataFileEncoding('utf-8'); }} onClose={() => setShowDataDialog(false)} /> : null}
       {oauthAuthorization ? <OAuthAuthorizationDialog onCancel={cancelRun} status={oauthAuthorization} /> : null}
     </section>
   );
