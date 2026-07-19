@@ -2,6 +2,7 @@ import { normalizeShortcut, shortcutMatches } from './preferences';
 
 export type RunnerPlanItem = { id: string; enabled: boolean };
 export type RunnerPaneDirection = 'vertical' | 'horizontal';
+export type RunnerResultPane = 'results' | 'history' | 'console';
 
 export const runnerPlanSelectionState = (plan: RunnerPlanItem[]): 'all' | 'some' | 'none' => {
   if (!plan.length || plan.every((item) => !item.enabled)) return 'none';
@@ -26,6 +27,9 @@ export const runnerShortcutShouldStart = (event: KeyboardEvent, shortcut: string
 
 export const runnerLayoutDirection = (forceVerticalLayout: boolean): RunnerPaneDirection =>
   forceVerticalLayout ? 'vertical' : 'horizontal';
+
+export const activeRunnerResultPane = (selectedPane: RunnerResultPane, isRunning: boolean): RunnerResultPane =>
+  isRunning ? 'results' : selectedPane;
 
 export const clampRunnerPaneSize = (size: number) => Math.max(35, Math.min(90, Number.isFinite(size) ? size : 35));
 

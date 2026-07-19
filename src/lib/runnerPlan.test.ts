@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampRunnerPaneSize, parseRunnerNumberDraft, runnerLayoutDirection, runnerPaneSizeFromKey, runnerPaneSizeFromPointer, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from './runnerPlan';
+import { activeRunnerResultPane, clampRunnerPaneSize, parseRunnerNumberDraft, runnerLayoutDirection, runnerPaneSizeFromKey, runnerPaneSizeFromPointer, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from './runnerPlan';
 
 describe('Runner request-plan selection', () => {
   it('distinguishes empty, none, partial, and complete selection', () => {
@@ -40,6 +40,13 @@ describe('Runner request-plan selection', () => {
   it('maps the forced layout preference to the Runner pane direction', () => {
     expect(runnerLayoutDirection(false)).toBe('horizontal');
     expect(runnerLayoutDirection(true)).toBe('vertical');
+  });
+
+  it('forces Results while running and restores the selected inactive pane afterward', () => {
+    expect(activeRunnerResultPane('history', true)).toBe('results');
+    expect(activeRunnerResultPane('console', true)).toBe('results');
+    expect(activeRunnerResultPane('history', false)).toBe('history');
+    expect(activeRunnerResultPane('console', false)).toBe('console');
   });
 
   it('bounds pointer-derived Runner pane sizes in either direction', () => {
