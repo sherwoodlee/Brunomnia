@@ -2048,7 +2048,22 @@ Compatibility bounds remain explicit: stream sessions retain the newest 5,000 ev
 
 Compatibility bounds remain explicit: `-1` is an iterative no-ceiling redirect mode, each handshake/proxy/TLS operation retains the configured per-hop timeout, and redirects accept only WS(S). Pinned realtime proxy code is manual/direct rather than PAC-aware. Socket.IO stays `Baseline` because its default automatic reconnection after transient Engine.IO loss remains open; initial connect errors and explicit disconnects are not treated as reconnectable. The WebSocket row is Complete; 21 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 138 — remaining parity closure and release hardening
+## Milestone 138 — complete Socket.IO reconnection parity (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Persistent session ownership | Complete | One native task now retains the command channel, active listeners, acknowledgement sequence, and offline emit queue across replacement Engine.IO transports |
+| Transient failure classification | Complete | Post-connect Engine.IO close, WebSocket close/error/end, polling failure/end, heartbeat-send failure, and emit transport failure enter reconnect; namespace disconnect, malformed/oversized data, initial failure, and explicit stop remain terminal |
+| Default reconnect policy | Complete | Attempts are unlimited, use Socket.IO-compatible randomized exponential delays beginning at 500–1,500 ms, and cap at five seconds |
+| Fresh negotiation | Complete | Every attempt obtains a new Engine.IO session, rejoins the namespace, retries an advertised WebSocket upgrade, and can recover through polling fallback while preserving rendered request/auth/proxy/redirect/TLS/identity policy |
+| Offline continuity | Complete | Listener additions/removals apply during delay or handshake; emits requested offline queue in order and flush after reopen, while already-sent events and obsolete acknowledgements are not duplicated |
+| Cancellation and evidence | Complete | Explicit disconnect cancels delay or negotiation, removes the live-session handle, and retains close/reconnecting/error/open/upgrade/closed evidence in the existing account-free history/timeline surface |
+| Executable recovery evidence | Complete | A real polling server ends the first Engine.IO session, accepts a fresh session and namespace, receives an emit queued offline, and proves an offline listener swap before explicit disconnect |
+| Documentation and ledger | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), README, and [Milestone 138 verification](QA_MILESTONE_138.md); the Socket.IO row is Complete |
+
+Compatibility bounds remain explicit: the backoff is bounded in time per attempt but has no attempt ceiling, queued emits are memory-resident for the live session, and no event already handed to the failed transport is replayed. Reconnect reuses the initially rendered values, matching the pinned client's fixed connection options; it does not rerun templates or plugin hooks. The Socket.IO row is Complete; 20 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 139 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

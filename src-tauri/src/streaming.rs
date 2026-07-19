@@ -17,12 +17,12 @@ use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     net::IpAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Instant,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::ipc::Channel;
 use tokio::{
@@ -53,6 +53,8 @@ const MAX_SOCKET_IO_ATTACHMENTS: usize = 100;
 const MAX_SOCKET_IO_EVENT_NAME_CHARS: usize = 500;
 const MAX_SOCKET_IO_PACKET_BYTES: usize = 1_048_576;
 const MAX_SOCKET_IO_LISTENERS: usize = 500;
+const SOCKET_IO_RECONNECT_DELAY_MS: u64 = 1_000;
+const SOCKET_IO_RECONNECT_DELAY_MAX_MS: u64 = 5_000;
 const GRAPHQL_TRANSPORT_WS_PROTOCOL: &str = "graphql-transport-ws";
 const MAX_GRAPHQL_SUBSCRIPTION_BYTES: usize = 1_048_576;
 const MAX_PROXY_RESPONSE_BYTES: usize = 65_536;
@@ -194,12 +196,14 @@ enum WebSocketCommand {
     Close,
 }
 
+struct SocketIoEmitCommand {
+    event_name: String,
+    args: Vec<Value>,
+    ack: bool,
+}
+
 enum SocketIoCommand {
-    Emit {
-        event_name: String,
-        args: Vec<Value>,
-        ack: bool,
-    },
+    Emit(SocketIoEmitCommand),
     AddListener(String),
     RemoveListener(String),
     Close,
@@ -1581,6 +1585,22 @@ async fn establish_socket_io_transport(
     ))
 }
 
+async fn establish_socket_io_transport_with_timeout(
+    input: &SocketIoConnectInput,
+) -> Result<(String, ConnectedSocketIoTransport), String> {
+    let handshake = establish_socket_io_transport(input);
+    if input.transport.timeout_ms == 0 {
+        handshake.await
+    } else {
+        tokio::time::timeout(
+            std::time::Duration::from_millis(input.transport.timeout_ms),
+            handshake,
+        )
+        .await
+        .map_err(|_| "Socket.IO connection timed out during Engine.IO negotiation.".to_string())?
+    }
+}
+
 pub async fn connect_websocket(
     input: StreamConnectInput,
     on_event: Channel<StreamEvent>,
@@ -1809,7 +1829,19 @@ pub async fn disconnect_websocket(session_id: String, state: StreamingState) -> 
 enum SocketIoPacketAction {
     Continue,
     Pong,
-    Close,
+    Reconnect(String),
+    Terminate,
+}
+
+enum SocketIoSessionEnd {
+    Reconnect(String),
+    Terminate,
+    ClientClosed,
+}
+
+struct SocketIoRuntimeState {
+    pending_emits: VecDeque<SocketIoEmitCommand>,
+    next_ack_id: u64,
 }
 
 fn handle_socket_io_binary_attachment(
@@ -1827,7 +1859,7 @@ fn handle_socket_io_binary_attachment(
             "error",
             "Socket.IO received an unexpected binary attachment.",
         ));
-        return SocketIoPacketAction::Close;
+        return SocketIoPacketAction::Terminate;
     };
     if pending.attachments.len() >= pending.expected_attachments
         || pending.total_bytes.saturating_add(bytes.len()) > MAX_SOCKET_IO_PACKET_BYTES
@@ -1837,7 +1869,7 @@ fn handle_socket_io_binary_attachment(
             "error",
             "Socket.IO binary attachments exceed the declared count or 1 MiB limit.",
         ));
-        return SocketIoPacketAction::Close;
+        return SocketIoPacketAction::Terminate;
     }
     pending.total_bytes += bytes.len();
     pending.attachments.push(bytes.to_vec());
@@ -1848,7 +1880,7 @@ fn handle_socket_io_binary_attachment(
         Ok(packet) => packet,
         Err(error) => {
             let _ = on_event.send(StreamEvent::system(session_id, "error", error));
-            return SocketIoPacketAction::Close;
+            return SocketIoPacketAction::Terminate;
         }
     };
     match packet {
@@ -1894,18 +1926,15 @@ fn handle_socket_io_packet(
             "error",
             "A Socket.IO packet exceeded 1 MiB.",
         ));
-        return SocketIoPacketAction::Close;
+        return SocketIoPacketAction::Terminate;
     }
     if packet == "2" {
         return SocketIoPacketAction::Pong;
     }
     if packet == "1" {
-        let _ = on_event.send(StreamEvent::system(
-            session_id,
-            "close",
-            "Engine.IO server closed the connection",
-        ));
-        return SocketIoPacketAction::Close;
+        let reason = "Engine.IO server closed the connection".to_string();
+        let _ = on_event.send(StreamEvent::system(session_id, "close", &reason));
+        return SocketIoPacketAction::Reconnect(reason);
     }
     if let Some(encoded) = packet.strip_prefix('b') {
         let bytes = match STANDARD.decode(encoded) {
@@ -1916,7 +1945,7 @@ fn handle_socket_io_packet(
                     "error",
                     format!("Invalid Engine.IO base64 attachment: {error}"),
                 ));
-                return SocketIoPacketAction::Close;
+                return SocketIoPacketAction::Terminate;
             }
         };
         return handle_socket_io_binary_attachment(
@@ -1935,7 +1964,7 @@ fn handle_socket_io_packet(
             "error",
             "Socket.IO received a text packet before all binary attachments arrived.",
         ));
-        return SocketIoPacketAction::Close;
+        return SocketIoPacketAction::Terminate;
     }
     match parse_socket_io_binary_packet(packet) {
         Ok(Some(pending)) => {
@@ -1945,7 +1974,7 @@ fn handle_socket_io_packet(
         Ok(None) => {}
         Err(error) => {
             let _ = on_event.send(StreamEvent::system(session_id, "error", error));
-            return SocketIoPacketAction::Close;
+            return SocketIoPacketAction::Terminate;
         }
     }
     if let Some(event) = parse_socket_io_event(packet) {
@@ -1967,7 +1996,7 @@ fn handle_socket_io_packet(
     } else if let Some((failed_namespace, payload)) = socket_io_packet_payload(packet, '4') {
         if failed_namespace == namespace {
             let _ = on_event.send(StreamEvent::system(session_id, "error", payload));
-            return SocketIoPacketAction::Close;
+            return SocketIoPacketAction::Terminate;
         }
     } else if let Some((closed_namespace, _)) = socket_io_packet_payload(packet, '1') {
         if closed_namespace == namespace {
@@ -1976,7 +2005,7 @@ fn handle_socket_io_packet(
                 "close",
                 "Socket.IO namespace disconnected",
             ));
-            return SocketIoPacketAction::Close;
+            return SocketIoPacketAction::Terminate;
         }
     }
     SocketIoPacketAction::Continue
@@ -2012,86 +2041,217 @@ fn update_socket_io_listener(
     }
 }
 
-async fn run_socket_io_websocket_session(
-    mut socket: SocketIoWebSocket,
-    mut receiver: mpsc::UnboundedReceiver<SocketIoCommand>,
-    namespace: &str,
-    mut listeners: HashSet<String>,
+fn socket_io_reconnect_delay_ms(attempt: u32) -> u64 {
+    let exponent = attempt.saturating_sub(1).min(16);
+    let base = SOCKET_IO_RECONNECT_DELAY_MS
+        .saturating_mul(1_u64 << exponent)
+        .min(SOCKET_IO_RECONNECT_DELAY_MAX_MS);
+    let jitter_per_mille = 500
+        + u64::from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos(),
+        ) % 1_001;
+    base.saturating_mul(jitter_per_mille)
+        .saturating_div(1_000)
+        .clamp(100, SOCKET_IO_RECONNECT_DELAY_MAX_MS)
+}
+
+fn queue_socket_io_offline_command(
+    command: SocketIoCommand,
+    listeners: &mut HashSet<String>,
+    pending_emits: &mut VecDeque<SocketIoEmitCommand>,
     session_id: &str,
     on_event: &Channel<StreamEvent>,
-) {
-    let mut next_ack_id = 1_u64;
+) -> bool {
+    match command {
+        SocketIoCommand::Emit(command) => pending_emits.push_back(command),
+        SocketIoCommand::AddListener(event_name) => {
+            update_socket_io_listener(listeners, event_name, true, session_id, on_event)
+        }
+        SocketIoCommand::RemoveListener(event_name) => {
+            update_socket_io_listener(listeners, event_name, false, session_id, on_event)
+        }
+        SocketIoCommand::Close => return false,
+    }
+    true
+}
+
+async fn send_socket_io_websocket_emit(
+    socket: &mut SocketIoWebSocket,
+    namespace: &str,
+    command: SocketIoEmitCommand,
+    next_ack_id: &mut u64,
+    pending_acks: &mut HashMap<u64, String>,
+    session_id: &str,
+    on_event: &Channel<StreamEvent>,
+) -> Option<String> {
+    let SocketIoEmitCommand {
+        event_name,
+        args,
+        ack,
+    } = command;
+    let ack_id = ack.then_some(*next_ack_id);
+    let packet = match socket_io_event_packet(namespace, &event_name, &args, ack_id) {
+        Ok(packet) => packet,
+        Err(error) => {
+            let _ = on_event.send(StreamEvent::system(session_id, "error", error));
+            return None;
+        }
+    };
+    if let Err(error) = socket.send(Message::Text(packet.into())).await {
+        let error = error.to_string();
+        let _ = on_event.send(StreamEvent::system(session_id, "error", &error));
+        return Some(error);
+    }
+    if let Some(ack_id) = ack_id {
+        pending_acks.insert(ack_id, event_name.clone());
+        *next_ack_id = next_ack_id.saturating_add(1);
+    }
+    let text = serde_json::to_string_pretty(&args).unwrap_or_else(|_| "[]".into());
+    let _ = on_event.send(StreamEvent::outgoing(session_id, &event_name, text));
+    None
+}
+
+async fn send_socket_io_polling_emit(
+    transport: &SocketIoPollingTransport,
+    namespace: &str,
+    command: SocketIoEmitCommand,
+    next_ack_id: &mut u64,
+    pending_acks: &mut HashMap<u64, String>,
+    session_id: &str,
+    on_event: &Channel<StreamEvent>,
+) -> Option<String> {
+    let SocketIoEmitCommand {
+        event_name,
+        args,
+        ack,
+    } = command;
+    let ack_id = ack.then_some(*next_ack_id);
+    let packet = match socket_io_event_packet(namespace, &event_name, &args, ack_id) {
+        Ok(packet) if packet.len() <= transport.max_payload => packet,
+        Ok(_) => {
+            let _ = on_event.send(StreamEvent::system(
+                session_id,
+                "error",
+                "The Socket.IO event exceeds the server polling payload limit.",
+            ));
+            return None;
+        }
+        Err(error) => {
+            let _ = on_event.send(StreamEvent::system(session_id, "error", error));
+            return None;
+        }
+    };
+    if let Err(error) = socket_io_http_request(
+        &transport.client,
+        &transport.url,
+        &transport.headers,
+        Some(&packet),
+    )
+    .await
+    {
+        let _ = on_event.send(StreamEvent::system(session_id, "error", &error));
+        return Some(error);
+    }
+    if let Some(ack_id) = ack_id {
+        pending_acks.insert(ack_id, event_name.clone());
+        *next_ack_id = next_ack_id.saturating_add(1);
+    }
+    let text = serde_json::to_string_pretty(&args).unwrap_or_else(|_| "[]".into());
+    let _ = on_event.send(StreamEvent::outgoing(session_id, &event_name, text));
+    None
+}
+
+async fn run_socket_io_websocket_session(
+    mut socket: SocketIoWebSocket,
+    receiver: &mut mpsc::UnboundedReceiver<SocketIoCommand>,
+    namespace: &str,
+    listeners: &mut HashSet<String>,
+    runtime: &mut SocketIoRuntimeState,
+    session_id: &str,
+    on_event: &Channel<StreamEvent>,
+) -> SocketIoSessionEnd {
     let mut pending_acks = HashMap::<u64, String>::new();
     let mut pending_binary = None;
     loop {
+        if let Some(command) = runtime.pending_emits.pop_front() {
+            if let Some(error) = send_socket_io_websocket_emit(
+                &mut socket,
+                namespace,
+                command,
+                &mut runtime.next_ack_id,
+                &mut pending_acks,
+                session_id,
+                on_event,
+            )
+            .await
+            {
+                return SocketIoSessionEnd::Reconnect(error);
+            }
+            continue;
+        }
         tokio::select! {
             command = receiver.recv() => {
                 match command {
-                    Some(SocketIoCommand::Emit { event_name, args, ack }) => {
-                        let ack_id = ack.then_some(next_ack_id);
-                        let packet = match socket_io_event_packet(namespace, &event_name, &args, ack_id) {
-                            Ok(packet) => packet,
-                            Err(error) => {
-                                let _ = on_event.send(StreamEvent::system(session_id, "error", error));
-                                continue;
-                            }
-                        };
-                        match socket.send(Message::Text(packet.into())).await {
-                            Ok(()) => {
-                                if let Some(ack_id) = ack_id {
-                                    pending_acks.insert(ack_id, event_name.clone());
-                                    next_ack_id = next_ack_id.saturating_add(1);
-                                }
-                                let text = serde_json::to_string_pretty(&args).unwrap_or_else(|_| "[]".into());
-                                let _ = on_event.send(StreamEvent::outgoing(session_id, &event_name, text));
-                            }
-                            Err(error) => {
-                                let _ = on_event.send(StreamEvent::system(session_id, "error", error.to_string()));
-                                break;
-                            }
+                    Some(SocketIoCommand::Emit(command)) => {
+                        if let Some(error) = send_socket_io_websocket_emit(&mut socket, namespace, command, &mut runtime.next_ack_id, &mut pending_acks, session_id, on_event).await {
+                            return SocketIoSessionEnd::Reconnect(error);
                         }
                     }
-                    Some(SocketIoCommand::AddListener(event_name)) => update_socket_io_listener(&mut listeners, event_name, true, session_id, on_event),
-                    Some(SocketIoCommand::RemoveListener(event_name)) => update_socket_io_listener(&mut listeners, event_name, false, session_id, on_event),
+                    Some(SocketIoCommand::AddListener(event_name)) => update_socket_io_listener(listeners, event_name, true, session_id, on_event),
+                    Some(SocketIoCommand::RemoveListener(event_name)) => update_socket_io_listener(listeners, event_name, false, session_id, on_event),
                     Some(SocketIoCommand::Close) | None => {
                         let _ = socket.send(Message::Text(socket_io_disconnect_packet(namespace).into())).await;
                         let _ = socket.close(None).await;
-                        break;
+                        return SocketIoSessionEnd::ClientClosed;
                     }
                 }
             }
             message = socket.next() => {
                 match message {
-                    Some(Ok(Message::Text(text))) => match handle_socket_io_packet(&text, namespace, &listeners, &mut pending_acks, &mut pending_binary, session_id, on_event) {
+                    Some(Ok(Message::Text(text))) => match handle_socket_io_packet(&text, namespace, listeners, &mut pending_acks, &mut pending_binary, session_id, on_event) {
                         SocketIoPacketAction::Continue => {}
                         SocketIoPacketAction::Pong => {
-                            if socket.send(Message::Text("3".into())).await.is_err() {
-                                break;
+                            if let Err(error) = socket.send(Message::Text("3".into())).await {
+                                let error = error.to_string();
+                                let _ = on_event.send(StreamEvent::system(session_id, "error", &error));
+                                return SocketIoSessionEnd::Reconnect(error);
                             }
                         }
-                        SocketIoPacketAction::Close => break,
+                        SocketIoPacketAction::Reconnect(reason) => return SocketIoSessionEnd::Reconnect(reason),
+                        SocketIoPacketAction::Terminate => return SocketIoSessionEnd::Terminate,
                     },
-                    Some(Ok(Message::Binary(bytes))) => match handle_socket_io_binary_attachment(&bytes, &mut pending_binary, namespace, &listeners, &mut pending_acks, session_id, on_event) {
+                    Some(Ok(Message::Binary(bytes))) => match handle_socket_io_binary_attachment(&bytes, &mut pending_binary, namespace, listeners, &mut pending_acks, session_id, on_event) {
                         SocketIoPacketAction::Continue => {}
                         SocketIoPacketAction::Pong => {}
-                        SocketIoPacketAction::Close => break,
+                        SocketIoPacketAction::Reconnect(reason) => return SocketIoSessionEnd::Reconnect(reason),
+                        SocketIoPacketAction::Terminate => return SocketIoSessionEnd::Terminate,
                     },
                     Some(Ok(Message::Ping(payload))) => {
-                        if socket.send(Message::Pong(payload)).await.is_err() {
-                            break;
+                        if let Err(error) = socket.send(Message::Pong(payload)).await {
+                            let error = error.to_string();
+                            let _ = on_event.send(StreamEvent::system(session_id, "error", &error));
+                            return SocketIoSessionEnd::Reconnect(error);
                         }
                     }
                     Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
                     Some(Ok(Message::Close(frame))) => {
                         let reason = frame.map(|frame| frame.reason.to_string()).unwrap_or_else(|| "Remote peer closed the connection".into());
-                        let _ = on_event.send(StreamEvent::system(session_id, "close", reason));
-                        break;
+                        let _ = on_event.send(StreamEvent::system(session_id, "close", &reason));
+                        return SocketIoSessionEnd::Reconnect(reason);
                     }
                     Some(Err(error)) => {
-                        let _ = on_event.send(StreamEvent::system(session_id, "error", error.to_string()));
-                        break;
+                        let error = error.to_string();
+                        let _ = on_event.send(StreamEvent::system(session_id, "error", &error));
+                        return SocketIoSessionEnd::Reconnect(error);
                     }
-                    None => break,
+                    None => {
+                        let reason = "Engine.IO WebSocket transport ended".to_string();
+                        let _ = on_event.send(StreamEvent::system(session_id, "close", &reason));
+                        return SocketIoSessionEnd::Reconnect(reason);
+                    }
                 }
             }
         }
@@ -2100,25 +2260,19 @@ async fn run_socket_io_websocket_session(
 
 async fn run_socket_io_polling_session(
     transport: SocketIoPollingTransport,
-    mut receiver: mpsc::UnboundedReceiver<SocketIoCommand>,
+    receiver: &mut mpsc::UnboundedReceiver<SocketIoCommand>,
     namespace: &str,
-    mut listeners: HashSet<String>,
+    listeners: &mut HashSet<String>,
+    runtime: &mut SocketIoRuntimeState,
     session_id: &str,
     on_event: &Channel<StreamEvent>,
-) {
-    let SocketIoPollingTransport {
-        client,
-        url,
-        headers,
-        max_payload,
-    } = transport;
-    let mut next_ack_id = 1_u64;
+) -> SocketIoSessionEnd {
     let mut pending_acks = HashMap::<u64, String>::new();
     let mut pending_binary = None;
     let (poll_sender, mut poll_receiver) = mpsc::channel(1);
-    let poll_client = client.clone();
-    let poll_url = url.clone();
-    let poll_headers = headers.clone();
+    let poll_client = transport.client.clone();
+    let poll_url = transport.url.clone();
+    let poll_headers = transport.headers.clone();
     let poll_task = tokio::spawn(async move {
         loop {
             let response =
@@ -2129,73 +2283,238 @@ async fn run_socket_io_polling_session(
             }
         }
     });
-    'connection: loop {
+    let end = 'connection: loop {
+        if let Some(command) = runtime.pending_emits.pop_front() {
+            if let Some(error) = send_socket_io_polling_emit(
+                &transport,
+                namespace,
+                command,
+                &mut runtime.next_ack_id,
+                &mut pending_acks,
+                session_id,
+                on_event,
+            )
+            .await
+            {
+                break 'connection SocketIoSessionEnd::Reconnect(error);
+            }
+            continue;
+        }
         tokio::select! {
             response = poll_receiver.recv() => {
                 let response = match response {
                     Some(Ok(response)) => response,
                     Some(Err(error)) => {
-                        let _ = on_event.send(StreamEvent::system(session_id, "error", error));
-                        break;
+                        let _ = on_event.send(StreamEvent::system(session_id, "error", &error));
+                        break 'connection SocketIoSessionEnd::Reconnect(error);
                     }
-                    None => break,
+                    None => {
+                        let reason = "Engine.IO polling transport ended".to_string();
+                        let _ = on_event.send(StreamEvent::system(session_id, "close", &reason));
+                        break 'connection SocketIoSessionEnd::Reconnect(reason);
+                    }
                 };
                 for packet in response.body.split('\u{001e}') {
-                    match handle_socket_io_packet(packet, namespace, &listeners, &mut pending_acks, &mut pending_binary, session_id, on_event) {
+                    match handle_socket_io_packet(packet, namespace, listeners, &mut pending_acks, &mut pending_binary, session_id, on_event) {
                         SocketIoPacketAction::Continue => {}
                         SocketIoPacketAction::Pong => {
-                            if let Err(error) = socket_io_http_request(&client, &url, &headers, Some("3")).await {
-                                let _ = on_event.send(StreamEvent::system(session_id, "error", error));
-                                break 'connection;
+                            if let Err(error) = socket_io_http_request(&transport.client, &transport.url, &transport.headers, Some("3")).await {
+                                let _ = on_event.send(StreamEvent::system(session_id, "error", &error));
+                                break 'connection SocketIoSessionEnd::Reconnect(error);
                             }
                         }
-                        SocketIoPacketAction::Close => break 'connection,
+                        SocketIoPacketAction::Reconnect(reason) => break 'connection SocketIoSessionEnd::Reconnect(reason),
+                        SocketIoPacketAction::Terminate => break 'connection SocketIoSessionEnd::Terminate,
                     }
                 }
             }
             command = receiver.recv() => {
                 match command {
-                    Some(SocketIoCommand::Emit { event_name, args, ack }) => {
-                        let ack_id = ack.then_some(next_ack_id);
-                        let packet = match socket_io_event_packet(namespace, &event_name, &args, ack_id) {
-                            Ok(packet) if packet.len() <= max_payload => packet,
-                            Ok(_) => {
-                                let _ = on_event.send(StreamEvent::system(session_id, "error", "The Socket.IO event exceeds the server polling payload limit."));
-                                continue;
-                            }
-                            Err(error) => {
-                                let _ = on_event.send(StreamEvent::system(session_id, "error", error));
-                                continue;
-                            }
-                        };
-                        match socket_io_http_request(&client, &url, &headers, Some(&packet)).await {
-                            Ok(_) => {
-                                if let Some(ack_id) = ack_id {
-                                    pending_acks.insert(ack_id, event_name.clone());
-                                    next_ack_id = next_ack_id.saturating_add(1);
-                                }
-                                let text = serde_json::to_string_pretty(&args).unwrap_or_else(|_| "[]".into());
-                                let _ = on_event.send(StreamEvent::outgoing(session_id, &event_name, text));
-                            }
-                            Err(error) => {
-                                let _ = on_event.send(StreamEvent::system(session_id, "error", error));
-                                break 'connection;
-                            }
+                    Some(SocketIoCommand::Emit(command)) => {
+                        if let Some(error) = send_socket_io_polling_emit(&transport, namespace, command, &mut runtime.next_ack_id, &mut pending_acks, session_id, on_event).await {
+                            break 'connection SocketIoSessionEnd::Reconnect(error);
                         }
                     }
-                    Some(SocketIoCommand::AddListener(event_name)) => update_socket_io_listener(&mut listeners, event_name, true, session_id, on_event),
-                    Some(SocketIoCommand::RemoveListener(event_name)) => update_socket_io_listener(&mut listeners, event_name, false, session_id, on_event),
+                    Some(SocketIoCommand::AddListener(event_name)) => update_socket_io_listener(listeners, event_name, true, session_id, on_event),
+                    Some(SocketIoCommand::RemoveListener(event_name)) => update_socket_io_listener(listeners, event_name, false, session_id, on_event),
                     Some(SocketIoCommand::Close) | None => {
                         let packet = socket_io_disconnect_packet(namespace);
-                        let _ = socket_io_http_request(&client, &url, &headers, Some(&packet)).await;
-                        break 'connection;
+                        let _ = socket_io_http_request(&transport.client, &transport.url, &transport.headers, Some(&packet)).await;
+                        break 'connection SocketIoSessionEnd::ClientClosed;
                     }
                 }
             }
         }
-    }
+    };
     poll_task.abort();
     let _ = poll_task.await;
+    end
+}
+
+async fn wait_for_socket_io_reconnect(
+    delay_ms: u64,
+    receiver: &mut mpsc::UnboundedReceiver<SocketIoCommand>,
+    listeners: &mut HashSet<String>,
+    pending_emits: &mut VecDeque<SocketIoEmitCommand>,
+    session_id: &str,
+    on_event: &Channel<StreamEvent>,
+) -> bool {
+    let delay = tokio::time::sleep(std::time::Duration::from_millis(delay_ms));
+    tokio::pin!(delay);
+    loop {
+        tokio::select! {
+            _ = &mut delay => return true,
+            command = receiver.recv() => match command {
+                Some(command) => {
+                    if !queue_socket_io_offline_command(command, listeners, pending_emits, session_id, on_event) {
+                        return false;
+                    }
+                }
+                None => return false,
+            }
+        }
+    }
+}
+
+async fn reconnect_socket_io_transport(
+    input: &SocketIoConnectInput,
+    receiver: &mut mpsc::UnboundedReceiver<SocketIoCommand>,
+    listeners: &mut HashSet<String>,
+    pending_emits: &mut VecDeque<SocketIoEmitCommand>,
+    session_id: &str,
+    on_event: &Channel<StreamEvent>,
+) -> Option<Result<(String, ConnectedSocketIoTransport), String>> {
+    let reconnect = establish_socket_io_transport_with_timeout(input);
+    tokio::pin!(reconnect);
+    loop {
+        tokio::select! {
+            result = &mut reconnect => return Some(result),
+            command = receiver.recv() => match command {
+                Some(command) => {
+                    if !queue_socket_io_offline_command(command, listeners, pending_emits, session_id, on_event) {
+                        return None;
+                    }
+                }
+                None => return None,
+            }
+        }
+    }
+}
+
+fn socket_io_transport_name(transport: &ConnectedSocketIoTransport) -> &'static str {
+    match transport {
+        ConnectedSocketIoTransport::WebSocket { .. } => "WebSocket",
+        ConnectedSocketIoTransport::Polling { .. } => "polling",
+    }
+}
+
+fn socket_io_upgrade_note(transport: &ConnectedSocketIoTransport) -> Option<String> {
+    match transport {
+        ConnectedSocketIoTransport::WebSocket { .. } => {
+            Some("Upgraded from polling to WebSocket".into())
+        }
+        ConnectedSocketIoTransport::Polling { upgrade_note, .. } => upgrade_note.clone(),
+    }
+}
+
+async fn run_socket_io_session(
+    input: SocketIoConnectInput,
+    mut namespace: String,
+    mut transport: ConnectedSocketIoTransport,
+    mut receiver: mpsc::UnboundedReceiver<SocketIoCommand>,
+    mut listeners: HashSet<String>,
+    session_id: &str,
+    on_event: &Channel<StreamEvent>,
+) {
+    let mut runtime = SocketIoRuntimeState {
+        pending_emits: VecDeque::new(),
+        next_ack_id: 1,
+    };
+    loop {
+        let end = match transport {
+            ConnectedSocketIoTransport::WebSocket { socket, .. } => {
+                run_socket_io_websocket_session(
+                    *socket,
+                    &mut receiver,
+                    &namespace,
+                    &mut listeners,
+                    &mut runtime,
+                    session_id,
+                    on_event,
+                )
+                .await
+            }
+            ConnectedSocketIoTransport::Polling { transport, .. } => {
+                run_socket_io_polling_session(
+                    transport,
+                    &mut receiver,
+                    &namespace,
+                    &mut listeners,
+                    &mut runtime,
+                    session_id,
+                    on_event,
+                )
+                .await
+            }
+        };
+        let SocketIoSessionEnd::Reconnect(mut reason) = end else {
+            return;
+        };
+        let mut attempt = 0_u32;
+        loop {
+            attempt = attempt.saturating_add(1);
+            let delay_ms = socket_io_reconnect_delay_ms(attempt);
+            let _ = on_event.send(StreamEvent::system(
+                session_id,
+                "reconnecting",
+                format!("Reconnect attempt {attempt} in {delay_ms} ms · {reason}"),
+            ));
+            if !wait_for_socket_io_reconnect(
+                delay_ms,
+                &mut receiver,
+                &mut listeners,
+                &mut runtime.pending_emits,
+                session_id,
+                on_event,
+            )
+            .await
+            {
+                return;
+            }
+            match reconnect_socket_io_transport(
+                &input,
+                &mut receiver,
+                &mut listeners,
+                &mut runtime.pending_emits,
+                session_id,
+                on_event,
+            )
+            .await
+            {
+                None => return,
+                Some(Err(error)) => {
+                    let _ = on_event.send(StreamEvent::system(session_id, "error", &error));
+                    reason = error;
+                }
+                Some(Ok((reconnected_namespace, reconnected_transport))) => {
+                    namespace = reconnected_namespace;
+                    let transport_name = socket_io_transport_name(&reconnected_transport);
+                    let _ = on_event.send(StreamEvent::system(
+                        session_id,
+                        "open",
+                        format!(
+                            "Reconnected · attempt {attempt} · namespace {namespace} · transport {transport_name}"
+                        ),
+                    ));
+                    if let Some(note) = socket_io_upgrade_note(&reconnected_transport) {
+                        let _ = on_event.send(StreamEvent::system(session_id, "upgrade", note));
+                    }
+                    transport = reconnected_transport;
+                    break;
+                }
+            }
+        }
+    }
 }
 
 pub async fn connect_socket_io(
@@ -2217,17 +2536,7 @@ pub async fn connect_socket_io(
         listeners.insert(event_name.clone());
     }
     let started = Instant::now();
-    let handshake = establish_socket_io_transport(&input);
-    let (namespace, transport) = if input.transport.timeout_ms == 0 {
-        handshake.await
-    } else {
-        tokio::time::timeout(
-            std::time::Duration::from_millis(input.transport.timeout_ms),
-            handshake,
-        )
-        .await
-        .map_err(|_| "Socket.IO connection timed out during Engine.IO negotiation.".to_string())?
-    }?;
+    let (namespace, transport) = establish_socket_io_transport_with_timeout(&input).await?;
 
     let (sender, receiver) = mpsc::unbounded_channel();
     state
@@ -2300,30 +2609,16 @@ pub async fn connect_socket_io(
     }
 
     tokio::spawn(async move {
-        match transport {
-            ConnectedSocketIoTransport::WebSocket { socket, .. } => {
-                run_socket_io_websocket_session(
-                    *socket,
-                    receiver,
-                    &namespace,
-                    listeners,
-                    &session_id,
-                    &on_event,
-                )
-                .await;
-            }
-            ConnectedSocketIoTransport::Polling { transport, .. } => {
-                run_socket_io_polling_session(
-                    transport,
-                    receiver,
-                    &namespace,
-                    listeners,
-                    &session_id,
-                    &on_event,
-                )
-                .await;
-            }
-        }
+        run_socket_io_session(
+            input,
+            namespace,
+            transport,
+            receiver,
+            listeners,
+            &session_id,
+            &on_event,
+        )
+        .await;
         sessions.lock().await.remove(&session_id);
         let _ = on_event.send(StreamEvent::system(
             &session_id,
@@ -2351,11 +2646,11 @@ pub async fn send_socket_io_message(
         .cloned()
         .ok_or_else(|| "Connect Socket.IO before emitting an event.".to_string())?;
     sender
-        .send(SocketIoCommand::Emit {
+        .send(SocketIoCommand::Emit(SocketIoEmitCommand {
             event_name,
             args,
             ack,
-        })
+        }))
         .map_err(|_| "The Socket.IO session has ended.".to_string())
 }
 
@@ -3869,6 +4164,211 @@ mod tests {
                 && event["text"].as_str().unwrap().contains("255")
         }));
         disconnect_socket_io("socket-session".into(), state)
+            .await
+            .unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn reconnects_socket_io_after_transient_engine_loss() {
+        use std::{sync::mpsc as std_mpsc, time::Duration};
+        use tauri::ipc::InvokeResponseBody;
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut first_open, _) = listener.accept().await.unwrap();
+            let request = read_test_http_request(&mut first_open).await;
+            assert_eq!(request.method, "GET");
+            assert!(!request.target.contains("sid="));
+            write_test_http_response(
+                &mut first_open,
+                "0{\"sid\":\"engine-1\",\"upgrades\":[],\"pingInterval\":25000,\"pingTimeout\":20000,\"maxPayload\":1000000}",
+            )
+            .await;
+
+            let (mut first_connect, _) = listener.accept().await.unwrap();
+            let request = read_test_http_request(&mut first_connect).await;
+            assert_eq!(request.method, "POST");
+            assert!(request.target.contains("sid=engine-1"));
+            assert_eq!(request.body, "40/orders,");
+            write_test_http_response(&mut first_connect, "ok").await;
+
+            let (mut first_namespace, _) = listener.accept().await.unwrap();
+            let request = read_test_http_request(&mut first_namespace).await;
+            assert_eq!(request.method, "GET");
+            assert!(request.target.contains("sid=engine-1"));
+            write_test_http_response(&mut first_namespace, "40/orders,{\"sid\":\"socket-1\"}")
+                .await;
+
+            let (mut close_poll, _) = listener.accept().await.unwrap();
+            let request = read_test_http_request(&mut close_poll).await;
+            assert_eq!(request.method, "GET");
+            assert!(request.target.contains("sid=engine-1"));
+            write_test_http_response(&mut close_poll, "1").await;
+
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut probe = [0_u8; 1];
+                if stream.peek(&mut probe).await.unwrap() == 0 {
+                    continue;
+                }
+                let request = read_test_http_request(&mut stream).await;
+                if request.target.contains("sid=engine-1") {
+                    write_test_http_response(&mut stream, "1").await;
+                    continue;
+                }
+                assert_eq!(request.method, "GET");
+                assert!(!request.target.contains("sid="));
+                write_test_http_response(
+                    &mut stream,
+                    "0{\"sid\":\"engine-2\",\"upgrades\":[],\"pingInterval\":25000,\"pingTimeout\":20000,\"maxPayload\":1000000}",
+                )
+                .await;
+                break;
+            }
+
+            let (mut second_connect, _) = listener.accept().await.unwrap();
+            let request = read_test_http_request(&mut second_connect).await;
+            assert_eq!(request.method, "POST");
+            assert!(request.target.contains("sid=engine-2"));
+            assert_eq!(request.body, "40/orders,");
+            write_test_http_response(&mut second_connect, "ok").await;
+
+            let (mut second_namespace, _) = listener.accept().await.unwrap();
+            let request = read_test_http_request(&mut second_namespace).await;
+            assert_eq!(request.method, "GET");
+            assert!(request.target.contains("sid=engine-2"));
+            write_test_http_response(&mut second_namespace, "40/orders,{\"sid\":\"socket-2\"}")
+                .await;
+
+            let mut pending_poll = None;
+            let mut received_emit = false;
+            while pending_poll.is_none() || !received_emit {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request = read_test_http_request(&mut stream).await;
+                assert!(request.target.contains("sid=engine-2"));
+                if request.method == "GET" {
+                    pending_poll = Some(stream);
+                } else {
+                    assert_eq!(request.method, "POST");
+                    assert_eq!(request.body, "42/orders,[\"queued\",{\"id\":42}]");
+                    write_test_http_response(&mut stream, "ok").await;
+                    received_emit = true;
+                }
+            }
+            write_test_http_response(
+                pending_poll.as_mut().unwrap(),
+                "42/orders,[\"old.event\",{\"ignored\":true}]\u{001e}42/orders,[\"new.event\",{\"ready\":true}]",
+            )
+            .await;
+
+            let mut pending_poll = None;
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request = read_test_http_request(&mut stream).await;
+                assert!(request.target.contains("sid=engine-2"));
+                if request.method == "GET" {
+                    pending_poll = Some(stream);
+                } else {
+                    assert_eq!(request.method, "POST");
+                    assert_eq!(request.body, "41/orders,");
+                    write_test_http_response(&mut stream, "ok").await;
+                    break;
+                }
+            }
+            drop(pending_poll);
+        });
+
+        let (event_sender, event_receiver) = std_mpsc::channel();
+        let channel = Channel::<StreamEvent>::new(move |body| {
+            if let InvokeResponseBody::Json(json) = body {
+                let _ = event_sender.send(serde_json::from_str::<Value>(&json)?);
+            }
+            Ok(())
+        });
+        let state = StreamingState::default();
+        connect_socket_io(
+            SocketIoConnectInput {
+                session_id: "reconnecting-socket-io".into(),
+                url: format!("http://{address}/orders"),
+                headers: Vec::new(),
+                path: "/custom".into(),
+                auth_token: String::new(),
+                event_listeners: vec!["old.event".into()],
+                transport: crate::models::TransportConfig {
+                    timeout_ms: 5_000,
+                    proxy_mode: "disabled".into(),
+                    ..Default::default()
+                },
+            },
+            channel,
+            state.clone(),
+        )
+        .await
+        .unwrap();
+
+        let mut events = Vec::new();
+        loop {
+            let event = event_receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+            let reconnecting = event["kind"] == "reconnecting";
+            events.push(event);
+            if reconnecting {
+                break;
+            }
+        }
+        set_socket_io_listener(
+            "reconnecting-socket-io".into(),
+            "old.event".into(),
+            false,
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        set_socket_io_listener(
+            "reconnecting-socket-io".into(),
+            "new.event".into(),
+            true,
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        send_socket_io_message(
+            "reconnecting-socket-io".into(),
+            "queued".into(),
+            vec![serde_json::json!({ "id": 42 })],
+            false,
+            state.clone(),
+        )
+        .await
+        .unwrap();
+
+        while !events
+            .iter()
+            .any(|event| event["direction"] == "incoming" && event["kind"] == "new.event")
+            || !events
+                .iter()
+                .any(|event| event["direction"] == "outgoing" && event["kind"] == "queued")
+        {
+            events.push(event_receiver.recv_timeout(Duration::from_secs(5)).unwrap());
+        }
+        assert!(events.iter().any(|event| {
+            event["kind"] == "open"
+                && event["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Reconnected · attempt 1")
+        }));
+        assert!(events.iter().any(|event| event["kind"] == "unlisten"
+            && event["text"] == "Stopped listening to old.event"));
+        assert!(events
+            .iter()
+            .any(|event| event["kind"] == "listen" && event["text"] == "Listening to new.event"));
+        assert!(!events
+            .iter()
+            .any(|event| event["direction"] == "incoming" && event["kind"] == "old.event"));
+        disconnect_socket_io("reconnecting-socket-io".into(), state)
             .await
             .unwrap();
         server.await.unwrap();
