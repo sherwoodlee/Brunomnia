@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
 import type { Collection, Environment, RequestFolder } from '../types';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWorkspaceFolder, folderAncestors, keyboardWorkspaceResourceMove, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes } from './resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWorkspaceEnvironment, duplicateWorkspaceFolder, folderAncestors, keyboardWorkspaceEnvironmentMove, keyboardWorkspaceResourceMove, moveWorkspaceEnvironment, moveWorkspaceResource, orderedCollectionChildren, orderedEnvironmentChildren, persistEffectiveAuthentication, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes } from './resources';
 
 const row = (id: string, name: string, value: string) => ({ id, name, value, enabled: true });
 
@@ -86,6 +86,38 @@ describe('resource hierarchy', () => {
       { id: 'private', name: 'Private', parentId: 'base', private: true, variables: [] },
       { id: 'descendant', name: 'Descendant', parentId: 'private', variables: [] },
     ]).map((environment) => environment.id)).toEqual(['base']);
+  });
+
+  it('reorders and duplicates sub-environments with pinned sibling semantics', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.environments = [
+      { id: 'base', name: 'Base', variables: [] },
+      { id: 'first', name: 'First', parentId: 'base', variables: [row('first-row', 'url', 'one')], private: true, color: '#112233', source: { format: 'insomnia-v5', sourceId: 'remote-first' } },
+      { id: 'nested', name: 'Nested', parentId: 'first', variables: [] },
+      { id: 'second', name: 'Second', parentId: 'base', variables: [] },
+      { id: 'third', name: 'Third', parentId: 'base', variables: [] },
+      { id: 'other-base', name: 'Other base', variables: [] },
+      { id: 'other-child', name: 'Other child', parentId: 'other-base', variables: [] },
+    ];
+    const reordered = moveWorkspaceEnvironment(workspace, { environmentId: 'second', targetEnvironmentId: 'first', placement: 'before' });
+    expect(orderedEnvironmentChildren(reordered.environments, 'base').map((environment) => environment.id)).toEqual(['second', 'first', 'third']);
+    expect(reordered.environments.find((environment) => environment.id === 'nested')?.parentId).toBe('first');
+    expect(keyboardWorkspaceEnvironmentMove(reordered.environments, 'first', 'last')).toEqual({ environmentId: 'first', targetEnvironmentId: 'third', placement: 'after' });
+    expect(keyboardWorkspaceEnvironmentMove(reordered.environments, 'second', 'up')).toBeUndefined();
+    expect(moveWorkspaceEnvironment(workspace, { environmentId: 'first', targetEnvironmentId: 'other-child', placement: 'after' })).toBe(workspace);
+    expect(moveWorkspaceEnvironment(workspace, { environmentId: 'first', targetEnvironmentId: 'first', placement: 'after' })).toBe(workspace);
+    expect(moveWorkspaceEnvironment(workspace, { environmentId: 'first', targetEnvironmentId: 'missing', placement: 'after' })).toBe(workspace);
+
+    let sequence = 0;
+    const duplicated = duplicateWorkspaceEnvironment(reordered, 'first', (kind) => `${kind}-${sequence++}`);
+    const siblings = orderedEnvironmentChildren(duplicated.environments, 'base');
+    const copy = siblings.find((environment) => environment.id !== 'first' && environment.name === 'First (Copy)')!;
+    expect(siblings.map((environment) => environment.id)).toEqual(['second', 'first', copy.id, 'third']);
+    expect(copy).toMatchObject({ parentId: 'base', private: true, color: '#112233', source: undefined });
+    expect(copy.variables[0]).toMatchObject({ name: 'url', value: 'one' });
+    expect(copy.variables[0].id).not.toBe('first-row');
+    expect(duplicated.environments.filter((environment) => environment.parentId === copy.id)).toEqual([]);
+    expect(duplicateWorkspaceEnvironment(workspace, 'base')).toBe(workspace);
   });
 
   it('renders mixed folder and request siblings from a persisted order', () => {

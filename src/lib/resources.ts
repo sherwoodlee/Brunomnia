@@ -22,6 +22,64 @@ export type WorkspaceResourceKeyboardTarget =
 
 export type WorkspaceResourceKeyboardAction = 'up' | 'down' | 'first' | 'last' | 'indent' | 'outdent';
 
+export type WorkspaceEnvironmentMove = {
+  environmentId: string;
+  targetEnvironmentId: string;
+  placement: 'before' | 'after';
+};
+
+export type WorkspaceEnvironmentKeyboardAction = 'up' | 'down' | 'first' | 'last';
+
+export const orderedEnvironmentChildren = (environments: Environment[], parentId: string): Environment[] => (
+  environments.filter((environment) => environment.parentId === parentId)
+);
+
+export const keyboardWorkspaceEnvironmentMove = (
+  environments: Environment[],
+  environmentId: string,
+  action: WorkspaceEnvironmentKeyboardAction,
+): WorkspaceEnvironmentMove | undefined => {
+  const environment = environments.find((candidate) => candidate.id === environmentId);
+  if (!environment?.parentId) return undefined;
+  const siblings = orderedEnvironmentChildren(environments, environment.parentId);
+  const index = siblings.findIndex((candidate) => candidate.id === environmentId);
+  const targetIndex = action === 'up' ? index - 1 : action === 'down' ? index + 1 : action === 'first' ? 0 : siblings.length - 1;
+  const target = siblings[targetIndex];
+  if (!target || target.id === environmentId) return undefined;
+  return { environmentId, targetEnvironmentId: target.id, placement: action === 'down' || action === 'last' ? 'after' : 'before' };
+};
+
+export const moveWorkspaceEnvironment = (workspace: Workspace, move: WorkspaceEnvironmentMove): Workspace => {
+  const environment = workspace.environments.find((candidate) => candidate.id === move.environmentId);
+  const target = workspace.environments.find((candidate) => candidate.id === move.targetEnvironmentId);
+  if (!environment?.parentId || !target || environment.id === target.id || environment.parentId !== target.parentId) return workspace;
+  const environments = workspace.environments.filter((candidate) => candidate.id !== environment.id);
+  const targetIndex = environments.findIndex((candidate) => candidate.id === target.id);
+  if (targetIndex < 0) return workspace;
+  environments.splice(targetIndex + (move.placement === 'after' ? 1 : 0), 0, environment);
+  return { ...workspace, environments };
+};
+
+export const duplicateWorkspaceEnvironment = (
+  workspace: Workspace,
+  environmentId: string,
+  createId: (kind: string) => string = (kind) => `${kind}-${crypto.randomUUID()}`,
+): Workspace => {
+  const index = workspace.environments.findIndex((environment) => environment.id === environmentId);
+  const environment = workspace.environments[index];
+  if (!environment?.parentId) return workspace;
+  const copy = {
+    ...structuredClone(environment),
+    id: createId('environment'),
+    name: `${environment.name} (Copy)`,
+    variables: environment.variables.map((variable) => ({ ...variable, id: createId('variable') })),
+    source: undefined,
+  };
+  const environments = [...workspace.environments];
+  environments.splice(index + 1, 0, copy);
+  return { ...workspace, environments };
+};
+
 const collectionResourceOrder = (collection: Collection): string[] => {
   const validIds = new Set([
     ...(collection.folders ?? []).map((folder) => folder.id),

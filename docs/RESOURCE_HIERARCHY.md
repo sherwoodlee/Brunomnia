@@ -48,6 +48,8 @@ Collection, folder, and request documentation is stored as Markdown source. This
 
 Open the environment editor from the top bar. Base environments have no parent. Sub-environments inherit enabled and disabled variable rows from their parent chain, with a closer value replacing an earlier value with the same name. Editing a script stores only changed or newly created values in the selected sub-environment instead of flattening all inherited values into it.
 
+Drag a sub-environment before or after one of its siblings to persist that sibling order. Focused sub-environments expose the equivalent Option/Alt + Arrow Up/Down and Home/End controls. **Duplicate** creates a sibling named with the pinned `(Copy)` suffix immediately after the source, regenerates the environment and variable-row IDs, and removes import provenance so the copy is locally owned. Base environments are not reorderable or duplicable through these pinned-compatible actions.
+
 The runner and bundled CLI resolve the same ancestry before applying collection and folder variables. Environment and folder ancestry is cycle-bounded during execution, while workspace migration removes malformed parent cycles and invalid references.
 
 ## Private sub-environments

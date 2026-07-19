@@ -2155,7 +2155,19 @@ Compatibility bounds remain explicit: keyboard moves operate one resource at a t
 
 Compatibility bounds remain explicit: duplication stays within the current collection, matching the ordinary pinned folder action; cross-workspace copy/move continues through existing drag/settings paths rather than this command. Multi-select/bulk resource actions, request pinning/new-tab state, environment-tree ordering, collected-data breadth, legacy-version reconstruction, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 146 — remaining parity closure and release hardening
+## Milestone 146 — sub-environment ordering and duplication (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned source behavior | Complete | The pinned environment editor reorders sub-environments before/after siblings and duplicates a selected sub-environment as `Name (Copy)` immediately after its source |
+| Persistent pointer ordering | Complete | Native drag/drop reorders only valid same-parent sub-environment siblings through a pure workspace operation; base, self, and cross-parent drops are no-ops |
+| Keyboard equivalence | Complete | Focused sub-environments expose Option/Alt + Arrow Up/Down/Home/End through a pure before/after planner and advertised `aria-keyshortcuts` |
+| Safe duplication | Complete | The copy retains parent, values, color, and private state; regenerates environment and variable-row IDs; removes import provenance; and does not duplicate descendants |
+| Executable evidence | Complete | A deterministic regression proves sibling order, nested-child stability, keyboard planning, invalid cross-parent/base operations, adjacent copy placement, fresh IDs, provenance removal, and descendant exclusion; strict TypeScript proves dialog wiring |
+
+Compatibility bounds remain explicit: pinned Insomnia exposes these actions only for sub-environments, so Brunomnia base environments remain immovable and non-duplicable through this surface even though its richer model can contain multiple base trees. Parent changes remain an explicit editor field instead of an implied cross-parent drop. Multi-select/bulk resource actions, request pinning/new-tab state, collected-data breadth, legacy-version reconstruction, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 147 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

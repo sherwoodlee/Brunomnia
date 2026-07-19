@@ -16,8 +16,8 @@ import type { ArtifactImport } from './lib/interchange/types';
 import { applyPluginTheme, createPluginRuntime, describePlugin, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
 import { plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
 import { defaultPreferences, shortcutMatches } from './lib/preferences';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWorkspaceFolder, environmentAncestors, folderAncestors, folderPath, keyboardWorkspaceResourceMove, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
-import type { WorkspaceResourceKeyboardAction, WorkspaceResourceMove } from './lib/resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWorkspaceEnvironment, duplicateWorkspaceFolder, environmentAncestors, folderAncestors, folderPath, keyboardWorkspaceEnvironmentMove, keyboardWorkspaceResourceMove, moveWorkspaceEnvironment, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
+import type { WorkspaceEnvironmentMove, WorkspaceResourceKeyboardAction, WorkspaceResourceMove } from './lib/resources';
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
 import type { AppliedResponseMockTarget } from './lib/mockRouteFromResponse';
@@ -927,9 +927,14 @@ type EnvironmentDialogProps = {
   onSelect: (id: string) => void;
   onAdd: (parentId: string) => void;
   onDelete: (id: string) => void;
+  onDuplicate: (id: string) => void;
+  onMove: (move: WorkspaceEnvironmentMove) => void;
 };
 
-function EnvironmentDialog({ environments, activeId, onClose, onChange, onSelect, onAdd, onDelete }: EnvironmentDialogProps) {
+function EnvironmentDialog({ environments, activeId, onClose, onChange, onSelect, onAdd, onDelete, onDuplicate, onMove }: EnvironmentDialogProps) {
+  const dragEnvironmentRef = useRef<string | undefined>(undefined);
+  const [draggedEnvironmentId, setDraggedEnvironmentId] = useState('');
+  const [environmentDrop, setEnvironmentDrop] = useState<{ id: string; placement: 'before' | 'after' }>();
   const environment = environments.find((candidate) => candidate.id === activeId) ?? environments[0];
   if (!environment) return null;
   const resolved = resolveEnvironment(environments, environment.id) ?? environment;
@@ -937,7 +942,50 @@ function EnvironmentDialog({ environments, activeId, onClose, onChange, onSelect
   const inherited = resolved.variables.filter((variable) => !ownNames.has(variable.name));
   const publicIds = new Set(publicEnvironments(environments).map((candidate) => candidate.id));
   const roots = environments.filter((candidate) => !candidate.parentId);
-  const renderEnvironment = (candidate: Environment, depth: number): ReactNode => <div key={candidate.id}><button className={candidate.id === environment.id ? 'active' : ''} onClick={() => onSelect(candidate.id)} style={{ '--environment-depth': depth } as CSSProperties} type="button"><i style={{ background: candidate.color || 'var(--muted)' }} /><span>{candidate.name}</span>{candidate.private ? <small>PRIVATE</small> : null}</button>{environments.filter((child) => child.parentId === candidate.id).map((child) => renderEnvironment(child, depth + 1))}</div>;
+  const clearEnvironmentDrag = () => {
+    dragEnvironmentRef.current = undefined;
+    setDraggedEnvironmentId('');
+    setEnvironmentDrop(undefined);
+  };
+  const beginEnvironmentDrag = (event: ReactDragEvent<HTMLButtonElement>, candidate: Environment) => {
+    if (!candidate.parentId) {
+      event.preventDefault();
+      return;
+    }
+    dragEnvironmentRef.current = candidate.id;
+    setDraggedEnvironmentId(candidate.id);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', 'brunomnia-environment');
+  };
+  const dropOnEnvironment = (event: ReactDragEvent<HTMLButtonElement>, target: Environment, commit: boolean) => {
+    const sourceId = dragEnvironmentRef.current;
+    const source = environments.find((candidate) => candidate.id === sourceId);
+    if (!source?.parentId || source.id === target.id || source.parentId !== target.parentId) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const placement = event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'move';
+    setEnvironmentDrop({ id: target.id, placement });
+    if (commit) {
+      onMove({ environmentId: source.id, targetEnvironmentId: target.id, placement });
+      clearEnvironmentDrag();
+    }
+  };
+  const keyboardEnvironmentMove = (event: ReactKeyboardEvent<HTMLButtonElement>, candidate: Environment) => {
+    if (!event.altKey || event.metaKey || event.ctrlKey) return;
+    const action = event.key === 'ArrowUp' ? 'up' : event.key === 'ArrowDown' ? 'down' : event.key === 'Home' ? 'first' : event.key === 'End' ? 'last' : undefined;
+    if (!action) return;
+    const move = keyboardWorkspaceEnvironmentMove(environments, candidate.id, action);
+    if (!move) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onMove(move);
+  };
+  const renderEnvironment = (candidate: Environment, depth: number): ReactNode => {
+    const dropClass = environmentDrop?.id === candidate.id ? ` drop-${environmentDrop.placement}` : '';
+    return <div key={candidate.id}><button aria-grabbed={draggedEnvironmentId === candidate.id} aria-keyshortcuts={candidate.parentId ? 'Alt+ArrowUp Alt+ArrowDown Alt+Home Alt+End' : undefined} className={`${candidate.id === environment.id ? 'active' : ''}${draggedEnvironmentId === candidate.id ? ' is-dragging' : ''}${dropClass}`} draggable={Boolean(candidate.parentId)} onClick={() => onSelect(candidate.id)} onDragEnd={clearEnvironmentDrag} onDragOver={(event) => dropOnEnvironment(event, candidate, false)} onDragStart={(event) => beginEnvironmentDrag(event, candidate)} onDrop={(event) => dropOnEnvironment(event, candidate, true)} onKeyDown={(event) => keyboardEnvironmentMove(event, candidate)} style={{ '--environment-depth': depth } as CSSProperties} title={candidate.parentId ? 'Drag to reorder siblings · Option/Alt+Up/Down/Home/End reorders' : undefined} type="button"><i style={{ background: candidate.color || 'var(--muted)' }} /><span>{candidate.name}</span>{candidate.private ? <small>PRIVATE</small> : null}</button>{environments.filter((child) => child.parentId === candidate.id).map((child) => renderEnvironment(child, depth + 1))}</div>;
+  };
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section aria-labelledby="environment-title" aria-modal="true" className="modal environment-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
@@ -948,7 +996,7 @@ function EnvironmentDialog({ environments, activeId, onClose, onChange, onSelect
           {inherited.length ? <div className="inherited-variables"><strong>Inherited from parent</strong>{inherited.map((variable) => <span key={variable.name}><code>{variable.name}</code><em>{variable.value}</em></span>)}</div> : null}
           <KeyValueEditor rows={environment.variables} onChange={(variables) => onChange({ ...environment, variables })} namePlaceholder="Variable" />
         </main></div>
-        <footer><button className="danger-action" disabled={environments.length <= 1} onClick={() => onDelete(environment.id)} type="button">Delete</button><span className="footer-spacer" /><button className="secondary-button" onClick={onClose} type="button">Done</button></footer>
+        <footer><button className="danger-action" disabled={environments.length <= 1} onClick={() => onDelete(environment.id)} type="button">Delete</button><button className="secondary-button" disabled={!environment.parentId} onClick={() => onDuplicate(environment.id)} type="button"><Icon name="copy" size={13} /> Duplicate</button><span className="footer-spacer" /><button className="secondary-button" onClick={onClose} type="button">Done</button></footer>
       </section>
     </div>
   );
@@ -2317,6 +2365,14 @@ export default function App() {
     }));
   };
 
+  const moveEnvironment = useCallback((move: WorkspaceEnvironmentMove) => {
+    setWorkspace((current) => moveWorkspaceEnvironment(current, move));
+  }, []);
+
+  const duplicateEnvironment = (id: string) => {
+    setWorkspace((current) => duplicateWorkspaceEnvironment(current, id, uid));
+  };
+
   const addEnvironment = (parentId: string) => {
     const id = uid('environment');
     setWorkspace((current) => {
@@ -2581,7 +2637,7 @@ export default function App() {
         <span>{workbenchSection === 'requests' ? protocolLabel(active.request) : titleCase(workbenchSection)}</span>
       </footer>
 
-      {showEnvironment ? <EnvironmentDialog activeId={workspace.activeEnvironmentId} environments={workspace.environments} onAdd={addEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} onDelete={deleteEnvironment} onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))} /> : null}
+      {showEnvironment ? <EnvironmentDialog activeId={workspace.activeEnvironmentId} environments={workspace.environments} onAdd={addEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} onDelete={deleteEnvironment} onDuplicate={duplicateEnvironment} onMove={moveEnvironment} onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))} /> : null}
       {configuredCollection ? <CollectionDialog collection={configuredCollection} onChange={updateCollection} onClose={() => setCollectionEditor(undefined)} /> : null}
       {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={activeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} onDuplicate={() => duplicateFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
       {showSendOptions ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSendOptions(false)}>
