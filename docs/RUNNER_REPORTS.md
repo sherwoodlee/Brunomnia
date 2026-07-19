@@ -113,6 +113,8 @@ node bin/brunomnia.cjs run collection workspace.json "Collection" --reporter jso
 
 Supported names are `dot`, `list`, `min`, `progress`, `spec`, and `tap`, matching the names in the current Inso `run test` reference, plus machine-readable `json` and `junit`. Without `--output`, the selected reporter goes to stdout. `run test --output` writes that reporter artifact to the file. `run collection --output` writes the safe or explicitly accepted full-data JSON result file while preserving the selected reporter on stdout. A failed attempt still makes the process exit non-zero regardless of reporter or destination.
 
+Pinned test-only `--keepFile` writes the generated sorted suite/test source as a mode-`0600` file inside a unique private directory under the system temporary root and appends `Test files: ["<path>"].` to stdout after the reporter. The retained source includes suite/test names, default request IDs, and user-authored test code; it excludes the injected runtime bridge but should still be handled as sensitive and deleted manually. JSON consumers should not enable this diagnostic flag unless they intentionally split the final path line. `--keep-file` is an additional alias, and collection runs reject either spelling before transport.
+
 For `run collection`, `--bail`/`-b` stops subsequent requests and iterations only after the current request exhausts its configured retries. For `run test`, it stops subsequent standalone tests after the current test exhausts its retries. Without it, the runner records the complete plan.
 
 ## Test-name filtering

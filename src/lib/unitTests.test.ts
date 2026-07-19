@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
-import { clearDeletedUnitTestRequest, createUnitTest, createUnitTestSuite, moveUnitTest, moveUnitTestSuite, moveUnitTestSuiteToCollection, orderedTestSuites, selectUnitTestSuites, unitTestScript } from './unitTests';
+import { clearDeletedUnitTestRequest, createUnitTest, createUnitTestSuite, generateUnitTestCliArtifact, moveUnitTest, moveUnitTestSuite, moveUnitTestSuiteToCollection, orderedTestSuites, selectUnitTestSuites, unitTestScript } from './unitTests';
 
 describe('standalone unit tests', () => {
   it('creates pinned-shaped suites and tests at the front', () => {
@@ -41,5 +41,21 @@ describe('standalone unit tests', () => {
     ];
     expect(selectUnitTestSuites(workspace, 'suite-f')).toEqual([expect.objectContaining({ id: 'suite-first' })]);
     expect(selectUnitTestSuites(workspace, workspace.apiDesigns[0].id).map((suite) => suite.id)).toEqual(['suite-first', 'suite-later']);
+  });
+
+  it('generates a sorted source-shaped retained CLI test artifact', () => {
+    const artifact = generateUnitTestCliArtifact([
+      { id: 'suite-later', name: 'Later', collectionId: 'collection', sortKey: 2, tests: [] },
+      { id: 'suite-first', name: 'First "suite"', collectionId: 'collection', sortKey: 1, tests: [
+        { id: 'test-later', name: 'Later', requestId: null, sortKey: 2, code: '' },
+        { id: 'test-first', name: 'First', requestId: 'request-one', sortKey: 1, code: 'const response = await insomnia.send();\nexpect(response.status).to.equal(200);' },
+      ] },
+    ]);
+    expect(artifact).toContain('describe("First \\"suite\\"", () => {');
+    expect(artifact).toContain('insomnia.setActiveRequestId("request-one");');
+    expect(artifact).toContain('    expect(response.status).to.equal(200);');
+    expect(artifact.indexOf('describe("First')).toBeLessThan(artifact.indexOf('describe("Later'));
+    expect(artifact.indexOf('it("First"')).toBeLessThan(artifact.indexOf('it("Later"'));
+    expect(artifact.endsWith('\n')).toBe(true);
   });
 });

@@ -40,6 +40,28 @@ export const moveUnitTest = (tests: UnitTest[], id: string, targetId: string, pl
 
 export const unitTestScript = (test: Pick<UnitTest, 'name' | 'code'>) => `insomnia.test(${JSON.stringify(test.name)}, async () => {\n${test.code}\n});`;
 
+export const generateUnitTestCliArtifact = (suites: UnitTestSuite[]) => {
+  const lines = [
+    'const { expect } = chai;',
+    '',
+    'beforeEach(() => insomnia.clearActiveRequest());',
+    '',
+  ];
+  orderedTestSuites(suites).forEach((suite, suiteIndex) => {
+    if (suiteIndex) lines.push('');
+    lines.push(`describe(${JSON.stringify(suite.name)}, () => {`);
+    orderedUnitTests(suite.tests).forEach((test, testIndex) => {
+      if (testIndex) lines.push('');
+      lines.push(`  it(${JSON.stringify(test.name)}, async () => {`);
+      if (test.requestId) lines.push(`    insomnia.setActiveRequestId(${JSON.stringify(test.requestId)});`);
+      if (test.code) lines.push(...test.code.split(/\r?\n/).map((line) => `    ${line}`));
+      lines.push('  });');
+    });
+    lines.push('});');
+  });
+  return `${lines.join('\n')}\n`;
+};
+
 const idMatches = (id: string, identifier: string) => id === identifier || id.startsWith(identifier);
 
 export const selectUnitTestSuites = (workspace: Workspace, identifier: string): UnitTestSuite[] => {

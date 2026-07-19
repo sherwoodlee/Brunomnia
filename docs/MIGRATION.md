@@ -45,7 +45,7 @@ Streaming gRPC currently returns up to 100 messages within the configured deadli
 | After-response tests | Complete baseline | `insomnia.test`, response helpers, console output, and a focused `expect` matcher set with results in the response pane |
 | Collection runner | Complete baseline | Ordered runs, 1–1000 iterations, JSON/CSV data, up to 10 retries, delays, cancellation, environment propagation, and stored reports |
 | Local mocks | Complete baseline | Native loopback-only Axum server, method/path matching, path parameters, status/headers/body/delay/CORS, and timestamp/UUID/path tokens |
-| Headless CLI | Complete baseline | Lint/generate/export plus collection/test runs using the shared OpenAPI and runner modules; stored resources accept exact names or unambiguous ID prefixes, omitted collection/suite/design identifiers have bounded terminal prompts and non-TTY refusal, and collection environments preserve explicit/CI/interactive/non-interactive selection boundaries |
+| Headless CLI | Complete baseline | Lint/generate/export plus collection/test runs using the shared OpenAPI and runner modules; stored resources accept exact names or unambiguous ID prefixes, omitted identifiers have bounded terminal prompts and non-TTY refusal, collection environments preserve explicit/CI/interactive boundaries, and test runs can retain private generated source through pinned `--keepFile` |
 | Workspace migration | Complete | Version 1 and 2 workspaces migrate in place to version 3 design, mock, and report resources |
 
 Current compatibility bounds are explicit: linting is not yet Spectral ruleset parity; the script API is a safe compatibility subset; mock templating is not yet Liquid/Faker parity; browser-only mock start/stop is a UI simulation because a browser cannot bind a server; CLI collection execution currently supports HTTP and GraphQL; and streaming runner semantics for WebSocket/SSE are deferred.
@@ -371,7 +371,7 @@ Compatibility bounds at this milestone remain explicit: the sidebar depends on n
 | Executable coverage | Complete | Shared tests cover pre-network validation, pattern propagation, omission, failure retention, Worker callback skipping, and report metadata; an offline CLI smoke covers both a single match and zero matches |
 | Documentation and evidence | Complete | Updated [runner reports and CI guide](RUNNER_REPORTS.md) and [Milestone 25 verification](QA_MILESTONE_25.md) |
 
-Compatibility bounds remain explicit: Brunomnia discovers named tests inside request after-response scripts, so the request and top-level script execute before dynamic registrations can be filtered. This is not the same persistence model as Insomnia's standalone unit-test-suite resources. Suite identity/selection, configuration-file discovery, `--keepFile`, proxy/data-folder flags, and the remaining command surface remain open.
+Compatibility bounds at this milestone were explicit: Brunomnia discovered named tests inside request after-response scripts, so the request and top-level script executed before dynamic registrations could be filtered. This was not the same persistence model as Insomnia's standalone unit-test-suite resources. Later milestones add persistent suite identity/selection, configuration-file discovery, proxy/data-folder flags, and Milestone 218 closes test-only `--keepFile`; the remaining command surface stays open.
 
 ## Milestone 26 — persistent SSE reconnect controls (complete baseline)
 

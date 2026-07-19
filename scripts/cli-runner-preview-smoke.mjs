@@ -527,6 +527,10 @@ paths:
     assert.match(rejectedResource.stderr, message);
   }
   assert.equal(arrivals.length, arrivalsBeforeResourceRefusals, 'resource refusal happened after transport');
+  const rejectedCollectionKeepFile = await runFailure(['run', 'collection', collection.id, '-w', temporary, '--keepFile']);
+  assert.equal(rejectedCollectionKeepFile.code, 1);
+  assert.match(rejectedCollectionKeepFile.stderr, /--keepFile is only available for run test/);
+  assert.equal(arrivals.length, arrivalsBeforeResourceRefusals, 'collection keep-file rejection happened after transport');
   collection.subEnvironments.push({ id: 'preview-collection-secondary', name: 'Secondary collection environment', variables: [] });
   await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
   const arrivalsBeforeEnvironmentRefusals = arrivals.length;

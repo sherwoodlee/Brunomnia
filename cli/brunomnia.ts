@@ -1,7 +1,7 @@
 import { constants as fsConstants } from 'node:fs';
-import { access, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node:os';
+import { arch, cpus, freemem, hostname, platform, release, tmpdir, userInfo } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { rootCertificates } from 'node:tls';
@@ -27,7 +27,7 @@ import { applyDefaultUserAgentHeader } from '../src/lib/userAgent';
 import { applyDefaultAcceptHeader } from '../src/lib/calculatedHeaders';
 import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
-import { orderedTestSuites, orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
+import { generateUnitTestCliArtifact, orderedTestSuites, orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
 import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, selectRunnerResource, type RunnerInsoConfig } from '../src/lib/runnerCli';
 
@@ -877,7 +877,7 @@ const usage = `Brunomnia CLI
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <design-name-or-id-prefix> -w <workspace-or-project> [-s, --skipAnnotations] [--output <file>]
   brunomnia run collection <workspace-or-project> <collection-name-or-id-prefix> [-g, --globals <name-id-prefix-or-file>] [-e, --env <name-or-id-prefix>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--includeFullData <redact|plaintext> --acceptRisk] [-f, --dataFolders <folder...>] [--httpProxy URL] [--httpsProxy URL] [--noProxy HOSTS] [--disableCertValidation] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
-  brunomnia run test <workspace> <suite-name-or-id-prefix|spec-name-or-id-prefix> [-g, --globals <name-id-prefix-or-file>] [-e, --env <name-or-id-prefix>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [-f, --dataFolders <folder...>] [-k, --disableCertValidation] [same transport/trust options]
+  brunomnia run test <workspace> <suite-name-or-id-prefix|spec-name-or-id-prefix> [-g, --globals <name-id-prefix-or-file>] [-e, --env <name-or-id-prefix>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [--keepFile] [-f, --dataFolders <folder...>] [-k, --disableCertValidation] [same transport/trust options]
   brunomnia script <name> [arguments...] [--config <path>]
 
 Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the optional collection, suite, or API-spec identifier positionally. Omission prompts in a terminal; use --ci for deterministic non-interactive fallback. Use --env or --ci when collection sub-environments exist.
@@ -1030,10 +1030,12 @@ const main = async () => {
     const requestedRequests = flagValues('--item', '--request', '-i');
     const environmentOverrides = flagValues('--env-var');
     const requestedDelay = firstFlag('--delay-request', '--delay');
+    const keepTestFile = hasFlag('--keepFile') || hasFlag('--keep-file');
     const requestTimeoutMs = parseRunnerRequestTimeout(firstFlag('--requestTimeout', '--request-timeout'), workspace.preferences.requestTimeoutMs);
     if (subject === 'test' && requestedRequests.length) fail('--item/--request is only available for run collection.');
     if (subject === 'test' && environmentOverrides.length) fail('--env-var is only available for run collection.');
     if (subject === 'test' && requestedDelay !== undefined) fail('--delay-request is only available for run collection.');
+    if (subject === 'collection' && keepTestFile) fail('--keepFile is only available for run test.');
     const selectedRequestIds = resolveRunnerItemRequestIds(collection, requestedRequests);
     const explicitRequestNamePattern = firstFlag('--requestNamePattern', '--request-name-pattern');
     const explicitTestNamePattern = firstFlag('--testNamePattern', '--test-name-pattern');
@@ -1080,6 +1082,12 @@ const main = async () => {
     const proxyPreferences = { enabled: Boolean(httpProxy || httpsProxy), httpProxy, httpsProxy, noProxy };
     const validateCertificates = !hasFlag('--disableCertValidation') && !hasFlag('--disable-cert-validation') && !hasFlag('-k');
     const captureCollectionReport = subject === 'collection' && Boolean(reportOutputPath);
+    let retainedTestFilePath = '';
+    if (subject === 'test' && keepTestFile) {
+      const retainedDirectory = await mkdtemp(join(tmpdir(), 'brunomnia-testing-'));
+      retainedTestFilePath = join(retainedDirectory, `${crypto.randomUUID()}-test.ts`);
+      await writeFile(retainedTestFilePath, generateUnitTestCliArtifact(suites), { mode: 0o600 });
+    }
     const reportExecutions: CliFullExecution[] = [];
     const pendingReportExecutions = new Map<string, Omit<CliFullExecution, 'tests' | 'iteration' | 'attempt'>>();
     const fullExecutionKey = (key: string, attempt: number) => `${key}\n${attempt}`;
@@ -1301,6 +1309,7 @@ const main = async () => {
     } else {
       process.stdout.write(artifact.contents);
     }
+    if (retainedTestFilePath) console.log(`Test files: ${JSON.stringify([retainedTestFilePath])}.`);
     if (report.failed > 0) process.exitCode = 1;
     return;
   }

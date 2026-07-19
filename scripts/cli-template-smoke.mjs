@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -77,13 +77,23 @@ try {
 
   fileRequest.body = originalBody;
   await writeFile(workspacePath, JSON.stringify(workspace));
-  const allowed = await run([...baseArgs, '--allow-template-files', '-f', join(root, 'examples')]);
+  const allowed = await run([...baseArgs, '--allow-template-files', '-f', join(root, 'examples'), '--keepFile']);
   assert.equal(allowed.code, 0, `Granted template smoke exited ${allowed.code}. ${allowed.stderr}\n${allowed.stdout}`);
-  const allowedReport = JSON.parse(allowed.stdout);
+  const retainedMatch = allowed.stdout.match(/\nTest files: (\["[^"]+"\])\.\n?$/);
+  assert.ok(retainedMatch, `Retained test-file path was not reported. ${allowed.stdout}`);
+  const allowedReport = JSON.parse(allowed.stdout.slice(0, retainedMatch.index));
   assert.equal(allowedReport.report.total, 1);
   assert.equal(allowedReport.report.passed, 1);
   assert.equal(allowedReport.report.failed, 0);
   assert.equal(allowedReport.report.matchedTests, 1);
+  const retainedPaths = JSON.parse(retainedMatch[1]);
+  assert.equal(retainedPaths.length, 1);
+  assert.equal((await stat(retainedPaths[0])).mode & 0o777, 0o600);
+  const retainedSource = await readFile(retainedPaths[0], 'utf8');
+  assert.match(retainedSource, /describe\("CLI Template Smoke", \(\) => \{/);
+  assert.match(retainedSource, /insomnia\.setActiveRequestId\("cli-template-main"\);/);
+  assert.match(retainedSource, /expect\(payload\.file\)\.to\.equal\('template-file-ok'\)/);
+  await rm(dirname(retainedPaths[0]), { recursive: true, force: true });
   const scriptFile = await run([
     'bin/brunomnia.cjs', 'run', 'collection', join(root, 'examples', 'cli-workspace.json'), 'CLI Health',
     '--ci', '--item', 'cli-health-request', '--allow-scripts', '--allow-script-files', '-f', join(root, 'examples'), '--reporter', 'json',
@@ -91,7 +101,7 @@ try {
   assert.equal(scriptFile.code, 0, `Granted script-file smoke exited ${scriptFile.code}. ${scriptFile.stderr}\n${scriptFile.stdout}`);
   const scriptFileReport = JSON.parse(scriptFile.stdout);
   assert.deepEqual(scriptFileReport.report.results.map((result) => [result.requestId, result.status, result.passed]), [['cli-health-request', 200, true]]);
-  process.stdout.write('CLI template smoke passed: default denial, required roots, outside-root and symlink rejection, valid template/script file grants, OS/hash/time, response chaining, and cookies.\n');
+  process.stdout.write('CLI template smoke passed: default denial, required roots, outside-root and symlink rejection, valid template/script file grants, retained generated test source, OS/hash/time, response chaining, and cookies.\n');
 } finally {
   server.kill('SIGTERM');
   await rm(temporary, { recursive: true, force: true });
