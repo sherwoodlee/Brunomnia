@@ -18,12 +18,12 @@ const runnerCliValueOptions = new Set([
   '--env', '-e', '--requestNamePattern', '--request-name-pattern', '--testNamePattern', '--test-name-pattern', '-t',
   '--item', '--request', '-i', '--requestTimeout', '--request-timeout', '--env-var', '--iteration-count', '--iterations', '-n',
   '--retries', '--delay-request', '--delay', '--iteration-data', '--data', '-d', '--script-timeout', '--reporter', '-r',
-  '--output', '-o', '--workingDir', '--working-dir', '-w',
+  '--output', '-o', '--workingDir', '--working-dir', '-w', '--config',
 ]);
 
 const runnerCliBooleanOptions = new Set([
   '--bail', '-b', '--allow-scripts', '--allow-script-requests', '--allow-script-files', '--allow-template-files',
-  '--allow-external-vaults', '--help', '-h',
+  '--allow-external-vaults', '--ci', '--verbose', '--printOptions', '--print-options', '--help', '-h',
 ]);
 
 export const runnerCliPositionalArguments = (values: string[]) => {
@@ -38,6 +38,26 @@ export const runnerCliPositionalArguments = (values: string[]) => {
     positionals.push(value);
   }
   return positionals;
+};
+
+export type RunnerInsoConfig = {
+  options: { workingDir?: string; ci?: boolean; verbose?: boolean; printOptions?: boolean };
+  scripts: Record<string, string>;
+};
+
+export const normalizeRunnerInsoConfig = (value: unknown): RunnerInsoConfig => {
+  const document = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const rawOptions = document.options && typeof document.options === 'object' && !Array.isArray(document.options) ? document.options as Record<string, unknown> : {};
+  const rawScripts = document.scripts && typeof document.scripts === 'object' && !Array.isArray(document.scripts) ? document.scripts as Record<string, unknown> : {};
+  const options: RunnerInsoConfig['options'] = {};
+  if (typeof rawOptions.workingDir === 'string' && rawOptions.workingDir.trim()) options.workingDir = rawOptions.workingDir;
+  if (typeof rawOptions.ci === 'boolean') options.ci = rawOptions.ci;
+  if (typeof rawOptions.verbose === 'boolean') options.verbose = rawOptions.verbose;
+  if (typeof rawOptions.printOptions === 'boolean') options.printOptions = rawOptions.printOptions;
+  const scripts = Object.fromEntries(Object.entries(rawScripts)
+    .filter(([name, command]) => name.length <= 200 && typeof command === 'string' && command.length <= 10_000)
+    .slice(0, 100)) as Record<string, string>;
+  return { options, scripts };
 };
 
 const shellSafeToken = /^[A-Za-z0-9_@%+=:,./-]+$/;

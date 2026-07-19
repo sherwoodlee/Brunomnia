@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, loadRunnerIterationData, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
+import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
 
 describe('Runner CLI command preview', () => {
   it('preserves selected request order and every execution control', () => {
@@ -101,6 +101,21 @@ describe('Runner CLI command preview', () => {
   it('extracts legacy and pinned run positionals around options', () => {
     expect(runnerCliPositionalArguments(['workspace.json', 'collection', '--item', 'request', '-b'])).toEqual(['workspace.json', 'collection']);
     expect(runnerCliPositionalArguments(['collection', '-w', '/tmp/project', '--env', 'staging', '--requestTimeout', '5000'])).toEqual(['collection']);
-    expect(runnerCliPositionalArguments(['--workingDir', '/tmp/project', '--allow-scripts', 'suite'])).toEqual(['suite']);
+    expect(runnerCliPositionalArguments(['--config', '/tmp/.insorc', '--ci', '--workingDir', '/tmp/project', '--allow-scripts', 'suite'])).toEqual(['suite']);
+  });
+
+  it('keeps only bounded pinned config options and script strings', () => {
+    expect(normalizeRunnerInsoConfig({
+      options: { workingDir: '/tmp/project', ci: true, verbose: false, printOptions: true, ignored: 'value' },
+      scripts: { test: 'inso run test suite', invalid: 42 },
+      ignored: true,
+    })).toEqual({
+      options: { workingDir: '/tmp/project', ci: true, verbose: false, printOptions: true },
+      scripts: { test: 'inso run test suite' },
+    });
+    expect(normalizeRunnerInsoConfig(undefined)).toEqual({ options: {}, scripts: {} });
+    const bounded = normalizeRunnerInsoConfig({ scripts: Object.fromEntries(Array.from({ length: 102 }, (_, index) => [`script-${index}`, 'inso run test'])) });
+    expect(Object.keys(bounded.scripts)).toHaveLength(100);
+    expect(normalizeRunnerInsoConfig({ scripts: { ['x'.repeat(201)]: 'inso run test', valid: 'x'.repeat(10_001) } }).scripts).toEqual({});
   });
 });

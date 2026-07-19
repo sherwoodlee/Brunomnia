@@ -1,6 +1,6 @@
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node:os';
-import { basename, extname, join } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import vm from 'node:vm';
 import { parse as parseYaml } from 'yaml';
 import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openapi';
@@ -24,7 +24,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
-import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern } from '../src/lib/runnerCli';
+import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, type RunnerInsoConfig } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -77,6 +77,45 @@ const loadWorkspace = async (path: string): Promise<Workspace> => {
   const parsed = input.isDirectory() ? await loadSplitProject(path) : JSON.parse(await loadText(path)) as unknown;
   try { return migrateWorkspace(parsed); }
   catch { return fail('The input is not a Brunomnia workspace.'); }
+};
+
+type LoadedRunnerInsoConfig = RunnerInsoConfig & { filePath?: string };
+const runnerConfigNames = ['.insorc', '.insorc.json', '.insorc.yaml', '.insorc.yml'];
+const readRunnerConfigFile = async (path: string, packageProperty = false): Promise<LoadedRunnerInsoConfig> => {
+  const bytes = await readFile(path);
+  if (bytes.byteLength > 1_000_000) throw new Error(`Inso config '${path}' exceeds the 1 MB limit.`);
+  const parsed = parseYaml(bytes.toString('utf8')) as unknown;
+  const value = packageProperty && parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>).inso
+    : parsed;
+  return { ...normalizeRunnerInsoConfig(value), filePath: resolve(path) };
+};
+const findRunnerConfig = async (start: string): Promise<LoadedRunnerInsoConfig> => {
+  const absoluteStart = resolve(start);
+  const startStat = await stat(absoluteStart).catch(() => undefined);
+  let directory = startStat?.isFile() ? dirname(absoluteStart) : absoluteStart;
+  while (true) {
+    for (const name of runnerConfigNames) {
+      const candidate = join(directory, name);
+      if ((await stat(candidate).catch(() => undefined))?.isFile()) return readRunnerConfigFile(candidate);
+    }
+    const packagePath = join(directory, 'package.json');
+    if ((await stat(packagePath).catch(() => undefined))?.isFile()) {
+      const config = await readRunnerConfigFile(packagePath, true);
+      if (Object.keys(config.options).length || Object.keys(config.scripts).length) return config;
+    }
+    const parent = dirname(directory);
+    if (parent === directory) return { options: {}, scripts: {} };
+    directory = parent;
+  }
+};
+const loadRunnerConfig = async (configPath: string | undefined, searchStart: string | undefined): Promise<LoadedRunnerInsoConfig> => {
+  if (configPath) {
+    const absolutePath = resolve(configPath);
+    if (!(await stat(absolutePath).catch(() => undefined))?.isFile()) throw new Error(`Could not find config file at ${configPath}.`);
+    return readRunnerConfigFile(absolutePath, basename(absolutePath) === 'package.json');
+  }
+  return findRunnerConfig(searchStart ?? process.cwd());
 };
 
 const expectApi = createScriptExpect();
@@ -561,6 +600,7 @@ const usage = `Brunomnia CLI
   brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [--requestTimeout MS] [same options except --item/--env-var/--delay-request]
 
 Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the collection, suite, or API-spec identifier positionally.
+Config: --config <path> or discovered .insorc/.json/.yaml/.yml/package.json supports workingDir, ci, verbose, printOptions, and bounded script definitions.
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
 `;
@@ -601,9 +641,18 @@ const main = async () => {
 
   if (command === 'run' && (subject === 'collection' || subject === 'test')) {
     const positionals = runnerCliPositionalArguments(args.slice(2));
-    const workingDir = firstFlag('--workingDir', '--working-dir', '-w');
+    const cliWorkingDir = firstFlag('--workingDir', '--working-dir', '-w');
+    const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
+    const workingDir = cliWorkingDir ?? config.options.workingDir;
+    const ci = hasFlag('--ci') || config.options.ci === true;
+    const verbose = hasFlag('--verbose') || config.options.verbose === true;
+    const printOptions = hasFlag('--printOptions') || hasFlag('--print-options') || config.options.printOptions === true;
+    if (verbose && config.filePath) console.error(`Found config file at ${config.filePath}.`);
+    if (printOptions) console.error('Loaded options', JSON.stringify({ workingDir: workingDir ?? '', ci, verbose, printOptions, config: config.filePath ?? '' }));
     const workspace = await loadWorkspace(workingDir ?? positionals[0] ?? fail('Provide a workspace file or use --workingDir.'));
-    const identifier = positionals[workingDir ? 0 : 1] ?? fail(subject === 'test' ? 'Provide a test suite or API specification name or ID.' : 'Provide a collection name or ID.');
+    const identifier = positionals[workingDir ? 0 : 1] ?? (ci
+      ? subject === 'test' ? workspace.testSuites[0]?.id : workspace.collections[0]?.id
+      : undefined) ?? fail(subject === 'test' ? 'Provide a test suite or API specification name or ID.' : 'Provide a collection name or ID.');
     const suites = subject === 'test' ? selectUnitTestSuites(workspace, identifier) : [];
     if (subject === 'test' && !suites.length) fail(`No test suites were found for '${identifier}'.`);
     const collection = subject === 'test'

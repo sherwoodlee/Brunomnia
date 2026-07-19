@@ -96,9 +96,10 @@ try {
   }));
   await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
   await writeFile(join(temporary, 'environments', 'preview.yaml'), stringify(environment));
+  await writeFile(join(temporary, '.insorc'), stringify({ options: { workingDir: temporary, ci: true, verbose: true, printOptions: false }, scripts: { preview: `inso run collection ${collection.id}` } }));
 
   const output = await run([
-    'run', 'collection', collection.id, '--workingDir', temporary,
+    'run', 'collection', collection.id, '--config', join(temporary, '.insorc'),
     '--env', environment.id,
     '--item', 'folder-selected',
     '--item', 'request-first',
@@ -165,7 +166,23 @@ try {
   assert.equal(timeoutFailure.code, 1);
   const timeoutArtifact = JSON.parse(timeoutFailure.stdout);
   assert.deepEqual(timeoutArtifact.report.results.map((result) => [result.requestId, result.status, result.passed]), [['request-slow', 0, false]]);
-  console.log('CLI runner preview smoke passed: working directory, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  const ciFallback = JSON.parse(await run([
+    'run', 'collection', '--config', join(temporary, '.insorc'), '--item', 'request-first',
+    '--env-var', 'row=ci', '--env-var', 'region=ci', '--reporter', 'json',
+  ]));
+  assert.deepEqual(ciFallback.report.results.map((result) => [result.requestId, result.status]), [['request-first', 200]]);
+  const discovered = await runFailure([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-first', '--printOptions',
+    '--env-var', 'row=discovery', '--env-var', 'region=discovery', '--reporter', 'json',
+  ]);
+  assert.equal(discovered.code, 0);
+  assert.match(discovered.stderr, /Found config file at .*\.insorc/);
+  assert.match(discovered.stderr, /Loaded options.*"printOptions":true/);
+  assert.deepEqual(JSON.parse(discovered.stdout).report.results.map((result) => result.requestId), ['request-first']);
+  const missingConfig = await runFailure(['run', 'collection', collection.id, '--config', join(temporary, 'missing.insorc')]);
+  assert.equal(missingConfig.code, 1);
+  assert.match(missingConfig.stderr, /Could not find config file/);
+  console.log('CLI runner preview smoke passed: config, CI fallback, working directory, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });
