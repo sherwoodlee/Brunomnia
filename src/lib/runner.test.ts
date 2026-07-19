@@ -310,11 +310,13 @@ describe('collection runner', () => {
 
   it('publishes pending, running, and completed live-item evidence', async () => {
     const request = createBlankRequest('live');
+    request.url = 'https://{{ host }}/orders?token={{ token }}';
     const snapshots: string[][] = [];
+    const liveUrls: string[] = [];
     const report = await runCollection(
       { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
-      { id: 'env', name: 'Env', variables: [] },
-      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], sourceName: 'Collection / Folder', folderId: 'folder', onLiveItems: (items) => snapshots.push(items.map((item) => item.status)) },
+      { id: 'env', name: 'Env', variables: [{ id: 'host', name: 'host', value: 'api.example.test', enabled: true }, { id: 'token', name: 'token', value: 'private', enabled: true }] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], sourceName: 'Collection / Folder', folderId: 'folder', onLiveItems: (items) => { snapshots.push(items.map((item) => item.status)); const running = items.find((item) => item.status === 'running'); if (running) liveUrls.push(running.requestUrl); } },
       async (_activeRequest, _variables, execution) => {
         expect(execution).toMatchObject({ key: buildRunnerItemKey(1, 0, request.id), attempt: 1 });
         expect(execution.signal.aborted).toBe(false);
@@ -325,6 +327,9 @@ describe('collection runner', () => {
 
     expect(snapshots[0]).toEqual(['pending']);
     expect(snapshots).toContainEqual(['running']);
+    expect(liveUrls).toContain('https://api.example.test/orders?token=%5Bredacted%5D');
+    expect(liveUrls.join('\n')).not.toContain('{{');
+    expect(liveUrls.join('\n')).not.toContain('private');
     expect(snapshots.at(-1)).toEqual(['completed']);
     expect(report).toMatchObject({ sourceName: 'Collection / Folder', folderId: 'folder', planned: 1, completed: 1, skipped: 0, canceled: 0 });
     expect(report.liveItems?.[0]).toMatchObject({ status: 'completed', statusCode: 201, statusMessage: 'Created', responseTime: 12, responseSize: 2, requestUrl: 'https://example.test/rendered', tests: [{ name: 'created', passed: true }] });

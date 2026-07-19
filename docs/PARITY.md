@@ -1046,6 +1046,14 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Horizontal/vertical grid integration, narrow-screen fallback, and account-free documentation: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx), [`src/styles.css`](../src/styles.css), and [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
 - Exact verification record: [`docs/QA_MILESTONE_190.md`](QA_MILESTONE_190.md)
 
+## Milestone 191 acceptance evidence
+
+- Pinned `RenderedText` live-card URL behavior and real slow-request smoke assertion audit: [`docs/QA_MILESTONE_191.md`](QA_MILESTONE_191.md)
+- Pre-transport configured URL rendering, post-script refresh, effective-response replacement, query-secret redaction, and rebuilt shared CLI core: [`src/lib/runner.ts`](../src/lib/runner.ts) and [`bin/brunomnia.cjs`](../bin/brunomnia.cjs)
+- Focused pending/running/completed URL regression with templated environment values and redacted token evidence: [`src/lib/runner.test.ts`](../src/lib/runner.test.ts)
+- Updated account-free live Runner documentation: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
+- Exact verification record: [`docs/QA_MILESTONE_191.md`](QA_MILESTONE_191.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).

@@ -493,7 +493,12 @@ export const runCollection = async (
             break;
           }
 
-          updateLiveItem(key, { status: 'running', attempt, errorMessage: undefined });
+          const configured = applyCollectionConfiguration(collection, originalRequest, environment);
+          let request = structuredClone(configured.request);
+          let liveRequestUrl = request.url;
+          try { liveRequestUrl = buildRequestUrl(request, environmentMap(configured.environment)); } catch { /* retain the editable URL */ }
+          liveRequestUrl = redactSensitiveQuery(liveRequestUrl);
+          updateLiveItem(key, { status: 'running', attempt, requestName: request.name, requestUrl: liveRequestUrl, errorMessage: undefined });
           if (delayMs > 0) {
             try {
               await wait(delayMs, controller.signal);
@@ -505,8 +510,6 @@ export const runCollection = async (
               break;
             }
           }
-          const configured = applyCollectionConfiguration(collection, originalRequest, environment);
-          let request = structuredClone(configured.request);
           let response: HttpResponse | undefined;
           let tests: RunnerItemResult['tests'] = [];
           let error: string | undefined;
@@ -555,13 +558,15 @@ export const runCollection = async (
               Object.assign(requestVariables, folderVariables.get(folder.id) ?? {});
             });
             Object.assign(requestVariables, iterationData, localVariables);
+            try { liveRequestUrl = redactSensitiveQuery(buildRequestUrl(request, requestVariables)); } catch { liveRequestUrl = redactSensitiveQuery(request.url); }
+            updateLiveItem(key, { requestName: request.name, requestUrl: liveRequestUrl });
             itemNextRequestIdOrName = preRequest.execution?.nextRequestIdOrName ?? '';
             if (preRequest.execution?.skipRequest) {
               updateLiveItem(key, {
                 status: 'skipped',
                 attempt,
                 requestName: request.name,
-                requestUrl: redactSensitiveQuery(request.url),
+                requestUrl: liveRequestUrl,
                 errorMessage: 'Skipped by pre-request script.',
                 tests: preRequest.tests,
               });
@@ -608,7 +613,7 @@ export const runCollection = async (
                 status: control,
                 attempt,
                 requestName: request.name,
-                requestUrl: redactSensitiveQuery(response?.requestUrl ?? request.url),
+                requestUrl: response?.requestUrl ? redactSensitiveQuery(response.requestUrl) : liveRequestUrl,
                 statusCode: response?.status,
                 statusMessage: response?.statusText,
                 responseTime: response?.durationMs ?? Date.now() - started,
@@ -654,7 +659,7 @@ export const runCollection = async (
             status: exhausted ? liveStatus : 'running',
             attempt,
             requestName: request.name,
-            requestUrl: redactSensitiveQuery(response?.requestUrl ?? request.url),
+            requestUrl: response?.requestUrl ? redactSensitiveQuery(response.requestUrl) : liveRequestUrl,
             statusCode: response?.status,
             statusMessage: response?.statusText,
             responseTime: result.durationMs,
