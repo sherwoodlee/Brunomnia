@@ -6,7 +6,7 @@ import https from 'node:https';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { stringify } from 'yaml';
+import { parse, stringify } from 'yaml';
 
 const run = (args) => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [join(process.cwd(), 'bin', 'brunomnia.cjs'), ...args], { cwd: process.cwd() });
@@ -161,12 +161,29 @@ try {
     ],
   };
   const selectedGlobals = { id: 'preview-selected-globals', name: 'Selected globals', variables: [{ id: 'preview-global-selected-row', name: 'globalChoice', value: 'selected', enabled: true }] };
+  const apiDesign = {
+    id: 'preview-api-design',
+    name: 'Preview API design',
+    contents: `openapi: 3.1.0
+info: { title: Preview API, version: 1.0.0 }
+x-kong-name: hidden-root
+x-visible: retained-root
+paths:
+  /health:
+    get:
+      x-kong-plugin: hidden-operation
+      x-visible: retained-operation
+      responses: { '200': { description: ok } }
+`,
+    ruleset: '',
+  };
   const globalFile = join(temporary, 'global-environment.yaml');
   const brunomniaGlobalFile = join(temporary, 'brunomnia-global-environment.yaml');
   const v5GlobalFile = join(temporary, 'v5-global-environment.yaml');
   await mkdir(join(temporary, '.brunomnia'), { recursive: true });
   await mkdir(join(temporary, 'collections'));
   await mkdir(join(temporary, 'environments'));
+  await mkdir(join(temporary, 'designs'));
   const metadataPath = join(temporary, '.brunomnia', 'project.yaml');
   const metadata = {
     format: 'brunomnia', version: 37, name: 'CLI preview project', activeRequestId: 'request-first', activeEnvironmentId: environment.id,
@@ -175,6 +192,7 @@ try {
   await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
   await writeFile(join(temporary, 'environments', 'preview.yaml'), stringify(environment));
   await writeFile(join(temporary, 'environments', 'selected.yaml'), stringify(selectedGlobals));
+  await writeFile(join(temporary, 'designs', 'preview.yaml'), stringify(apiDesign));
   await writeFile(globalFile, stringify({
     _type: 'export', __export_format: 4,
     resources: [
@@ -194,6 +212,17 @@ try {
       invalid: 'echo unsafe',
     },
   }));
+
+  const legacyExport = await run(['export', 'spec', temporary, apiDesign.name]);
+  assert.match(legacyExport, /x-kong-name: hidden-root/);
+  const exportedPath = join(temporary, 'exports', 'nested', 'clean.yaml');
+  const exportOutput = await run(['export', 'spec', apiDesign.id, '-w', temporary, '-s', '-o', 'exports/nested/clean.yaml']);
+  assert.equal(exportOutput.trim(), `Exported ${exportedPath}`);
+  const cleanExport = parse(await readFile(exportedPath, 'utf8'));
+  assert.equal(cleanExport['x-kong-name'], undefined);
+  assert.equal(cleanExport['x-visible'], 'retained-root');
+  assert.equal(cleanExport.paths['/health'].get['x-kong-plugin'], undefined);
+  assert.equal(cleanExport.paths['/health'].get['x-visible'], 'retained-operation');
 
   const output = await run([
     'run', 'collection', collection.id, '--config', join(temporary, '.insorc'),
@@ -463,7 +492,7 @@ try {
   const missingScript = await runFailure(['script', '--config', join(temporary, '.insorc'), 'missing']);
   assert.equal(missingScript.code, 1);
   assert.match(missingScript.stderr, /Available scripts: preview, invalid/);
-  console.log('CLI runner preview smoke passed: pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  console.log('CLI runner preview smoke passed: pinned and legacy API-spec export with annotation stripping, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await close(secureServer).catch(() => undefined);

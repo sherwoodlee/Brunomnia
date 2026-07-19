@@ -274,3 +274,21 @@ export const formatOpenApi = (contents: string): string => {
   const document = parse(contents);
   return stringify(document, { lineWidth: 100 });
 };
+
+const withoutKongAnnotations = (value: unknown, ancestors = new WeakSet<object>(), depth = 0): unknown => {
+  if (!value || typeof value !== 'object') return value;
+  if (depth > 100) throw new Error('Specification annotation stripping exceeds 100 nested levels.');
+  if (ancestors.has(value)) throw new Error('Specification annotation stripping does not support cyclic YAML aliases.');
+  ancestors.add(value);
+  const output = Array.isArray(value)
+    ? value.map((child) => withoutKongAnnotations(child, ancestors, depth + 1))
+    : Object.fromEntries(Object.entries(value)
+      .filter(([name]) => !name.startsWith('x-kong-'))
+      .map(([name, child]) => [name, withoutKongAnnotations(child, ancestors, depth + 1)]));
+  ancestors.delete(value);
+  return output;
+};
+
+export const exportOpenApiSpecification = (contents: string, skipAnnotations = false) => skipAnnotations
+  ? stringify(withoutKongAnnotations(parse(contents)))
+  : contents;

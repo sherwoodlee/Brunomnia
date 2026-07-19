@@ -24,7 +24,7 @@ All of these exited successfully:
 node bin/brunomnia.cjs --help
 node bin/brunomnia.cjs lint spec examples/orders-api.yaml
 node bin/brunomnia.cjs generate collection examples/orders-api.yaml --output /tmp/brunomnia-generated.json
-node bin/brunomnia.cjs export spec examples/cli-workspace.json "CLI API" --output /tmp/brunomnia-exported.yaml
+node bin/brunomnia.cjs export spec "CLI API" -w examples/cli-workspace.json --output /tmp/brunomnia-exported.yaml
 node bin/brunomnia.cjs run collection examples/cli-workspace.json "CLI Health" --iterations 2 --retries 1
 node bin/brunomnia.cjs run test examples/cli-workspace.json cli-health
 ```

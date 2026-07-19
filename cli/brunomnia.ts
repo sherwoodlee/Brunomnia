@@ -7,7 +7,7 @@ import { rootCertificates } from 'node:tls';
 import vm from 'node:vm';
 import { Agent, EnvHttpProxyAgent, fetch as undiciFetch } from 'undici';
 import { parse as parseYaml, parseAllDocuments } from 'yaml';
-import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openapi';
+import { analyzeOpenApi, exportOpenApiSpecification, generateCollectionFromOpenApi } from '../src/lib/openapi';
 import { createBlankRequest } from '../src/data/seed';
 import { buildHeaders, buildRequestUrl, environmentMap } from '../src/lib/request';
 import { renderApiRequest } from '../src/lib/requestRender';
@@ -834,7 +834,7 @@ const usage = `Brunomnia CLI
 
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
-  brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
+  brunomnia export spec <design-name-or-id> -w <workspace-or-project> [-s, --skipAnnotations] [--output <file>]
   brunomnia run collection <workspace-or-project> <collection-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--includeFullData <redact|plaintext> --acceptRisk] [-f, --dataFolders <folder...>] [--httpProxy URL] [--httpsProxy URL] [--noProxy HOSTS] [--disableCertValidation] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
   brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [-f, --dataFolders <folder...>] [-k, --disableCertValidation] [same transport/trust options]
   brunomnia script <name> [arguments...] [--config <path>]
@@ -870,12 +870,26 @@ const main = async () => {
   }
 
   if (command === 'export' && subject === 'spec') {
-    const workspace = await loadWorkspace(args[2] ?? fail('Provide a workspace file.'));
-    const identifier = args[3] ?? fail('Provide a design name or ID.');
+    const positionals = runnerCliPositionalArguments(args.slice(2));
+    const cliWorkingDir = firstFlag('--workingDir', '--working-dir', '-w');
+    const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
+    const workingDir = cliWorkingDir ?? config.options.workingDir;
+    const workspace = await loadWorkspace(workingDir ?? positionals[0] ?? fail('Provide a workspace file or use --workingDir.'));
+    const identifier = positionals[workingDir ? 0 : 1] ?? fail('Provide a design name or ID.');
     const design = workspace.apiDesigns.find((candidate) => candidate.id === identifier || candidate.name === identifier) ?? fail(`Design '${identifier}' was not found.`);
-    const output = flag('--output');
-    if (output) { await writeFile(output, design.contents); console.log(`Exported ${output}`); }
-    else console.log(design.contents);
+    const contents = exportOpenApiSpecification(design.contents, hasFlag('--skipAnnotations') || hasFlag('--skip-annotations') || hasFlag('-s'));
+    const output = firstFlag('--output', '-o');
+    if (output) {
+      const outputBase = workingDir
+        ? (await stat(workingDir)).isDirectory() ? resolve(workingDir) : dirname(resolve(workingDir))
+        : process.cwd();
+      const outputPath = resolve(outputBase, output);
+      await mkdir(dirname(outputPath), { recursive: true });
+      await writeFile(outputPath, contents);
+      console.log(`Exported ${outputPath}`);
+    } else {
+      process.stdout.write(contents.endsWith('\n') ? contents : `${contents}\n`);
+    }
     return;
   }
 

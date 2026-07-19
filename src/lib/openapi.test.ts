@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeOpenApi, generateCollectionFromOpenApi } from './openapi';
+import { parse } from 'yaml';
+import { analyzeOpenApi, exportOpenApiSpecification, generateCollectionFromOpenApi } from './openapi';
 
 const source = `openapi: 3.1.0
 info: { title: Pet API, version: 1.0.0 }
@@ -48,5 +49,16 @@ describe('OpenAPI design tools', () => {
     const unsupported = analyzeOpenApi(source, 'extends: spectral:oas\nrules:\n  custom: { given: $, then: { function: customJavaScript } }');
     expect(unsupported.issues.some((issue) => issue.path === '$ruleset.extends')).toBe(true);
     expect(unsupported.issues.some((issue) => issue.message.includes("customJavaScript"))).toBe(true);
+  });
+
+  it('removes nested Kong annotations only when explicitly requested', () => {
+    const annotated = `${source}x-kong-name: pets\nx-visible: retained\ncomponents:\n  schemas:\n    Pet:\n      type: object\n      x-kong-plugin: hidden\n      properties:\n        id: { type: string, x-kong-field: hidden, x-visible: retained }\n`;
+    expect(exportOpenApiSpecification(annotated)).toBe(annotated);
+    const exported = parse(exportOpenApiSpecification(annotated, true));
+    expect(exported['x-kong-name']).toBeUndefined();
+    expect(exported['x-visible']).toBe('retained');
+    expect(exported.components.schemas.Pet['x-kong-plugin']).toBeUndefined();
+    expect(exported.components.schemas.Pet.properties.id).toEqual({ type: 'string', 'x-visible': 'retained' });
+    expect(() => exportOpenApiSpecification('root: &root\n  self: *root\n', true)).toThrow(/cyclic YAML aliases/);
   });
 });
