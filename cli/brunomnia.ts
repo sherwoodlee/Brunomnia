@@ -24,7 +24,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
-import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerRequestIdsMatchingPattern } from '../src/lib/runnerCli';
+import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -560,6 +560,8 @@ const usage = `Brunomnia CLI
   brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
   brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [--requestTimeout MS] [same options except --item/--env-var/--delay-request]
 
+Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the collection, suite, or API-spec identifier positionally.
+
 Reporters: dot, list, min, progress, spec, tap, json, junit
 `;
 
@@ -598,8 +600,10 @@ const main = async () => {
   }
 
   if (command === 'run' && (subject === 'collection' || subject === 'test')) {
-    const workspace = await loadWorkspace(args[2] ?? fail('Provide a workspace file.'));
-    const identifier = args[3] ?? fail(subject === 'test' ? 'Provide a test suite or API specification name or ID.' : 'Provide a collection name or ID.');
+    const positionals = runnerCliPositionalArguments(args.slice(2));
+    const workingDir = firstFlag('--workingDir', '--working-dir', '-w');
+    const workspace = await loadWorkspace(workingDir ?? positionals[0] ?? fail('Provide a workspace file or use --workingDir.'));
+    const identifier = positionals[workingDir ? 0 : 1] ?? fail(subject === 'test' ? 'Provide a test suite or API specification name or ID.' : 'Provide a collection name or ID.');
     const suites = subject === 'test' ? selectUnitTestSuites(workspace, identifier) : [];
     if (subject === 'test' && !suites.length) fail(`No test suites were found for '${identifier}'.`);
     const collection = subject === 'test'

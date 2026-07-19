@@ -65,11 +65,13 @@ The exact selected bytes remain only in the open Runner document's bounded in-me
 
 ## Run via CLI
 
-Use **Run via CLI** in a collection or folder Runner to preview a POSIX-shell command for the current environment, selected request order, iterations, retries, pre-send delay, data file, and bail setting. Values are shell-quoted rather than concatenated into executable syntax. The Tauri app resolves its saved device-local project JSON automatically; connected folder and Git project directories are also valid CLI inputs because the CLI reads their `.brunomnia/project.yaml` metadata and managed split YAML resources.
+Use **Run via CLI** in a collection or folder Runner to preview a POSIX-shell command for the current environment, selected request order, iterations, retries, pre-send delay, data file, and bail setting. Values are shell-quoted rather than concatenated into executable syntax. Generated commands use pinned `--workingDir <path>` input shape. The Tauri app resolves its saved device-local project JSON automatically; connected folder and Git project directories are also valid CLI inputs because the CLI reads their `.brunomnia/project.yaml` metadata and managed split YAML resources.
 
 Browser-local projects have no filesystem path, so export all workspace data as Brunomnia JSON and enter the downloaded path. Browser file inputs likewise do not reveal a durable data-file path; when the Runner contains iteration data, save the decoded data as UTF-8 JSON/CSV and enter its path before copying. The copy action stays disabled while either required path is unresolved.
 
 Repeated pinned `--item`/`-i` flags preserve the previewed order and omit unchecked requests. `--delay-request`/`--delay` uses the same bounded 0–30,000 ms delay before every desktop Runner attempt; `--iteration-count`/`-n`, `--iteration-data`/`-d`, `--bail`/`-b`, and `--env`/`-e` match pinned spellings. The earlier `--request`, `--iterations`, and `--data` forms remain compatible aliases. Duplicate request names are rejected as ambiguous, so generated commands use stable request IDs. CLI script, file, script-network, template-file, and external-vault authorities remain separate explicit `--allow-*` grants and are never added silently by the preview.
+
+Both `-w` and `--workingDir` may appear before or after the run identifier, matching pinned global-option behavior; `--working-dir` is an additional alias. The legacy Brunomnia form with workspace path followed by identifier remains accepted for existing automation.
 
 For direct CLI use, an `--item` value may also be a folder ID. The folder recursively expands all descendant requests in the collection's mixed resource-tree order; mixed folder/request items retain argument order, and duplicates execute once. Unknown items and folders with no matching requests fail before transport instead of producing an empty successful run.
 

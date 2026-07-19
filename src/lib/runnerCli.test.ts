@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, loadRunnerIterationData, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
+import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, loadRunnerIterationData, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
 
 describe('Runner CLI command preview', () => {
   it('preserves selected request order and every execution control', () => {
@@ -14,7 +14,7 @@ describe('Runner CLI command preview', () => {
       delayMs: 125,
       dataPath: '/tmp/iteration data.csv',
       bail: true,
-    })).toBe("brunomnia run collection '/tmp/My Projects/orders' collection-orders --env environment-local --item request-third --item request-first --iteration-count 4 --retries 2 --delay-request 125 --iteration-data '/tmp/iteration data.csv' --bail");
+    })).toBe("brunomnia run collection collection-orders --workingDir '/tmp/My Projects/orders' --env environment-local --item request-third --item request-first --iteration-count 4 --retries 2 --delay-request 125 --iteration-data '/tmp/iteration data.csv' --bail");
   });
 
   it('omits default controls and bounds numeric input like the runner', () => {
@@ -27,7 +27,7 @@ describe('Runner CLI command preview', () => {
       retries: -8,
       delayMs: 100_000,
       bail: false,
-    })).toBe('brunomnia run collection workspace.json collection --env environment --item request --delay-request 30000');
+    })).toBe('brunomnia run collection collection --workingDir workspace.json --env environment --item request --delay-request 30000');
   });
 
   it('quotes empty, whitespace, apostrophe, and shell-control values', () => {
@@ -96,5 +96,11 @@ describe('Runner CLI command preview', () => {
     await expect(loadRunnerIterationData('https://example.test/missing.csv', async () => '', async () => new Response('missing', { status: 404 }), 100)).rejects.toThrow(/HTTP 404/);
     await expect(loadRunnerIterationData('https://example.test/large.csv', async () => '', async () => new Response('123456789'), 8)).rejects.toThrow(/5 MB/);
     await expect(loadRunnerIterationData('/tmp/large.csv', async () => '123456789', fetch, 8)).rejects.toThrow(/5 MB/);
+  });
+
+  it('extracts legacy and pinned run positionals around options', () => {
+    expect(runnerCliPositionalArguments(['workspace.json', 'collection', '--item', 'request', '-b'])).toEqual(['workspace.json', 'collection']);
+    expect(runnerCliPositionalArguments(['collection', '-w', '/tmp/project', '--env', 'staging', '--requestTimeout', '5000'])).toEqual(['collection']);
+    expect(runnerCliPositionalArguments(['--workingDir', '/tmp/project', '--allow-scripts', 'suite'])).toEqual(['suite']);
   });
 });

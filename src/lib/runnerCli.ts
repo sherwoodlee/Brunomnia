@@ -14,6 +14,32 @@ export type RunnerCliCommandOptions = {
   bail: boolean;
 };
 
+const runnerCliValueOptions = new Set([
+  '--env', '-e', '--requestNamePattern', '--request-name-pattern', '--testNamePattern', '--test-name-pattern', '-t',
+  '--item', '--request', '-i', '--requestTimeout', '--request-timeout', '--env-var', '--iteration-count', '--iterations', '-n',
+  '--retries', '--delay-request', '--delay', '--iteration-data', '--data', '-d', '--script-timeout', '--reporter', '-r',
+  '--output', '-o', '--workingDir', '--working-dir', '-w',
+]);
+
+const runnerCliBooleanOptions = new Set([
+  '--bail', '-b', '--allow-scripts', '--allow-script-requests', '--allow-script-files', '--allow-template-files',
+  '--allow-external-vaults', '--help', '-h',
+]);
+
+export const runnerCliPositionalArguments = (values: string[]) => {
+  const positionals: string[] = [];
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+    if (runnerCliBooleanOptions.has(value)) continue;
+    if (runnerCliValueOptions.has(value)) {
+      index += 1;
+      continue;
+    }
+    positionals.push(value);
+  }
+  return positionals;
+};
+
 const shellSafeToken = /^[A-Za-z0-9_@%+=:,./-]+$/;
 
 export const quotePosixShellArgument = (value: string) => {
@@ -136,8 +162,9 @@ export const buildRunnerCliCommand = (options: RunnerCliCommandOptions) => {
     'brunomnia',
     'run',
     'collection',
-    options.workspacePath,
     options.collectionId,
+    '--workingDir',
+    options.workspacePath,
     '--env',
     options.environmentId,
   ];

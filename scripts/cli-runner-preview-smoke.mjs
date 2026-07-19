@@ -98,7 +98,7 @@ try {
   await writeFile(join(temporary, 'environments', 'preview.yaml'), stringify(environment));
 
   const output = await run([
-    'run', 'collection', temporary, collection.id,
+    'run', 'collection', collection.id, '--workingDir', temporary,
     '--env', environment.id,
     '--item', 'folder-selected',
     '--item', 'request-first',
@@ -137,14 +137,14 @@ try {
   const rejectedPattern = await runFailure(['run', 'test', join(process.cwd(), 'examples', 'cli-workspace.json'), 'CLI Health', '--requestNamePattern', '^First$']);
   assert.equal(rejectedPattern.code, 1);
   assert.match(rejectedPattern.stderr, /--requestNamePattern is only available for run collection/);
-  const rejectedEmptyPlan = await runFailure(['run', 'collection', temporary, collection.id, '--requestNamePattern', '^Missing$']);
+  const rejectedEmptyPlan = await runFailure(['run', 'collection', collection.id, '-w', temporary, '--requestNamePattern', '^Missing$']);
   assert.equal(rejectedEmptyPlan.code, 1);
   assert.match(rejectedEmptyPlan.stderr, /No requests identified; nothing to run/);
-  const rejectedEmptyFolder = await runFailure(['run', 'collection', temporary, collection.id, '--item', 'folder-empty']);
+  const rejectedEmptyFolder = await runFailure(['run', 'collection', collection.id, '-w', temporary, '--item', 'folder-empty']);
   assert.equal(rejectedEmptyFolder.code, 1);
   assert.match(rejectedEmptyFolder.stderr, /No requests identified; nothing to run/);
   const bailed = await runFailure([
-    'run', 'collection', temporary, collection.id,
+    'run', 'collection', collection.id, '-w', temporary,
     '--item', 'request-second', '--item', 'request-first',
     '--env-var', 'row=bail', '--env-var', 'region=bail',
     '-b', '--reporter', 'json',
@@ -154,18 +154,18 @@ try {
   assert.equal(bailedArtifact.report.bailed, true);
   assert.deepEqual(bailedArtifact.report.results.map((result) => result.requestId), ['request-second']);
   const timeoutSuccess = JSON.parse(await run([
-    'run', 'collection', temporary, collection.id, '--item', 'request-slow',
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-slow',
     '--env-var', 'row=timeout', '--env-var', 'region=timeout', '--requestTimeout', '500', '--reporter', 'json',
   ]));
   assert.deepEqual(timeoutSuccess.report.results.map((result) => [result.requestId, result.status, result.passed]), [['request-slow', 200, true]]);
   const timeoutFailure = await runFailure([
-    'run', 'collection', temporary, collection.id, '--item', 'request-slow',
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-slow',
     '--env-var', 'row=timeout', '--env-var', 'region=timeout', '--requestTimeout', '20', '--reporter', 'json',
   ]);
   assert.equal(timeoutFailure.code, 1);
   const timeoutArtifact = JSON.parse(timeoutFailure.stdout);
   assert.deepEqual(timeoutArtifact.report.results.map((result) => [result.requestId, result.status, result.passed]), [['request-slow', 0, false]]);
-  console.log('CLI runner preview smoke passed: split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  console.log('CLI runner preview smoke passed: working directory, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });
