@@ -49,3 +49,13 @@ cosign verify ghcr.io/sherwoodlee/brunomnia-cli@sha256:<digest> \
 ```
 
 Use the immutable digest from the workflow or registry rather than relying on a mutable tag in production automation.
+
+## First verified publication
+
+Main commit `2654a4c442f153034255a677be298e277bec9cba` completed both remote jobs in [Actions run 29707093949](https://github.com/sherwoodlee/Brunomnia/actions/runs/29707093949). The published `edge` tag resolved to:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:5c0253be23b1b6a8ed97f85108fdc15db520d59e6cea036cddaddf1187bfc517
+```
+
+Independent `cosign verify` passed for issuer `https://token.actions.githubusercontent.com`, subject `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, the exact workflow commit, trusted certificate authorities, and the Rekor transparency-log entry. The mutable `edge` tag will advance; this digest remains the permanent M223 publication evidence.

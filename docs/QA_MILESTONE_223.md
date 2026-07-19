@@ -36,6 +36,8 @@ No Rust/native behavior changed. Milestone 220 remains the latest full native te
 
 The keyless publication job can run only after this workflow exists on remote `main`. M223 therefore accepts the locally verified release definition but keeps first remote publication/signature observation explicit. The Headless CLI and packaging rows remain `Baseline` until that post-push evidence and their unrelated remaining gaps are addressed.
 
+Milestone 224 records the successful post-push jobs, published digest, and independent Cosign verification that close this remote gate.
+
 ## Acceptance boundary
 
 The image does not silently grant scripts, plugins, external vaults, files, certificates, proxies, or network access; existing CLI flags and container runtime policy still control those authorities. M223 does not add executable config, user plugin tags, desktop-vault state, stronger process isolation, desktop signing/notarization, or desktop installers. Exactly 19 parity rows remain incomplete, so Brunomnia is not feature-complete.
