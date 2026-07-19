@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { RunnerItemResult, Workspace } from '../types';
-import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, discardRunnerDraftEntries, discardRunnerReport, parseRunnerData, resolveRunnerTarget, runCollection, runnerDraftKey, runnerReportsForTarget, validateTestNamePattern } from './runner';
+import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, discardRunnerDraftEntries, discardRunnerReport, parseRunnerData, parseRunnerDataFile, resolveRunnerTarget, runCollection, runnerDraftKey, runnerReportsForTarget, validateTestNamePattern } from './runner';
 import { formatResponseTimeline } from './timeline';
 
 describe('collection runner', () => {
@@ -19,7 +19,7 @@ describe('collection runner', () => {
   });
 
   it('keys Runner drafts by workspace and clears only closed documents', () => {
-    const draft = { collectionId: 'collection', environmentId: 'environment', iterations: 2, retries: 1, bail: true, keepLog: true, delayMs: 25, streamWindowMs: 500, data: '[{}]', requestPlan: [{ id: 'request', enabled: false }] };
+    const draft = { collectionId: 'collection', environmentId: 'environment', iterations: 2, retries: 1, bail: true, keepLog: true, delayMs: 25, streamWindowMs: 500, data: '[{}]', dataFileName: 'iterations.json', requestPlan: [{ id: 'request', enabled: false }] };
     const drafts = {
       [runnerDraftKey('workspace-a', 'runner_one')]: draft,
       [runnerDraftKey('workspace-a', 'runner_two')]: { ...draft, iterations: 3 },
@@ -43,8 +43,17 @@ describe('collection runner', () => {
     expect(discardRunnerReport(reports, 'missing')).toBe(reports);
   });
   it('parses JSON and quoted CSV iteration data', () => {
-    expect(parseRunnerData('[{"id":1}]')).toEqual([{ id: '1' }]);
+    expect(parseRunnerData('[{"id":1,"nested":{"ok":true}}]')).toEqual([{ id: '1', nested: '{"ok":true}' }]);
     expect(parseRunnerData('id,name\n1,"Ada, L."')).toEqual([{ id: '1', name: 'Ada, L.' }]);
+  });
+
+  it('validates bounded JSON and CSV data-file previews', () => {
+    expect(parseRunnerDataFile('[{"id":1,"nested":["a","b"]},null,"skip"]', 'iterations.JSON')).toEqual({ rows: [{ id: '1', nested: '["a","b"]' }], headers: ['id', 'nested'] });
+    expect(parseRunnerDataFile('id,name\r\n1,"Ada, L."', 'iterations.csv')).toEqual({ rows: [{ id: '1', name: 'Ada, L.' }], headers: ['id', 'name'] });
+    expect(() => parseRunnerDataFile('{"id":1}', 'iterations.json')).toThrow(/array of key-value objects/);
+    expect(() => parseRunnerDataFile('id', 'iterations.csv')).toThrow(/header row and at least one data row/);
+    expect(() => parseRunnerDataFile('[{"id":1}]', 'iterations.txt')).toThrow(/JSON or CSV/);
+    expect(() => parseRunnerDataFile(JSON.stringify(Array.from({ length: 1_001 }, (_, id) => ({ id }))), 'iterations.json')).toThrow(/1,000 iterations/);
   });
 
   it('retries failures and keeps ordered results', async () => {

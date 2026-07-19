@@ -64,6 +64,7 @@ export type RunnerWorkbenchDraft = {
   delayMs: number;
   streamWindowMs: number;
   data: string;
+  dataFileName: string;
   requestPlan: Array<{ id: string; enabled: boolean }>;
 };
 
@@ -128,6 +129,9 @@ export const RUNNER_REQUEST_PER_RESULT_BYTES = 16_000;
 export const RUNNER_REQUEST_REPORT_BYTES = 500_000;
 export const RUNNER_TIMELINE_PER_RESULT_BYTES = 64_000;
 export const RUNNER_TIMELINE_REPORT_BYTES = 1_000_000;
+export const RUNNER_DATA_FILE_BYTES = 5_000_000;
+export const RUNNER_DATA_FILE_ROWS = 1_000;
+export const RUNNER_DATA_FILE_HEADERS = 100;
 const RUNNER_RESPONSE_BODY_BYTES = 16_000;
 const RUNNER_RESPONSE_HEADERS = 64;
 const RUNNER_TIMELINE_ENTRIES = 1_000;
@@ -682,10 +686,33 @@ export const parseRunnerData = (contents: string): Record<string, string>[] => {
   if (contents.trimStart().startsWith('[') || contents.trimStart().startsWith('{')) {
     const parsed: unknown = JSON.parse(contents);
     const rows = Array.isArray(parsed) ? parsed : [parsed];
-    return rows.map((row) => Object.fromEntries(Object.entries(row as Record<string, unknown>).map(([key, value]) => [key, String(value ?? '')])));
+    return rows.map((row) => Object.fromEntries(Object.entries(row as Record<string, unknown>).map(([key, value]) => [key, value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value)])));
   }
   const lines = contents.split(/\r?\n/).filter((line) => line.trim());
   if (lines.length < 2) return [];
   const headers = parseCsvLine(lines[0]).map((header) => header.trim());
   return lines.slice(1).map((line) => Object.fromEntries(headers.map((header, index) => [header, parseCsvLine(line)[index] ?? ''])));
+};
+
+export type RunnerDataFilePreview = { rows: Record<string, string>[]; headers: string[] };
+
+export const parseRunnerDataFile = (contents: string, fileName: string): RunnerDataFilePreview => {
+  if (new TextEncoder().encode(contents).byteLength > RUNNER_DATA_FILE_BYTES) throw new Error('Runner data files cannot exceed 5 MB.');
+  const extension = fileName.trim().toLowerCase().split('.').at(-1);
+  let rows: Record<string, string>[];
+  if (extension === 'json') {
+    const parsed: unknown = JSON.parse(contents);
+    if (!Array.isArray(parsed)) throw new Error('Runner JSON data must be an array of key-value objects.');
+    rows = parsed.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object' && !Array.isArray(row)).map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value)])));
+  } else if (extension === 'csv') {
+    rows = parseRunnerData(contents);
+  } else {
+    throw new Error('Choose a JSON or CSV Runner data file.');
+  }
+  if (!rows.length) throw new Error(extension === 'json' ? 'Runner JSON data must contain at least one key-value object.' : 'Runner CSV data must include a header row and at least one data row.');
+  if (rows.length > RUNNER_DATA_FILE_ROWS) throw new Error('Runner data files cannot exceed 1,000 iterations.');
+  const headers = [...new Set(rows.flatMap((row) => Object.keys(row)).filter(Boolean))];
+  if (!headers.length) throw new Error('Runner data must contain at least one named variable.');
+  if (headers.length > RUNNER_DATA_FILE_HEADERS) throw new Error('Runner data files cannot exceed 100 variables.');
+  return { rows, headers };
 };
