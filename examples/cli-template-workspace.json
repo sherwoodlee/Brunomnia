@@ -1,6 +1,6 @@
 {
   "format": "brunomnia",
-  "version": 34,
+  "version": 37,
   "name": "CLI template smoke",
   "activeRequestId": "cli-template-main",
   "activeEnvironmentId": "cli-template-local",
@@ -32,6 +32,18 @@
       "environment": [],
       "requests": [
         {
+          "id": "cli-template-local-seed",
+          "name": "Seed local dependent response and cookie",
+          "protocol": "http",
+          "method": "GET",
+          "url": "{{ baseUrl }}/seed",
+          "headers": [],
+          "bodyMode": "none",
+          "body": "",
+          "preRequestScript": "",
+          "tests": ""
+        },
+        {
           "id": "cli-template-main",
           "name": "Verify portable template parity",
           "protocol": "http",
@@ -42,12 +54,29 @@
             { "id": "cli-template-os", "name": "X-Template-OS", "value": "{% os 'platform' %}", "enabled": true },
             { "id": "cli-template-hash", "name": "X-Template-Hash", "value": "{% hash 'sha256', 'hex', 'hello' %}", "enabled": true },
             { "id": "cli-template-date", "name": "X-Template-Date", "value": "{% now 'custom', 'yyyy-MM-dd' %}", "enabled": true },
-            { "id": "cli-template-chain", "name": "X-Template-Chain", "value": "{% response 'body', 'cli-template-seed', '$.token', 'always', '60' %}|{% cookie 'session' %}", "enabled": true }
+            { "id": "cli-template-chain", "name": "X-Template-Chain", "value": "{% response 'body', 'cli-template-local-seed', '$.token', 'always', '60' %}|{% cookie 'session' %}", "enabled": true }
           ],
           "bodyMode": "json",
           "body": "{\"file\": {% file 'examples/cli-template-file.json' %}}",
           "preRequestScript": "",
-          "tests": "const payload = insomnia.response.json();\ninsomnia.test('File, OS, hash, and custom time render through the CLI', () => {\n  insomnia.expect(payload.file).to.equal('template-file-ok');\n  insomnia.expect(payload.os).to.be.a('string').and.not.be.empty;\n  insomnia.expect(payload.hash).to.equal('2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824');\n  insomnia.expect(payload.date).to.have.lengthOf(10);\n  insomnia.expect(payload.date.split('-')).to.have.lengthOf(3);\n});\ninsomnia.test('Dependent response and cookie state stay continuous', () => {\n  insomnia.expect(payload.chain).to.equal('dependency-token|cli-cookie');\n  insomnia.expect(payload.cookie).to.contain('session=cli-cookie');\n});"
+          "tests": ""
+        }
+      ]
+    }
+  ],
+  "testSuites": [
+    {
+      "id": "cli-template-suite",
+      "name": "CLI Template Smoke",
+      "collectionId": "cli-template-smoke",
+      "sortKey": 0,
+      "tests": [
+        {
+          "id": "cli-template-test",
+          "name": "Portable template parity",
+          "requestId": "cli-template-main",
+          "sortKey": 0,
+          "code": "const response = await insomnia.send();\nconst payload = JSON.parse(response.data);\nexpect(payload.file).to.equal('template-file-ok');\nexpect(payload.os).to.be.a('string').and.not.be.empty;\nexpect(payload.hash).to.equal('2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824');\nexpect(payload.date).to.have.lengthOf(10);\nexpect(payload.date.split('-')).to.have.lengthOf(3);\nexpect(payload.chain).to.equal('dependency-token|cli-cookie');\nexpect(payload.cookie).to.contain('session=cli-cookie');"
         }
       ]
     }

@@ -40,27 +40,27 @@ JSON is a versioned envelope with `format: "brunomnia-run-report"`, `version: 1`
 `run test` defaults to the readable `spec` reporter. `run collection` retains JSON as its default for automation. Select an explicit format with `--reporter` (or `-r`):
 
 ```sh
-node bin/brunomnia.cjs run test workspace.json "Collection" --reporter tap
-node bin/brunomnia.cjs run test workspace.json "Collection" --bail --reporter junit --output report.xml
+node bin/brunomnia.cjs run test workspace.json "Contract suite" --allow-scripts --reporter tap
+node bin/brunomnia.cjs run test workspace.json api-spec-id --allow-scripts --bail --reporter junit --output report.xml
 node bin/brunomnia.cjs run collection workspace.json "Collection" --reporter json --output report.json
 ```
 
 Supported names are `dot`, `list`, `min`, `progress`, `spec`, and `tap`, matching the names in the current Inso `run test` reference, plus machine-readable `json` and `junit`. `--output`/`-o` writes the selected artifact to a file; without it, the report goes to standard output. A failed attempt still makes the process exit non-zero regardless of reporter or destination.
 
-`--bail` stops subsequent requests and iterations only after the current request exhausts its configured retries. Without it, the runner records the complete plan.
+For `run collection`, `--bail` stops subsequent requests and iterations only after the current request exhausts its configured retries. For `run test`, it stops subsequent standalone tests after the current test exhausts its retries. Without it, the runner records the complete plan.
 
 ## Test-name filtering
 
 `run test` accepts the current Inso-compatible `-t` / `--testNamePattern <regex>` option (and `--test-name-pattern` as a Brunomnia convenience alias):
 
 ```bash
-node bin/brunomnia.cjs run test workspace.json "Collection" --allow-scripts -t '^Status is (?:200|201)$'
+node bin/brunomnia.cjs run test workspace.json "Contract suite" --allow-scripts -t '^Status is (?:200|201)$'
 ```
 
-The regex is compiled and length-checked before any request executes. An invalid regex or a pattern longer than 1,000 characters exits non-zero without running the collection. Matching is case-sensitive JavaScript regex behavior, consistent with the documented regex contract.
+The regex is compiled and length-checked before any saved request executes. An invalid regex or a pattern longer than 1,000 characters exits non-zero without running the suite. Matching is case-sensitive JavaScript regex behavior, consistent with the documented regex contract.
 
-Unmatched `insomnia.test(name, callback)` callbacks are not invoked. Clean attempts with no matching registrations are omitted from the report, so a zero-match run reports `0 passed, 0 failed, 0 total, 0 matched tests`. Transport, HTTP, pre-request, or top-level after-response failures are retained even when no test name matches. Filtered JSON reports store `testNamePattern` and `matchedTests`; text summaries include the matched count.
+`run test` filters persistent standalone test names before their scripts execute. A zero-match run reports `0 passed, 0 failed, 0 total, 0 matched tests`. Filtered JSON reports store `testNamePattern` and `matchedTests`; text summaries include the matched count.
 
-Brunomnia's current test model is request-centric: named tests are registered dynamically inside after-response scripts. The request and the script's top-level statements must therefore execute before Brunomnia can discover and filter those registrations. This does not claim persistence or selection parity with Insomnia's standalone unit-test-suite resources.
+The identifier selects one suite by exact name or full/prefix ID. A linked API-specification name or full/prefix ID selects every collection-owned suite in sort-key order. Each test executes as one async assertion and may call default or ID-targeted `insomnia.send()` within the owning collection while sharing inherited environments, cookies, response chaining, and explicit CLI trust grants.
 
 The text reporters provide compatible roles and stable plain text, not byte-identical Mocha formatting. JSON and JUnit are Brunomnia portability formats and do not claim to be upstream Inso formats.

@@ -407,7 +407,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 36;
+  version: 37;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -717,6 +717,7 @@ export type UnitTest = {
 export type UnitTestSuite = {
   id: string;
   name: string;
+  collectionId: string;
   sortKey: number;
   tests: UnitTest[];
 };

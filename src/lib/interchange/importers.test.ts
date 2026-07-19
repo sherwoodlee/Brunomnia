@@ -191,6 +191,8 @@ paths:
       { _id: 'req_1', parentId: 'fld_1', name: 'Get one', method: 'GET', url: 'https://api.example.com/one', headers: [], parameters: [], settingFollowRedirects: 'off', _type: 'request' },
       { _id: 'greq_1', parentId: 'wrk_1', name: 'Registry schema', url: 'grpcs://grpc.example.com', body: { text: '{"name":"Ada"}' }, metadata: [], protoMethodName: 'acme.Greeter/SayHello', reflectionApi: { enabled: true, url: 'https://buf.example.com', apiKey: '{{ vault.buf }}', module: 'buf.build/acme/greeter' }, disableUserAgentHeader: true, _type: 'grpc_request' },
       { _id: 'env_1', parentId: 'wrk_1', name: 'Base', data: { token: 'abc' }, _type: 'environment' },
+      { _id: 'uts_1', parentId: 'wrk_1', name: 'Contract suite', metaSortKey: -2, _type: 'unit_test_suite' },
+      { _id: 'ut_1', parentId: 'uts_1', requestId: 'req_1', name: 'Returns 200', code: 'const response = await insomnia.send();', metaSortKey: -1, _type: 'unit_test' },
     ] }), 'insomnia-v4.json');
     expect(v4.format).toBe('insomnia-v4');
     expect(v4.collections[0].requests[0].name).toBe('Get one');
@@ -198,6 +200,7 @@ paths:
     expect(v4.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
     expect(v4.collections[0].requests[0].folderId).toBe(v4.collections[0].folders?.[0].id);
     expect(v4.collections[0].environment?.[0]).toMatchObject({ name: 'token', value: 'abc' });
+    expect(v4.testSuites).toEqual([expect.objectContaining({ name: 'Contract suite', collectionId: v4.collections[0].id, tests: [expect.objectContaining({ name: 'Returns 200', requestId: v4.collections[0].requests[0].id })] })]);
     expect(v4.collections[0].requests.find((request) => request.protocol === 'grpc')).toMatchObject({
       disableUserAgentHeader: true,
       grpc: {
@@ -208,10 +211,11 @@ paths:
       },
     });
 
-    const v5 = importArtifact(`type: collection.insomnia.rest/5.0
+    const v5 = importArtifact(`type: spec.insomnia.rest/5.0
 schema_version: "5.1"
 name: V5 Workspace
 meta: { id: wrk_v5 }
+spec: { contents: "openapi: 3.1.0" }
 collection:
   - name: Folder
     meta: { id: fld_v5 }
@@ -233,6 +237,14 @@ collection:
 environments:
   name: Base
   data: { baseUrl: https://api.example.com }
+testSuites:
+  - name: V5 contract suite
+    meta: { id: uts_v5, sortKey: -2 }
+    tests:
+      - name: Creates an item
+        meta: { id: ut_v5, sortKey: -1 }
+        requestId: req_v5
+        code: const response = await insomnia.send();
 `, 'insomnia-v5.yaml');
     expect(v5.format).toBe('insomnia-v5');
     expect(v5.collections[0].requests[0]).toMatchObject({ name: 'Create', bodyMode: 'json', transport: expect.objectContaining({ followRedirectsMode: 'on' }) });
@@ -242,10 +254,15 @@ environments:
     expect(v5.collections[0].requests[1].source?.unsupported).toMatchObject({ protoFileId: 'pf_missing' });
     expect(v5.warnings).toContainEqual(expect.objectContaining({ code: 'external-schema', resource: 'Legacy gRPC' }));
     expect(v5.collections[0].environment?.[0]).toMatchObject({ name: 'baseUrl', value: 'https://api.example.com' });
+    expect(v5.testSuites).toEqual([expect.objectContaining({ name: 'V5 contract suite', collectionId: v5.collections[0].id, tests: [expect.objectContaining({ name: 'Creates an item', requestId: v5.collections[0].requests[0].id })] })]);
     const applied = applyArtifactImport(cloneSeedWorkspace(), v5);
     const appliedCollection = applied.collections.at(-1)!;
     expect(appliedCollection.requests[0].folderId).toBe(appliedCollection.folders?.[0].id);
     expect(appliedCollection.folders?.[0].id).not.toBe(v5.collections[0].folders?.[0].id);
+    expect(applied.testSuites.at(-1)).toMatchObject({ collectionId: appliedCollection.id, tests: [expect.objectContaining({ requestId: appliedCollection.requests[0].id })] });
+    const appliedAgain = applyArtifactImport(applied, v5);
+    expect(new Set(appliedAgain.testSuites.map((suite) => suite.id)).size).toBe(appliedAgain.testSuites.length);
+    expect(new Set(appliedAgain.testSuites.flatMap((suite) => suite.tests.map((test) => test.id))).size).toBe(appliedAgain.testSuites.reduce((total, suite) => total + suite.tests.length, 0));
   });
 
   it('imports Socket.IO requests and preserves unsupported MCP details with a warning', () => {
@@ -285,7 +302,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(36);
+    expect(second.version).toBe(37);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

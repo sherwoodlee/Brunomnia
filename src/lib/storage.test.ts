@@ -149,7 +149,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(36);
+    expect(migrated.version).toBe(37);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
@@ -198,7 +198,7 @@ describe('workspace migrations', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(36);
+    expect(migrated.version).toBe(37);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
@@ -222,8 +222,9 @@ describe('workspace migrations', () => {
     }, { id: 'orphan', suiteId: 'missing', tests: [] }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(36);
+    expect(migrated.version).toBe(37);
     expect(migrated.testSuites).toHaveLength(1);
+    expect(migrated.testSuites[0].collectionId).toBe(migrated.collections[0].id);
     expect(migrated.testSuites[0].tests.map((test) => [test.id, test.requestId])).toEqual([['test-two', null], ['test-one', requestId]]);
     expect(migrated.unitTestResults).toEqual([expect.objectContaining({ id: 'result-one', suiteId: 'suite-one', tests: [expect.objectContaining({ passed: true, durationMs: 12, logs: ['sent'] })] })]);
   });
@@ -275,7 +276,7 @@ describe('workspace migrations', () => {
     };
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(36);
+    expect(migrated.version).toBe(37);
     expect(migrated.collections[0].requests[0].grpc).toMatchObject({
       protoText: 'syntax = "proto3"; service Legacy {}',
       protoEntryPath: 'schema.proto',
@@ -300,7 +301,7 @@ describe('workspace migrations', () => {
 
     const migrated = migrateWorkspace(workspace);
     const grpc = migrated.collections[0].requests[0].grpc;
-    expect(migrated.version).toBe(36);
+    expect(migrated.version).toBe(37);
     expect(grpc.descriptorSource).toBe('buf');
     expect(grpc.reflectionApiUrl).toHaveLength(8_192);
     expect(grpc.reflectionApiKey).toHaveLength(65_536);
@@ -317,7 +318,7 @@ describe('workspace migrations', () => {
       clients: [null, { id: 'client', host: 'api.example.test:8443', enabled: true, certificatePem: 'cert-pem', keyPem: 'key-pem' }, { id: 'pfx', host: '*.internal.test', enabled: true, pfxBase64: 'cGZ4', passphrase: 'secret' }],
     };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(36);
+    expect(migrated.version).toBe(37);
     expect(migrated.certificates).toEqual({
       ca: { enabled: true, pem: 'ca-pem' },
       clients: [
@@ -410,7 +411,7 @@ describe('workspace migrations', () => {
     environments[0].environmentEditorMode = 'raw';
     (environments[0].variables as Array<Record<string, unknown>>).push({ id: 'global-config', name: 'globalConfig', value: '{"enabled":true}', valueType: 'json', enabled: true });
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(36);
+    expect(migrated.version).toBe(37);
     expect(migrated.collections[0]).toMatchObject({ environmentEditorMode: 'raw', environment: [expect.objectContaining({ name: 'config', valueType: 'json' })] });
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', environmentEditorMode: 'raw', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');

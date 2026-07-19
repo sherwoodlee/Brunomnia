@@ -39,7 +39,7 @@ export const importArtifact = (contents: string, sourceName = 'Imported artifact
         ...(disabledIntegrations ? [{ code: 'integrations-disabled', message: 'Imported MCP, AI, and Konnect integrations were disabled and credential fields were cleared. Review endpoints and commands before enabling them.' }] : []),
       ], replacement,
       metadata: { version: String(replacement.version), collections: String(replacement.collections.length) },
-      collections: [], environments: [], apiDesigns: [], mockServers: [], cookies: [],
+      collections: [], environments: [], apiDesigns: [], mockServers: [], cookies: [], testSuites: [],
     };
   }
   if (documents.some(isInsomniaV5)) return importInsomniaV5(sourceName, documents.filter(isInsomniaV5));
@@ -59,6 +59,7 @@ export const importSummary = (result: ArtifactImport) => {
     result.environments.length ? `${result.environments.length} environment${result.environments.length === 1 ? '' : 's'}` : '',
     result.apiDesigns.length ? `${result.apiDesigns.length} design${result.apiDesigns.length === 1 ? '' : 's'}` : '',
     result.mockServers.length ? `${result.mockServers.length} mock${result.mockServers.length === 1 ? '' : 's'}` : '',
+    result.testSuites.length ? `${result.testSuites.length} test suite${result.testSuites.length === 1 ? '' : 's'}` : '',
     result.cookies.length ? `${result.cookies.length} cookie${result.cookies.length === 1 ? '' : 's'}` : '',
   ].filter(Boolean);
   return result.replacement ? `Replace with Brunomnia workspace · ${result.replacement.collections.length} collections` : resources.join(' · ') || 'No supported resources';

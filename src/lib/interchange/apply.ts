@@ -1,4 +1,4 @@
-import type { Collection, CookieRecord, Environment, ImportRecord, MockServer, Workspace } from '../../types';
+import type { Collection, CookieRecord, Environment, ImportRecord, MockServer, UnitTestSuite, Workspace } from '../../types';
 import { sourceId } from './common';
 import type { ArtifactImport } from './types';
 
@@ -59,6 +59,17 @@ const rekeyMock = (server: MockServer, batch: string): MockServer => ({
   routes: server.routes.map((route) => ({ ...route, id: `${batch}-${route.id}`, headers: route.headers.map((header) => ({ ...header, id: `${batch}-${header.id}` })) })),
 });
 
+const rekeyTestSuites = (suites: UnitTestSuite[], collectionIds: Map<string, string>, requestIds: Map<string, string>, batch: string): UnitTestSuite[] => suites.flatMap((suite) => {
+  const collectionId = collectionIds.get(suite.collectionId);
+  if (!collectionId) return [];
+  return [{
+    ...suite,
+    id: `${batch}-${suite.id}`,
+    collectionId,
+    tests: suite.tests.map((test) => ({ ...test, id: `${batch}-${test.id}`, requestId: test.requestId ? requestIds.get(test.requestId) ?? null : null })),
+  }];
+});
+
 const mergeCookies = (current: CookieRecord[], imported: CookieRecord[], batch: string) => {
   const cookies = new Map(current.map((cookie) => [`${cookie.name}\n${cookie.domain}\n${cookie.path}`, cookie]));
   imported.forEach((cookie) => cookies.set(`${cookie.name}\n${cookie.domain}\n${cookie.path}`, { ...cookie, id: `${batch}-${cookie.id}` }));
@@ -75,10 +86,11 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
     warnings: result.warnings,
     metadata: result.metadata,
   };
-  if (result.replacement) return { ...result.replacement, version: 36, imports: [record, ...result.replacement.imports].slice(0, 100) };
+  if (result.replacement) return { ...result.replacement, version: 37, imports: [record, ...result.replacement.imports].slice(0, 100) };
 
   const collections = result.collections.map((collection) => rekeyCollection(collection, batch));
   const collectionIds = new Map(result.collections.map((collection, index) => [collection.id, collections[index].id]));
+  const requestIds = new Map(result.collections.flatMap((collection, collectionIndex) => collection.requests.map((request, requestIndex) => [request.id, collections[collectionIndex].requests[requestIndex].id] as const)));
   const environments = rekeyEnvironments(result.environments, batch);
   const apiDesigns = result.apiDesigns.map((design) => ({
     ...design,
@@ -86,16 +98,18 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
     generatedCollectionId: design.generatedCollectionId ? collectionIds.get(design.generatedCollectionId) : undefined,
   }));
   const mockServers = result.mockServers.map((server) => rekeyMock(server, batch));
+  const testSuites = rekeyTestSuites(result.testSuites, collectionIds, requestIds, batch);
   const firstRequest = collections.flatMap((collection) => collection.requests)[0];
   return {
     ...workspace,
-    version: 36,
+    version: 37,
     activeRequestId: firstRequest?.id ?? workspace.activeRequestId,
     activeEnvironmentId: environments[0]?.id ?? workspace.activeEnvironmentId,
     collections: [...workspace.collections, ...collections],
     environments: [...workspace.environments, ...environments],
     apiDesigns: [...workspace.apiDesigns, ...apiDesigns],
     mockServers: [...workspace.mockServers, ...mockServers],
+    testSuites: [...workspace.testSuites, ...testSuites],
     cookies: mergeCookies(workspace.cookies, result.cookies, batch),
     imports: [record, ...workspace.imports].slice(0, 100),
   };

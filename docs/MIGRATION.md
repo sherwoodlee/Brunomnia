@@ -2394,7 +2394,21 @@ Compatibility bounds remain explicit: pinned v4/v5 standalone-suite interchange 
 
 Compatibility bounds remain explicit: Insomnia v5 has no compatible KV-pair/editor-mode field, so v5 imports use Raw mode while preserving typed data. Rendered Browser QA remains omitted by the standing local-browser restriction. Collections and Import/export stay `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete.
 
-## Milestone 164 — remaining parity closure and release hardening
+## Milestone 164 — standalone suite ownership, interchange, and CLI selection (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned model/CLI audit | Complete | Pinned suites are workspace children, v4 stores `unit_test_suite` plus `unit_test` resources, v5 stores suites only on specification documents, and Inso selects one suite by name/ID or all workspace suites through an API-spec/workspace ID in sort-key order |
+| Collection ownership | Complete baseline | Workspace v37 requires one owning collection per suite as Brunomnia's workspace adaptation; legacy suites infer ownership from referenced requests or the first collection, and cross-collection references clear safely |
+| Workbench scoping | Complete | Suite creation selects an owner, the editor exposes owner selection, request choices and named/default sends stay inside that collection, and moving a suite clears now-invalid request references |
+| Interchange import | Complete baseline | Insomnia v4/v5 suite/test resources map to collection-owned models with source request IDs resolved; collision-safe artifact application rekeys suites, tests, collections, and request references together |
+| Interchange export | Complete baseline | V4 emits ordered suite/test resources under each owning workspace with exported request IDs; v5 emits ordered suites on matching linked specification documents and warns when a selected collection has no representable spec |
+| CLI suite execution | Complete baseline | `run test` selects one suite or every linked API-spec suite, runs persistent tests in order, exposes pinned-shaped default/ID-targeted `insomnia.send()`, and preserves regex, retries, bail, environments, cookies, chaining, reporters, and explicit trusted grants |
+| Executable evidence | Complete baseline | Focused 67-test coverage, 67-file/484-test frontend regressions, direct suite/API-spec CLI runs, localhost trust/chaining smoke, strict TypeScript/Rust gates, clean audit, and a rebuilt arm64 app verify the milestone without rendered Browser QA |
+
+Compatibility bounds remain explicit: Insomnia v5 cannot represent standalone suites on collection-only documents, so Brunomnia emits a downgrade warning unless a linked API specification is selected. The portable CLI still refuses unsupported per-request TLS/proxy/client-identity authority and does not implement the remaining Inso command/configuration surface. Rendered Browser QA remains omitted by the standing local-browser restriction. Collection runner, Headless CLI, and Import/export stay `Baseline`; exactly 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete.
+
+## Milestone 165 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, protocol, scripting, extension, collaboration, and CLI gaps

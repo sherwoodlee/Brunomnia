@@ -50,7 +50,7 @@ try {
   const denied = await run(baseArgs);
   assert.equal(denied.code, 1, `File-denial smoke unexpectedly exited ${denied.code}. ${denied.stderr}`);
   const deniedReport = JSON.parse(denied.stdout);
-  assert.match(deniedReport.report.results[0]?.error ?? '', /Template file access is disabled/);
+  assert.match(deniedReport.report.results[0]?.tests[0]?.error ?? deniedReport.report.results[0]?.error ?? '', /Template file access is disabled/);
 
   const allowed = await run([...baseArgs, '--allow-template-files']);
   assert.equal(allowed.code, 0, `Granted template smoke exited ${allowed.code}. ${allowed.stderr}\n${allowed.stdout}`);
@@ -58,7 +58,7 @@ try {
   assert.equal(allowedReport.report.total, 1);
   assert.equal(allowedReport.report.passed, 1);
   assert.equal(allowedReport.report.failed, 0);
-  assert.equal(allowedReport.report.matchedTests, 2);
+  assert.equal(allowedReport.report.matchedTests, 1);
   process.stdout.write('CLI template smoke passed: denial, file grant, OS/hash/time, response chaining, and cookies.\n');
 } finally {
   server.kill('SIGTERM');

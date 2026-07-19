@@ -70,10 +70,10 @@ The grant does not expose external-vault provider adapters. Scripts cannot enume
 The bundled CLI uses Node's `vm` compatibility runtime, which is not a security boundary for hostile JavaScript. For that reason, workspace scripts are disabled by default. Run scripts only for a workspace you trust:
 
 ```sh
-brunomnia run test workspace.json "Collection" --allow-scripts
+brunomnia run test workspace.json "Suite or API spec" --allow-scripts
 ```
 
-Local attachments additionally require `--allow-script-files`; secondary script requests require `--allow-script-requests`. A file-backed secondary request therefore requires all three flags, including `--allow-scripts`. The trusted CLI does not consume the desktop allowed-folder list or expose the desktop local vault. These invocation flags are intentionally not read from workspace preference data, preventing an imported workspace from granting itself script authority.
+Local attachments additionally require `--allow-script-files`; arbitrary `insomnia.sendRequest()` calls require `--allow-script-requests`. Standalone-suite `insomnia.send()` may execute only a saved HTTP/GraphQL request in that suite's owning collection and still requires `--allow-scripts`. A file-backed arbitrary secondary request therefore requires all three flags, including `--allow-scripts`. The trusted CLI does not consume the desktop allowed-folder list or expose the desktop local vault. These invocation flags are intentionally not read from workspace preference data, preventing an imported workspace from granting itself script authority.
 
 ## Remaining compatibility limits
 

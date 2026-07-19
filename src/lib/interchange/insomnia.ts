@@ -1,5 +1,5 @@
 import { stringify } from 'yaml';
-import type { ApiDesign, ApiRequest, Collection, CookieRecord, Environment, ImportWarning, JsonValue, KeyValue, MockRoute, MockServer, RequestFolder } from '../../types';
+import type { ApiDesign, ApiRequest, Collection, CookieRecord, Environment, ImportWarning, JsonValue, KeyValue, MockRoute, MockServer, RequestFolder, UnitTestSuite } from '../../types';
 import { normalizeGrpcProtoTree } from '../grpcProto';
 import { asArray, asBoolean, asNumber, asRecord, asString, keyValues, normalizeMethod, objectVariables, requestFrom, sourceId, sourceMetadata, toJsonValue, type UnknownRecord } from './common';
 import { emptyResources, type ArtifactImport } from './types';
@@ -388,6 +388,7 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
   const collections: Collection[] = [];
   const environments: Environment[] = [];
   const mockServers: MockServer[] = [];
+  const testSuites: UnitTestSuite[] = [];
   const cookieMap = new Map<string, CookieRecord>();
   resources.filter((resource) => resource._type === 'cookie_jar').flatMap((resource) => asArray(resource.cookies)).forEach((cookie, index) => {
     const mapped = insomniaCookie(cookie, 'insomnia-v4', index);
@@ -459,7 +460,19 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
     };
     appendResourceOrder(workspaceId, new Set());
     const collectionEnvironments = v4Environments(resources, workspaceId, 'insomnia-v4');
-    collections.push({ id: sourceId('collection', 'insomnia-v4', workspaceId, workspaceIndex), name: asString(workspace.name, `Workspace ${workspaceIndex + 1}`), expanded: true, requests, folders: requestFolders, resourceOrder, ...collectionEnvironmentFields(collectionEnvironments), documentation: asString(workspace.description), source: sourceMetadata('insomnia-v4', workspaceId, { description: workspace.description }) });
+    const collectionId = sourceId('collection', 'insomnia-v4', workspaceId, workspaceIndex);
+    collections.push({ id: collectionId, name: asString(workspace.name, `Workspace ${workspaceIndex + 1}`), expanded: true, requests, folders: requestFolders, resourceOrder, ...collectionEnvironmentFields(collectionEnvironments), documentation: asString(workspace.description), source: sourceMetadata('insomnia-v4', workspaceId, { description: workspace.description }) });
+    byDeclaredSortKey(resources.filter((resource) => resource._type === 'unit_test_suite' && resource.parentId === workspaceId), (resource) => resource.metaSortKey).forEach((suite, suiteIndex) => {
+      const suiteSourceId = asString(suite._id, `${workspaceId}-suite-${suiteIndex}`);
+      const tests = byDeclaredSortKey(resources.filter((resource) => resource._type === 'unit_test' && resource.parentId === suiteSourceId), (resource) => resource.metaSortKey).map((test, testIndex) => ({
+        id: sourceId('unit-test', 'insomnia-v4', `${workspaceId}:${suiteSourceId}:${asString(test._id, String(testIndex))}`, testIndex),
+        name: asString(test.name, `Test ${testIndex + 1}`),
+        code: asString(test.code),
+        requestId: requestIds.get(asString(test.requestId)) ?? null,
+        sortKey: asNumber(test.metaSortKey, testIndex),
+      }));
+      testSuites.push({ id: sourceId('test-suite', 'insomnia-v4', `${workspaceId}:${suiteSourceId}`, suiteIndex), name: asString(suite.name, `Suite ${suiteIndex + 1}`), collectionId, sortKey: asNumber(suite.metaSortKey, suiteIndex), tests });
+    });
     mockServers.push(...v4Mocks(resources, workspaceId));
   }
 
@@ -473,7 +486,7 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
   return {
     ...emptyResources(), format: 'insomnia-v4', sourceName, warnings,
     metadata: { source: asString(document.__export_source), date: asString(document.__export_date), resources: String(resources.length) },
-    collections, environments, apiDesigns, mockServers, cookies,
+    collections, environments, apiDesigns, mockServers, cookies, testSuites,
   };
 };
 
@@ -533,6 +546,7 @@ export const importInsomniaV5 = (sourceName: string, documents: UnknownRecord[])
   const apiDesigns: ApiDesign[] = [];
   const mockServers: MockServer[] = [];
   const cookies: CookieRecord[] = [];
+  const testSuites: UnitTestSuite[] = [];
   for (const [documentIndex, document] of documents.entries()) {
     const type = asString(document.type);
     const meta = asRecord(document.meta);
@@ -548,7 +562,29 @@ export const importInsomniaV5 = (sourceName: string, documents: UnknownRecord[])
       nestedV5Requests(document.collection, '', warnings, requests, folders, resourceOrder, identity);
       const name = asString(document.name, `Collection ${documentIndex + 1}`);
       const collectionEnvironments = v5Environments(document, identity);
-      collections.push({ id: sourceId('collection', 'insomnia-v5', identity), name, expanded: true, requests, folders, resourceOrder, ...collectionEnvironmentFields(collectionEnvironments), documentation: asString(meta?.description), source: sourceMetadata('insomnia-v5', identity, { schemaVersion: document.schema_version }) });
+      const collectionId = sourceId('collection', 'insomnia-v5', identity);
+      collections.push({ id: collectionId, name, expanded: true, requests, folders, resourceOrder, ...collectionEnvironmentFields(collectionEnvironments), documentation: asString(meta?.description), source: sourceMetadata('insomnia-v5', identity, { schemaVersion: document.schema_version }) });
+      const requestIds = new Map(requests.flatMap((request) => {
+        const sourceRequestId = request.source?.sourceId;
+        if (!sourceRequestId) return [];
+        const unscopedRequestId = sourceRequestId.startsWith(`${identity}:`) ? sourceRequestId.slice(identity.length + 1) : sourceRequestId;
+        return [[sourceRequestId, request.id] as const, [unscopedRequestId, request.id] as const];
+      }));
+      if (type.startsWith('spec.')) asArray(document.testSuites).map(asRecord).filter((suite): suite is UnknownRecord => Boolean(suite)).forEach((suite, suiteIndex) => {
+        const suiteMeta = asRecord(suite.meta);
+        const suiteSourceId = asString(suiteMeta?.id, `${identity}-suite-${suiteIndex}`);
+        const tests = asArray(suite.tests).map(asRecord).filter((test): test is UnknownRecord => Boolean(test)).map((test, testIndex) => {
+          const testMeta = asRecord(test.meta);
+          return {
+            id: sourceId('unit-test', 'insomnia-v5', `${identity}:${suiteSourceId}:${asString(testMeta?.id, String(testIndex))}`, testIndex),
+            name: asString(test.name, `Test ${testIndex + 1}`),
+            code: asString(test.code),
+            requestId: requestIds.get(asString(test.requestId)) ?? null,
+            sortKey: asNumber(testMeta?.sortKey, testIndex),
+          };
+        }).sort((left, right) => left.sortKey - right.sortKey);
+        testSuites.push({ id: sourceId('test-suite', 'insomnia-v5', `${identity}:${suiteSourceId}`, suiteIndex), name: asString(suite.name, `Suite ${suiteIndex + 1}`), collectionId, sortKey: asNumber(suiteMeta?.sortKey, suiteIndex), tests });
+      });
       if (type.startsWith('spec.')) {
         const spec = asRecord(document.spec);
         const contents = spec?.contents;
@@ -568,5 +604,5 @@ export const importInsomniaV5 = (sourceName: string, documents: UnknownRecord[])
     } else if (type.startsWith('environment.')) environments.push(...v5Environments(document, identity));
   }
   if (!collections.length && !environments.length && !mockServers.length) warnings.push({ code: 'empty-export', message: 'The Insomnia v5 file contained no supported resources.' });
-  return { ...emptyResources(), format: 'insomnia-v5', sourceName, warnings, metadata: { documents: String(documents.length), schemaVersions: [...new Set(documents.map((document) => asString(document.schema_version)).filter(Boolean))].join(', ') }, collections, environments, apiDesigns, mockServers, cookies };
+  return { ...emptyResources(), format: 'insomnia-v5', sourceName, warnings, metadata: { documents: String(documents.length), schemaVersions: [...new Set(documents.map((document) => asString(document.schema_version)).filter(Boolean))].join(', ') }, collections, environments, apiDesigns, mockServers, cookies, testSuites };
 };

@@ -1,6 +1,6 @@
 {
   "format": "brunomnia",
-  "version": 14,
+  "version": 37,
   "name": "CLI example",
   "activeRequestId": "cli-health-request",
   "activeEnvironmentId": "cli-local",
@@ -62,6 +62,23 @@
       ]
     }
   ],
+  "testSuites": [
+    {
+      "id": "cli-health-suite",
+      "name": "CLI Health",
+      "collectionId": "cli-health",
+      "sortKey": 0,
+      "tests": [
+        {
+          "id": "cli-health-test",
+          "name": "Local data response is healthy",
+          "requestId": "cli-health-request",
+          "sortKey": 0,
+          "code": "const response = await insomnia.send();\nexpect(response.status).to.equal(200);\nexpect(JSON.parse(response.data)).to.deep.equal({ ok: true });"
+        }
+      ]
+    }
+  ],
   "environments": [
     {
       "id": "cli-base",
@@ -80,6 +97,7 @@
     {
       "id": "cli-api-design",
       "name": "CLI API",
+      "generatedCollectionId": "cli-health",
       "contents": "openapi: 3.1.0\ninfo:\n  title: CLI API\n  version: 1.0.0\npaths:\n  /health:\n    get:\n      operationId: health\n      responses:\n        '200':\n          description: Healthy\n"
     }
   ],

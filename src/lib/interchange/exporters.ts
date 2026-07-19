@@ -39,10 +39,11 @@ const scopedWorkspace = (workspace: Workspace, options: ExportOptions): Workspac
   if (options.scope === 'all') return { ...workspace, environments, activeEnvironmentId };
   const collections = selectedCollections(workspace, options);
   const designs = selectedDesigns(workspace, options);
+  const collectionIds = new Set(collections.map((collection) => collection.id));
   const requestIds = new Set(collections.flatMap((collection) => collection.requests.map((request) => request.id)));
-  const testSuites = workspace.testSuites.flatMap((suite) => {
+  const testSuites = workspace.testSuites.filter((suite) => collectionIds.has(suite.collectionId)).map((suite) => {
     const tests = suite.tests.filter((test) => test.requestId === null || requestIds.has(test.requestId));
-    return tests.length ? [{ ...suite, tests }] : [];
+    return { ...suite, tests };
   });
   const testIdsBySuite = new Map(testSuites.map((suite) => [suite.id, new Set(suite.tests.map((test) => test.id))]));
   return {
@@ -100,9 +101,11 @@ const insomniaBody = (request: ApiRequest, warnings: ImportWarning[]) => {
   return {};
 };
 
+const v4RequestId = (prefix: string, index: number) => `__REQUEST_${prefix}_${index + 1}__`;
+
 const v4Request = (request: ApiRequest, parentId: string, index: number, sortKey: number, warnings: ImportWarning[], prefix: string, protoFileId = '') => {
   const base = {
-    _id: `__REQUEST_${prefix}_${index + 1}__`, parentId, modified: Date.now(), created: Date.now(), name: request.name,
+    _id: v4RequestId(prefix, index), parentId, modified: Date.now(), created: Date.now(), name: request.name,
     metaSortKey: sortKey,
     url: request.url, method: request.method,
     pathParameters: request.pathParams.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
@@ -175,6 +178,7 @@ const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): Artifac
     const foldersById = new Map(folders.map((folder) => [folder.id, folder]));
     const requestsById = new Map(collection.requests.map((request) => [request.id, request]));
     const folderIds = new Map(folders.map((folder, folderIndex) => [folder.id, `__REQUEST_GROUP_${collectionIndex + 1}_${folderIndex + 1}__`]));
+    const exportedRequestIds = new Map<string, string>();
     let requestIndex = 0;
     const appendChildren = (parentId: string, exportedParentId: string) => {
       orderedCollectionChildren(collection, parentId).forEach((resource, siblingIndex) => {
@@ -197,11 +201,20 @@ const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): Artifac
         const currentRequestIndex = requestIndex++;
         const protoFileId = pushV4ProtoResources(resources, request, workspaceId, collectionIndex, currentRequestIndex);
         const exported = v4Request(request, exportedParentId, currentRequestIndex, siblingIndex, warnings, String(collectionIndex + 1), protoFileId);
+        exportedRequestIds.set(request.id, exported._id);
         resources.push(exported);
         if (request.protocol === 'socketio') resources.push({ _id: `__SOCKET_IO_PAYLOAD_${collectionIndex + 1}_${currentRequestIndex + 1}__`, parentId: exported._id, modified: Date.now(), created: Date.now(), eventName: request.socketIo.eventName, ack: request.socketIo.ack, args: request.socketIo.args, _type: 'socketio_payload' });
       });
     };
     appendChildren('', workspaceId);
+    workspace.testSuites.filter((suite) => suite.collectionId === collection.id).sort((left, right) => left.sortKey - right.sortKey).forEach((suite, suiteIndex) => {
+      const suiteId = `__UNIT_TEST_SUITE_${collectionIndex + 1}_${suiteIndex + 1}__`;
+      resources.push({ _id: suiteId, parentId: workspaceId, modified: Date.now(), created: Date.now(), name: suite.name, metaSortKey: suite.sortKey, _type: 'unit_test_suite' });
+      [...suite.tests].sort((left, right) => left.sortKey - right.sortKey).forEach((test, testIndex) => resources.push({
+        _id: `__UNIT_TEST_${collectionIndex + 1}_${suiteIndex + 1}_${testIndex + 1}__`, parentId: suiteId, modified: Date.now(), created: Date.now(), name: test.name,
+        requestId: test.requestId ? exportedRequestIds.get(test.requestId) ?? null : null, code: test.code, metaSortKey: test.sortKey, _type: 'unit_test',
+      }));
+    });
   });
   selectedDesigns(workspace, options).forEach((design, index) => resources.push({ _id: `__API_SPEC_${index + 1}__`, parentId: resources.length ? '__WORKSPACE_1__' : null, name: design.name, contents: design.contents, _type: 'api_spec' }));
   if (options.scope === 'all') workspace.mockServers.forEach((server, index) => resources.push({ _id: `__MOCK_${index + 1}__`, parentId: resources.length ? '__WORKSPACE_1__' : null, name: server.name, url: `http://${server.host}:${server.port}`, routes: server.routes.map((route) => ({ name: route.name, method: route.method, path: route.path, statusCode: route.status, headers: route.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })), body: route.body, delayMs: route.delayMs })), _type: 'mock_server' }));
@@ -227,26 +240,33 @@ const v5CollectionEnvironment = (collection: Workspace['collections'][number], p
   subEnvironments: (collection.subEnvironments ?? []).map((environment, index) => ({ name: environment.name, meta: { id: `${prefix}-environment-${index + 1}` }, data: environmentData(environment.variables) })),
 });
 
+const v5RequestId = (request: ApiRequest, index: number, prefix: string) => {
+  if (request.protocol === 'websocket') return `${prefix}-ws-req_${index + 1}`;
+  if (request.protocol === 'socketio') return `socketio-req_${prefix}_${index + 1}`;
+  if (request.protocol === 'grpc') return `${prefix}-greq_${index + 1}`;
+  return `${prefix}-req_${index + 1}`;
+};
+
 const v5Request = (request: ApiRequest, index: number, sortKey: number, warnings: ImportWarning[], prefix: string) => {
+  const id = v5RequestId(request, index, prefix);
   const common = {
-    url: request.url, name: request.name, meta: { id: `${prefix}-req_${index + 1}`, description: request.documentation || (request.source ? `Imported from ${request.source.format}` : ''), sortKey },
+    url: request.url, name: request.name, meta: { id, description: request.documentation || (request.source ? `Imported from ${request.source.format}` : ''), sortKey },
     headers: request.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled, description: header.description })),
     disableUserAgentHeader: request.disableUserAgentHeader,
     pathParameters: request.pathParams.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
     parameters: request.params.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
     authentication: insomniaAuth(request.auth),
   };
-  if (request.protocol === 'websocket') return { ...common, meta: { ...common.meta, id: `${prefix}-ws-req_${index + 1}` }, settings: { encodeUrl: true, followRedirects: request.transport.followRedirectsMode, cookies: { send: true, store: true } } };
+  if (request.protocol === 'websocket') return { ...common, settings: { encodeUrl: true, followRedirects: request.transport.followRedirectsMode, cookies: { send: true, store: true } } };
   if (request.protocol === 'socketio') return {
     ...common,
-    meta: { ...common.meta, id: `socketio-req_${prefix}_${index + 1}` },
     settings: { encodeUrl: true, path: request.socketIo.path, cookies: { send: request.transport.sendCookies, store: request.transport.storeCookies } },
     eventListeners: request.socketIo.eventListeners.map((listener) => ({ id: listener.id, eventName: listener.eventName, desc: listener.description, isOpen: listener.enabled })),
     payload: { eventName: request.socketIo.eventName, ack: request.socketIo.ack, args: request.socketIo.args },
   };
   if (request.protocol === 'grpc') {
     if (request.grpc.descriptorSource === 'proto') warnings.push({ code: 'external-schema', message: 'Insomnia v5 collection YAML cannot embed its database-backed proto resource; import the proto source separately.', resource: request.name });
-    return { ...common, meta: { ...common.meta, id: `${prefix}-greq_${index + 1}` }, body: { text: request.grpc.input }, metadata: request.grpc.metadata.map((item) => ({ name: item.name, value: item.value, disabled: !item.enabled })), protoFileId: '', protoMethodName: [request.grpc.service, request.grpc.method].filter(Boolean).join('/'), reflectionApi: { enabled: request.grpc.descriptorSource === 'buf', url: request.grpc.reflectionApiUrl, apiKey: request.grpc.reflectionApiKey, module: request.grpc.reflectionApiModule } };
+    return { ...common, body: { text: request.grpc.input }, metadata: request.grpc.metadata.map((item) => ({ name: item.name, value: item.value, disabled: !item.enabled })), protoFileId: '', protoMethodName: [request.grpc.service, request.grpc.method].filter(Boolean).join('/'), reflectionApi: { enabled: request.grpc.descriptorSource === 'buf', url: request.grpc.reflectionApiUrl, apiKey: request.grpc.reflectionApiKey, module: request.grpc.reflectionApiModule } };
   }
   return {
     ...common,
@@ -259,6 +279,7 @@ const v5Request = (request: ApiRequest, index: number, sortKey: number, warnings
 
 const v5Collection = (collection: Workspace['collections'][number], warnings: ImportWarning[], prefix: string) => {
   let requestIndex = 0;
+  const requestIds = new Map<string, string>();
   const folders = collection.folders ?? [];
   const foldersById = new Map(folders.map((folder) => [folder.id, folder]));
   const requestsById = new Map(collection.requests.map((request) => [request.id, request]));
@@ -277,22 +298,46 @@ const v5Collection = (collection: Workspace['collections'][number], warnings: Im
       }];
     }
     const request = requestsById.get(resource.id);
-    return request ? [v5Request(request, requestIndex++, siblingIndex, warnings, prefix)] : [];
+    if (!request) return [];
+    const currentRequestIndex = requestIndex++;
+    requestIds.set(request.id, v5RequestId(request, currentRequestIndex, prefix));
+    return [v5Request(request, currentRequestIndex, siblingIndex, warnings, prefix)];
   });
-  return children('');
+  return { collection: children(''), requestIds };
 };
+
+const v5TestSuites = (workspace: Workspace, collectionId: string, requestIds: Map<string, string>, prefix: string) => workspace.testSuites
+  .filter((suite) => suite.collectionId === collectionId)
+  .sort((left, right) => left.sortKey - right.sortKey)
+  .map((suite, suiteIndex) => ({
+    name: suite.name,
+    meta: { id: `${prefix}-suite-${suiteIndex + 1}`, sortKey: suite.sortKey },
+    tests: [...suite.tests].sort((left, right) => left.sortKey - right.sortKey).map((test, testIndex) => ({
+      name: test.name,
+      meta: { id: `${prefix}-test-${suiteIndex + 1}-${testIndex + 1}`, sortKey: test.sortKey },
+      requestId: test.requestId ? requestIds.get(test.requestId) ?? null : null,
+      code: test.code,
+    })),
+  }));
 
 const exportInsomniaV5 = (workspace: Workspace, options: ExportOptions): ArtifactExport => {
   const warnings: ImportWarning[] = [];
   const documents: unknown[] = [];
   const standaloneCollections = options.scope === 'design' ? [] : selectedCollections(workspace, options);
   standaloneCollections.forEach((collection, index) => {
-    documents.push({ type: 'collection.insomnia.rest/5.0', schema_version: '5.1', name: collection.name, meta: { id: `wrk_${index + 1}`, description: collection.documentation || 'Exported by Brunomnia' }, collection: v5Collection(collection, warnings, `wrk_${index + 1}`), environments: v5CollectionEnvironment(collection, `wrk_${index + 1}`), cookieJar: { name: 'Default Jar', meta: { id: `jar_${index + 1}` }, cookies: workspace.cookies.map(insomniaCookie) }, certificates: [] });
+    const exported = v5Collection(collection, warnings, `wrk_${index + 1}`);
+    documents.push({ type: 'collection.insomnia.rest/5.0', schema_version: '5.1', name: collection.name, meta: { id: `wrk_${index + 1}`, description: collection.documentation || 'Exported by Brunomnia' }, collection: exported.collection, environments: v5CollectionEnvironment(collection, `wrk_${index + 1}`), cookieJar: { name: 'Default Jar', meta: { id: `jar_${index + 1}` }, cookies: workspace.cookies.map(insomniaCookie) }, certificates: [] });
   });
-  selectedDesigns(workspace, options).forEach((design, index) => {
+  const designs = selectedDesigns(workspace, options);
+  designs.forEach((design, index) => {
     const collection = workspace.collections.find((candidate) => candidate.id === design.generatedCollectionId);
-    documents.push({ type: 'spec.insomnia.rest/5.0', schema_version: '5.1', name: design.name, meta: { id: `spc_${index + 1}`, description: 'Exported by Brunomnia' }, spec: { contents: design.contents }, collection: collection ? v5Collection(collection, warnings, `spc_${index + 1}`) : [], environments: collection ? v5CollectionEnvironment(collection, `spc_${index + 1}`) : v5GlobalEnvironment([], `spc_${index + 1}`), testSuites: [], certificates: [] });
+    const prefix = `spc_${index + 1}`;
+    const exported = collection ? v5Collection(collection, warnings, prefix) : undefined;
+    documents.push({ type: 'spec.insomnia.rest/5.0', schema_version: '5.1', name: design.name, meta: { id: prefix, description: 'Exported by Brunomnia' }, spec: { contents: design.contents }, collection: exported?.collection ?? [], environments: collection ? v5CollectionEnvironment(collection, prefix) : v5GlobalEnvironment([], prefix), testSuites: collection && exported ? v5TestSuites(workspace, collection.id, exported.requestIds, prefix) : [], certificates: [] });
   });
+  const representableCollectionIds = new Set(designs.flatMap((design) => design.generatedCollectionId ? [design.generatedCollectionId] : []));
+  const selectedCollectionIds = new Set(selectedCollections(workspace, options).map((collection) => collection.id));
+  workspace.testSuites.filter((suite) => selectedCollectionIds.has(suite.collectionId) && !representableCollectionIds.has(suite.collectionId)).forEach((suite) => warnings.push({ code: 'unsupported-v5-test-suite', message: 'Insomnia v5 can store standalone test suites only on API specification documents, so this collection-owned suite was omitted.', resource: suite.name }));
   const globalEnvironments = publicEnvironments(workspace.environments);
   const byId = new Map(globalEnvironments.map((environment) => [environment.id, environment]));
   globalEnvironments.filter((environment) => !environment.parentId || !byId.has(environment.parentId)).forEach((base, index) => {

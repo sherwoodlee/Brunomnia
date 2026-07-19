@@ -11,7 +11,7 @@ import { applyScriptSubresponse, runBrowserScript, type ScriptRunOptions } from 
 import { createPluginRuntime, type PluginHostCallbacks, type PluginRunState } from '../lib/plugins';
 import { readDesktopScriptFile, readDesktopTemplateFile } from '../lib/scriptFiles';
 import { resolveAuthorizedExternalSecret } from '../lib/security';
-import { createUnitTest, createUnitTestSuite, moveUnitTest, moveUnitTestSuite, orderedTestSuites, orderedUnitTests, unitTestScript, type UnitTestPlacement } from '../lib/unitTests';
+import { createUnitTest, createUnitTestSuite, moveUnitTest, moveUnitTestSuite, moveUnitTestSuiteToCollection, orderedTestSuites, orderedUnitTests, unitTestScript, type UnitTestPlacement } from '../lib/unitTests';
 import { CodeEditor } from './ProtocolEditors';
 import { Icon } from './Icon';
 import { OAuthAuthorizationDialog, type OAuthAuthorizationStatus } from './OAuthAuthorizationDialog';
@@ -55,9 +55,10 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
   const oauthFlowId = useRef('');
   const suites = useMemo(() => orderedTestSuites(workspace.testSuites), [workspace.testSuites]);
   const tests = useMemo(() => orderedUnitTests(suite.tests), [suite.tests]);
-  const requests = useMemo(() => workspace.collections.flatMap((collection) => collection.requests
+  const suiteCollection = workspace.collections.find((collection) => collection.id === suite.collectionId) ?? workspace.collections[0];
+  const requests = useMemo(() => workspace.collections.filter((collection) => collection.id === suite.collectionId).flatMap((collection) => collection.requests
     .filter((request) => request.protocol === 'http' || request.protocol === 'graphql')
-    .map((request) => ({ collection, request }))), [workspace.collections]);
+    .map((request) => ({ collection, request }))), [suite.collectionId, workspace.collections]);
   const runs = useMemo(() => workspace.unitTestResults.filter((result) => result.suiteId === suite.id), [suite.id, workspace.unitTestResults]);
   const selectedRun = runs.find((result) => result.id === selectedRunId) ?? runs[0];
   const visibleResults = running ? liveResults : selectedRun?.tests ?? [];
@@ -102,7 +103,7 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
   }));
 
   const addSuite = () => {
-    const created = createUnitTestSuite(uid('test-suite'), workspace.testSuites);
+    const created = createUnitTestSuite(uid('test-suite'), workspace.testSuites, suite.collectionId || workspace.collections[0]?.id || '');
     onChangeWorkspace((current) => ({ ...current, testSuites: [...current.testSuites, created] }));
     onOpenSuite(created.id);
   };
@@ -233,7 +234,7 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
     let resolveResponse: NonNullable<SendRequestContext['resolveResponse']>;
     const executeSavedRequest = async (requestId: string | undefined, requestChain: string[] = [], cookies = runCookies, responses = runResponses): Promise<{ response: HttpResponse; stored: StoredResponse }> => {
       if (!requestId) throw new Error('Select a request before calling insomnia.send().');
-      const collection = workspace.collections.find((candidate) => candidate.requests.some((request) => request.id === requestId || request.name === requestId));
+      const collection = workspace.collections.find((candidate) => candidate.id === suite.collectionId);
       const sourceRequest = collection?.requests.find((request) => request.id === requestId || request.name === requestId);
       if (!collection || !sourceRequest) throw new Error(`Could not find request ${requestId}`);
       if (sourceRequest.protocol !== 'http' && sourceRequest.protocol !== 'graphql') throw new Error('Standalone unit tests can send HTTP and GraphQL requests.');
@@ -381,18 +382,18 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
       <aside className="test-suite-sidebar">
         <header><div><small>Standalone tests</small><strong>Test suites</strong></div><button aria-label="New test suite" onClick={addSuite} type="button"><Icon name="plus" size={14} /></button></header>
         <div>{suites.map((candidate, index) => <article className={candidate.id === suite.id ? 'active' : ''} draggable key={candidate.id} onDragEnd={() => { draggedSuiteId.current = ''; }} onDragOver={(event) => event.preventDefault()} onDragStart={() => { draggedSuiteId.current = candidate.id; }} onDrop={(event) => dropSuite(event, candidate.id)}>
-          <button onClick={(event) => onOpenSuite(candidate.id, event.metaKey || event.ctrlKey)} onDoubleClick={() => onOpenSuite(candidate.id, true)} type="button"><Icon name="check" size={13} /><span><strong>{candidate.name}</strong><small>{candidate.tests.length} test{candidate.tests.length === 1 ? '' : 's'}</small></span></button>
+          <button onClick={(event) => onOpenSuite(candidate.id, event.metaKey || event.ctrlKey)} onDoubleClick={() => onOpenSuite(candidate.id, true)} type="button"><Icon name="check" size={13} /><span><strong>{candidate.name}</strong><small>{workspace.collections.find((collection) => collection.id === candidate.collectionId)?.name ?? 'Missing collection'} · {candidate.tests.length} test{candidate.tests.length === 1 ? '' : 's'}</small></span></button>
           <div><button aria-label={`Move ${candidate.name} up`} disabled={running || index === 0} onClick={() => moveSuiteOne(candidate, -1)} type="button">↑</button><button aria-label={`Move ${candidate.name} down`} disabled={running || index === suites.length - 1} onClick={() => moveSuiteOne(candidate, 1)} type="button">↓</button><button aria-label={`Delete ${candidate.name}`} disabled={running} onClick={() => deleteSuite(candidate)} type="button"><Icon name="trash" size={12} /></button></div>
         </article>)}</div>
       </aside>
       <main className="unit-test-editor">
-        <header><input aria-label="Test suite name" onChange={(event) => updateSuite((current) => ({ ...current, name: event.target.value }))} value={suite.name} /><div><button className="secondary-button" onClick={addTest} type="button"><Icon name="plus" size={13} /> New test</button><button className="primary-button" disabled={running || !tests.length} onClick={() => void run(tests)} type="button"><Icon name="play" size={13} /> {running ? 'Running…' : 'Run tests'}</button></div></header>
+        <header><input aria-label="Test suite name" onChange={(event) => updateSuite((current) => ({ ...current, name: event.target.value }))} value={suite.name} /><select aria-label="Test suite collection" onChange={(event) => { const collection = workspace.collections.find((candidate) => candidate.id === event.target.value); if (collection) updateSuite((current) => moveUnitTestSuiteToCollection(current, collection.id, new Set(collection.requests.map((request) => request.id)))); }} value={suiteCollection?.id ?? ''}>{workspace.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select><div><button className="secondary-button" onClick={addTest} type="button"><Icon name="plus" size={13} /> New test</button><button className="primary-button" disabled={running || !tests.length} onClick={() => void run(tests)} type="button"><Icon name="play" size={13} /> {running ? 'Running…' : 'Run tests'}</button></div></header>
         <p className="unit-test-warning">Pinned Insomnia plans to deprecate standalone unit tests in favor of request scripts during 2026. They remain fully local and account-free here for compatibility.</p>
         <div className="unit-test-list">{tests.map((test, index) => {
           const expanded = expandedTests.has(test.id);
           const latest = visibleResults.find((result) => result.testId === test.id);
           return <article className="unit-test-card" draggable key={test.id} onDragEnd={() => { draggedTestId.current = ''; }} onDragOver={(event) => event.preventDefault()} onDragStart={() => { draggedTestId.current = test.id; }} onDrop={(event) => dropTest(event, test.id)}>
-            <div className="unit-test-row"><button aria-label={`${expanded ? 'Collapse' : 'Expand'} ${test.name}`} onClick={() => setExpandedTests((current) => { const next = new Set(current); if (next.has(test.id)) next.delete(test.id); else next.add(test.id); return next; })} type="button"><Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={13} /></button><input aria-label="Test name" onChange={(event) => updateTest(test.id, { name: event.target.value })} value={test.name} /><select aria-label={`Request for ${test.name}`} onChange={(event) => updateTest(test.id, { requestId: event.target.value || null })} value={test.requestId ?? ''}><option value="">Select a request</option>{workspace.collections.map((collection) => <optgroup key={collection.id} label={collection.name}>{collection.requests.filter((request) => request.protocol === 'http' || request.protocol === 'graphql').map((request) => <option key={request.id} value={request.id}>{request.protocol === 'graphql' ? 'GQL' : request.method} · {request.name}</option>)}</optgroup>)}</select>{latest ? <span className={latest.passed ? 'ok' : 'bad'}>{latest.passed ? 'PASS' : 'FAIL'}</span> : null}<div><button aria-label={`Move ${test.name} up`} disabled={index === 0} onClick={() => moveTestOne(test, -1)} type="button">↑</button><button aria-label={`Move ${test.name} down`} disabled={index === tests.length - 1} onClick={() => moveTestOne(test, 1)} type="button">↓</button><button aria-label={`Delete ${test.name}`} onClick={() => deleteTest(test)} type="button"><Icon name="trash" size={13} /></button><button aria-label={`Run ${test.name}`} disabled={running} onClick={() => void run([test])} type="button"><Icon name="play" size={13} /></button></div></div>
+            <div className="unit-test-row"><button aria-label={`${expanded ? 'Collapse' : 'Expand'} ${test.name}`} onClick={() => setExpandedTests((current) => { const next = new Set(current); if (next.has(test.id)) next.delete(test.id); else next.add(test.id); return next; })} type="button"><Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={13} /></button><input aria-label="Test name" onChange={(event) => updateTest(test.id, { name: event.target.value })} value={test.name} /><select aria-label={`Request for ${test.name}`} onChange={(event) => updateTest(test.id, { requestId: event.target.value || null })} value={test.requestId ?? ''}><option value="">Select a request</option>{suiteCollection ? <optgroup label={suiteCollection.name}>{suiteCollection.requests.filter((request) => request.protocol === 'http' || request.protocol === 'graphql').map((request) => <option key={request.id} value={request.id}>{request.protocol === 'graphql' ? 'GQL' : request.method} · {request.name}</option>)}</optgroup> : null}</select>{latest ? <span className={latest.passed ? 'ok' : 'bad'}>{latest.passed ? 'PASS' : 'FAIL'}</span> : null}<div><button aria-label={`Move ${test.name} up`} disabled={index === 0} onClick={() => moveTestOne(test, -1)} type="button">↑</button><button aria-label={`Move ${test.name} down`} disabled={index === tests.length - 1} onClick={() => moveTestOne(test, 1)} type="button">↓</button><button aria-label={`Delete ${test.name}`} onClick={() => deleteTest(test)} type="button"><Icon name="trash" size={13} /></button><button aria-label={`Run ${test.name}`} disabled={running} onClick={() => void run([test])} type="button"><Icon name="play" size={13} /></button></div></div>
             {expanded ? <div className="unit-test-code"><CodeEditor ariaLabel={`${test.name} JavaScript`} onChange={(code) => updateTest(test.id, { code })} value={test.code} /></div> : null}
           </article>;
         })}{!tests.length ? <div className="empty-state compact"><Icon name="code" size={28} /><strong>Add unit tests to verify your API</strong><span>Each test can send its selected request with insomnia.send().</span><button className="secondary-button" onClick={addTest} type="button">New test</button></div> : null}</div>

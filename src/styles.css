@@ -442,6 +442,7 @@ kbd {
 .unit-test-editor { border-right: 1px solid var(--border); display: grid; grid-template-rows: 58px auto minmax(0, 1fr); min-height: 0; }
 .unit-test-editor > header { align-items: center; border-bottom: 1px solid var(--border); display: flex; gap: 12px; justify-content: space-between; padding: 0 14px; }
 .unit-test-editor > header > input { background: transparent; border: 0; color: var(--text); font-size: 16px; font-weight: 560; min-width: 0; outline: 0; width: 100%; }
+.unit-test-editor > header > select { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); flex: 0 1 220px; font: 9px var(--font-mono); height: 32px; min-width: 120px; padding: 0 8px; }
 .unit-test-editor > header > div { display: flex; flex: 0 0 auto; gap: 7px; }
 .unit-test-editor > header button { align-items: center; display: flex; font-size: 9px; gap: 6px; height: 33px; padding: 0 10px; }
 .unit-test-warning { background: color-mix(in srgb, var(--amber) 9%, var(--panel)); border-bottom: 1px solid color-mix(in srgb, var(--amber) 35%, var(--border)); color: var(--amber); font-size: 9px; line-height: 1.45; margin: 0; padding: 8px 14px; }

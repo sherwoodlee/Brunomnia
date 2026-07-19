@@ -3,12 +3,13 @@ import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node
 import { basename, extname } from 'node:path';
 import vm from 'node:vm';
 import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openapi';
+import { createBlankRequest } from '../src/data/seed';
 import { buildHeaders, buildRequestUrl, environmentMap } from '../src/lib/request';
 import { renderApiRequest } from '../src/lib/requestRender';
 import { parseRunnerData, runCollection, validateTestNamePattern } from '../src/lib/runner';
 import { createRunnerReportArtifact, parseRunnerReporter } from '../src/lib/runnerReport';
-import type { ApiDesign, ApiRequest, AuthConfig, CookieRecord, Environment, HttpResponse, ScriptRunResult, StoredResponse, Workspace } from '../src/types';
-import { applyCollectionConfiguration, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resources';
+import type { ApiDesign, ApiRequest, AuthConfig, CookieRecord, Environment, HttpResponse, RunnerItemResult, RunnerReport, ScriptRunResult, StoredResponse, Workspace } from '../src/types';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from '../src/lib/resources';
 import { hydrateScriptFileReferences, prepareScriptSubrequest, type ScriptFileBudget, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 import { createScriptExpect } from '../src/lib/scriptExpect';
 import { createScriptModules } from '../src/lib/scriptModules';
@@ -19,6 +20,7 @@ import { applyDefaultUserAgentHeader } from '../src/lib/userAgent';
 import { applyDefaultAcceptHeader } from '../src/lib/calculatedHeaders';
 import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
+import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
 
 const args = process.argv.slice(2);
@@ -81,6 +83,8 @@ const runNodeScript = async (
   const pendingTests: Promise<unknown>[] = [];
   const testNamePattern = options.testNamePattern === undefined ? undefined : new RegExp(options.testNamePattern);
   let registeredTests = 0;
+  let subrequestCount = 0;
+  const maxSubrequests = Math.min(20, Math.max(1, options.maxSubrequests ?? 5));
   const fileReferences: ScriptFileReference[] = [];
   const fileBudget: ScriptFileBudget = { files: 0, bytes: 0 };
   if (!source.trim()) return { request, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
@@ -273,6 +277,17 @@ const runNodeScript = async (
       },
     };
   };
+  const claimSubrequest = () => {
+    if (subrequestCount >= maxSubrequests) throw new Error('Script exceeded the secondary-request limit.');
+    subrequestCount += 1;
+  };
+  const savedResponseFacade = (candidate: HttpResponse) => ({
+    status: candidate.status,
+    statusMessage: candidate.statusText,
+    data: candidate.body,
+    headers: Object.fromEntries(Object.entries(candidate.headers).map(([name, value]) => [name.toLowerCase(), value])),
+    responseTime: candidate.durationMs,
+  });
   const insomnia = {
     baseGlobals: baseGlobalApi,
     globals: globalApi,
@@ -293,9 +308,15 @@ const runNodeScript = async (
     response: responseFacade(response),
     replaceIn: (value: unknown) => String(value).replace(/{{\s*([^{}]+?)\s*}}/g, (match, name: string) => mergedVariables()[name] ?? match),
     vault: { get: (name: string) => { if (!options.vault) throw new Error('Script vault access is disabled.'); return options.vault[name]; } },
+    send: async (requestId?: string) => {
+      if (!options.sendRequestById) throw new Error('Standalone test request execution is unavailable.');
+      claimSubrequest();
+      return savedResponseFacade(await options.sendRequestById(requestId));
+    },
     sendRequest: async (input: unknown, callback?: (error: Error | null, result?: ReturnType<typeof responseFacade>) => void) => {
       const run = async () => {
         if (!options.sendRequest) throw new Error('Script-initiated requests are disabled.');
+        claimSubrequest();
         const variables = mergedVariables();
         const subrequest = await prepareScriptSubrequest(input, request, variables, options.readFile, fileBudget);
         return responseFacade(await options.sendRequest(subrequest, variables));
@@ -474,7 +495,7 @@ const usage = `Brunomnia CLI
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
   brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
-  brunomnia run test <workspace> <collection-name-or-id> [-t, --testNamePattern <regex>] [same options]
+  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [same options]
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
 `;
@@ -515,8 +536,12 @@ const main = async () => {
 
   if (command === 'run' && (subject === 'collection' || subject === 'test')) {
     const workspace = await loadWorkspace(args[2] ?? fail('Provide a workspace file.'));
-    const identifier = args[3] ?? fail('Provide a collection name or ID.');
-    const collection = workspace.collections.find((candidate) => candidate.id === identifier || candidate.name === identifier) ?? fail(`Collection '${identifier}' was not found.`);
+    const identifier = args[3] ?? fail(subject === 'test' ? 'Provide a test suite or API specification name or ID.' : 'Provide a collection name or ID.');
+    const suites = subject === 'test' ? selectUnitTestSuites(workspace, identifier) : [];
+    if (subject === 'test' && !suites.length) fail(`No test suites were found for '${identifier}'.`);
+    const collection = subject === 'test'
+      ? workspace.collections.find((candidate) => candidate.id === suites[0].collectionId) ?? fail(`The selected test suite's collection was not found.`)
+      : workspace.collections.find((candidate) => candidate.id === identifier || candidate.name === identifier) ?? fail(`Collection '${identifier}' was not found.`);
     const environmentIdentifier = flag('--env') ?? workspace.activeEnvironmentId;
     const selectedEnvironment: Environment = workspace.environments.find((candidate) => candidate.id === environmentIdentifier || candidate.name === environmentIdentifier) ?? workspace.environments[0] ?? fail('The workspace has no environment.');
     const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
@@ -586,7 +611,9 @@ const main = async () => {
       return { result, stored };
     };
     resolveResponse = async ({ requestId, requestChain, cookies, responses }) => {
-      const dependencyCollection = workspace.collections.find((candidate) => candidate.requests.some((request) => request.id === requestId || request.name === requestId));
+      const dependencyCollection = subject === 'test'
+        ? collection
+        : workspace.collections.find((candidate) => candidate.requests.some((request) => request.id === requestId || request.name === requestId));
       const dependency = dependencyCollection?.requests.find((request) => request.id === requestId || request.name === requestId);
       if (!dependencyCollection || !dependency) throw new Error(`Could not find request ${requestId}`);
       const configured = applyCollectionConfiguration(dependencyCollection, dependency, environment);
@@ -594,26 +621,125 @@ const main = async () => {
       return stored;
     };
     const executeWorkspaceHttp = async (request: ApiRequest, variables: Record<string, string>) => (await executeAndStore(request, variables, environment.id)).result;
-    const report = await runCollection(collection, environment, {
-      iterations: Number(flag('--iterations') ?? 1), retries: Number(flag('--retries') ?? 0), bail: hasFlag('--bail'), delayMs: 0,
-      testNamePattern,
-      scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(flag('--script-timeout') ?? 10_000))),
-      environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
-      dataRows: dataPath ? parseRunnerData(await loadText(dataPath)) : [],
-      onResult: (result) => {
-        const responseIndex = cliResponses.findIndex((response) => response.requestId === result.requestId);
-        if (responseIndex < 0) return;
-        const requestTestResults = result.tests.slice(0, 1_000).map((test) => ({ ...test, name: test.name.slice(0, 2_000), ...(test.error ? { error: test.error.slice(0, 20_000) } : {}) }));
-        cliResponses[responseIndex] = { ...cliResponses[responseIndex], requestTestResults };
-      },
-    }, executeWorkspaceHttp, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => {
-      if (source.trim() && !hasFlag('--allow-scripts')) throw new Error('CLI script execution is disabled. Re-run trusted workspaces with --allow-scripts.');
-      return runNodeScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
-        ...scriptOptions,
-        sendRequest: hasFlag('--allow-script-requests') ? executeWorkspaceHttp : undefined,
-        readFile: hasFlag('--allow-script-files') ? readCliScriptFile : undefined,
+    const iterations = Math.min(1_000, Math.max(1, Math.floor(Number(flag('--iterations') ?? 1) || 1)));
+    const retries = Math.min(10, Math.max(0, Math.floor(Number(flag('--retries') ?? 0) || 0)));
+    const scriptTimeoutMs = Math.min(60_000, Math.max(1_000, Number(flag('--script-timeout') ?? 10_000)));
+    const dataRows = dataPath ? parseRunnerData(await loadText(dataPath)) : [];
+    let report: RunnerReport;
+    if (subject === 'collection') {
+      report = await runCollection(collection, environment, {
+        iterations, retries, bail: hasFlag('--bail'), delayMs: 0,
+        scriptTimeoutMs,
+        environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
+        dataRows,
+        onResult: (result) => {
+          const responseIndex = cliResponses.findIndex((response) => response.requestId === result.requestId);
+          if (responseIndex < 0) return;
+          const requestTestResults = result.tests.slice(0, 1_000).map((test) => ({ ...test, name: test.name.slice(0, 2_000), ...(test.error ? { error: test.error.slice(0, 20_000) } : {}) }));
+          cliResponses[responseIndex] = { ...cliResponses[responseIndex], requestTestResults };
+        },
+      }, executeWorkspaceHttp, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => {
+        if (source.trim() && !hasFlag('--allow-scripts')) throw new Error('CLI script execution is disabled. Re-run trusted workspaces with --allow-scripts.');
+        return runNodeScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
+          ...scriptOptions,
+          sendRequest: hasFlag('--allow-script-requests') ? executeWorkspaceHttp : undefined,
+          readFile: hasFlag('--allow-script-files') ? readCliScriptFile : undefined,
+        });
       });
-    });
+    } else {
+      const startedAt = new Date().toISOString();
+      const results: RunnerItemResult[] = [];
+      const pattern = testNamePattern === undefined ? undefined : new RegExp(testNamePattern);
+      const globalScopes = scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id);
+      const collectionScopes = collectionEnvironmentScopes(collection);
+      let bailed = false;
+      outer: for (let iteration = 0; iteration < iterations; iteration += 1) {
+        const iterationData = dataRows[iteration % Math.max(1, dataRows.length)] ?? {};
+        for (const suite of suites) {
+          for (const test of orderedUnitTests(suite.tests)) {
+            if (pattern && !pattern.test(test.name)) continue;
+            for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
+              const started = performance.now();
+              const target = collection.requests.find((request) => request.id === test.requestId || request.name === test.requestId);
+              const configured = target ? applyCollectionConfiguration(collection, target, environment) : undefined;
+              const scriptRequest = configured?.request ?? createBlankRequest(`cli-unit-test-${test.id}`);
+              let response: HttpResponse | undefined;
+              let tests: RunnerItemResult['tests'] = [];
+              let error: string | undefined;
+              try {
+                if (!hasFlag('--allow-scripts')) throw new Error('CLI script execution is disabled. Re-run trusted workspaces with --allow-scripts.');
+                const output = await runNodeScript(unitTestScript(test), scriptRequest, globalScopes?.globals.values ?? environmentMap(environment), undefined, scriptTimeoutMs, {}, iterationData, {
+                  baseGlobals: globalScopes?.baseGlobals.values ?? environmentMap(environment),
+                  baseGlobalDisabled: globalScopes?.baseGlobals.disabled ?? [],
+                  globalDisabled: globalScopes?.globals.disabled ?? [],
+                  globalsAreBase: globalScopes?.globalsAreBase ?? true,
+                  baseEnvironment: collectionScopes.baseEnvironment.values,
+                  baseEnvironmentDisabled: collectionScopes.baseEnvironment.disabled,
+                  collectionVariables: collectionScopes.environment.values,
+                  collectionDisabled: collectionScopes.environment.disabled,
+                  collectionVariablesAreBase: collectionScopes.environmentIsBase,
+                  folders: (configured?.folders ?? []).map((folder) => { const scope = variableScope([folder.environment]); return { id: folder.id, name: folder.name, environment: scope.values, disabled: scope.disabled }; }),
+                  testNamePattern,
+                  sendRequestById: async (requestId) => {
+                    const sourceRequest = collection.requests.find((request) => request.id === (requestId ?? test.requestId) || request.name === (requestId ?? test.requestId));
+                    if (!sourceRequest) throw new Error(requestId || test.requestId ? `Could not find request ${requestId ?? test.requestId}` : 'Select a request before calling insomnia.send().');
+                    if (sourceRequest.protocol !== 'http' && sourceRequest.protocol !== 'graphql') throw new Error('Standalone unit tests can send HTTP and GraphQL requests.');
+                    const prepared = applyCollectionConfiguration(collection, sourceRequest, environment);
+                    response = (await executeAndStore(prepared.request, environmentMap(prepared.environment), prepared.environment.id, [], cliCookies, cliResponses, collection.activeSubEnvironmentId ?? '')).result;
+                    return response;
+                  },
+                  sendRequest: hasFlag('--allow-script-requests') ? async (request, variables) => {
+                    response = await executeWorkspaceHttp(request, variables);
+                    return response;
+                  } : undefined,
+                  readFile: hasFlag('--allow-script-files') ? readCliScriptFile : undefined,
+                  maxSubrequests: 20,
+                });
+                tests = output.tests;
+                if (!tests.length) error = 'The test did not report a result.';
+              } catch (caught) {
+                error = caught instanceof Error ? caught.message : String(caught);
+              }
+              const passed = !error && tests.length > 0 && tests.every((testResult) => testResult.passed);
+              results.push({
+                id: `run-${crypto.randomUUID()}`,
+                requestId: test.requestId ?? test.id,
+                requestName: suites.length === 1 ? test.name : `${suite.name} › ${test.name}`,
+                iteration: iteration + 1,
+                attempt,
+                status: response?.status ?? 0,
+                durationMs: Math.max(0, Math.round(performance.now() - started)),
+                passed,
+                error,
+                tests,
+              });
+              if (passed || attempt > retries) {
+                if (!passed && hasFlag('--bail')) { bailed = true; break outer; }
+                break;
+              }
+            }
+          }
+        }
+      }
+      report = {
+        id: `run-${crypto.randomUUID()}`,
+        collectionId: collection.id,
+        collectionName: suites.length === 1 ? suites[0].name : `${collection.name} test suites`,
+        environmentId: environment.id,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        iterations,
+        retries,
+        testNamePattern,
+        matchedTests: results.reduce((total, result) => total + result.tests.length, 0),
+        total: results.length,
+        passed: results.filter((result) => result.passed).length,
+        failed: results.filter((result) => !result.passed).length,
+        cancelled: false,
+        bailed,
+        results,
+      };
+    }
     const reporter = parseRunnerReporter(flag('--reporter') ?? flag('-r'), subject === 'test' ? 'spec' : 'json');
     const artifact = createRunnerReportArtifact(report, reporter);
     const output = flag('--output') ?? flag('-o');

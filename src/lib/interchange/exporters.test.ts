@@ -37,6 +37,9 @@ describe('artifact export adapters', () => {
     grpcRequest.grpc.reflectionApiKey = '{{ vault.buf }}';
     grpcRequest.grpc.reflectionApiModule = 'buf.build/acme/greeter';
     grpcRequest.disableUserAgentHeader = true;
+    const testCollection = workspace.collections[0];
+    workspace.apiDesigns[0].generatedCollectionId = testCollection.id;
+    workspace.testSuites = [{ id: 'contract-suite', name: 'Contract suite', collectionId: testCollection.id, sortKey: -1, tests: [{ id: 'status-test', name: 'Returns success', code: 'const response = await insomnia.send();', requestId: testCollection.requests[0].id, sortKey: -1 }] }];
     workspace.cookies = [{ id: 'cookie-session', name: 'session', value: 'abc', domain: 'api.acme.dev', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-16T12:00:00.000Z' }];
     const v4Export = exportArtifact(workspace, { format: 'insomnia-v4', scope: 'all' });
     const v4Import = importArtifact(v4Export.contents, v4Export.fileName);
@@ -69,6 +72,8 @@ describe('artifact export adapters', () => {
     expect(v4Import.collections[0].folders?.[0]).toMatchObject({ environmentEditorMode: 'raw', environment: expect.arrayContaining([expect.objectContaining({ name: 'limits', valueType: 'json' })]) });
     expect(v4Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'socketio')).toMatchObject({ socketIo: { path: '/socket.io', eventName: 'message', ack: true, eventListeners: [expect.objectContaining({ eventName: 'order.updated', enabled: true })] } });
     expect(v4Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'grpc')).toMatchObject({ disableUserAgentHeader: true, grpc: { descriptorSource: 'buf', reflectionApiUrl: 'https://buf.example.com', reflectionApiKey: '{{ vault.buf }}', reflectionApiModule: 'buf.build/acme/greeter' } });
+    expect(v4Import.testSuites).toEqual([expect.objectContaining({ name: 'Contract suite', tests: [expect.objectContaining({ name: 'Returns success', requestId: expect.any(String) })] })]);
+    expect(v4Import.collections.find((collection) => collection.id === v4Import.testSuites[0].collectionId)?.requests.some((request) => request.id === v4Import.testSuites[0].tests[0].requestId)).toBe(true);
 
     const v5Export = exportArtifact(workspace, { format: 'insomnia-v5', scope: 'all' });
     const v5Import = importArtifact(v5Export.contents, v5Export.fileName);
@@ -96,6 +101,8 @@ describe('artifact export adapters', () => {
     expect(v5Import.environments.length).toBeGreaterThan(0);
     expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'socketio')).toMatchObject({ socketIo: { path: '/socket.io', eventName: 'message', ack: true, eventListeners: [expect.objectContaining({ eventName: 'order.updated', enabled: true })] } });
     expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'grpc')).toMatchObject({ disableUserAgentHeader: true, grpc: { descriptorSource: 'buf', reflectionApiUrl: 'https://buf.example.com', reflectionApiKey: '{{ vault.buf }}', reflectionApiModule: 'buf.build/acme/greeter' } });
+    expect(v5Import.testSuites).toEqual([expect.objectContaining({ name: 'Contract suite', tests: [expect.objectContaining({ name: 'Returns success', requestId: expect.any(String) })] })]);
+    expect(v5Import.collections.find((collection) => collection.id === v5Import.testSuites[0].collectionId)?.requests.some((request) => request.id === v5Import.testSuites[0].tests[0].requestId)).toBe(true);
   });
 
   it('exports and reimports HAR while warning about streaming protocols', () => {
@@ -197,10 +204,10 @@ describe('artifact export adapters', () => {
     const workspace = cloneSeedWorkspace();
     workspace.certificates.clients = [{ id: 'pfx', host: 'api.example.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }];
     const collection = workspace.collections[1];
-    workspace.testSuites = [{ id: 'suite', name: 'Scoped suite', sortKey: 0, tests: [
+    workspace.testSuites = [{ id: 'suite', name: 'Scoped suite', collectionId: collection.id, sortKey: 0, tests: [
       { id: 'included', name: 'Included', code: '', requestId: collection.requests[0].id, sortKey: 0 },
       { id: 'excluded', name: 'Excluded', code: '', requestId: workspace.collections[0].requests[0].id, sortKey: 1 },
-    ] }];
+    ] }, { id: 'empty-suite', name: 'Empty suite', collectionId: collection.id, sortKey: 1, tests: [] }];
     workspace.unitTestResults = [{ id: 'run', suiteId: 'suite', startedAt: '2026-07-19T00:00:00.000Z', finishedAt: '2026-07-19T00:00:01.000Z', tests: [
       { testId: 'included', name: 'Included', requestId: collection.requests[0].id, passed: true, durationMs: 1, logs: [] },
       { testId: 'excluded', name: 'Excluded', requestId: workspace.collections[0].requests[0].id, passed: true, durationMs: 1, logs: [] },
@@ -209,8 +216,8 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(36);
-    expect(parsed.testSuites).toEqual([expect.objectContaining({ id: 'suite', tests: [expect.objectContaining({ id: 'included' })] })]);
+    expect(parsed.version).toBe(37);
+    expect(parsed.testSuites).toEqual([expect.objectContaining({ id: 'suite', tests: [expect.objectContaining({ id: 'included' })] }), expect.objectContaining({ id: 'empty-suite', tests: [] })]);
     expect(parsed.unitTestResults).toEqual([expect.objectContaining({ id: 'run', suiteId: 'suite', tests: [expect.objectContaining({ testId: 'included' })] })]);
     expect(parsed.certificates.clients[0]).toMatchObject({ pfxBase64: 'cGZ4', passphrase: 'secret' });
 
@@ -222,5 +229,7 @@ describe('artifact export adapters', () => {
     const designV5 = exportArtifact(workspace, { format: 'insomnia-v5', scope: 'design', designId: design.id });
     const documents = parseAllDocuments(designV5.contents);
     expect(documents.map((document) => document.toJSON())).toContainEqual(expect.objectContaining({ type: 'spec.insomnia.rest/5.0', name: 'Orders API' }));
+    const collectionV5 = exportArtifact(workspace, { format: 'insomnia-v5', scope: 'collection', collectionId: collection.id });
+    expect(collectionV5.warnings).toContainEqual(expect.objectContaining({ code: 'unsupported-v5-test-suite', resource: 'Scoped suite' }));
   });
 });

@@ -518,17 +518,28 @@ const normalizeEnvironments = (value: unknown, fallback: Environment[]): Environ
   return normalized;
 };
 
-const normalizeTestSuites = (value: unknown, requestIds: Set<string>): Workspace['testSuites'] => {
+const normalizeTestSuites = (value: unknown, collections: Workspace['collections'], requestIds: Set<string>): Workspace['testSuites'] => {
   if (!Array.isArray(value)) return [];
   const suiteIds = new Set<string>();
   const testIds = new Set<string>();
+  const collectionIds = new Set(collections.map((collection) => collection.id));
+  const requestCollectionIds = new Map(collections.flatMap((collection) => collection.requests.map((request) => [request.id, collection.id] as const)));
   return value.slice(0, 500).flatMap((item, suiteIndex): Workspace['testSuites'] => {
     const suite = record(item);
     if (!suite) return [];
     const id = stringValue(suite.id, `migrated-test-suite-${suiteIndex}`).slice(0, 500);
     if (!id || suiteIds.has(id) || requestIds.has(id)) return [];
     suiteIds.add(id);
-    const tests = (Array.isArray(suite.tests) ? suite.tests : []).slice(0, 1_000).flatMap((testValue, testIndex) => {
+    const rawTests = Array.isArray(suite.tests) ? suite.tests : [];
+    const requestedCollectionId = stringValue(suite.collectionId).slice(0, 500);
+    const inferredCollectionId = rawTests.flatMap((testValue) => {
+      const test = record(testValue);
+      const collectionId = requestCollectionIds.get(stringValue(test?.requestId));
+      return collectionId ? [collectionId] : [];
+    })[0];
+    const collectionId = collectionIds.has(requestedCollectionId) ? requestedCollectionId : inferredCollectionId ?? collections[0]?.id;
+    if (!collectionId) return [];
+    const tests = rawTests.slice(0, 1_000).flatMap((testValue, testIndex) => {
       const test = record(testValue);
       if (!test) return [];
       const testId = stringValue(test.id, `${id}-test-${testIndex}`).slice(0, 500);
@@ -539,13 +550,14 @@ const normalizeTestSuites = (value: unknown, requestIds: Set<string>): Workspace
         id: testId,
         name: stringValue(test.name, `Test ${testIndex + 1}`).slice(0, 2_000),
         code: stringValue(test.code).slice(0, 1_000_000),
-        requestId: requestIds.has(requestId) ? requestId : null,
+        requestId: requestCollectionIds.get(requestId) === collectionId ? requestId : null,
         sortKey: typeof test.sortKey === 'number' && Number.isFinite(test.sortKey) ? test.sortKey : testIndex,
       }];
     }).sort((left, right) => left.sortKey - right.sortKey);
     return [{
       id,
       name: stringValue(suite.name, `Suite ${suiteIndex + 1}`).slice(0, 2_000),
+      collectionId,
       sortKey: typeof suite.sortKey === 'number' && Number.isFinite(suite.sortKey) ? suite.sortKey : suiteIndex,
       tests,
     }];
@@ -767,10 +779,10 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const requestIds = new Set(collections.flatMap((collection) => collection.requests.map((request) => request.id)));
   const environmentIds = new Set(environments.map((environment) => environment.id));
   const governance = normalizeGovernance(workspace.governance, seed.governance);
-  const testSuites = normalizeTestSuites(workspace.testSuites, requestIds);
+  const testSuites = normalizeTestSuites(workspace.testSuites, collections as Workspace['collections'], requestIds);
   return {
     ...workspace,
-    version: 36,
+    version: 37,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
