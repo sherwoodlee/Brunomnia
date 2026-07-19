@@ -1,6 +1,7 @@
 import type { ApiRequest, Collection, Environment, JsonValue, KeyValue, KonnectConfig, KonnectControlPlane, RequestFolder, Workspace } from '../types';
 import { createBlankRequest } from '../data/seed';
 import { sendRequest, type SendRequestContext } from './http';
+import { parseKonnectExpression } from './konnectExpression';
 import { normalizeHttpMethod } from './request';
 import { isProtectedSecretReference } from './security';
 
@@ -256,20 +257,26 @@ export const mapKonnectResources = (workspace: Workspace, servicesSource: unknow
   routesSource.forEach((item) => {
     const record = asRecord(item);
     if (!record) return;
-    const route = sanitizeRoute(record);
+    let route = sanitizeRoute(record);
     const protocols = route.protocols;
     const serviceId = sourceId(route.service);
     const supported = protocols.some((protocol) => ['http', 'https', 'ws', 'wss', 'grpc', 'grpcs'].includes(protocol));
+    const expression = route.hasExpression ? parseKonnectExpression(route.expression) : undefined;
     const reason = !route.id ? 'Route has no identifier.'
       : !serviceId ? 'Route has no Gateway Service.'
       : route.snis.length ? 'Route uses SNI matching, which request URLs cannot override.'
-        : route.hasExpression ? 'Expression-router routes require reviewed expression conversion.'
-          : !supported ? `Unsupported protocol: ${protocols.join(', ') || 'none'}.`
-            : '';
+        : expression?.reason ?? (!supported ? `Unsupported protocol: ${protocols.join(', ') || 'none'}.` : '');
     if (reason) {
       skipped.push({ route, reason });
       return;
     }
+    if (expression?.fields) route = {
+      ...route,
+      methods: expression.fields.methods,
+      paths: expression.fields.paths,
+      hosts: expression.fields.hosts,
+      headers: expression.fields.headers,
+    };
     routes.set(serviceId, [...(routes.get(serviceId) ?? []), route]);
   });
   const collections: Collection[] = [];

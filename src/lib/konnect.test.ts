@@ -53,14 +53,18 @@ describe('Konnect pull mapping', () => {
       { id: 'route-ws', name: 'Events', service: { id: 'service-one' }, protocols: ['ws', 'wss'], paths: ['/events'] },
       { id: 'route-grpc', name: 'Greeter', service: { id: 'service-one' }, protocols: ['grpc', 'grpcs'], paths: ['/acme.Greeter/SayHello'], headers: { 'X-Tenant': ['team'] } },
       { id: 'route-sni', name: 'SNI', service: { id: 'service-one' }, protocols: ['https'], snis: ['api.example.com'] },
-      { id: 'route-expression', name: 'Expression', service: { id: 'service-one' }, protocols: ['http'], expression: 'http.path == "/"' },
+      { id: 'route-expression', name: 'Expression', service: { id: 'service-one' }, protocols: ['http', 'https'], expression: 'http.method == "GET" && http.path ^= "/expression" && http.host == "expression.example.com" && http.headers.x_tenant == "acme"' },
+      { id: 'route-expression-path-only', name: 'Path only expression', service: { id: 'service-one' }, protocols: ['http'], expression: 'http.path == "/path-only"' },
+      { id: 'route-expression-method-only', name: 'Method only expression', service: { id: 'service-one' }, protocols: ['http'], expression: 'http.method == "GET"' },
+      { id: 'route-expression-unsupported', name: 'Unsupported expression', service: { id: 'service-one' }, protocols: ['http'], expression: 'net.src.ip in 10.0.0.0/8' },
+      { id: 'route-expression-sni', name: 'Expression SNI', service: { id: 'service-one' }, protocols: ['https'], expression: 'tls.sni == "secure.example.com" && http.method == "GET"' },
       { id: 'route-tcp', name: 'TCP', service: { id: 'service-one' }, protocols: ['tcp'] },
       { name: 'Missing ID', service: { id: 'service-one' }, protocols: ['http'], paths: ['/missing'] },
     ]);
 
     const collection = mapped.collections.find((candidate) => candidate.source?.sourceId === 'service-one')!;
-    expect(collection.requests).toHaveLength(12);
-    expect(collection.requests.filter((request) => request.protocol === 'http')).toHaveLength(8);
+    expect(collection.requests).toHaveLength(20);
+    expect(collection.requests.filter((request) => request.protocol === 'http')).toHaveLength(16);
     expect(collection.requests.filter((request) => request.protocol === 'websocket')).toHaveLength(2);
     expect(collection.requests.filter((request) => request.protocol === 'grpc')).toHaveLength(2);
     const regexRequest = collection.requests.find((request) => request.url.includes('{userid}'))!;
@@ -73,7 +77,7 @@ describe('Konnect pull mapping', () => {
     const grpc = collection.requests.find((request) => request.url.startsWith('{{ konnect_service_one_grpc_proxy_url }}'))!;
     expect(grpc.grpc).toMatchObject({ service: 'acme.Greeter', method: 'SayHello' });
     expect(grpc.grpc.metadata).toEqual([expect.objectContaining({ name: 'X-Tenant', value: 'team' })]);
-    expect(collection.folders).toHaveLength(11);
+    expect(collection.folders).toHaveLength(16);
     const httpFolder = collection.folders?.find((folder) => folder.source?.sourceId === 'route-http:folder:HTTP /users')!;
     const httpParent = collection.folders?.find((folder) => folder.source?.sourceId === 'route-http:route')!;
     expect(httpFolder).toMatchObject({ name: 'HTTP /users', parentId: httpParent.id });
@@ -84,13 +88,29 @@ describe('Konnect pull mapping', () => {
     const grpcsFolder = collection.folders?.find((folder) => folder.source?.sourceId === 'route-grpc:folder:GRPCS /acme.Greeter/SayHello')!;
     expect(grpcsFolder.name).toBe('GRPCS /acme.Greeter/SayHello');
     expect(collection.requests.find((request) => request.source?.sourceId === 'route-grpc:grpc:/acme.Greeter/SayHello:grpcs')?.folderId).toBe(grpcsFolder.id);
+    const expressionRequests = collection.requests.filter((request) => request.source?.unsupported?.routeId === 'route-expression');
+    expect(expressionRequests).toHaveLength(2);
+    expect(expressionRequests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: 'GET', name: '/expression', url: expect.stringContaining('/expression') }),
+    ]));
+    expect(expressionRequests[0].headers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Host', value: 'expression.example.com' }),
+      expect.objectContaining({ name: 'x-tenant', value: 'acme' }),
+    ]));
+    expect(collection.requests.filter((request) => request.source?.unsupported?.routeId === 'route-expression-path-only')).toHaveLength(5);
+    expect(collection.requests.find((request) => request.source?.unsupported?.routeId === 'route-expression-method-only')).toMatchObject({
+      method: 'GET',
+      name: 'Method only expression',
+      url: '{{ konnect_service_one_http_proxy_url }}',
+    });
     expect(mapped.variables).toHaveLength(6);
-    expect(mapped.skipped).toBe(4);
+    expect(mapped.skipped).toBe(5);
     expect(mapped.collections.find((candidate) => candidate.source?.sourceId === 'skipped-routes')?.requests.map((request) => request.source?.unsupported?.reason)).toEqual(expect.arrayContaining([
       expect.stringContaining('SNI'),
-      expect.stringContaining('expression'),
       expect.stringContaining('Unsupported protocol'),
       expect.stringContaining('identifier'),
+      expect.stringContaining('no extractable'),
+      expect.stringContaining('tls.sni'),
     ]));
   });
 

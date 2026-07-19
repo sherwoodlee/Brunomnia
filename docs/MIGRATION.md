@@ -2118,7 +2118,20 @@ Compatibility bounds remain explicit: the selected control plane must first be d
 
 Compatibility bounds remain explicit: preserving a user's manual local-folder request placement can leave an otherwise valid managed route folder empty instead of deleting local organization as pinned sync does. Automatic all-control-plane project/workspace reconciliation, reviewed expression-router conversion, and a credentialed live-tenant fixture remain open. Service integrations stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 143 — remaining parity closure and release hardening
+## Milestone 143 — Konnect expression-router conversion (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Method expressions | Complete | Deduplicated uppercase `http.method ==` predicates constrain generated methods, including flat OR combinations |
+| Path expressions | Complete | Exact `http.path ==` and prefix `http.path ^=` predicates become deduplicated executable paths and retain default-method expansion when no method is extractable |
+| Host/header expressions | Complete | `http.host ==` becomes the managed Host row; `http.headers.<name> ==` becomes a managed normalized header with underscore-to-hyphen lowercase conversion |
+| Partial expressions | Complete | Unsupported predicates are ignored when another supported field is extractable, preserving pinned over-approximation and method/path cross-product behavior |
+| Explicit skips and bounds | Complete | `tls.sni`, fully unextractable, and over-100,000-character expressions remain visible with exact reasons rather than becoming misleading requests |
+| Executable evidence | Complete | Pure parser and mapping matrices cover deduplication, exact/prefix paths, normalized headers, partial extraction, unsupported negation/regex predicates, SNI, size bounds, two-protocol mapping, folders, and managed constraints |
+
+Compatibility bounds remain explicit: the pinned parser deliberately ignores unsupported predicates when any safe field is found and can over-approximate correlated OR branches into a method/path cross-product; Brunomnia matches and documents that behavior instead of claiming a full Kong expressions evaluator. Automatic all-control-plane project/workspace reconciliation and a credentialed live-tenant fixture remain open. Service integrations stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 144 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
