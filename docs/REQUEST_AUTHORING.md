@@ -77,13 +77,17 @@ GraphQL subscriptions use the shared realtime response panel, session retention,
 
 WSS subscriptions use the effective API certificate-validation choice and the same domain-scoped PEM or PFX/PKCS#12 client identity as native HTTP. Validation remains on by default; Never accepts an untrusted server certificate only for that request. A configured identity is sent only when the resolved hostname matches its exact, wildcard, comma-separated, or newline-separated domain allowlist. Inherited manual or per-request custom HTTP/HTTPS proxies use a bounded CONNECT tunnel, optional URL Basic credentials, and the current no-proxy list before the WSS handshake. The subscription path has no login, organization, plan, or entitlement check. Streaming plugin hooks, advanced signing schemes, upstream filesystem-backed event logs, and broad third-party server fixtures remain open.
 
-## gRPC proto trees
+## gRPC schemas and proto trees
+
+Choose **Reflection** for ordinary reflection against the request's gRPC endpoint, **Proto source** for local definitions, or **Buf registry** for the Buf Schema Registry reflection API. Buf mode accepts an environment-templated registry URL, module, and optional API key; private modules send the resolved key as a Bearer token. **Disable User-Agent header** omits Brunomnia's product header for registries that require it. Loading uses binary Connect/protobuf at `buf.reflect.v1beta1.FileDescriptorSetService/GetFileDescriptorSet`, fixes the transport to HTTP/1.1 like the pinned Insomnia implementation, and rejects responses over 10 MiB.
+
+Registry loading resolves workspace CA and host/port-scoped PEM or PFX/PKCS#12 identity against the registry URL rather than the eventual gRPC service URL. Request timeout, certificate-validation override, redirect policy, proxy selection, and request-local identity material remain in force. An invalid API key and an inaccessible or missing module receive the same focused guidance as the pinned implementation. No Brunomnia account, plan, or entitlement is checked.
 
 Choose **Proto source**, then import one or more `.proto` files or a complete folder. Folder import removes the selected root folder once, preserves every nested relative path, and lets imports such as `types/messages.proto` resolve from the temporary compilation root. Import replaces the request's previous tree; use **Editing** to switch the visible file and **Compile entry** to choose the file whose service graph should be opened.
 
 Proto trees accept at most 500 files, 1 MiB per file, 10 MiB total, and 512 characters per relative path. Absolute paths, parent traversal, non-proto files, and case-insensitive duplicate paths are rejected in both the renderer and native command. Native compilation recreates only the validated tree in an isolated temporary directory, includes imported descriptors/source information, and never reads source paths directly from the user's filesystem.
 
-Workspace v29 persists the files, active editor path, and compile entry while retaining the entry source in the legacy `protoText` field for interchange compatibility. Older single-source requests migrate to `schema.proto` without changing their text. Browser development previews the combined source deterministically; real cross-file compilation and calls run in the packaged Tauri app. Richer reflection/schema workflows remain open, so the gRPC parity row remains Baseline.
+Workspace v29 persists the files, active editor path, and compile entry while retaining the entry source in the legacy `protoText` field for interchange compatibility. Workspace v32 adds bounded Buf URL, module, API-key, and User-Agent policy fields and corrects Insomnia v4/v5 `reflectionApi.enabled` interchange to mean Buf registry mode. Plaintext Buf keys participate in publication guards; vault and external-vault references remain accepted. Older single-source requests migrate to `schema.proto` without changing their text. Browser development previews schemas deterministically; real cross-file compilation, registry retrieval, and calls run in the packaged Tauri app.
 
 ## Interactive gRPC streams
 
@@ -93,7 +97,7 @@ Each interactive message is schema-validated after environment substitution and 
 
 Choose **Use stub** beside the selected method to replace the editor with a descriptor-generated request object. Stubs include every field up to a 500-field and three-level recursion budget, one sample for repeated fields and maps, the first enum number, valid base64 bytes, realistic scalar values, UUIDs for names beginning or ending in `id`, JSON field names, and one branch per oneof. Brunomnia exposes the same action for reflected and imported-proto schemas; pinned Insomnia exposes it for reflected examples. Existing message text is replaced only after the explicit click.
 
-Pinned Insomnia also keeps gRPC request/response messages transient, so persisted gRPC call history is not tracked as a parity gap. Its `@grpc/grpc-js` channel construction has no separate HTTP/HTTPS proxy agent, so a custom gRPC proxy is likewise not required. Buf Schema Registry reflection, disable-user-agent behavior, richer connection-error guidance, and broader third-party fixtures remain open.
+Pinned Insomnia also keeps gRPC request/response messages transient, so persisted gRPC call history is not tracked as a parity gap. Its `@grpc/grpc-js` channel construction has no separate HTTP/HTTPS proxy agent, so a custom gRPC proxy is likewise not required. Richer connection-error guidance and broader third-party fixtures remain open.
 
 ## Socket.IO sessions
 

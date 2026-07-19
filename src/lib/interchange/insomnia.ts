@@ -152,6 +152,7 @@ const mapInsomniaRequest = (
       }),
     };
   } else if (isGrpc) {
+    const reflectionApi = asRecord(raw.reflectionApi);
     request.protocol = 'grpc';
     request.method = 'POST';
     request.grpc = {
@@ -160,7 +161,11 @@ const mapInsomniaRequest = (
       service: asString(raw.protoMethodName).split('/').slice(0, -1).join('/'),
       input: asString(asRecord(raw.body)?.text, '{}'),
       metadata: keyValues(raw.metadata, `${request.id}-metadata`),
-      descriptorSource: asBoolean(asRecord(raw.reflectionApi)?.enabled, true) ? 'reflection' : 'proto',
+      descriptorSource: asBoolean(reflectionApi?.enabled) ? 'buf' : asString(raw.protoFileId) ? 'proto' : 'reflection',
+      reflectionApiUrl: asString(reflectionApi?.url, request.grpc.reflectionApiUrl),
+      reflectionApiKey: asString(reflectionApi?.apiKey),
+      reflectionApiModule: asString(reflectionApi?.module, request.grpc.reflectionApiModule),
+      disableUserAgentHeader: asBoolean(raw.disableUserAgentHeader),
     };
   } else if (isMcp) {
     request.method = 'POST';

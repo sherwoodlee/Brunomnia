@@ -560,7 +560,17 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           schemaEndpoint: stringValue(graphql?.schemaEndpoint),
           schemaFetchedAt: stringValue(graphql?.schemaFetchedAt),
         },
-        grpc: { ...defaults.grpc, ...request.grpc, ...protoTree, metadata: normalizeRows(grpc?.metadata, `${requestId}-metadata`) },
+        grpc: {
+          ...defaults.grpc,
+          ...request.grpc,
+          ...protoTree,
+          descriptorSource: grpc?.descriptorSource === 'proto' || grpc?.descriptorSource === 'buf' ? grpc.descriptorSource : 'reflection',
+          reflectionApiUrl: stringValue(grpc?.reflectionApiUrl, defaults.grpc.reflectionApiUrl).slice(0, 8_192),
+          reflectionApiKey: stringValue(grpc?.reflectionApiKey).slice(0, 65_536),
+          reflectionApiModule: stringValue(grpc?.reflectionApiModule, defaults.grpc.reflectionApiModule).slice(0, 2_048),
+          disableUserAgentHeader: grpc?.disableUserAgentHeader === true,
+          metadata: normalizeRows(grpc?.metadata, `${requestId}-metadata`),
+        },
         transport: {
           ...defaults.transport,
           ...request.transport,
@@ -638,7 +648,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 31,
+    version: 32,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

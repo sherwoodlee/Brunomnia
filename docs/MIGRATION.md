@@ -1789,7 +1789,20 @@ Compatibility bounds remain explicit: Buf Schema Registry reflection, reflected 
 
 Compatibility bounds remain explicit: Buf Schema Registry reflection, disable-user-agent behavior, richer connection-error guidance, and broader third-party fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 120 — remaining parity closure and release hardening
+## Milestone 120 — Buf Schema Registry reflection (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned `reflectionApi.enabled` means the Buf Schema Registry Connect API, not ordinary gRPC server reflection; URL, API key, module, and optional User-Agent suppression are request fields |
+| Native registry transport | Complete | Binary Connect unary POST retrieves `FileDescriptorSet`, preserves request timeout/TLS/CA/PEM/PFX/proxy policy against the registry host, enforces HTTP/1.1 and a 10 MiB response ceiling, and maps 401/404 to focused guidance |
+| Account-free editor | Complete | A third **Buf registry** source exposes templated URL/module/API key plus masked secret and disable-user-agent controls without login, organization, plan, or entitlement checks |
+| Persistence and interchange | Complete | Workspace v32 bounds registry fields, scans plaintext keys before publication, and imports/exports the actual Insomnia v4/v5 reflection API semantics |
+| Executable coverage | Complete | A real loopback server asserts binary protobuf fields, endpoint path, Connect/content headers, Bearer auth, User-Agent presence/absence, descriptor decoding, and 401/404 handling; renderer tests cover template and certificate routing |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 120 verification](QA_MILESTONE_120.md) |
+
+Compatibility bounds remain explicit: richer gRPC connection-error guidance and broader third-party fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 121 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

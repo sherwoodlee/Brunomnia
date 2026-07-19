@@ -155,7 +155,11 @@ export type GrpcProtoFile = {
 export type GrpcConfig = {
   service: string;
   method: string;
-  descriptorSource: 'reflection' | 'proto';
+  descriptorSource: 'reflection' | 'proto' | 'buf';
+  reflectionApiUrl: string;
+  reflectionApiKey: string;
+  reflectionApiModule: string;
+  disableUserAgentHeader: boolean;
   protoText: string;
   protoFiles: GrpcProtoFile[];
   protoEntryPath: string;
@@ -374,7 +378,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 31;
+  version: 32;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

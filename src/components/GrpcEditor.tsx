@@ -34,8 +34,9 @@ export function GrpcEditor({
   const [sessionError, setSessionError] = useState('');
   const [sessionMessages, setSessionMessages] = useState<StreamMessage[]>([]);
   const sessionId = useRef('');
+  const loadedSchema = grpc.descriptorSetBase64 ? schema : undefined;
   const activeFile = grpc.protoFiles.find((file) => file.path === grpc.protoActivePath) ?? grpc.protoFiles[0];
-  const service = schema?.services.find((candidate) => candidate.fullName === grpc.service) ?? schema?.services[0];
+  const service = loadedSchema?.services.find((candidate) => candidate.fullName === grpc.service) ?? loadedSchema?.services[0];
   const method = service?.methods.find((candidate) => candidate.name === grpc.method) ?? service?.methods[0];
   const sessionActive = sessionStatus === 'starting' || sessionStatus === 'active' || sessionStatus === 'committed';
   const statusEvent = [...sessionMessages].reverse().find((message) => message.kind === 'status' && message.statusCode !== undefined);
@@ -146,10 +147,11 @@ export function GrpcEditor({
         <div className="segmented-control">
           <button className={grpc.descriptorSource === 'reflection' ? 'active' : ''} disabled={sessionActive} onClick={() => update({ descriptorSource: 'reflection', descriptorSetBase64: '' })} type="button">Reflection</button>
           <button className={grpc.descriptorSource === 'proto' ? 'active' : ''} disabled={sessionActive} onClick={() => update({ descriptorSource: 'proto', descriptorSetBase64: '' })} type="button">Proto source</button>
+          <button className={grpc.descriptorSource === 'buf' ? 'active' : ''} disabled={sessionActive} onClick={() => update({ descriptorSource: 'buf', descriptorSetBase64: '' })} type="button">Buf registry</button>
         </div>
-        <button className="secondary-button compact-button" disabled={schemaLoading} onClick={onLoadSchema} type="button">{schemaLoading ? 'Loading…' : 'Load schema'}</button>
+        <button className="secondary-button compact-button" disabled={schemaLoading || sessionActive} onClick={onLoadSchema} type="button">{schemaLoading ? 'Loading…' : 'Load schema'}</button>
       </div>
-      <div className={`grpc-workspace${grpc.descriptorSource === 'proto' ? ' with-proto' : ''}`}>
+      <div className={`grpc-workspace${grpc.descriptorSource === 'proto' ? ' with-proto' : grpc.descriptorSource === 'buf' ? ' with-buf' : ''}`}>
         {grpc.descriptorSource === 'proto' ? (
           <div className="proto-source-pane">
             <div className="proto-import-bar">
@@ -168,13 +170,23 @@ export function GrpcEditor({
             {activeFile ? <CodeEditor ariaLabel={`Protocol Buffer definition ${activeFile.path}`} value={activeFile.text} onChange={updateActiveFile} /> : <div className="empty-state compact"><Icon name="import" size={26} /><strong>Import a proto file or folder</strong><span>Relative imports are compiled from the selected entry file.</span></div>}
           </div>
         ) : null}
+        {grpc.descriptorSource === 'buf' ? (
+          <div className="grpc-registry-pane">
+            <header><strong>Buf Schema Registry</strong><small>Connect reflection API</small></header>
+            <label>Registry URL<input disabled={sessionActive} onChange={(event) => update({ reflectionApiUrl: event.target.value, descriptorSetBase64: '' })} placeholder="https://buf.build" value={grpc.reflectionApiUrl} /></label>
+            <label>Module<input disabled={sessionActive} onChange={(event) => update({ reflectionApiModule: event.target.value, descriptorSetBase64: '' })} placeholder="buf.build/connectrpc/eliza" value={grpc.reflectionApiModule} /></label>
+            <label>API key<input autoComplete="off" disabled={sessionActive} onChange={(event) => update({ reflectionApiKey: event.target.value, descriptorSetBase64: '' })} type="password" value={grpc.reflectionApiKey} /></label>
+            <label className="grpc-registry-toggle"><input checked={grpc.disableUserAgentHeader} disabled={sessionActive} onChange={(event) => update({ disableUserAgentHeader: event.target.checked, descriptorSetBase64: '' })} type="checkbox" /> Disable User-Agent header</label>
+            <small>URL, module, and API key support environment templates. Registry TLS uses the request transport and matching workspace certificates.</small>
+          </div>
+        ) : null}
         <div className="grpc-call-editor">
           <div className="grpc-method-picker">
-            <label>Service<select aria-label="gRPC service" disabled={sessionActive} value={service?.fullName ?? ''} onChange={(event) => { const next = schema?.services.find((candidate) => candidate.fullName === event.target.value); update({ service: event.target.value, method: next?.methods[0]?.name ?? '' }); }}><option value="">Select service</option>{schema?.services.map((item) => <option key={item.fullName} value={item.fullName}>{item.fullName}</option>)}</select></label>
+            <label>Service<select aria-label="gRPC service" disabled={sessionActive} value={service?.fullName ?? ''} onChange={(event) => { const next = loadedSchema?.services.find((candidate) => candidate.fullName === event.target.value); update({ service: event.target.value, method: next?.methods[0]?.name ?? '' }); }}><option value="">Select service</option>{loadedSchema?.services.map((item) => <option key={item.fullName} value={item.fullName}>{item.fullName}</option>)}</select></label>
             <label>Method<select aria-label="gRPC method" disabled={sessionActive} value={method?.name ?? ''} onChange={(event) => update({ service: service?.fullName ?? '', method: event.target.value })}><option value="">Select method</option>{service?.methods.map((item) => <option key={item.fullName} value={item.name}>{item.name}</option>)}</select></label>
             {method ? <div className="grpc-method-actions"><span className="rpc-kind">{method.clientStreaming ? 'client stream' : 'single request'} → {method.serverStreaming ? 'server stream' : 'single response'}</span><button disabled={!method.example} onClick={() => update({ input: JSON.stringify(method.example ?? {}, null, 2) })} type="button">Use stub</button></div> : null}
           </div>
-          {schema ? <div className="grpc-message-lifecycle">
+          {loadedSchema ? <div className="grpc-message-lifecycle">
             <div className="grpc-message-editor"><div className="pane-label"><strong>JSON message</strong><small>{method?.clientStreaming ? 'One message per send' : 'Initial request'}</small></div><CodeEditor ariaLabel="gRPC JSON message" value={grpc.input} onChange={(input) => update({ input })} /></div>
             <div className="grpc-session-console">
               <div className="grpc-session-toolbar">
@@ -193,7 +205,7 @@ export function GrpcEditor({
                 {sessionMessages.length ? sessionMessages.map((message) => <article className={`stream-message ${message.direction}`} key={message.id}><header><span>{message.direction}</span><strong>{message.kind}</strong><time>{new Date(message.timestamp).toLocaleTimeString()}</time></header><pre>{message.text}</pre></article>) : <div className="empty-state compact"><Icon name="history" size={24} /><strong>No call activity yet</strong><span>Start the call, then send and commit client-stream messages independently.</span></div>}
               </div>
             </div>
-          </div> : <div className="empty-state compact"><Icon name="database" size={26} /><strong>Load reflection or this proto definition</strong><span>Brunomnia builds dynamic request and response messages locally.</span></div>}
+          </div> : <div className="empty-state compact"><Icon name="database" size={26} /><strong>Load a reflection, proto, or Buf schema</strong><span>Brunomnia builds dynamic request and response messages locally.</span></div>}
         </div>
       </div>
     </div>

@@ -56,6 +56,10 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
     service: '',
     method: '',
     descriptorSource: 'reflection',
+    reflectionApiUrl: 'https://buf.build',
+    reflectionApiKey: '',
+    reflectionApiModule: 'buf.build/connectrpc/eliza',
+    disableUserAgentHeader: false,
     protoText: seedProtoText,
     protoFiles: [{ id: `${id}-grpc-schema`, path: 'schema.proto', text: seedProtoText }],
     protoEntryPath: 'schema.proto',
@@ -130,7 +134,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 31,
+  version: 32,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',

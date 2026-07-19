@@ -112,6 +112,16 @@ describe('encrypted collaboration boundaries', () => {
     ]);
   });
 
+  it('flags plaintext Buf API keys and accepts protected references', () => {
+    const workspace = cloneSeedWorkspace();
+    const collection = workspace.collections.find((candidate) => candidate.requests.some((request) => request.protocol === 'grpc'))!;
+    const request = collection.requests.find((candidate) => candidate.protocol === 'grpc')!;
+    request.grpc.reflectionApiKey = 'plaintext-buf-key';
+    expect(plaintextSecretCandidates(workspace)).toEqual([`${collection.name} / ${request.name}: Buf reflection API key`]);
+    request.grpc.reflectionApiKey = '{{ vault.buf_api_key }}';
+    expect(plaintextSecretCandidates(workspace)).toEqual([]);
+  });
+
   it('checks inherited collection and folder configuration for plaintext credentials', () => {
     const workspace = cloneSeedWorkspace();
     workspace.collections[0].environment = [{ id: 'collection-token', name: 'clientSecret', value: 'plaintext', enabled: true }];

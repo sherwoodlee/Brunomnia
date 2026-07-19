@@ -115,6 +115,7 @@ export const plaintextSecretCandidates = (workspace: Workspace): string[] => {
       if (request.transport.clientKeyPem && !isProtectedSecretReference(request.transport.clientKeyPem)) candidates.push(`${label}: client private key`);
       if (request.transport.clientCertificatePfxBase64 && !isProtectedSecretReference(request.transport.clientCertificatePfxBase64)) candidates.push(`${label}: client PFX/PKCS#12 identity`);
       if (request.transport.clientCertificatePassphrase && !isProtectedSecretReference(request.transport.clientCertificatePassphrase)) candidates.push(`${label}: client-certificate passphrase`);
+      if (request.grpc.reflectionApiKey && !isProtectedSecretReference(request.grpc.reflectionApiKey)) candidates.push(`${label}: Buf reflection API key`);
     });
   });
   workspace.mcpClients.forEach((client) => {

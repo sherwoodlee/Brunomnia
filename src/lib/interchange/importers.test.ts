@@ -189,6 +189,7 @@ paths:
       { _id: 'wrk_1', parentId: null, name: 'V4 Workspace', _type: 'workspace' },
       { _id: 'fld_1', parentId: 'wrk_1', name: 'Folder', _type: 'request_group' },
       { _id: 'req_1', parentId: 'fld_1', name: 'Get one', method: 'GET', url: 'https://api.example.com/one', headers: [], parameters: [], settingFollowRedirects: 'off', _type: 'request' },
+      { _id: 'greq_1', parentId: 'wrk_1', name: 'Registry schema', url: 'grpcs://grpc.example.com', body: { text: '{"name":"Ada"}' }, metadata: [], protoMethodName: 'acme.Greeter/SayHello', reflectionApi: { enabled: true, url: 'https://buf.example.com', apiKey: '{{ vault.buf }}', module: 'buf.build/acme/greeter' }, disableUserAgentHeader: true, _type: 'grpc_request' },
       { _id: 'env_1', parentId: 'wrk_1', name: 'Base', data: { token: 'abc' }, _type: 'environment' },
     ] }), 'insomnia-v4.json');
     expect(v4.format).toBe('insomnia-v4');
@@ -197,6 +198,13 @@ paths:
     expect(v4.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
     expect(v4.collections[0].requests[0].folderId).toBe(v4.collections[0].folders?.[0].id);
     expect(v4.collections[0].environment?.[0]).toMatchObject({ name: 'token', value: 'abc' });
+    expect(v4.collections[0].requests.find((request) => request.protocol === 'grpc')?.grpc).toMatchObject({
+      descriptorSource: 'buf',
+      reflectionApiUrl: 'https://buf.example.com',
+      reflectionApiKey: '{{ vault.buf }}',
+      reflectionApiModule: 'buf.build/acme/greeter',
+      disableUserAgentHeader: true,
+    });
 
     const v5 = importArtifact(`type: collection.insomnia.rest/5.0
 schema_version: "5.1"
@@ -264,7 +272,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(31);
+    expect(second.version).toBe(32);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

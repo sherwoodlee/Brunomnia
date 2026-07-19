@@ -1,13 +1,15 @@
 use crate::models::{
-    GrpcCallInput, GrpcCallOutput, GrpcMethodInfo, GrpcProtoFileInput, GrpcSchemaInput,
-    GrpcSchemaOutput, GrpcServiceInfo, GrpcSessionStartInput, GrpcSessionStartOutput, KeyValue,
-    StreamEvent, TransportConfig,
+    GrpcCallInput, GrpcCallOutput, GrpcMethodInfo, GrpcProtoFileInput, GrpcReflectionApiInput,
+    GrpcSchemaInput, GrpcSchemaOutput, GrpcServiceInfo, GrpcSessionStartInput,
+    GrpcSessionStartOutput, KeyValue, StreamEvent, TransportConfig,
 };
 use crate::{
     client_identity::{effective_client_identity_pem, validate_certificate_material},
+    http_client::build_client,
     streaming::AcceptInvalidServerCertificate,
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use futures_util::StreamExt;
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage, Kind, MessageDescriptor, MethodDescriptor};
 use prost_types::{FileDescriptorProto, FileDescriptorSet};
@@ -67,16 +69,125 @@ struct GrpcMethodSelection {
 }
 
 pub async fn load_schema(input: GrpcSchemaInput) -> Result<GrpcSchemaOutput, String> {
-    let (pool, bytes) = if input.source == "proto" {
-        compile_proto(
+    let (pool, bytes) = match input.source.as_str() {
+        "proto" => compile_proto(
             &input.proto_text,
             &input.proto_files,
             &input.proto_entry_path,
-        )?
-    } else {
-        reflect_schema(&input.endpoint, &input.metadata, &input.transport).await?
+        )?,
+        "buf" => fetch_buf_schema(&input.reflection_api, &input.transport).await?,
+        "reflection" => reflect_schema(&input.endpoint, &input.metadata, &input.transport).await?,
+        source => return Err(format!("Unsupported gRPC descriptor source: {source}")),
     };
     Ok(schema_output(&pool, &bytes))
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct BufFileDescriptorSetRequest {
+    #[prost(string, tag = "1")]
+    module: String,
+    #[prost(string, tag = "2")]
+    version: String,
+    #[prost(string, repeated, tag = "3")]
+    symbols: Vec<String>,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct BufFileDescriptorSetResponse {
+    #[prost(message, optional, tag = "1")]
+    file_descriptor_set: Option<FileDescriptorSet>,
+    #[prost(string, tag = "2")]
+    version: String,
+}
+
+fn buf_reflection_endpoint(base_url: &str) -> Result<url::Url, String> {
+    let mut endpoint = url::Url::parse(base_url.trim())
+        .map_err(|error| format!("Invalid Buf Schema Registry URL: {error}"))?;
+    if !matches!(endpoint.scheme(), "http" | "https") || endpoint.cannot_be_a_base() {
+        return Err("Buf Schema Registry URLs must use HTTP or HTTPS.".into());
+    }
+    let base_path = endpoint.path().trim_end_matches('/');
+    endpoint.set_path(&format!(
+        "{base_path}/buf.reflect.v1beta1.FileDescriptorSetService/GetFileDescriptorSet"
+    ));
+    endpoint.set_query(None);
+    endpoint.set_fragment(None);
+    Ok(endpoint)
+}
+
+async fn bounded_response_bytes(response: reqwest::Response) -> Result<Vec<u8>, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_GRPC_DESCRIPTOR_BYTES as u64)
+    {
+        return Err("The Buf descriptor response exceeds 10 MiB.".into());
+    }
+    let mut body = Vec::new();
+    let mut chunks = response.bytes_stream();
+    while let Some(chunk) = chunks.next().await {
+        let chunk = chunk.map_err(|error| format!("Unable to read Buf descriptors: {error}"))?;
+        if body.len().saturating_add(chunk.len()) > MAX_GRPC_DESCRIPTOR_BYTES {
+            return Err("The Buf descriptor response exceeds 10 MiB.".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+async fn fetch_buf_schema(
+    reflection_api: &GrpcReflectionApiInput,
+    transport: &TransportConfig,
+) -> Result<(DescriptorPool, Vec<u8>), String> {
+    let endpoint = buf_reflection_endpoint(&reflection_api.url)?;
+    if reflection_api.module.trim().is_empty() {
+        return Err("Enter a Buf Schema Registry module first.".into());
+    }
+    let mut registry_transport = transport.clone();
+    registry_transport.preferred_http_version = "http1.1".into();
+    let client = build_client(&registry_transport, Some(endpoint.as_str()))?;
+    let body = BufFileDescriptorSetRequest {
+        module: reflection_api.module.clone(),
+        version: String::new(),
+        symbols: vec![],
+    }
+    .encode_to_vec();
+    let mut request = client
+        .post(endpoint)
+        .header(reqwest::header::CONTENT_TYPE, "application/proto")
+        .header(reqwest::header::ACCEPT, "application/proto")
+        .header("Connect-Protocol-Version", "1")
+        .body(body);
+    if !reflection_api.api_key.is_empty() {
+        request = request.bearer_auth(&reflection_api.api_key);
+    }
+    if !reflection_api.disable_user_agent_header {
+        request = request.header(
+            reqwest::header::USER_AGENT,
+            format!("brunomnia/{}", env!("CARGO_PKG_VERSION")),
+        );
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("Buf Schema Registry request failed: {error}"))?;
+    match response.status() {
+        reqwest::StatusCode::UNAUTHORIZED => return Err("Invalid reflection server api key".into()),
+        reqwest::StatusCode::NOT_FOUND => {
+            return Err("The reflection server api key doesn't have access to the module or the module does not exists".into());
+        }
+        status if !status.is_success() => {
+            return Err(format!("Buf Schema Registry returned HTTP {status}."));
+        }
+        _ => {}
+    }
+    let response =
+        BufFileDescriptorSetResponse::decode(bounded_response_bytes(response).await?.as_slice())
+            .map_err(|error| format!("Invalid Buf descriptor response: {error}"))?;
+    let descriptor_set = response.file_descriptor_set.unwrap_or_default();
+    let encoded = descriptor_set.encode_to_vec();
+    let pool = DescriptorPool::from_file_descriptor_set(descriptor_set)
+        .map_err(|error| format!("Invalid Buf descriptor set: {error}"))?;
+    Ok((pool, encoded))
 }
 
 fn select_method(input: &GrpcCallInput) -> Result<GrpcMethodSelection, String> {
@@ -1453,6 +1564,68 @@ mod tests {
         (address, shutdown, task)
     }
 
+    async fn start_buf_reflection_server(
+        descriptor_set: FileDescriptorSet,
+    ) -> (
+        std::net::SocketAddr,
+        Arc<StdMutex<Vec<(http::Version, http::HeaderMap, Vec<u8>)>>>,
+        JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let captures = Arc::new(StdMutex::new(Vec::new()));
+        let route_captures = captures.clone();
+        let response_bytes = BufFileDescriptorSetResponse {
+            file_descriptor_set: Some(descriptor_set),
+            version: "fixture-version".into(),
+        }
+        .encode_to_vec();
+        let app = axum::Router::new().route(
+            "/registry/buf.reflect.v1beta1.FileDescriptorSetService/GetFileDescriptorSet",
+            axum::routing::post(move |request: axum::extract::Request| {
+                let route_captures = route_captures.clone();
+                let response_bytes = response_bytes.clone();
+                async move {
+                    let version = request.version();
+                    let headers = request.headers().clone();
+                    let body = axum::body::to_bytes(request.into_body(), 1_048_576)
+                        .await
+                        .unwrap();
+                    let request = BufFileDescriptorSetRequest::decode(body.as_ref()).unwrap();
+                    let status = match request.module.as_str() {
+                        "unauthorized" => http::StatusCode::UNAUTHORIZED,
+                        "missing" => http::StatusCode::NOT_FOUND,
+                        _ => http::StatusCode::OK,
+                    };
+                    route_captures
+                        .lock()
+                        .unwrap()
+                        .push((version, headers, body.to_vec()));
+                    let mut response =
+                        http::Response::new(axum::body::Body::from(if status.is_success() {
+                            if request.module == "oversized" {
+                                vec![0; MAX_GRPC_DESCRIPTOR_BYTES + 1]
+                            } else {
+                                response_bytes
+                            }
+                        } else {
+                            Vec::new()
+                        }));
+                    *response.status_mut() = status;
+                    response.headers_mut().insert(
+                        http::header::CONTENT_TYPE,
+                        http::HeaderValue::from_static("application/proto"),
+                    );
+                    response
+                }
+            }),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (address, captures, server)
+    }
+
     fn lifecycle_input(
         endpoint: &str,
         descriptor_bytes: &[u8],
@@ -1514,6 +1687,98 @@ mod tests {
         assert!(!output.services[0].methods[0].server_streaming);
         assert!(output.services[0].methods[1].server_streaming);
         assert!(!output.descriptor_set_base64.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn loads_buf_connect_descriptors_with_auth_and_user_agent_controls() {
+        let (_, descriptor_bytes) = compile_proto(TEST_PROTO, &[], "").unwrap();
+        let descriptor_set = FileDescriptorSet::decode(descriptor_bytes.as_slice()).unwrap();
+        let (address, captures, server) = start_buf_reflection_server(descriptor_set).await;
+        let reflection_api = GrpcReflectionApiInput {
+            url: format!("http://{address}/registry/"),
+            api_key: "TEST_KEY".into(),
+            module: "buf.build/brunomnia/test".into(),
+            disable_user_agent_header: false,
+        };
+        let (pool, encoded) = fetch_buf_schema(
+            &reflection_api,
+            &TransportConfig {
+                timeout_ms: 5_000,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(pool.get_service_by_name("brunomnia.test.Greeter").is_some());
+        assert!(!encoded.is_empty());
+
+        fetch_buf_schema(
+            &GrpcReflectionApiInput {
+                disable_user_agent_header: true,
+                ..reflection_api.clone()
+            },
+            &TransportConfig::default(),
+        )
+        .await
+        .unwrap();
+        let unauthorized = fetch_buf_schema(
+            &GrpcReflectionApiInput {
+                module: "unauthorized".into(),
+                ..reflection_api.clone()
+            },
+            &TransportConfig::default(),
+        )
+        .await
+        .unwrap_err();
+        let missing = fetch_buf_schema(
+            &GrpcReflectionApiInput {
+                module: "missing".into(),
+                ..reflection_api.clone()
+            },
+            &TransportConfig::default(),
+        )
+        .await
+        .unwrap_err();
+        let oversized = fetch_buf_schema(
+            &GrpcReflectionApiInput {
+                module: "oversized".into(),
+                ..reflection_api
+            },
+            &TransportConfig::default(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(unauthorized, "Invalid reflection server api key");
+        assert!(missing.contains("doesn't have access"));
+        assert_eq!(oversized, "The Buf descriptor response exceeds 10 MiB.");
+
+        let captures = captures.lock().unwrap();
+        assert_eq!(captures.len(), 5);
+        assert_eq!(captures[0].0, http::Version::HTTP_11);
+        assert_eq!(
+            captures[0].1.get(http::header::AUTHORIZATION).unwrap(),
+            "Bearer TEST_KEY"
+        );
+        assert_eq!(captures[0].1.get("connect-protocol-version").unwrap(), "1");
+        assert_eq!(
+            captures[0].1.get(http::header::CONTENT_TYPE).unwrap(),
+            "application/proto"
+        );
+        assert_eq!(
+            captures[0].1.get(http::header::ACCEPT).unwrap(),
+            "application/proto"
+        );
+        assert_eq!(
+            captures[0].1.get(http::header::USER_AGENT).unwrap(),
+            concat!("brunomnia/", env!("CARGO_PKG_VERSION"))
+        );
+        assert!(captures[1].1.get(http::header::USER_AGENT).is_none());
+        let first_request = BufFileDescriptorSetRequest::decode(captures[0].2.as_slice()).unwrap();
+        assert_eq!(first_request.module, "buf.build/brunomnia/test");
+        assert!(first_request.version.is_empty());
+        assert!(first_request.symbols.is_empty());
+        drop(captures);
+        server.abort();
     }
 
     #[test]

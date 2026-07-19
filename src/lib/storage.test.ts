@@ -148,7 +148,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(31);
+    expect(migrated.version).toBe(32);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
@@ -196,7 +196,7 @@ describe('workspace migrations', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(31);
+    expect(migrated.version).toBe(32);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
@@ -217,13 +217,36 @@ describe('workspace migrations', () => {
     };
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(31);
+    expect(migrated.version).toBe(32);
     expect(migrated.collections[0].requests[0].grpc).toMatchObject({
       protoText: 'syntax = "proto3"; service Legacy {}',
       protoEntryPath: 'schema.proto',
       protoActivePath: 'schema.proto',
       protoFiles: [expect.objectContaining({ path: 'schema.proto', text: 'syntax = "proto3"; service Legacy {}' })],
     });
+  });
+
+  it('migrates bounded Buf Schema Registry configuration', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.version = 31;
+    const request = (workspace.collections as Array<{ requests: Array<Record<string, unknown>> }>)[0].requests[0];
+    request.grpc = {
+      ...(request.grpc as Record<string, unknown>),
+      descriptorSource: 'buf',
+      reflectionApiUrl: `https://registry.example/${'u'.repeat(9_000)}`,
+      reflectionApiKey: 'k'.repeat(70_000),
+      reflectionApiModule: `buf.build/acme/${'m'.repeat(3_000)}`,
+      disableUserAgentHeader: true,
+    };
+
+    const migrated = migrateWorkspace(workspace);
+    const grpc = migrated.collections[0].requests[0].grpc;
+    expect(migrated.version).toBe(32);
+    expect(grpc.descriptorSource).toBe('buf');
+    expect(grpc.reflectionApiUrl).toHaveLength(8_192);
+    expect(grpc.reflectionApiKey).toHaveLength(65_536);
+    expect(grpc.reflectionApiModule).toHaveLength(2_048);
+    expect(grpc.disableUserAgentHeader).toBe(true);
   });
 
   it('migrates workspace certificates into bounded device-local records', () => {
@@ -234,7 +257,7 @@ describe('workspace migrations', () => {
       clients: [null, { id: 'client', host: 'api.example.test:8443', enabled: true, certificatePem: 'cert-pem', keyPem: 'key-pem' }, { id: 'pfx', host: '*.internal.test', enabled: true, pfxBase64: 'cGZ4', passphrase: 'secret' }],
     };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(31);
+    expect(migrated.version).toBe(32);
     expect(migrated.certificates).toEqual({
       ca: { enabled: true, pem: 'ca-pem' },
       clients: [
@@ -318,7 +341,7 @@ describe('workspace migrations', () => {
     collection.subEnvironments = [{ id: 'staging', name: 'Staging', variables: [{ name: 'host', value: 'staging.example', enabled: true }] }, null];
     collection.activeSubEnvironmentId = 'missing';
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(31);
+    expect(migrated.version).toBe(32);
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });

@@ -7882,6 +7882,10 @@ var createRequest = (id, name, method, url) => ({
     service: "",
     method: "",
     descriptorSource: "reflection",
+    reflectionApiUrl: "https://buf.build",
+    reflectionApiKey: "",
+    reflectionApiModule: "buf.build/connectrpc/eliza",
+    disableUserAgentHeader: false,
     protoText: seedProtoText,
     protoFiles: [{ id: `${id}-grpc-schema`, path: "schema.proto", text: seedProtoText }],
     protoEntryPath: "schema.proto",
@@ -7953,7 +7957,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 31,
+  version: 32,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -11855,7 +11859,17 @@ var migrateWorkspace = (value) => {
           schemaEndpoint: stringValue3(graphql?.schemaEndpoint),
           schemaFetchedAt: stringValue3(graphql?.schemaFetchedAt)
         },
-        grpc: { ...defaults.grpc, ...request.grpc, ...protoTree, metadata: normalizeRows(grpc?.metadata, `${requestId}-metadata`) },
+        grpc: {
+          ...defaults.grpc,
+          ...request.grpc,
+          ...protoTree,
+          descriptorSource: grpc?.descriptorSource === "proto" || grpc?.descriptorSource === "buf" ? grpc.descriptorSource : "reflection",
+          reflectionApiUrl: stringValue3(grpc?.reflectionApiUrl, defaults.grpc.reflectionApiUrl).slice(0, 8192),
+          reflectionApiKey: stringValue3(grpc?.reflectionApiKey).slice(0, 65536),
+          reflectionApiModule: stringValue3(grpc?.reflectionApiModule, defaults.grpc.reflectionApiModule).slice(0, 2048),
+          disableUserAgentHeader: grpc?.disableUserAgentHeader === true,
+          metadata: normalizeRows(grpc?.metadata, `${requestId}-metadata`)
+        },
         transport: {
           ...defaults.transport,
           ...request.transport,
@@ -11931,7 +11945,7 @@ var migrateWorkspace = (value) => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 31,
+    version: 32,
     name: workspace.name || "Imported Workspace",
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? "",
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

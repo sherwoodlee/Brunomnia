@@ -113,6 +113,13 @@ const grpcCallInput = (
 export const loadGrpcSchema = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000, validateCertificates = true, certificates?: WorkspaceCertificates): Promise<GrpcSchema> => {
   const variables = environmentMap(environment);
   const endpoint = resolveTemplate(request.url, variables);
+  const reflectionApi = {
+    url: resolveTemplate(request.grpc.reflectionApiUrl, variables),
+    apiKey: resolveTemplate(request.grpc.reflectionApiKey, variables),
+    module: resolveTemplate(request.grpc.reflectionApiModule, variables),
+    disableUserAgentHeader: request.grpc.disableUserAgentHeader,
+  };
+  const schemaEndpoint = request.grpc.descriptorSource === 'buf' ? reflectionApi.url : endpoint;
   if (!isTauri()) {
     await new Promise((resolve) => window.setTimeout(resolve, 300));
     return mockGrpcSchema(request);
@@ -129,7 +136,8 @@ export const loadGrpcSchema = async (request: ApiRequest, environment?: Environm
         name: resolveTemplate(item.name, variables),
         value: resolveTemplate(item.value, variables),
       })),
-      transport: applyWorkspaceCertificates({ ...request.transport, timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs), validateCertificates: resolveCertificateValidation(request.transport, validateCertificates) }, endpoint, certificates),
+      reflectionApi,
+      transport: applyWorkspaceCertificates({ ...request.transport, timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs), validateCertificates: resolveCertificateValidation(request.transport, validateCertificates) }, schemaEndpoint, certificates),
     },
   });
 };

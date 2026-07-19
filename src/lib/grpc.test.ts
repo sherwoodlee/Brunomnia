@@ -49,6 +49,50 @@ describe('gRPC schema loading', () => {
     }) }));
   });
 
+  it('resolves Buf registry settings and selects certificates for the registry host', async () => {
+    const request = createBlankRequest('grpc-buf');
+    request.protocol = 'grpc';
+    request.url = 'grpcs://service.internal:50051';
+    request.grpc.descriptorSource = 'buf';
+    request.grpc.reflectionApiUrl = 'https://{{ registry }}/tenant';
+    request.grpc.reflectionApiKey = '{{ token }}';
+    request.grpc.reflectionApiModule = 'buf.build/{{ organization }}/payments';
+    request.grpc.disableUserAgentHeader = true;
+
+    await loadGrpcSchema(request, {
+      id: 'environment',
+      name: 'Development',
+      variables: [
+        { id: 'registry', name: 'registry', value: 'registry.internal', enabled: true },
+        { id: 'token', name: 'token', value: 'buf-secret', enabled: true },
+        { id: 'organization', name: 'organization', value: 'acme', enabled: true },
+      ],
+    }, 6_000, true, {
+      ca: { enabled: true, pem: 'workspace-ca' },
+      clients: [
+        { id: 'service', host: 'service.internal', enabled: true, certificatePem: 'service-certificate', keyPem: 'service-key', pfxBase64: '', passphrase: '' },
+        { id: 'registry', host: 'registry.internal', enabled: true, certificatePem: 'registry-certificate', keyPem: 'registry-key', pfxBase64: '', passphrase: '' },
+      ],
+    });
+
+    expect(tauri.invoke).toHaveBeenCalledWith('grpc_load_schema', { input: expect.objectContaining({
+      endpoint: 'grpcs://service.internal:50051',
+      source: 'buf',
+      reflectionApi: {
+        url: 'https://registry.internal/tenant',
+        apiKey: 'buf-secret',
+        module: 'buf.build/acme/payments',
+        disableUserAgentHeader: true,
+      },
+      transport: expect.objectContaining({
+        timeoutMs: 6_000,
+        caCertificatePem: 'workspace-ca',
+        clientCertificatePem: 'registry-certificate',
+        clientKeyPem: 'registry-key',
+      }),
+    }) });
+  });
+
   it('starts a channel-backed session with resolved metadata and workspace TLS', async () => {
     const request = createBlankRequest('grpc-session');
     request.protocol = 'grpc';

@@ -632,6 +632,7 @@ kbd {
 .compact-button { font-size: 10px; padding: 7px 11px; }
 .grpc-workspace { display: grid; min-height: 0; }
 .grpc-workspace.with-proto { grid-template-columns: minmax(280px, 1fr) minmax(320px, 1fr); }
+.grpc-workspace.with-buf { grid-template-columns: minmax(230px, .62fr) minmax(360px, 1.38fr); }
 .proto-source-pane { border-right: 1px solid var(--border); display: grid; grid-template-rows: 38px 50px minmax(0, 1fr); min-height: 0; min-width: 0; }
 .proto-import-bar { align-items: center; border-bottom: 1px solid var(--border-soft); display: flex; gap: 8px; justify-content: space-between; min-width: 0; padding: 0 8px; }
 .proto-import-bar > div { display: flex; gap: 5px; }
@@ -641,6 +642,14 @@ kbd {
 .proto-file-controls { align-items: center; border-bottom: 1px solid var(--border-soft); display: grid; gap: 7px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 5px 8px; }
 .proto-file-controls label { color: var(--muted); display: grid; font-size: 7px; gap: 3px; letter-spacing: .06em; min-width: 0; text-transform: uppercase; }
 .proto-file-controls select { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font: 8px var(--font-mono); height: 25px; min-width: 0; }
+.grpc-registry-pane { border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 14px; min-width: 0; overflow: auto; padding: 16px 14px; }
+.grpc-registry-pane header { border-bottom: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 4px; padding-bottom: 12px; }
+.grpc-registry-pane header strong { color: var(--text); font: 11px var(--font-mono); }
+.grpc-registry-pane header small, .grpc-registry-pane > small { color: var(--faint); font-size: 8px; line-height: 1.55; }
+.grpc-registry-pane > label:not(.grpc-registry-toggle) { color: var(--muted); display: flex; flex-direction: column; font-size: 8px; gap: 5px; letter-spacing: .07em; text-transform: uppercase; }
+.grpc-registry-pane input:not([type="checkbox"]) { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font: 9px var(--font-mono); height: 30px; min-width: 0; padding: 0 8px; }
+.grpc-registry-toggle { align-items: center; color: var(--text-soft); display: flex; font-size: 9px; gap: 7px; }
+.grpc-registry-toggle input { accent-color: var(--accent); height: 14px; width: 14px; }
 .pane-label { align-items: center; border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; padding: 0 12px; }
 .pane-label strong { color: var(--text-soft); font: 9px var(--font-mono); }
 .pane-label small { color: var(--faint); font-size: 8px; }

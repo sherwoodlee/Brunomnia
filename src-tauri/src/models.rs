@@ -245,6 +245,19 @@ pub struct GrpcProtoFileInput {
     pub text: String,
 }
 
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcReflectionApiInput {
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub module: String,
+    #[serde(default)]
+    pub disable_user_agent_header: bool,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GrpcSchemaInput {
@@ -256,6 +269,8 @@ pub struct GrpcSchemaInput {
     #[serde(default)]
     pub proto_entry_path: String,
     pub metadata: Vec<KeyValue>,
+    #[serde(default)]
+    pub reflection_api: GrpcReflectionApiInput,
     #[serde(default)]
     pub transport: TransportConfig,
 }
