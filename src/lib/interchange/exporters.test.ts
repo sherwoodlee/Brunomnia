@@ -76,7 +76,7 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(24);
+    expect(parsed.version).toBe(25);
 
     const design = workspace.apiDesigns[0];
     const spec = exportArtifact(workspace, { format: 'openapi', scope: 'design', designId: design.id });

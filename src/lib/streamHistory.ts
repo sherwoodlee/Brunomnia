@@ -33,6 +33,7 @@ export const createStreamSession = (
   protocol: request.protocol as StoredStreamSession['protocol'],
   startedAt,
   messages: [],
+  requestSnapshot: structuredClone(request),
 });
 
 export const retainStreamSessionHistory = (

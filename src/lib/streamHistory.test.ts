@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
+import { restoreRequestSnapshot } from './historicalRequest';
 import { appendStreamSessionMessage, clearStoredStreamSessions, createStreamSession, deleteStoredStreamSession, retainStreamSessionHistory, streamHistorySections, visibleStreamSessionHistory } from './streamHistory';
 
 describe('stream session history', () => {
@@ -33,5 +34,25 @@ describe('stream session history', () => {
     expect(streamHistorySections([recent, older], new Date('2026-07-18T12:00:00.000Z')).map((section) => section.label)).toEqual(['Just Now', 'This Week']);
     expect(deleteStoredStreamSession([recent, older], 'recent')).toEqual([older]);
     expect(clearStoredStreamSessions([recent, older], request.id, 'env-a')).toEqual([]);
+  });
+
+  it('captures and restores an independent editable request version', () => {
+    const workspace = cloneSeedWorkspace();
+    const request = workspace.collections[0].requests[0];
+    request.protocol = 'websocket';
+    request.url = 'wss://example.test/original';
+    request.folderId = 'historical-folder';
+    const session = createStreamSession(request, 'env-a', 'stream-version');
+    request.name = 'Current name';
+    request.url = 'wss://example.test/current';
+    request.folderId = 'current-folder';
+
+    expect(session.requestSnapshot?.url).toBe('wss://example.test/original');
+    expect(restoreRequestSnapshot(session, request)).toMatchObject({
+      id: request.id,
+      name: session.requestSnapshot?.name,
+      url: 'wss://example.test/original',
+      folderId: 'current-folder',
+    });
   });
 });

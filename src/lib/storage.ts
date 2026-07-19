@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
-import type { AiSettings, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ShortcutAction, StoredResponse, StoredStreamSession, StreamMessage, Workspace } from '../types';
+import type { AiSettings, ApiRequest, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ShortcutAction, StoredResponse, StoredStreamSession, StreamMessage, Workspace } from '../types';
 import { normalizeGraphqlSchema } from './graphql';
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 import { normalizeHttpMethod } from './request';
@@ -334,6 +334,7 @@ const normalizeStoredStreamSessions = (value: unknown, requestIds: Set<string>):
   const protocol = source.protocol === 'websocket' || source.protocol === 'sse' ? source.protocol : 'socketio';
   const id = stringValue(source.id, `legacy-stream-${index}`);
   const endedAt = stringValue(source.endedAt);
+  const requestSnapshot = record(source.requestSnapshot);
   return [{
     id,
     requestId,
@@ -344,6 +345,7 @@ const normalizeStoredStreamSessions = (value: unknown, requestIds: Set<string>):
     startedAt: stringValue(source.startedAt, new Date(0).toISOString()),
     ...(endedAt ? { endedAt } : {}),
     messages: normalizeStreamMessages(source.messages, id),
+    ...(requestSnapshot?.id === requestId ? { requestSnapshot: structuredClone(requestSnapshot) as ApiRequest } : {}),
   }];
 });
 
@@ -608,7 +610,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 24,
+    version: 25,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

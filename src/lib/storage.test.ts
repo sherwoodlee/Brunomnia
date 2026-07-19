@@ -147,7 +147,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(24);
+    expect(migrated.version).toBe(25);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
@@ -257,7 +257,7 @@ describe('workspace migrations', () => {
     collection.subEnvironments = [{ id: 'staging', name: 'Staging', variables: [{ name: 'host', value: 'staging.example', enabled: true }] }, null];
     collection.activeSubEnvironmentId = 'missing';
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(24);
+    expect(migrated.version).toBe(25);
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });
@@ -467,9 +467,10 @@ describe('workspace migrations', () => {
 
   it('normalizes bounded stream session history and removes orphaned requests', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
-    const requestId = ((workspace.collections as Array<{ requests: Array<{ id: string }> }>)[0].requests)[0].id;
+    const requestSnapshot = structuredClone(((workspace.collections as Array<{ requests: Array<Record<string, unknown>> }>)[0].requests)[0]);
+    const requestId = String(requestSnapshot.id);
     workspace.streamSessions = [
-      { requestId, requestName: 'Socket events', requestUrl: 'https://example.test/events', environmentId: 'environment', protocol: 'socketio', startedAt: '2026-07-18T00:00:00.000Z', messages: [{ direction: 'incoming', kind: 'order.created', text: '{"id":42}', timestamp: '2026-07-18T00:00:01.000Z' }, null] },
+      { requestId, requestName: 'Socket events', requestUrl: 'https://example.test/events', environmentId: 'environment', protocol: 'socketio', startedAt: '2026-07-18T00:00:00.000Z', messages: [{ direction: 'incoming', kind: 'order.created', text: '{"id":42}', timestamp: '2026-07-18T00:00:01.000Z' }, null], requestSnapshot },
       { id: 'orphan', requestId: 'missing', protocol: 'sse', messages: [] },
     ];
 
@@ -482,6 +483,7 @@ describe('workspace migrations', () => {
       protocol: 'socketio',
       startedAt: '2026-07-18T00:00:00.000Z',
       messages: [{ id: 'legacy-stream-0-event-0', sessionId: 'legacy-stream-0', direction: 'incoming', kind: 'order.created', text: '{"id":42}', timestamp: '2026-07-18T00:00:01.000Z' }],
+      requestSnapshot,
     }]);
   });
 

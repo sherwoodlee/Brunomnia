@@ -7833,7 +7833,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 24,
+  version: 25,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -11456,6 +11456,7 @@ var normalizeStoredStreamSessions = (value, requestIds) => (Array.isArray(value)
   const protocol = source.protocol === "websocket" || source.protocol === "sse" ? source.protocol : "socketio";
   const id = stringValue2(source.id, `legacy-stream-${index}`);
   const endedAt = stringValue2(source.endedAt);
+  const requestSnapshot = record4(source.requestSnapshot);
   return [{
     id,
     requestId,
@@ -11465,7 +11466,8 @@ var normalizeStoredStreamSessions = (value, requestIds) => (Array.isArray(value)
     protocol,
     startedAt: stringValue2(source.startedAt, (/* @__PURE__ */ new Date(0)).toISOString()),
     ...endedAt ? { endedAt } : {},
-    messages: normalizeStreamMessages(source.messages, id)
+    messages: normalizeStreamMessages(source.messages, id),
+    ...requestSnapshot?.id === requestId ? { requestSnapshot: structuredClone(requestSnapshot) } : {}
   }];
 });
 var normalizeResponseFilters = (value, requestIds) => {
@@ -11693,7 +11695,7 @@ var migrateWorkspace = (value) => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 24,
+    version: 25,
     name: workspace.name || "Imported Workspace",
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? "",
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

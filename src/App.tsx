@@ -975,7 +975,7 @@ function FolderDialog({ collection, folder, environment, cookies, responses, req
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 24, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+    format: 'brunomnia', version: 25, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -1122,7 +1122,7 @@ export default function App() {
     workspace.preferences.filterResponsesByEnv,
   ), [active?.request.id, activeEnvironment?.id, workspace.preferences.filterResponsesByEnv, workspace.streamSessions]);
   const activeEnvironmentStreamHistoryCount = activeStreamHistory.filter((session) => session.environmentId === activeEnvironment?.id).length;
-  const restoreSavedRequestVersion = (saved: StoredResponse) => {
+  const restoreSavedRequestVersion = (saved: StoredResponse | StoredStreamSession) => {
     void import('./lib/historicalRequest').then(({ restoreWorkspaceRequestSnapshot }) => {
       setWorkspace((current) => restoreWorkspaceRequestSnapshot(saved, current));
     }, () => undefined);
@@ -1155,7 +1155,7 @@ export default function App() {
     setResponse(saved);
     restoreSavedRequestVersion(saved);
   };
-  const showLatestStreamSession = (sessions: StoredStreamSession[]) => {
+  const showLatestStreamSession = (sessions: StoredStreamSession[], restoreRequest = false) => {
     const latest = visibleStreamSessions(
       sessions,
       active?.request.id ?? '',
@@ -1165,6 +1165,7 @@ export default function App() {
     selectedStreamSessionIdRef.current = latest?.id ?? '';
     setSelectedStreamSessionId(selectedStreamSessionIdRef.current);
     setStreamMessages(latest?.messages ?? []);
+    if (latest && restoreRequest) restoreSavedRequestVersion(latest);
   };
   const selectStreamSession = async (sessionId: string) => {
     const saved = activeStreamHistory.find((session) => session.id === sessionId);
@@ -1184,6 +1185,7 @@ export default function App() {
     selectedStreamSessionIdRef.current = saved.id;
     setSelectedStreamSessionId(saved.id);
     setStreamMessages(saved.messages);
+    restoreSavedRequestVersion(saved);
   };
   const deleteSelectedStreamSession = async () => {
     if (!selectedStreamSessionId) return;
@@ -1200,7 +1202,7 @@ export default function App() {
     if (streamViewScopeRef.current !== operationScope || selectedStreamSessionIdRef.current !== targetSessionId) return;
     const sessions = workspace.streamSessions.filter((session) => session.id !== targetSessionId);
     setWorkspace((current) => ({ ...current, streamSessions: current.streamSessions.filter((session) => session.id !== targetSessionId) }));
-    showLatestStreamSession(sessions);
+    showLatestStreamSession(sessions, true);
   };
   const clearActiveStreamHistory = async () => {
     if (!active || !activeEnvironment) return;
@@ -1616,7 +1618,7 @@ export default function App() {
         ...current,
         streamSessions: retainStreamSessionHistory(
           current.streamSessions,
-          createStreamSession(request, activeEnvironment.id, sessionId),
+          createStreamSession(active.request, activeEnvironment.id, sessionId),
           current.preferences.maxHistoryResponses,
           current.preferences.filterResponsesByEnv,
         ),

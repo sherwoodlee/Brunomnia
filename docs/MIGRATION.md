@@ -1537,7 +1537,22 @@ Compatibility bounds remain explicit: upstream's current editor does not expose 
 
 Compatibility bounds remain explicit: stream history does not yet restore historical request versions, persist native timeline/handshake headers beside each event log, search or export saved events, or expose streaming plugin hooks. The renderer still keeps bounded logs in workspace memory rather than upstream-style file-backed event-log paths. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 102 — remaining parity closure and release hardening
+## Milestone 102 — realtime request-version restoration (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned WebSocket and Socket.IO response services create a compressed request version for each response; the shared history dropdown restores that version on selection, and deleting the current response restores the newest remaining response version |
+| Snapshot creation | Complete | Every newly retained WebSocket, Socket.IO, or SSE session captures an independent structured clone of the editable request before inherited runtime configuration is applied |
+| Historical selection | Complete baseline | Selecting a saved session disconnects a different live connection, swaps the event log, and restores the captured request only if the same request remains active after the asynchronous disconnect |
+| Delete continuity | Complete baseline | Deleting the selected stream session restores the newest remaining eligible session and its request version; clearing the active environment history intentionally leaves the current request unchanged |
+| Structural safety | Complete | Stream and ordinary response history share one validated restore helper that requires matching identity and complete protocol/body/auth/transport structures while preserving the current request ID and folder placement; legacy or malformed snapshots remain history-only |
+| Workspace schema | Complete | Workspace v25 adds an optional stream request snapshot, preserves only snapshot objects whose ID matches the owning request, and propagates the version through project reads, replacement/merge imports, and scoped exports |
+| Executable coverage | Complete baseline | Focused tests prove snapshot independence/restoration, legacy migration, request-ID scoping, interchange versions, project preservation, and encrypted-sync omission |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 102 verification](QA_MILESTONE_102.md) |
+
+Compatibility bounds remain explicit: stream history still does not retain handshake/timeline headers or upstream-style filesystem event-log paths, and saved-event search/export plus streaming plugin hooks remain open. Request restoration follows Brunomnia's existing structural snapshot contract rather than Insomnia's compressed request-version database. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 103 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -1,11 +1,13 @@
-import type { ApiRequest, StoredResponse, Workspace } from '../types';
+import type { ApiRequest, Workspace } from '../types';
+
+type RequestSnapshotOwner = { requestId: string; requestSnapshot?: ApiRequest };
 
 const record = (value: unknown): Record<string, unknown> | undefined => value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
 const protocols = new Set(['http', 'graphql', 'websocket', 'socketio', 'sse', 'grpc']);
 const bodyModes = new Set(['none', 'json', 'text', 'form-urlencoded', 'multipart', 'binary']);
 
-export const restoreRequestSnapshot = (response: StoredResponse, current: ApiRequest): ApiRequest => {
-  const snapshot = record(response.requestSnapshot);
+export const restoreRequestSnapshot = (owner: RequestSnapshotOwner, current: ApiRequest): ApiRequest => {
+  const snapshot = record(owner.requestSnapshot);
   if (!snapshot
     || snapshot.id !== current.id
     || typeof snapshot.name !== 'string'
@@ -27,14 +29,14 @@ export const restoreRequestSnapshot = (response: StoredResponse, current: ApiReq
   return { ...restored, id: current.id, folderId: current.folderId, socketIo: record(snapshot.socketIo) ? restored.socketIo : current.socketIo };
 };
 
-export const restoreWorkspaceRequestSnapshot = (response: StoredResponse, workspace: Workspace): Workspace => {
-  if (workspace.activeRequestId !== response.requestId) return workspace;
+export const restoreWorkspaceRequestSnapshot = (owner: RequestSnapshotOwner, workspace: Workspace): Workspace => {
+  if (workspace.activeRequestId !== owner.requestId) return workspace;
   let changed = false;
   const collections = workspace.collections.map((collection) => ({
     ...collection,
     requests: collection.requests.map((request) => {
       if (request.id !== workspace.activeRequestId) return request;
-      const restored = restoreRequestSnapshot(response, request);
+      const restored = restoreRequestSnapshot(owner, request);
       changed ||= restored !== request;
       return restored;
     }),
