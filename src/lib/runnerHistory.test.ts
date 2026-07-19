@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunnerReport } from '../types';
-import { formatRunnerDuration, runnerReportDurationMs, summarizeRunnerHistory } from './runnerHistory';
+import { formatRunnerDuration, runnerReportDurationMs, summarizeRunnerAssertions, summarizeRunnerHistory } from './runnerHistory';
 
 const report = (patch: Partial<RunnerReport> = {}): RunnerReport => ({
   id: 'run',
@@ -25,6 +25,12 @@ const report = (patch: Partial<RunnerReport> = {}): RunnerReport => ({
 describe('Runner history presentation', () => {
   it('counts retained assertions rather than request attempts', () => {
     expect(summarizeRunnerHistory(report())).toEqual({ durationMs: 61_234, duration: '1.02 m', total: 4, passed: 2, failed: 1, skipped: 1 });
+  });
+
+  it('marks the Results badge green only when every retained assertion passed', () => {
+    expect(summarizeRunnerAssertions([])).toEqual({ total: 0, passed: 0, failed: 0, skipped: 0, tone: 'neutral' });
+    expect(summarizeRunnerAssertions(report().results.slice(0, 1))).toEqual({ total: 2, passed: 1, failed: 0, skipped: 1, tone: 'failed' });
+    expect(summarizeRunnerAssertions([{ ...report().results[0], tests: [{ name: 'one', passed: true }, { name: 'two', passed: true, status: 'passed' }] }])).toEqual({ total: 2, passed: 2, failed: 0, skipped: 0, tone: 'passed' });
   });
 
   it('uses strict time-unit thresholds and magnitude-based precision', () => {

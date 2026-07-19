@@ -1165,9 +1165,13 @@ kbd {
 .runner-results > header small { color: var(--muted); font-size: 9px; }
 .runner-results > header h2 { font-size: 19px; font-weight: 550; margin: 3px 0 0; }
 .runner-heading { min-width: 0; }
+.runner-duration-tag { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 3px; color: var(--text-soft); display: inline-flex; font: 8px var(--font-mono); margin-top: 6px; padding: 3px 6px; }
 .runner-view-tabs { display: flex; gap: 3px; margin-top: 10px; }
 .runner-view-tabs button { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font-size: 9px; padding: 3px 7px 5px; }
 .runner-view-tabs button[aria-pressed="true"] { border-bottom-color: var(--accent); color: var(--text); }
+.runner-result-count { background: var(--panel-soft); border-radius: 3px; color: var(--muted); font: 8px var(--font-mono); margin-left: 3px; padding: 2px 4px; }
+.runner-result-count.passed { background: var(--mint); color: var(--panel); }
+.runner-result-count.failed { background: var(--red); color: white; }
 .runner-stats { align-items: baseline; display: grid; gap: 2px 11px; grid-template-columns: repeat(5, auto); text-align: right; }
 .runner-stats strong { font: 21px var(--font-mono); }
 .runner-stats strong.active { color: var(--accent); }

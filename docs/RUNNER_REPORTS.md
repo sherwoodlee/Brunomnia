@@ -20,6 +20,8 @@ Each expanded attempt card lists every retained script assertion before the requ
 
 The Results toolbar leaves every request-attempt card visible and filters only the assertion rows inside every expanded card, matching pinned Runner request cards. All, Passed, Failed, and Skipped use the retained assertion status. The name field uses pinned `fuzzysort` 1.9.0 behavior against the assertion name only, including its `-8000` garbage-match floor; request identity, URL, response status, and error text do not masquerade as assertion-name matches. Filters apply equally to active, latest, and reopened historical results without changing cards, aggregate counters, saved reports, Console evidence, or exports. The direct response Tests pane uses the same controls and matcher.
 
+The Results tab always shows `passed / total` retained assertions. It stays neutral at `0 / 0`, turns successful only when every retained assertion passed, and uses the failed treatment when any assertion failed or was skipped, matching the pinned tab badge. This differs from History's row icon, which fails only for an actual failed assertion. Completed latest and selected historical runs also show their pinned-formatted total duration with raw milliseconds available as a tooltip; active and manually canceled live mode does not reuse an older report's duration.
+
 Snapshots are intentionally bounded device-local evidence, not a second full response archive:
 
 - 32,000 UTF-8 bytes maximum per attempt
