@@ -2323,7 +2323,21 @@ Compatibility bounds remain explicit: drafts are session-memory context for curr
 
 Compatibility bounds remain explicit: this document represents Brunomnia's project-global environment tree. Collection base/sub-environments remain in each collection's existing settings pane rather than fabricating a second pinned environment-workspace route. Mock-server/route, collection/design document, and test-suite resources still do not participate in the shared strip. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 159 — remaining parity closure and release hardening
+## Milestone 159 — API design document tabs (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned document audit | Complete | Pinned `inferTabType` maps every design-scoped workspace to `document`; ordinary resource navigation supplies its workspace ID/name and the shared tab context owns lifecycle |
+| Typed design resources | Complete baseline | Each Brunomnia `ApiDesign` ID is a valid `document` reference with a fixed design icon/name; legacy stored tab JSON remains readable and removed designs reconcile out of open/history/closed state |
+| Shared lifecycle | Complete | Multiple designs persist beside request/folder/Environment/Runner documents and share temporary replacement/promotion, active history, cycling, drag order, middle/final/all/other close, reopen, and dashboard behavior |
+| Targeted workbench | Complete baseline | The existing OpenAPI editor, formatter, custom rules, structural lint evidence, preview, and collection generation bind to the active design tab; selecting another design opens/activates its document rather than mutating hidden local selection |
+| Edit and generation continuity | Complete | Name/document/ruleset/format/generate actions promote temporary designs; request generation atomically preserves that design tab before opening the generated collection request |
+| Entry paths | Complete | Activity rail, command palette, and project-dashboard design cards open the shared document; an empty project creates and opens a valid starter OpenAPI design through the same path |
+| Executable evidence | Complete baseline | Focused typed-tab/OpenAPI regressions, strict React/TypeScript compilation, full frontend/native suites, CLI/audit gates, and a rebuilt macOS app verify the milestone without rendered Browser QA |
+
+Compatibility bounds remain explicit: this milestone changes document navigation, not the API-design engine's existing scope. Full Spectral functions, remote/package ruleset extension, multi-file references, and richer tooling remain. Mock-server/route and test-suite resources still do not participate in the shared strip, and collection workspaces remain represented by their request/folder documents rather than a separate collection tab. Collections and API specification design stay `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 160 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -46,6 +46,9 @@ type AutomationWorkbenchProps = {
   onStartMock: (serverId: string, runningMock: RunningMock) => void;
   onStopMock: (serverId: string) => void;
   templatePrompt: SendRequestContext['prompt'];
+  designTargetId?: string;
+  onDesignChange?: () => void;
+  onOpenDesign?: (designId: string) => void;
   runnerTarget?: { collectionId: string; folderId?: string };
   onRunnerStart?: () => void;
   runnerDraft?: RunnerWorkbenchDraft;
@@ -61,26 +64,27 @@ const workspaceProxyPreferences = (workspace: Workspace) => ({
 });
 
 export function AutomationWorkbench(props: AutomationWorkbenchProps) {
-  if (props.section === 'design') return <DesignWorkbench {...props} />;
+  if (props.section === 'design') return <DesignWorkbench key={props.designTargetId} {...props} />;
   if (props.section === 'runner') return <RunnerWorkbench key={props.runnerDraftKey} {...props} />;
   return <MockWorkbench {...props} />;
 }
 
-function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection }: AutomationWorkbenchProps) {
-  const [activeId, setActiveId] = useState(workspace.apiDesigns[0]?.id ?? '');
+function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection, designTargetId, onDesignChange, onOpenDesign }: AutomationWorkbenchProps) {
   const [message, setMessage] = useState('');
   const [editorMode, setEditorMode] = useState<'document' | 'ruleset'>('document');
-  const design = workspace.apiDesigns.find((candidate) => candidate.id === activeId) ?? workspace.apiDesigns[0];
+  const design = workspace.apiDesigns.find((candidate) => candidate.id === designTargetId) ?? workspace.apiDesigns[0];
   const deferredContents = useDeferredValue(design?.contents ?? '');
   const analysis = useMemo(() => analyzeOpenApi(deferredContents, design?.ruleset), [deferredContents, design?.ruleset]);
 
   const updateDesign = (patch: Partial<ApiDesign>) => {
     if (!design) return;
+    onDesignChange?.();
     onChangeWorkspace((current) => ({ ...current, apiDesigns: current.apiDesigns.map((candidate) => candidate.id === design.id ? { ...candidate, ...patch } : candidate) }));
   };
 
   const generate = () => {
     if (!design) return;
+    onDesignChange?.();
     try {
       const collection = generateCollectionFromOpenApi(design);
       const id = design.generatedCollectionId ?? collection.id;
@@ -103,7 +107,7 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection }: Aut
   if (!design) return <AutomationEmpty title="No API designs" action="Create design" onAction={() => {
     const created = { id: uid('design'), name: 'Untitled API', contents: 'openapi: 3.1.0\ninfo:\n  title: Untitled API\n  version: 1.0.0\npaths: {}\n', ruleset: '' };
     onChangeWorkspace((current) => ({ ...current, apiDesigns: [...current.apiDesigns, created] }));
-    setActiveId(created.id);
+    onOpenDesign?.(created.id);
   }} />;
 
   const errors = analysis.issues.filter((issue) => issue.severity === 'error').length;
@@ -111,7 +115,7 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection }: Aut
   return (
     <section className="automation-workbench design-workbench">
       <AutomationHeader eyebrow="Design" title="API design document" subtitle="Edit, lint, preview, and turn OpenAPI operations into runnable requests.">
-        <select aria-label="API design" value={design.id} onChange={(event) => setActiveId(event.target.value)}>{workspace.apiDesigns.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+        <select aria-label="API design" value={design.id} onChange={(event) => onOpenDesign?.(event.target.value)}>{workspace.apiDesigns.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         <button className="secondary-action" onClick={() => { try { updateDesign({ contents: formatOpenApi(design.contents) }); setMessage('Document formatted.'); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }} type="button">Format</button>
         <button className="secondary-action" onClick={() => setEditorMode((current) => current === 'document' ? 'ruleset' : 'document')} type="button">{editorMode === 'document' ? 'Custom rules' : 'API document'}</button>
         <button className="primary-action" disabled={errors > 0} onClick={generate} type="button">Generate requests</button>

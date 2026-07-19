@@ -138,4 +138,16 @@ describe('request document tabs', () => {
       { id: 'environment_workspace', type: 'environment' },
     ]).tabs.at(-1)).toEqual({ requestId: 'environment_workspace', type: 'environment', temporary: false });
   });
+
+  it('persists API design documents in the shared document lifecycle', () => {
+    let state = openDocumentTab(emptyRequestTabState(), 'design_one', 'document');
+    state = promoteRequestTab(state, 'design_one');
+    state = openDocumentTab(state, 'design_two', 'document');
+    const parsed = parseRequestTabState(JSON.stringify(state));
+    expect(parsed.tabs).toEqual([
+      { requestId: 'design_one', type: 'document', temporary: false },
+      { requestId: 'design_two', type: 'document', temporary: true },
+    ]);
+    expect(reconcileRequestTabState(parsed, [{ id: 'design_two', type: 'document' }]).tabs).toEqual([{ requestId: 'design_two', type: 'document', temporary: true }]);
+  });
 });

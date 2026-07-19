@@ -113,6 +113,7 @@ const workspaceDocumentReferences = (workspace: Workspace, workspaceId: string):
     ...(collection.folders ?? []).map((folder): DocumentTabReference => ({ id: folder.id, type: 'folder' })),
     ...(collection.folders ?? []).map((folder): DocumentTabReference => ({ id: runnerDocumentId(workspaceId, folder.id), type: 'runner' })),
   ]),
+  ...workspace.apiDesigns.map((design): DocumentTabReference => ({ id: design.id, type: 'document' })),
   { id: runnerDocumentId(workspaceId), type: 'runner' },
   { id: environmentDocumentId(workspaceId), type: 'environment' },
 ];
@@ -594,13 +595,14 @@ type ProjectDashboardProps = {
   workspace: Workspace;
   canReopenRequest: boolean;
   onAddRequest: () => void;
+  onOpenDesign: (designId: string) => void;
   onOpenEnvironment: () => void;
   onOpenRequest: (requestId: string) => void;
-  onOpenSection: (section: 'design' | 'mocks') => void;
+  onOpenMocks: () => void;
   onReopenRequest: () => void;
 };
 
-function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onOpenEnvironment, onOpenRequest, onOpenSection, onReopenRequest }: ProjectDashboardProps) {
+function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onOpenDesign, onOpenEnvironment, onOpenMocks, onOpenRequest, onReopenRequest }: ProjectDashboardProps) {
   const requestCount = workspace.collections.reduce((total, collection) => total + collection.requests.length, 0);
   return <section aria-labelledby="project-dashboard-title" className="project-dashboard">
     <header>
@@ -628,8 +630,8 @@ function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onOpenEnv
             <Icon name="chevron-right" size={14} />
           </button>;
         })}
-        {workspace.apiDesigns.map((design) => <button key={design.id} onClick={() => onOpenSection('design')} type="button"><Icon name="grid" size={19} /><span><strong>{design.name}</strong><small>API design</small></span><Icon name="chevron-right" size={14} /></button>)}
-        {workspace.mockServers.map((server) => <button key={server.id} onClick={() => onOpenSection('mocks')} type="button"><Icon name="spark" size={19} /><span><strong>{server.name}</strong><small>{server.routes.length} route{server.routes.length === 1 ? '' : 's'} · 127.0.0.1:{server.port}</small></span><Icon name="chevron-right" size={14} /></button>)}
+        {workspace.apiDesigns.map((design) => <button key={design.id} onClick={() => onOpenDesign(design.id)} type="button"><Icon name="grid" size={19} /><span><strong>{design.name}</strong><small>API design</small></span><Icon name="chevron-right" size={14} /></button>)}
+        {workspace.mockServers.map((server) => <button key={server.id} onClick={onOpenMocks} type="button"><Icon name="spark" size={19} /><span><strong>{server.name}</strong><small>{server.routes.length} route{server.routes.length === 1 ? '' : 's'} · 127.0.0.1:{server.port}</small></span><Icon name="chevron-right" size={14} /></button>)}
       </div>
     </section>
   </section>;
@@ -717,7 +719,7 @@ function DocumentTabStrip({ documents, activeDocumentId, canReopenDocument, pinn
       const pinned = document.type === 'request' && pinnedIds.has(document.id);
       const editableName = document.type === 'request' || document.type === 'folder';
       return <div aria-haspopup="menu" aria-selected={activeDocument} className={`document-tab${activeDocument ? ' active' : ''}${document.temporary ? ' temporary' : ''}${draggedDocumentId === document.id ? ' is-dragging' : ''}${dropClass}`} draggable key={document.id} onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); onCloseDocument(document.id); } }} onClick={() => onSelectDocument(document.id, document.type)} onContextMenu={(event) => { event.preventDefault(); openDocumentMenu(document.id, event.clientX, event.clientY); }} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('button,input')) onPromoteDocument(document.id); }} onDragEnd={clearDocumentDrag} onDragOver={(event) => dropOnDocument(event, document.id, false)} onDragStart={(event) => beginDocumentDrag(event, document.id)} onDrop={(event) => dropOnDocument(event, document.id, true)} onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') onSelectDocument(document.id, document.type); else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); openDocumentMenu(document.id, bounds.left, bounds.bottom); } }} role="tab" tabIndex={0} title={document.temporary ? 'Temporary tab · Double-click to keep open' : document.name}>
-        {document.request ? <span className={`method method-${methodClass(document.request.method)} protocol-${document.request.protocol}`}>{protocolLabel(document.request)}</span> : <Icon name={document.type === 'runner' ? 'play' : document.type === 'environment' ? 'braces' : 'folder'} size={14} />}
+        {document.request ? <span className={`method method-${methodClass(document.request.method)} protocol-${document.request.protocol}`}>{protocolLabel(document.request)}</span> : <Icon name={document.type === 'runner' ? 'play' : document.type === 'environment' ? 'braces' : document.type === 'document' ? 'grid' : 'folder'} size={14} />}
         {activeDocument && editableName ? <input aria-label={`${document.type === 'folder' ? 'Folder' : 'Request'} name`} onChange={(event) => onRenameDocument(document.id, document.type, event.target.value)} onClick={(event) => event.stopPropagation()} spellCheck={false} value={document.name} /> : <span className="document-tab-name">{document.name}</span>}
         {document.temporary ? <button aria-label={`Keep ${document.name} tab open`} onClick={(event) => { event.stopPropagation(); onPromoteDocument(document.id); }} title="Keep tab open" type="button"><Icon name="check" size={11} /></button> : null}
         {activeDocument && document.type === 'request' ? <button aria-label={pinned ? 'Unpin request' : 'Pin request'} className={pinned ? 'active' : ''} onClick={(event) => { event.stopPropagation(); onToggleRequestPin(document.id); }} title={pinned ? 'Unpin request' : 'Pin request'} type="button"><Icon name="pin" size={13} /></button> : null}
@@ -1409,7 +1411,7 @@ export default function App() {
       return;
     }
     try { window.localStorage.setItem(requestTabsStorageKey(activeWorkspaceId), JSON.stringify(state)); } catch {}
-  }, [activeWorkspaceId, hydrated, requestDocumentState, workspace.activeRequestId, workspace.collections]);
+  }, [activeWorkspaceId, hydrated, requestDocumentState, workspace.activeRequestId, workspace.apiDesigns, workspace.collections]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspaceId || (workspaceRecovery?.kind === 'workspace-backup' && workspaceRecovery.workspaceId === activeWorkspaceId)) return;
@@ -1471,6 +1473,10 @@ export default function App() {
     if (tab.type === 'environment') {
       return tab.requestId === environmentDocumentId(activeWorkspaceId) ? [{ id: tab.requestId, type: 'environment', name: 'Environments', temporary: tab.temporary }] : [];
     }
+    if (tab.type === 'document') {
+      const design = workspace.apiDesigns.find((candidate) => candidate.id === tab.requestId);
+      return design ? [{ id: design.id, type: 'document', name: design.name, temporary: tab.temporary }] : [];
+    }
     const folder = foldersById.get(tab.requestId)?.folder;
     return folder ? [{ id: folder.id, type: 'folder', name: folder.name, temporary: tab.temporary }] : [];
   });
@@ -1479,6 +1485,7 @@ export default function App() {
   const activeRunnerTarget = activeDocumentTab?.type === 'runner' ? runnerTargetsById.get(activeDocumentTab.requestId) : undefined;
   const isRunnerDocument = activeDocumentTab?.type === 'runner' && runnerTargetsById.has(activeDocumentTab.requestId);
   const isEnvironmentDocument = activeDocumentTab?.type === 'environment' && activeDocumentTab.requestId === environmentDocumentId(activeWorkspaceId);
+  const activeDesignDocument = activeDocumentTab?.type === 'document' ? workspace.apiDesigns.find((design) => design.id === activeDocumentTab.requestId) : undefined;
   const isRequestDocument = activeDocumentTab?.type === 'request';
   const isRequestDashboard = activeRequestDocumentState.dashboard && openDocumentTabs.length === 0;
   useEffect(() => {
@@ -1803,6 +1810,16 @@ export default function App() {
 
   const openEnvironmentDocument = () => {
     openWorkspaceDocument(environmentDocumentId(activeWorkspaceId), 'environment');
+  };
+
+  const openDesignDocument = (designId = workspace.apiDesigns[0]?.id) => {
+    if (designId) {
+      openWorkspaceDocument(designId, 'document');
+      return;
+    }
+    const id = uid('design');
+    setWorkspace((current) => ({ ...current, apiDesigns: [...current.apiDesigns, { id, name: 'Untitled API', contents: 'openapi: 3.1.0\ninfo:\n  title: Untitled API\n  version: 1.0.0\npaths: {}\n', ruleset: '' }] }));
+    openWorkspaceDocument(id, 'document');
   };
 
   const promoteRequestDocument = (requestId: string) => {
@@ -2818,13 +2835,19 @@ export default function App() {
     const draftKey = section === 'runner' && activeDocumentTab?.type === 'runner' ? runnerDraftKey(activeWorkspaceId, activeDocumentTab.requestId) : undefined;
     return <Suspense fallback={<div className="dialog-loading">Loading automation…</div>}><AutomationWorkbench
     activeEnvironment={activeEnvironment}
+    designTargetId={section === 'design' ? activeDesignDocument?.id : undefined}
     focusedMock={focusedMock}
     onChangeWorkspace={(updater) => setWorkspace(updater)}
+    onDesignChange={section === 'design' && activeDesignDocument ? () => promoteRequestDocument(activeDesignDocument.id) : undefined}
     onOpenCollection={(collection) => {
       setWorkbenchSection('requests');
       setSidebarMode('collections');
-      if (collection.requests[0]) openRequestDocument(collection.requests[0].id);
+      if (collection.requests[0]) {
+        const state = section === 'design' && activeDesignDocument ? promoteRequestTab(activeRequestDocumentState, activeDesignDocument.id) : activeRequestDocumentState;
+        applyRequestDocumentState(openRequestTab(state, collection.requests[0].id));
+      }
     }}
+    onOpenDesign={openDesignDocument}
     onRunnerStart={section === 'runner' ? () => promoteRequestDocument(activeRequestDocumentState.activeRequestId) : undefined}
     onStartMock={(serverId, runningMock) => setRunningMocks((current) => ({ ...current, [serverId]: runningMock }))}
     onStopMock={(serverId) => setRunningMocks((current) => {
@@ -2932,7 +2955,7 @@ export default function App() {
         <nav className="activity-rail" aria-label="Workspace sections">
           <div>
             <button aria-label="Collections" className={workbenchSection === 'requests' && sidebarMode === 'collections' ? 'active' : ''} onClick={() => { setWorkbenchSection('requests'); setSidebarMode('collections'); }} type="button"><Icon name="archive" /></button>
-            <button aria-label="API Design" className={workbenchSection === 'design' ? 'active' : ''} onClick={() => setWorkbenchSection('design')} type="button"><Icon name="grid" /></button>
+            <button aria-label="API Design" className={activeDesignDocument ? 'active' : ''} onClick={() => openDesignDocument()} type="button"><Icon name="grid" /></button>
             <button aria-label="History" className={workbenchSection === 'requests' && sidebarMode === 'history' ? 'active' : ''} onClick={() => { setWorkbenchSection('requests'); setSidebarMode('history'); }} type="button"><Icon name="history" /></button>
             <button aria-label="Scripts" onClick={() => { setWorkbenchSection('requests'); setRequestTab('scripts'); }} type="button"><Icon name="code" /></button>
             <button aria-label="Collection Runner" className={isRunnerDocument ? 'active' : ''} onClick={() => openRunnerDocument()} type="button"><Icon name="database" /></button>
@@ -2969,9 +2992,10 @@ export default function App() {
         {workbenchSection === 'requests' ? (isRequestDashboard ? <ProjectDashboard
           canReopenRequest={activeRequestDocumentState.closed.some((documentId) => validDocumentReferences.some((document) => document.id === documentId))}
           onAddRequest={addRequest}
+          onOpenDesign={openDesignDocument}
           onOpenEnvironment={openEnvironmentDocument}
+          onOpenMocks={() => setWorkbenchSection('mocks')}
           onOpenRequest={(requestId) => openRequestDocument(requestId)}
-          onOpenSection={setWorkbenchSection}
           onReopenRequest={reopenRequestDocument}
           workspace={workspace}
         /> : isEnvironmentDocument ? <EnvironmentDocumentPanel
@@ -2984,7 +3008,7 @@ export default function App() {
           onDuplicate={(environmentId) => { promoteRequestDocument(environmentDocumentId(activeWorkspaceId)); duplicateEnvironment(environmentId); }}
           onMove={(move) => { promoteRequestDocument(environmentDocumentId(activeWorkspaceId)); moveEnvironment(move); }}
           onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))}
-        /> : activeFolderDocument ? <FolderDocumentPanel
+        /> : activeDesignDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('design')}</section> : activeFolderDocument ? <FolderDocumentPanel
           collection={activeFolderDocument.collection}
           cookies={workspace.cookies}
           documentTabStrip={renderDocumentTabStrip()}
@@ -3090,7 +3114,7 @@ export default function App() {
         <span>{vaultSession.unlocked ? `Vault: ${vaultSession.entries.length} unlocked` : 'Vault: locked'}</span>
         <span>Local-only</span>
         <span>UTF-8</span>
-        <span>{workbenchSection === 'requests' ? isRequestDashboard ? 'Project' : isEnvironmentDocument ? 'Environment' : activeFolderDocument ? 'Folder' : isRunnerDocument ? 'Runner' : protocolLabel(active.request) : titleCase(workbenchSection)}</span>
+        <span>{workbenchSection === 'requests' ? isRequestDashboard ? 'Project' : activeDesignDocument ? 'API Design' : isEnvironmentDocument ? 'Environment' : activeFolderDocument ? 'Folder' : isRunnerDocument ? 'Runner' : protocolLabel(active.request) : titleCase(workbenchSection)}</span>
       </footer>
 
       {configuredCollection ? <CollectionDialog collection={configuredCollection} onChange={updateCollection} onClose={() => setCollectionEditor(undefined)} /> : null}
@@ -3111,7 +3135,7 @@ export default function App() {
       {showImport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading import tools…</div></div>}><ImportDialog onApply={applyImport} onClose={() => setShowImport(false)} onFetchUrl={fetchImportUrl} /></Suspense> : null}
       {showExport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading export tools…</div></div>}><ExportDialog onClose={() => setShowExport(false)} workspace={workspace} /></Suspense> : null}
       {showCodeGeneration ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading code generator…</div></div>}><CodeGenerationDialog generate={generateCode} onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /></Suspense> : null}
-      {showPalette ? <Suspense fallback={<div className="dialog-loading">Loading commands…</div>}><CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => setWorkbenchSection('design')} onEnvironment={openEnvironmentDocument} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => setWorkbenchSection('mocks')} onPreferences={() => setWorkbenchSection('preferences')} onRunner={() => openRunnerDocument()} /></Suspense> : null}
+      {showPalette ? <Suspense fallback={<div className="dialog-loading">Loading commands…</div>}><CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => openDesignDocument()} onEnvironment={openEnvironmentDocument} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => setWorkbenchSection('mocks')} onPreferences={() => setWorkbenchSection('preferences')} onRunner={() => openRunnerDocument()} /></Suspense> : null}
     </main>
   );
 }
