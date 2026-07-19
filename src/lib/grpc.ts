@@ -69,6 +69,7 @@ export const previewGrpcSchema = (protoText: string): GrpcSchema => {
       serverStreaming: Boolean(match[4]),
       inputType: match[3],
       outputType: match[5],
+      example: {},
     }));
   return {
     descriptorSetBase64: btoa(protoText || 'browser-reflection-descriptor'),
@@ -77,7 +78,7 @@ export const previewGrpcSchema = (protoText: string): GrpcSchema => {
       fullName: service,
       methods: methods.length ? methods : [{
         name: 'ListOrders', fullName: `${service}.ListOrders`, clientStreaming: false,
-        serverStreaming: true, inputType: 'ListOrdersRequest', outputType: 'Order',
+        serverStreaming: true, inputType: 'ListOrdersRequest', outputType: 'Order', example: {},
       }],
     }],
   };

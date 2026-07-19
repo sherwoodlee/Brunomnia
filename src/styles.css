@@ -649,6 +649,9 @@ kbd {
 .grpc-method-picker label { color: var(--muted); display: flex; flex-direction: column; font-size: 8px; gap: 4px; letter-spacing: .08em; text-transform: uppercase; }
 .grpc-method-picker select { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font: 10px var(--font-mono); height: 30px; min-width: 0; }
 .rpc-kind { color: var(--muted); font: 9px/1.4 var(--font-mono); max-width: 110px; }
+.grpc-method-actions { align-items: end; display: flex; flex-direction: column; gap: 4px; }
+.grpc-method-actions button { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font-size: 8px; min-height: 24px; padding: 0 7px; white-space: nowrap; }
+.grpc-method-actions button:disabled { opacity: .4; }
 .grpc-message-lifecycle { display: grid; grid-template-rows: minmax(150px, .85fr) minmax(170px, 1.15fr); min-height: 0; }
 .grpc-message-editor { display: grid; grid-template-rows: 32px minmax(0, 1fr); min-height: 0; }
 .grpc-session-console { border-top: 1px solid var(--border); display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; }

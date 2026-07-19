@@ -786,6 +786,7 @@ export type GrpcMethodInfo = {
   serverStreaming: boolean;
   inputType: string;
   outputType: string;
+  example?: Record<string, unknown>;
 };
 
 export type GrpcServiceInfo = {

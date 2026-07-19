@@ -1773,9 +1773,23 @@ Compatibility bounds remain explicit: structured status fidelity, Buf Schema Reg
 | Executable coverage | Complete | A real Tonic server proves `0 OK` response metadata and `3 INVALID_ARGUMENT` details/error metadata; renderer tests prove structured channel fields survive ID normalization |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 118 verification](QA_MILESTONE_118.md) |
 
-Compatibility bounds remain explicit: Buf Schema Registry reflection, reflected request examples, disable-user-agent behavior, richer connection-error guidance, and broader third-party fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: Buf Schema Registry reflection, reflected request examples, disable-user-agent behavior, richer connection-error guidance, and broader third-party fixtures remain open. Milestone 119 later closes request examples. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 119 — remaining parity closure and release hardening
+## Milestone 119 — descriptor-generated gRPC request stubs (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned reflection walks protobuf request descriptors through `mockRequestMethods`, attaches one example to each reflected method, and enables an explicit button that replaces the current body |
+| Descriptor generator | Complete | Rust emits valid protobuf JSON for strings/ID UUIDs, every numeric family, booleans, bytes, first enum values, nested messages, repeated fields, maps, JSON names, and one branch per oneof |
+| Safety bounds | Complete | Generation stops after 500 fields or three recursive levels, truncates cycles to an empty object, and never executes schema code or reads filesystem paths |
+| Schema continuity | Complete baseline | The schema IPC returns examples for reflection and imported proto trees; browser preview retains an empty compatible stub, and method changes expose the selected descriptor's example |
+| Account-free authoring | Complete | **Use stub** replaces the body only after an explicit click and has no login, organization, plan, or entitlement check |
+| Executable coverage | Complete | A native fixture asserts camel-cased JSON names, UUID IDs, nested/repeated/map/enum/bytes/oneof values, and recursive truncation |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 119 verification](QA_MILESTONE_119.md) |
+
+Compatibility bounds remain explicit: Buf Schema Registry reflection, disable-user-agent behavior, richer connection-error guidance, and broader third-party fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 120 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

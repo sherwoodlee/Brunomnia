@@ -269,6 +269,7 @@ pub struct GrpcMethodInfo {
     pub server_streaming: bool,
     pub input_type: String,
     pub output_type: String,
+    pub example: serde_json::Value,
 }
 
 #[derive(Clone, Debug, Serialize)]

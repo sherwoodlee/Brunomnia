@@ -9,7 +9,7 @@ use crate::{
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use prost::Message;
-use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor, MethodDescriptor};
+use prost_reflect::{DescriptorPool, DynamicMessage, Kind, MessageDescriptor, MethodDescriptor};
 use prost_types::{FileDescriptorProto, FileDescriptorSet};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -35,6 +35,8 @@ const MAX_GRPC_SESSIONS: usize = 100;
 const GRPC_SESSION_COMMAND_CAPACITY: usize = 256;
 const MAX_GRPC_STATUS_METADATA_ENTRIES: usize = 500;
 const MAX_GRPC_STATUS_METADATA_VALUE_BYTES: usize = 65_536;
+const MAX_GRPC_EXAMPLE_FIELDS: usize = 500;
+const MAX_GRPC_EXAMPLE_DEPTH: usize = 3;
 
 #[derive(Clone, Default)]
 pub struct GrpcSessionState {
@@ -987,6 +989,117 @@ fn compile_proto(
     ))
 }
 
+struct GrpcExampleBudget {
+    fields: usize,
+}
+
+fn string_example(field_name: &str) -> String {
+    let normalized = field_name.to_ascii_lowercase();
+    if normalized.starts_with("id") || normalized.ends_with("id") {
+        Uuid::new_v4().to_string()
+    } else {
+        "Hello".into()
+    }
+}
+
+fn map_key_example(kind: Kind, field_name: &str) -> String {
+    match kind {
+        Kind::Bool => "true".into(),
+        Kind::String => string_example(field_name),
+        Kind::Int32 => "10".into(),
+        Kind::Int64 => "20".into(),
+        Kind::Uint32 | Kind::Uint64 | Kind::Sint32 => "100".into(),
+        Kind::Sint64 => "1200".into(),
+        Kind::Fixed32 => "1400".into(),
+        Kind::Fixed64 => "1500".into(),
+        Kind::Sfixed32 => "1600".into(),
+        Kind::Sfixed64 => "1700".into(),
+        _ => "key".into(),
+    }
+}
+
+fn kind_example(
+    kind: Kind,
+    field_name: &str,
+    depth: usize,
+    budget: &mut GrpcExampleBudget,
+) -> serde_json::Value {
+    match kind {
+        Kind::Double => serde_json::json!(1.4),
+        Kind::Float => serde_json::json!(1.1),
+        Kind::Int32 => serde_json::json!(10),
+        Kind::Int64 => serde_json::json!(20),
+        Kind::Uint32 | Kind::Uint64 | Kind::Sint32 => serde_json::json!(100),
+        Kind::Sint64 => serde_json::json!(1200),
+        Kind::Fixed32 => serde_json::json!(1400),
+        Kind::Fixed64 => serde_json::json!(1500),
+        Kind::Sfixed32 => serde_json::json!(1600),
+        Kind::Sfixed64 => serde_json::json!(1700),
+        Kind::Bool => serde_json::json!(true),
+        Kind::String => serde_json::json!(string_example(field_name)),
+        Kind::Bytes => serde_json::json!(STANDARD.encode([0xa1, 0xb2, 0xc3])),
+        Kind::Enum(descriptor) => serde_json::json!(descriptor
+            .values()
+            .next()
+            .map(|value| value.number())
+            .unwrap_or_default()),
+        Kind::Message(descriptor) => message_example(descriptor, depth + 1, budget),
+    }
+}
+
+fn message_example(
+    descriptor: MessageDescriptor,
+    depth: usize,
+    budget: &mut GrpcExampleBudget,
+) -> serde_json::Value {
+    if depth > MAX_GRPC_EXAMPLE_DEPTH || budget.fields >= MAX_GRPC_EXAMPLE_FIELDS {
+        return serde_json::json!({});
+    }
+    let mut object = serde_json::Map::new();
+    let mut selected_oneofs = HashSet::new();
+    for field in descriptor.fields() {
+        if budget.fields >= MAX_GRPC_EXAMPLE_FIELDS {
+            break;
+        }
+        if let Some(oneof) = field.containing_oneof() {
+            if !oneof.is_synthetic() && !selected_oneofs.insert(oneof.full_name().to_string()) {
+                continue;
+            }
+        }
+        budget.fields += 1;
+        let value = if field.is_map() {
+            match field.kind() {
+                Kind::Message(entry) => {
+                    let key_field = entry.map_entry_key_field();
+                    let value_field = entry.map_entry_value_field();
+                    serde_json::json!({
+                        map_key_example(key_field.kind(), field.name()): kind_example(
+                            value_field.kind(),
+                            value_field.name(),
+                            depth,
+                            budget,
+                        )
+                    })
+                }
+                _ => serde_json::json!({}),
+            }
+        } else {
+            let value = kind_example(field.kind(), field.name(), depth, budget);
+            if field.is_list() {
+                serde_json::json!([value])
+            } else {
+                value
+            }
+        };
+        object.insert(field.json_name().to_string(), value);
+    }
+    serde_json::Value::Object(object)
+}
+
+fn request_example(descriptor: MessageDescriptor) -> serde_json::Value {
+    message_example(descriptor, 0, &mut GrpcExampleBudget { fields: 0 })
+}
+
 fn schema_output(pool: &DescriptorPool, descriptor_bytes: &[u8]) -> GrpcSchemaOutput {
     GrpcSchemaOutput {
         services: pool
@@ -1004,6 +1117,7 @@ fn schema_output(pool: &DescriptorPool, descriptor_bytes: &[u8]) -> GrpcSchemaOu
                         server_streaming: method.is_server_streaming(),
                         input_type: method.input().full_name().to_string(),
                         output_type: method.output().full_name().to_string(),
+                        example: request_example(method.input()),
                     })
                     .collect(),
             })
@@ -1400,6 +1514,49 @@ mod tests {
         assert!(!output.services[0].methods[0].server_streaming);
         assert!(output.services[0].methods[1].server_streaming);
         assert!(!output.descriptor_set_base64.is_empty());
+    }
+
+    #[test]
+    fn generates_bounded_request_examples_from_descriptors() {
+        let proto = r#"
+            syntax = "proto3";
+            package brunomnia.example;
+            enum State { STATE_UNSPECIFIED = 0; STATE_READY = 1; }
+            message Nested { string note = 1; }
+            message Node { string value = 1; Node child = 2; }
+            message ExampleRequest {
+              string user_id = 1;
+              repeated string tags = 2;
+              int32 count = 3;
+              bool enabled = 4;
+              bytes payload = 5;
+              State state = 6;
+              Nested nested = 7;
+              map<string, int32> scores = 8;
+              oneof choice { string label = 9; int32 code = 10; }
+              Node recursive = 11;
+            }
+            message ExampleReply { bool ok = 1; }
+            service Examples { rpc Create (ExampleRequest) returns (ExampleReply); }
+        "#;
+        let (pool, bytes) = compile_proto(proto, &[], "").unwrap();
+        let output = schema_output(&pool, &bytes);
+        let example = &output.services[0].methods[0].example;
+
+        assert!(Uuid::parse_str(example["userId"].as_str().unwrap()).is_ok());
+        assert_eq!(example["tags"], serde_json::json!(["Hello"]));
+        assert_eq!(example["count"], 10);
+        assert_eq!(example["enabled"], true);
+        assert_eq!(example["payload"], "obLD");
+        assert_eq!(example["state"], 0);
+        assert_eq!(example["nested"]["note"], "Hello");
+        assert_eq!(example["scores"]["Hello"], 10);
+        assert_eq!(example["label"], "Hello");
+        assert!(example.get("code").is_none());
+        assert_eq!(
+            example["recursive"]["child"]["child"]["child"],
+            serde_json::json!({})
+        );
     }
 
     #[test]

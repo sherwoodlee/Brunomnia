@@ -43,4 +43,4 @@ Rendered interaction QA is omitted by standing direction. No screenshot, DOM, co
 
 ## Acceptance boundary
 
-This milestone closes structured gRPC status fidelity and corrects the transient-history audit. Buf Schema Registry reflection, reflected request examples, disable-user-agent behavior, richer connection-error guidance, and broad third-party fixtures remain open. The gRPC and other parity rows remain `Baseline`; Brunomnia is not declared feature-complete.
+This milestone closes structured gRPC status fidelity and corrects the transient-history audit. Milestone 119 later closes reflected request examples. Buf Schema Registry reflection, disable-user-agent behavior, richer connection-error guidance, and broad third-party fixtures remain open. The gRPC and other parity rows remain `Baseline`; Brunomnia is not declared feature-complete.
