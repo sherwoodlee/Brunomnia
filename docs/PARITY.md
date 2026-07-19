@@ -1083,6 +1083,13 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Per-entry armed warning, timer cleanup, accessible confirmation label, and exact report deletion integration: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx) and [`src/styles.css`](../src/styles.css)
 - Updated account-free History documentation and exact verification record: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md) and [`docs/QA_MILESTONE_195.md`](QA_MILESTONE_195.md)
 
+## Milestone 196 acceptance evidence
+
+- Pinned React Aria selected-key, before/after, and dedicated drag-handle audit: [`docs/QA_MILESTONE_196.md`](QA_MILESTONE_196.md)
+- Pure selected-drag derivation and order-preserving block movement with focused regressions: [`src/lib/runnerPlan.ts`](../src/lib/runnerPlan.ts) and [`src/lib/runnerPlan.test.ts`](../src/lib/runnerPlan.test.ts)
+- Dedicated accessible drag handle, midpoint placement, active locking, and retained up/down controls: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx) and [`src/styles.css`](../src/styles.css)
+- Corrected M186 boundary, updated account-free Request Order documentation, and exact verification record: [`docs/QA_MILESTONE_186.md`](QA_MILESTONE_186.md), [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md), and [`docs/QA_MILESTONE_196.md`](QA_MILESTONE_196.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).

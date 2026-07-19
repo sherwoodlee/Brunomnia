@@ -18,7 +18,7 @@ import { aggregateRunnerTimeline, discardRunnerReport, parseRunnerData, resolveR
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
 import { summarizeRunnerAssertions, summarizeRunnerHistory } from '../lib/runnerHistory';
 import { isRunnerItemFinished, summarizeRunnerLiveProgress } from '../lib/runnerFeedback';
-import { activeRunnerResultPane, parseRunnerNumberDraft, runnerHistoryDeleteDecision, runnerLayoutDirection, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection, type RunnerResultPane } from '../lib/runnerPlan';
+import { activeRunnerResultPane, parseRunnerNumberDraft, reorderRunnerPlan, runnerDraggedRequestIds, runnerHistoryDeleteDecision, runnerLayoutDirection, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection, type RunnerDropPosition, type RunnerResultPane } from '../lib/runnerPlan';
 import type { ScriptTestFilter } from '../lib/scriptTests';
 import { formatResponseTimeline } from '../lib/timeline';
 import { applyCollectionConfiguration, folderAncestors, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
@@ -205,7 +205,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
   const skippedKeys = useRef(new Set<string>());
   const activeItem = useRef<{ key: string; cancel: () => void; signal: AbortSignal } | undefined>(undefined);
   const oauthFlowId = useRef('');
-  const draggedRequestId = useRef('');
+  const draggedRequestIds = useRef<string[]>([]);
   const deleteReportTimeout = useRef<number | undefined>(undefined);
   const resolvedTarget = useMemo(() => resolveRunnerTarget(workspace, { collectionId, folderId: targetFolderId }), [collectionId, targetFolderId, workspace]);
   const { collection, folder: targetFolder, requests: runnerRequests } = resolvedTarget;
@@ -282,14 +282,9 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
     return next;
   });
 
-  const dropRequest = (targetId: string) => setRequestPlan((current) => {
-    const from = current.findIndex((item) => item.id === draggedRequestId.current);
-    const to = current.findIndex((item) => item.id === targetId);
-    draggedRequestId.current = '';
-    if (from < 0 || to < 0 || from === to) return current;
-    const next = [...current];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
+  const dropRequest = (targetId: string, position: RunnerDropPosition) => setRequestPlan((current) => {
+    const next = reorderRunnerPlan(current, draggedRequestIds.current, targetId, position);
+    draggedRequestIds.current = [];
     return next;
   });
 
@@ -601,7 +596,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
             if (!request) return null;
             const ancestorNames = collection ? folderAncestors(collection, request.folderId).map((folder) => folder.name) : [];
             const methodClass = request.method.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-            return <div aria-disabled={running} draggable={!running} key={item.id} onDragEnd={() => { draggedRequestId.current = ''; }} onDragOver={(event) => { if (!running) event.preventDefault(); }} onDragStart={() => { if (!running) draggedRequestId.current = item.id; }} onDrop={() => { if (!running) dropRequest(item.id); }}><input aria-label={`Include ${request.name}`} checked={item.enabled} disabled={running} onChange={(event) => setRequestPlan((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, enabled: event.target.checked } : candidate))} type="checkbox" /><span className={`method method-${methodClass}`}>{request.method.toUpperCase()}</span><span className="runner-plan-identity"><button disabled={running || !onOpenRequest} onClick={() => onOpenRequest?.(request.id)} title={`Open ${request.name}`} type="button">{request.name}</button>{ancestorNames.length ? <small title={ancestorNames.join(' / ')}>{ancestorNames.join(' / ')}</small> : null}</span><div><button aria-label={`Move ${request.name} up`} disabled={running || index === 0} onClick={() => moveRequest(item.id, -1)} type="button">↑</button><button aria-label={`Move ${request.name} down`} disabled={running || index === requestPlan.length - 1} onClick={() => moveRequest(item.id, 1)} type="button">↓</button></div></div>;
+            return <div aria-disabled={running} key={item.id} onDragOver={(event) => { if (!running) event.preventDefault(); }} onDrop={(event) => { if (running) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); dropRequest(item.id, event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after'); }}><button aria-label={`Drag ${request.name}`} className="runner-plan-drag" disabled={running} draggable={!running} onDragEnd={() => { draggedRequestIds.current = []; }} onDragStart={(event) => { if (running) return; const ids = runnerDraggedRequestIds(requestPlan, item.id); draggedRequestIds.current = ids; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', ids.join('\n')); }} title={item.enabled ? `Drag ${selectedRequestIds.length} selected requests` : `Drag ${request.name}`} type="button"><span aria-hidden="true">⠿</span></button><input aria-label={`Include ${request.name}`} checked={item.enabled} disabled={running} onChange={(event) => setRequestPlan((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, enabled: event.target.checked } : candidate))} type="checkbox" /><span className={`method method-${methodClass}`}>{request.method.toUpperCase()}</span><span className="runner-plan-identity"><button disabled={running || !onOpenRequest} onClick={() => onOpenRequest?.(request.id)} title={`Open ${request.name}`} type="button">{request.name}</button>{ancestorNames.length ? <small title={ancestorNames.join(' / ')}>{ancestorNames.join(' / ')}</small> : null}</span><div><button aria-label={`Move ${request.name} up`} disabled={running || index === 0} onClick={() => moveRequest(item.id, -1)} type="button">↑</button><button aria-label={`Move ${request.name} down`} disabled={running || index === requestPlan.length - 1} onClick={() => moveRequest(item.id, 1)} type="button">↓</button></div></div>;
           })}</fieldset>
           <div className="runner-number-grid"><label>Iterations<input disabled={running} min="1" max="1000" type="number" value={iterationsDraft} onBlur={() => setIterationsDraft(String(iterations))} onChange={(event) => updateNumberDraft(event.target.value, 1, 1_000, setIterationsDraft, setIterations)} /></label><label>Retries<input disabled={running} min="0" max="10" type="number" value={retriesDraft} onBlur={() => setRetriesDraft(String(retries))} onChange={(event) => updateNumberDraft(event.target.value, 0, 10, setRetriesDraft, setRetries)} /></label></div>
           <label className="runner-toggle"><input checked={bail} disabled={running} onChange={(event) => setBail(event.target.checked)} type="checkbox" /><span>Stop after first exhausted failure</span></label>

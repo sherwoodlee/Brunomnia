@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeRunnerResultPane, clampRunnerPaneSize, parseRunnerNumberDraft, runnerHistoryDeleteDecision, runnerLayoutDirection, runnerPaneSizeFromKey, runnerPaneSizeFromPointer, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from './runnerPlan';
+import { activeRunnerResultPane, clampRunnerPaneSize, parseRunnerNumberDraft, reorderRunnerPlan, runnerDraggedRequestIds, runnerHistoryDeleteDecision, runnerLayoutDirection, runnerPaneSizeFromKey, runnerPaneSizeFromPointer, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from './runnerPlan';
 
 describe('Runner request-plan selection', () => {
   it('distinguishes empty, none, partial, and complete selection', () => {
@@ -17,6 +17,28 @@ describe('Runner request-plan selection', () => {
     expect(toggleRunnerPlanSelection([{ id: 'one', enabled: true }, { id: 'two', enabled: false }])).toEqual([{ id: 'one', enabled: true }, { id: 'two', enabled: true }]);
     expect(toggleRunnerPlanSelection([{ id: 'one', enabled: false }, { id: 'two', enabled: false }])).toEqual([{ id: 'one', enabled: true }, { id: 'two', enabled: true }]);
     expect(toggleRunnerPlanSelection([])).toEqual([]);
+  });
+
+  it('drags the selected request set or one unselected request', () => {
+    const plan = [{ id: 'one', enabled: true }, { id: 'two', enabled: false }, { id: 'three', enabled: true }];
+    expect(runnerDraggedRequestIds(plan, 'one')).toEqual(['one', 'three']);
+    expect(runnerDraggedRequestIds(plan, 'two')).toEqual(['two']);
+    expect(runnerDraggedRequestIds(plan, 'missing')).toEqual([]);
+  });
+
+  it('moves multiple selected requests as one ordered block before or after a target', () => {
+    const plan = [{ id: 'one', enabled: true }, { id: 'two', enabled: false }, { id: 'three', enabled: true }, { id: 'four', enabled: false }];
+    expect(reorderRunnerPlan(plan, ['one', 'three'], 'four', 'before').map((item) => item.id)).toEqual(['two', 'one', 'three', 'four']);
+    expect(reorderRunnerPlan(plan, ['one', 'three'], 'four', 'after').map((item) => item.id)).toEqual(['two', 'four', 'one', 'three']);
+    expect(reorderRunnerPlan(plan, ['four'], 'one', 'after').map((item) => item.id)).toEqual(['one', 'four', 'two', 'three']);
+  });
+
+  it('ignores invalid or self-contained Runner drops', () => {
+    const plan = [{ id: 'one', enabled: true }, { id: 'two', enabled: true }];
+    expect(reorderRunnerPlan(plan, [], 'two', 'before')).toBe(plan);
+    expect(reorderRunnerPlan(plan, ['missing'], 'two', 'before')).toBe(plan);
+    expect(reorderRunnerPlan(plan, ['one', 'two'], 'two', 'after')).toBe(plan);
+    expect(reorderRunnerPlan(plan, ['one'], 'missing', 'after')).toBe(plan);
   });
 
   it('keeps blank, invalid, and out-of-range number drafts out of execution state', () => {

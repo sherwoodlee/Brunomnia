@@ -4,6 +4,7 @@ export type RunnerPlanItem = { id: string; enabled: boolean };
 export type RunnerPaneDirection = 'vertical' | 'horizontal';
 export type RunnerResultPane = 'results' | 'history' | 'console';
 export type RunnerHistoryDeleteDecision = { confirmed: boolean; pendingId: string };
+export type RunnerDropPosition = 'before' | 'after';
 
 export const runnerPlanSelectionState = (plan: RunnerPlanItem[]): 'all' | 'some' | 'none' => {
   if (!plan.length || plan.every((item) => !item.enabled)) return 'none';
@@ -13,6 +14,28 @@ export const runnerPlanSelectionState = (plan: RunnerPlanItem[]): 'all' | 'some'
 export const toggleRunnerPlanSelection = (plan: RunnerPlanItem[]): RunnerPlanItem[] => {
   const enabled = runnerPlanSelectionState(plan) !== 'all';
   return plan.map((item) => ({ ...item, enabled }));
+};
+
+export const runnerDraggedRequestIds = (plan: RunnerPlanItem[], draggedId: string) => {
+  const dragged = plan.find((item) => item.id === draggedId);
+  if (!dragged) return [];
+  return dragged.enabled ? plan.filter((item) => item.enabled).map((item) => item.id) : [dragged.id];
+};
+
+export const reorderRunnerPlan = (
+  plan: RunnerPlanItem[],
+  movingIds: string[],
+  targetId: string,
+  position: RunnerDropPosition,
+) => {
+  const moving = new Set(movingIds.filter((id) => plan.some((item) => item.id === id)));
+  if (!moving.size || moving.has(targetId)) return plan;
+  const moved = plan.filter((item) => moving.has(item.id));
+  const remaining = plan.filter((item) => !moving.has(item.id));
+  const targetIndex = remaining.findIndex((item) => item.id === targetId);
+  if (targetIndex < 0) return plan;
+  const insertionIndex = targetIndex + (position === 'after' ? 1 : 0);
+  return [...remaining.slice(0, insertionIndex), ...moved, ...remaining.slice(insertionIndex)];
 };
 
 export const parseRunnerNumberDraft = (draft: string, minimum: number, maximum: number): number | undefined => {
