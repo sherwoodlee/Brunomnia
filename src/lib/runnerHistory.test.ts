@@ -1,0 +1,48 @@
+import { describe, expect, it } from 'vitest';
+import type { RunnerReport } from '../types';
+import { formatRunnerDuration, runnerReportDurationMs, summarizeRunnerHistory } from './runnerHistory';
+
+const report = (patch: Partial<RunnerReport> = {}): RunnerReport => ({
+  id: 'run',
+  collectionId: 'collection',
+  collectionName: 'Orders',
+  environmentId: 'environment',
+  startedAt: '2026-07-19T18:00:00.000Z',
+  finishedAt: '2026-07-19T18:01:01.234Z',
+  iterations: 1,
+  retries: 0,
+  total: 2,
+  passed: 1,
+  failed: 1,
+  cancelled: false,
+  results: [
+    { id: 'one', requestId: 'one', requestName: 'One', iteration: 1, attempt: 1, status: 200, durationMs: 20, passed: true, tests: [{ name: 'passes', passed: true, status: 'passed' }, { name: 'skips', passed: false, status: 'skipped' }] },
+    { id: 'two', requestId: 'two', requestName: 'Two', iteration: 1, attempt: 1, status: 500, durationMs: 30, passed: false, tests: [{ name: 'fails', passed: false, status: 'failed' }, { name: 'legacy pass', passed: true }] },
+  ],
+  ...patch,
+});
+
+describe('Runner history presentation', () => {
+  it('counts retained assertions rather than request attempts', () => {
+    expect(summarizeRunnerHistory(report())).toEqual({ durationMs: 61_234, duration: '1.02 m', total: 4, passed: 2, failed: 1, skipped: 1 });
+  });
+
+  it('uses strict time-unit thresholds and magnitude-based precision', () => {
+    expect(formatRunnerDuration(1_000)).toBe('1000 ms');
+    expect(formatRunnerDuration(1_001)).toBe('1 s');
+    expect(formatRunnerDuration(10_550)).toBe('10.6 s');
+    expect(formatRunnerDuration(60_000)).toBe('60 s');
+    expect(formatRunnerDuration(60_001)).toBe('1 m');
+    expect(formatRunnerDuration(6_060_000)).toBe('101 m');
+  });
+
+  it('falls back to summed nonnegative attempt durations for invalid timestamps', () => {
+    const invalid = report({ startedAt: 'invalid', finishedAt: 'invalid', results: [
+      { id: 'one', requestId: 'one', requestName: 'One', iteration: 1, attempt: 1, status: 0, durationMs: -5, passed: false, tests: [] },
+      { id: 'two', requestId: 'two', requestName: 'Two', iteration: 1, attempt: 1, status: 200, durationMs: 12.5, passed: true, tests: [] },
+    ] });
+
+    expect(runnerReportDurationMs(invalid)).toBe(12.5);
+    expect(summarizeRunnerHistory(invalid)).toMatchObject({ duration: '12.5 ms', total: 0, passed: 0, failed: 0, skipped: 0 });
+  });
+});

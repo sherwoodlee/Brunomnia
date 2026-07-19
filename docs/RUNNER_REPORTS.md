@@ -1,6 +1,6 @@
 # Runner reports and CI
 
-Brunomnia keeps the latest 30 collection-run reports in device-local workspace storage. A report records every attempt in order, including iteration and retry numbers, request status, duration, script assertion results, runner errors, cancellation state, and aggregate pass/fail counts.
+Brunomnia keeps the latest 30 collection-run reports in device-local workspace storage. A report records every attempt in order, including iteration and retry numbers, request status, duration, script assertion results, runner errors, cancellation state, and aggregate pass/fail counts. The History table follows pinned Insomnia by deriving Total, Passed, Failed, Skipped, and its success/failure icon from retained assertions rather than request attempts; a transport failure with no assertion therefore contributes no History test count. Duration uses strict `> 1,000 ms` seconds and `> 60,000 ms` minutes thresholds with zero, one, or two decimal places based on magnitude, while the raw millisecond value remains available as a tooltip.
 
 ## Request plan
 

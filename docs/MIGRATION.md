@@ -1353,7 +1353,7 @@ Compatibility bounds at this milestone were explicit: direct request sends could
 | Shared resolver boundary | Complete | The HTTP execution context can request interactive OAuth credentials; protected dispatch remains blocked until a complete auth snapshot returns, then the same pre-send persistence callback receives it |
 | Collection runner | Complete baseline | Authorization-code and implicit requests can open the system browser during a run, display exact URLs, exchange/store tokens, continue the active attempt, and reuse the credential in later iterations |
 | Secondary execution | Complete baseline | Direct-request scripts, runner scripts, plugin network calls, and user-triggered project/integration HTTP operations share the same app- or runner-owned resolver rather than bypassing OAuth |
-| Cancellation | Complete | Direct request switching, project switching, component teardown, the waiting dialog, and Cancel run terminate the matching native flow without canceling unrelated flow IDs |
+| Cancellation | Complete | Direct request switching, project switching, component teardown, the waiting dialog, and Runner Cancel all terminate the matching native flow without canceling unrelated flow IDs |
 | Ownership | Complete | Main and runner acquisitions still persist request- or closest-folder-owned token state through the common ownership helper |
 | Browser boundary | Complete | Browser development keeps the manual copied-URL path and returns an explicit Tauri-required error instead of pretending it can bind a listener |
 | Bundle boundary | Complete | The reusable dialog is a 1.06 kB lazy chunk; OAuth remains 3.20 kB, Auth remains 11.97 kB, Automation is 50.94 kB, and the 180-module build keeps main JavaScript at 495.10 kB without a warning |
