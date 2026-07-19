@@ -26,6 +26,8 @@ Milestone 144 adds focusable keyboard-equivalent moves on each request row, fold
 
 Collections support Option/Alt + Arrow Up/Down/Home/End. Boundary, missing-resource, impossible-indent, root-outdent, and collection indent/outdent operations are no-ops. The focused keyed control remains the same resource after a successful move.
 
+Pinned Insomnia's current project navigation tree and legacy collection tree are single-select. Request and folder dropdowns receive one resource, so Brunomnia does not fabricate collection-tree multi-select or bulk actions as a parity feature. Existing bulk query/header editors and runner request selection are separate documented surfaces.
+
 Moving a folder across collections carries its complete descendant folder/request subtree and preserves every resource ID. A folder cannot be moved into itself or one of its descendants. Missing destinations and cross-collection ID collisions are rejected without a partial move. Destination collections and folders expand so the result remains visible.
 
 Order is stored in the native workspace and split-YAML project representation. Older workspaces are upgraded by retaining every valid folder/request once, discarding stale or duplicate order IDs, and appending valid resources that were absent from the saved order. Brunomnia compatibility imports remap saved order IDs with the imported resources.

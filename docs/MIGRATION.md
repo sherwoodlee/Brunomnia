@@ -2192,7 +2192,19 @@ Compatibility bounds remain explicit: this milestone closes request pin metadata
 
 Compatibility bounds remain explicit: pinned Insomnia can close its final tab and navigate to a separate project dashboard, while Brunomnia's always-present request workbench deliberately keeps one request tab open. This milestone covers request documents, not Insomnia's broader folder/environment/mock/spec/runner tab types or close-all/close-others context menu. Multi-select/bulk resource actions, collected-data breadth, legacy-version reconstruction, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 149 — remaining parity closure and release hardening
+## Milestone 149 — corrective collection bulk-action audit (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current tree selection | Corrected | Pinned `project-navigation-sidebar.tsx` explicitly configures `selectionMode="single"` and derives one selected key from the active route |
+| Legacy tree behavior | Corrected | Pinned `debug.tsx` renders one active request selection and each collection row receives one document; its pinned-request list is also single-select |
+| Action contracts | Corrected | `request-actions-dropdown.tsx` and `request-group-actions-dropdown.tsx` accept one request or folder and dispatch singular rename/duplicate/delete/move/configuration actions |
+| Existing bulk surfaces | Preserved | Bulk query/header text editors and multi-request runner selection remain implemented and are unrelated to collection-tree resource selection |
+| Ledger correction | Complete | The stale multi-select/bulk collection-tree gap is removed without adding behavior absent from pinned Insomnia or changing Brunomnia product code |
+
+Compatibility bounds remain explicit: this audit does not assert that Insomnia has no multi-selection anywhere; runner result tables, plugin settings, Git history, and other domain-specific lists can be multi-select. The corrected claim is limited to collection-tree resources and their actions. Collected-data breadth, legacy-version reconstruction, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. No rendered interaction claim is made.
+
+## Milestone 150 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
