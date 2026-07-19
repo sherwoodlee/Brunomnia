@@ -351,6 +351,7 @@ export type RequestFolder = {
   preRequestScript: string;
   tests: string;
   documentation: string;
+  source?: SourceMetadata;
 };
 
 export type CollectionEnvironment = {

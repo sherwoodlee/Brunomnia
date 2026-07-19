@@ -2104,7 +2104,21 @@ Compatibility bounds at this milestone remain explicit: Brunomnia still pulls on
 
 Compatibility bounds remain explicit: the selected control plane must first be discovered so its proxy metadata is local, and no credentialed tenant fixture is stored in the repository. Automatic all-control-plane project/workspace reconciliation, route-folder hierarchy, and reviewed expression-router conversion remain open. Service integrations stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 142 — remaining parity closure and release hardening
+## Milestone 142 — Konnect route-folder hierarchy (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Route folders | Complete | Every supported route receives one stable source-backed top folder named from the sanitized route name or ID |
+| HTTP path/protocol folders | Complete | Multi-path or multi-protocol HTTP routes receive pinned-compatible resolved-path subfolders with protocol prefixes when needed; methods share their path/protocol folder |
+| WS and gRPC folders | Complete | WS/WSS and gRPC/GRPCS routes receive protocol subfolders only when multiple family protocols are present |
+| Request naming | Complete | Managed requests use resolved paths, raw complex-regex fallback text, or route display names in the same decision order as pinned sync |
+| Safe reconciliation | Complete | Matching managed folders retain IDs, expansion, headers/auth/variables/scripts/tests/docs; remote names/parents update, stale managed folders disappear, local folders survive, orphaned local children return to root, and manual local request placement is retained |
+| Persistence and ordering | Complete | Folder source metadata survives workspace migration, generated mixed-resource order is valid and deduplicated, and existing local collection hierarchy/order/environment/docs remain intact |
+| Executable evidence | Complete | Focused mapping, migration, and resource-helper regressions prove eleven-folder HTTP/WS/gRPC structure, request placement, name semantics, local override, stable managed state, stale cleanup, source persistence, and generic hierarchy behavior |
+
+Compatibility bounds remain explicit: preserving a user's manual local-folder request placement can leave an otherwise valid managed route folder empty instead of deleting local organization as pinned sync does. Automatic all-control-plane project/workspace reconciliation, reviewed expression-router conversion, and a credentialed live-tenant fixture remain open. Service integrations stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 143 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

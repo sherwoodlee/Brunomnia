@@ -388,13 +388,14 @@ describe('workspace migrations', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
     const collection = (workspace.collections as Array<Record<string, unknown>>)[0];
     const requests = collection.requests as Array<Record<string, unknown>>;
-    collection.folders = [{ id: 'folder', name: 'Folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }];
+    collection.folders = [{ id: 'folder', name: 'Folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '', source: { format: 'konnect-route-folder', sourceId: 'route-one:route' } }];
     collection.resourceOrder = [requests[1].id, 'missing', 'folder', requests[1].id, 42];
     const migrated = migrateWorkspace(workspace);
     const order = migrated.collections[0].resourceOrder ?? [];
     expect(order.slice(0, 2)).toEqual([requests[1].id, 'folder']);
     expect(new Set(order).size).toBe(order.length);
     expect(order).toHaveLength(requests.length + 1);
+    expect(migrated.collections[0].folders?.[0].source).toEqual({ format: 'konnect-route-folder', sourceId: 'route-one:route' });
   });
 
   it('normalizes malformed collaboration and governance data without removing the last owner', () => {

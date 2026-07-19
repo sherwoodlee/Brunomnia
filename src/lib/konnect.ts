@@ -1,4 +1,4 @@
-import type { ApiRequest, Collection, Environment, JsonValue, KeyValue, KonnectConfig, KonnectControlPlane, Workspace } from '../types';
+import type { ApiRequest, Collection, Environment, JsonValue, KeyValue, KonnectConfig, KonnectControlPlane, RequestFolder, Workspace } from '../types';
 import { createBlankRequest } from '../data/seed';
 import { sendRequest, type SendRequestContext } from './http';
 import { normalizeHttpMethod } from './request';
@@ -141,7 +141,9 @@ const resolveKonnectPath = (rawPath: string) => {
 
 const serviceVariable = (serviceId: string, protocol: string) => `konnect_${serviceId.replace(/[^a-z0-9_]/gi, '_')}_${protocol}_proxy_url`;
 const loopbackProxyUrl = (protocol: string) => `${protocol}://127.0.0.1:${protocol === 'grpc' || protocol === 'grpcs' ? '9000' : '8000'}`;
-const routeRequestId = (key: string) => `konnect-route-${Array.from(new TextEncoder().encode(key), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+const managedResourceId = (prefix: string, key: string) => `${prefix}-${Array.from(new TextEncoder().encode(key), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+const routeRequestId = (key: string) => managedResourceId('konnect-route', key);
+const routeFolderId = (key: string) => managedResourceId('konnect-folder', key);
 const httpLikeProxyProtocols = new Set(['http', 'https', 'ws', 'wss']);
 const defaultPorts: Record<string, number> = { http: 80, ws: 80, https: 443, wss: 443 };
 
@@ -176,10 +178,15 @@ export const applyKonnectVariableDefaults = (
 };
 
 const previousManagedHeaderNames = (request: ApiRequest | undefined) => new Set(sanitizedStrings(asRecord(request?.source?.unsupported)?.managedHeaderNames).map((name) => name.toLowerCase()));
+const managedFolderFormat = 'konnect-route-folder';
 
 const preserveLocalCollection = (generated: Collection, previous: Collection | undefined): Collection => {
-  const folders = previous?.folders ?? [];
+  const folders = [
+    ...(previous?.folders ?? []).filter((folder) => folder.source?.format !== managedFolderFormat),
+    ...(generated.folders ?? []),
+  ];
   const folderIds = new Set(folders.map((folder) => folder.id));
+  const normalizedFolders = folders.map((folder) => ({ ...folder, parentId: folder.parentId && folderIds.has(folder.parentId) ? folder.parentId : '' }));
   const requests = generated.requests.map((request) => ({
     ...request,
     folderId: request.folderId && folderIds.has(request.folderId) ? request.folderId : '',
@@ -188,13 +195,13 @@ const preserveLocalCollection = (generated: Collection, previous: Collection | u
   const seen = new Set<string>();
   const resourceOrder = [
     ...(previous?.resourceOrder ?? []),
-    ...folders.map((folder) => folder.id),
+    ...normalizedFolders.map((folder) => folder.id),
     ...requests.map((request) => request.id),
   ].filter((id) => validIds.has(id) && !seen.has(id) && Boolean(seen.add(id)));
   return {
     ...generated,
     requests,
-    folders,
+    folders: normalizedFolders,
     resourceOrder,
     environment: previous?.environment ?? [],
     subEnvironments: previous?.subEnvironments ?? [],
@@ -253,7 +260,8 @@ export const mapKonnectResources = (workspace: Workspace, servicesSource: unknow
     const protocols = route.protocols;
     const serviceId = sourceId(route.service);
     const supported = protocols.some((protocol) => ['http', 'https', 'ws', 'wss', 'grpc', 'grpcs'].includes(protocol));
-    const reason = !serviceId ? 'Route has no Gateway Service.'
+    const reason = !route.id ? 'Route has no identifier.'
+      : !serviceId ? 'Route has no Gateway Service.'
       : route.snis.length ? 'Route uses SNI matching, which request URLs cannot override.'
         : route.hasExpression ? 'Expression-router routes require reviewed expression conversion.'
           : !supported ? `Unsupported protocol: ${protocols.join(', ') || 'none'}.`
@@ -272,8 +280,43 @@ export const mapKonnectResources = (workspace: Workspace, servicesSource: unknow
   services.forEach((service, serviceId) => {
     const existing = existingCollections.get(serviceId);
     const existingRequests = new Map(existing?.requests.map((request) => [request.source?.sourceId, request]) ?? []);
+    const existingFoldersById = new Map((existing?.folders ?? []).map((folder) => [folder.id, folder]));
+    const existingManagedFolders = new Map((existing?.folders ?? [])
+      .filter((folder) => folder.source?.format === managedFolderFormat && folder.source.sourceId)
+      .map((folder) => [folder.source!.sourceId!, folder]));
+    const localFolderIds = new Set((existing?.folders ?? []).filter((folder) => folder.source?.format !== managedFolderFormat).map((folder) => folder.id));
     const consumedPrevious = new Set<string>();
     const generatedKeys = new Set<string>();
+    const generatedFolders = new Map<string, RequestFolder>();
+    const usedFolderIds = new Set(localFolderIds);
+    const managedFolder = (key: string, name: string, parentId: string) => {
+      const generated = generatedFolders.get(key);
+      if (generated) return generated.id;
+      const previous = existingManagedFolders.get(key);
+      let id = previous?.id ?? routeFolderId(key);
+      while (usedFolderIds.has(id)) id = `${id}-managed`;
+      usedFolderIds.add(id);
+      const folder: RequestFolder = previous ? {
+        ...previous,
+        id,
+        name,
+        parentId,
+        source: { format: managedFolderFormat, sourceId: key },
+      } : {
+        id,
+        name,
+        parentId,
+        expanded: true,
+        headers: [],
+        environment: [],
+        preRequestScript: '',
+        tests: '',
+        documentation: '',
+        source: { format: managedFolderFormat, sourceId: key },
+      };
+      generatedFolders.set(key, folder);
+      return id;
+    };
     const previousFor = (key: string, routeId: string) => {
       const exact = existingRequests.get(key);
       if (exact) return exact;
@@ -289,6 +332,7 @@ export const mapKonnectResources = (workspace: Workspace, servicesSource: unknow
       const routeId = asString(route.id);
       const routeName = route.name || `Route ${routeId}`;
       const paths = route.paths.length ? route.paths : [''];
+      const parentFolderId = managedFolder(`${routeId}:route`, routeName, '');
       const managedHeaders = [
         ...(route.hosts[0] ? [{ name: 'Host', value: route.hosts[0] }] : []),
         ...Object.entries(route.headers).map(([name, values]) => ({ name, value: values[0] })),
@@ -297,23 +341,30 @@ export const mapKonnectResources = (workspace: Workspace, servicesSource: unknow
       const wsProtocols = route.protocols.filter((protocol) => protocol === 'ws' || protocol === 'wss');
       const protocols = grpcProtocols.length ? grpcProtocols : wsProtocols.length ? wsProtocols : route.protocols.filter((protocol) => protocol === 'http' || protocol === 'https');
       protocols.forEach((protocol) => {
+        const family = protocol === 'grpc' || protocol === 'grpcs' ? 'grpc' : protocol === 'ws' || protocol === 'wss' ? 'ws' : 'http';
         const variable = serviceVariable(serviceId, protocol);
         variables.add(variable);
         variableDefaults[variable] = controlPlaneProxyUrl(protocol, proxyUrls) || loopbackProxyUrl(protocol);
         variableProtocols[variable] = protocol;
         paths.forEach((rawPath) => {
           const resolved = resolveKonnectPath(rawPath);
+          const requestName = resolved.path === '/{path}' ? rawPath : resolved.path || routeName;
+          const needsSubfolder = protocols.length > 1 || (family === 'http' && paths.length > 1);
+          const subfolderName = protocols.length > 1 ? `${protocol.toUpperCase()} ${requestName}` : requestName;
+          const folderId = needsSubfolder
+            ? managedFolder(`${routeId}:folder:${subfolderName}`, subfolderName, parentFolderId)
+            : parentFolderId;
           const methods = protocol === 'http' || protocol === 'https'
             ? (route.methods.length ? route.methods : ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']).map((method) => normalizeHttpMethod(method, '')).filter(Boolean)
             : [''];
           methods.forEach((method) => {
-            const family = protocol === 'grpc' || protocol === 'grpcs' ? 'grpc' : protocol === 'ws' || protocol === 'wss' ? 'ws' : 'http';
             const key = family === 'http' ? `${routeId}:${method}:${rawPath}:${protocol}` : `${routeId}:${family}:${rawPath}:${protocol}`;
             if (generatedKeys.has(key)) return;
             generatedKeys.add(key);
             const previous = previousFor(key, routeId);
             const generated = createBlankRequest(routeRequestId(key));
-            generated.name = route.name || resolved.path || routeName;
+            generated.name = requestName;
+            generated.folderId = folderId;
             generated.protocol = family === 'grpc' ? 'grpc' : family === 'ws' ? 'websocket' : 'http';
             generated.method = (method || 'GET') as typeof generated.method;
             generated.url = `{{ ${variable} }}${family === 'grpc' ? '' : resolved.path}`;
@@ -329,6 +380,8 @@ export const mapKonnectResources = (workspace: Workspace, servicesSource: unknow
             }
             const headers = family === 'grpc' ? [] : managedHeaders.map((header, index) => ({ id: `${generated.id}-header-${index}`, ...header, enabled: true }));
             const preserved = preserveLocalRequest(generated, previous, headers, family === 'grpc' ? [] : resolved.pathParams);
+            const previousFolder = previous?.folderId ? existingFoldersById.get(previous.folderId) : undefined;
+            preserved.folderId = previousFolder && previousFolder.source?.format !== managedFolderFormat ? previousFolder.id : folderId;
             if (family === 'grpc' && previous) {
               const incomingMetadata = new Set(preserved.grpc.metadata.map((header) => header.name.toLowerCase()));
               const priorManaged = previousManagedHeaderNames(previous);
@@ -346,6 +399,7 @@ export const mapKonnectResources = (workspace: Workspace, servicesSource: unknow
       name: `Konnect · ${asString(service.name) || serviceId}`,
       expanded: existing?.expanded ?? true,
       requests,
+      folders: [...generatedFolders.values()],
       source: { format: 'konnect', sourceId: serviceId, unsupported: { controlPlaneId: workspace.konnect.controlPlaneId } },
     }, existing));
   });

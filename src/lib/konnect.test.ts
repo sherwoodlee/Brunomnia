@@ -55,6 +55,7 @@ describe('Konnect pull mapping', () => {
       { id: 'route-sni', name: 'SNI', service: { id: 'service-one' }, protocols: ['https'], snis: ['api.example.com'] },
       { id: 'route-expression', name: 'Expression', service: { id: 'service-one' }, protocols: ['http'], expression: 'http.path == "/"' },
       { id: 'route-tcp', name: 'TCP', service: { id: 'service-one' }, protocols: ['tcp'] },
+      { name: 'Missing ID', service: { id: 'service-one' }, protocols: ['http'], paths: ['/missing'] },
     ]);
 
     const collection = mapped.collections.find((candidate) => candidate.source?.sourceId === 'service-one')!;
@@ -64,7 +65,7 @@ describe('Konnect pull mapping', () => {
     expect(collection.requests.filter((request) => request.protocol === 'grpc')).toHaveLength(2);
     const regexRequest = collection.requests.find((request) => request.url.includes('{userid}'))!;
     expect(regexRequest.pathParams).toEqual([expect.objectContaining({ name: 'userid', value: '' })]);
-    expect(regexRequest.name).toBe('Users ');
+    expect(regexRequest.name).toBe('/users/{userid}');
     expect(regexRequest.headers).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'Host', value: 'api.example.com' }),
       expect.objectContaining({ name: 'X-Route', value: 'one' }),
@@ -72,12 +73,24 @@ describe('Konnect pull mapping', () => {
     const grpc = collection.requests.find((request) => request.url.startsWith('{{ konnect_service_one_grpc_proxy_url }}'))!;
     expect(grpc.grpc).toMatchObject({ service: 'acme.Greeter', method: 'SayHello' });
     expect(grpc.grpc.metadata).toEqual([expect.objectContaining({ name: 'X-Tenant', value: 'team' })]);
+    expect(collection.folders).toHaveLength(11);
+    const httpFolder = collection.folders?.find((folder) => folder.source?.sourceId === 'route-http:folder:HTTP /users')!;
+    const httpParent = collection.folders?.find((folder) => folder.source?.sourceId === 'route-http:route')!;
+    expect(httpFolder).toMatchObject({ name: 'HTTP /users', parentId: httpParent.id });
+    expect(collection.requests.find((request) => request.source?.sourceId === 'route-http:GET:/users:http')?.folderId).toBe(httpFolder.id);
+    const wssFolder = collection.folders?.find((folder) => folder.source?.sourceId === 'route-ws:folder:WSS /events')!;
+    expect(wssFolder.name).toBe('WSS /events');
+    expect(collection.requests.find((request) => request.source?.sourceId === 'route-ws:ws:/events:wss')?.folderId).toBe(wssFolder.id);
+    const grpcsFolder = collection.folders?.find((folder) => folder.source?.sourceId === 'route-grpc:folder:GRPCS /acme.Greeter/SayHello')!;
+    expect(grpcsFolder.name).toBe('GRPCS /acme.Greeter/SayHello');
+    expect(collection.requests.find((request) => request.source?.sourceId === 'route-grpc:grpc:/acme.Greeter/SayHello:grpcs')?.folderId).toBe(grpcsFolder.id);
     expect(mapped.variables).toHaveLength(6);
-    expect(mapped.skipped).toBe(3);
+    expect(mapped.skipped).toBe(4);
     expect(mapped.collections.find((candidate) => candidate.source?.sourceId === 'skipped-routes')?.requests.map((request) => request.source?.unsupported?.reason)).toEqual(expect.arrayContaining([
       expect.stringContaining('SNI'),
       expect.stringContaining('expression'),
       expect.stringContaining('Unsupported protocol'),
+      expect.stringContaining('identifier'),
     ]));
   });
 
@@ -133,15 +146,62 @@ describe('Konnect pull mapping', () => {
 
     const collection = mapped.collections[0];
     const added = collection.requests.filter((request) => request.id !== 'existing-route');
+    const managedFolders = collection.folders!.filter((folder) => folder.source?.format === 'konnect-route-folder');
     expect(collection.requests).toHaveLength(4);
     expect(new Set(added.map((request) => request.id)).size).toBe(3);
     expect(collection.requests[0]).toMatchObject({ id: 'existing-route', folderId: 'route-folder' });
-    expect(collection.folders).toEqual([expect.objectContaining({ id: 'route-folder', documentation: 'Folder notes' })]);
-    expect(collection.resourceOrder).toEqual(['route-folder', 'existing-route', ...added.map((request) => request.id)]);
+    expect(collection.folders).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'route-folder', documentation: 'Folder notes' })]));
+    expect(collection.resourceOrder).toEqual(['route-folder', 'existing-route', ...managedFolders.map((folder) => folder.id), ...added.map((request) => request.id)]);
     expect(collection.environment).toEqual([expect.objectContaining({ name: 'tenant', value: 'local' })]);
     expect(collection.subEnvironments).toEqual([expect.objectContaining({ id: 'collection-sub-environment' })]);
     expect(collection.activeSubEnvironmentId).toBe('collection-sub-environment');
     expect(collection.documentation).toBe('Collection notes');
+  });
+
+  it('reconciles only managed folders and preserves their local state', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.konnect.controlPlaneId = 'cp-one';
+    workspace.collections = [];
+    const services = [{ id: 'service-one', name: 'Gateway' }];
+    const initial = mapKonnectResources(workspace, services, [
+      { id: 'route-one', name: 'Original', service: { id: 'service-one' }, protocols: ['http'], methods: ['GET'], paths: ['~^/one/(?<id>\\d+)$', '/other'] },
+      { id: 'route-stale', name: 'Stale', service: { id: 'service-one' }, protocols: ['http'], methods: ['GET'], paths: ['/stale'] },
+    ]).collections[0];
+    const routeFolder = initial.folders!.find((folder) => folder.source?.sourceId === 'route-one:route')!;
+    const equivalentRegexFolder = initial.folders!.find((folder) => folder.source?.sourceId === 'route-one:folder:/one/{id}')!;
+    const staleFolder = initial.folders!.find((folder) => folder.source?.sourceId === 'route-stale:route')!;
+    routeFolder.expanded = false;
+    routeFolder.documentation = 'Keep folder notes';
+    routeFolder.headers = [{ id: 'folder-header', name: 'X-Folder', value: 'keep', enabled: true }];
+    routeFolder.environment = [{ id: 'folder-variable', name: 'folder_value', value: 'keep', enabled: true }];
+    routeFolder.auth = { ...createBlankRequest('folder-auth').auth, type: 'basic', username: 'local' };
+    routeFolder.preRequestScript = 'console.log("before")';
+    routeFolder.tests = 'insomnia.test("after", () => {})';
+    equivalentRegexFolder.documentation = 'Keep equivalent regex folder';
+    initial.folders!.push({ id: 'local-folder', name: 'Local', parentId: routeFolder.id, expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: 'Local notes' });
+    initial.folders!.push({ id: 'orphaned-local-folder', name: 'Orphaned local', parentId: staleFolder.id, expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' });
+    workspace.collections = [initial];
+
+    const updated = mapKonnectResources(workspace, services, [
+      { id: 'route-one', name: 'Renamed', service: { id: 'service-one' }, protocols: ['http'], methods: ['GET'], paths: ['~^/one/(?<id>[0-9]+)$', '/other'] },
+    ]).collections[0];
+    const updatedRouteFolder = updated.folders!.find((folder) => folder.source?.sourceId === 'route-one:route')!;
+    const updatedRegexFolder = updated.folders!.find((folder) => folder.source?.sourceId === 'route-one:folder:/one/{id}')!;
+    expect(updatedRouteFolder).toMatchObject({
+      id: routeFolder.id,
+      name: 'Renamed',
+      expanded: false,
+      documentation: 'Keep folder notes',
+      headers: [expect.objectContaining({ name: 'X-Folder', value: 'keep' })],
+      environment: [expect.objectContaining({ name: 'folder_value', value: 'keep' })],
+      auth: expect.objectContaining({ type: 'basic', username: 'local' }),
+      preRequestScript: 'console.log("before")',
+      tests: 'insomnia.test("after", () => {})',
+    });
+    expect(updated.folders).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'local-folder', parentId: routeFolder.id, documentation: 'Local notes' })]));
+    expect(updated.folders).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'orphaned-local-folder', parentId: '' })]));
+    expect(updatedRegexFolder).toMatchObject({ id: equivalentRegexFolder.id, documentation: 'Keep equivalent regex folder' });
+    expect(updated.folders?.some((folder) => folder.source?.sourceId?.startsWith('route-stale:'))).toBe(false);
   });
 
   it('derives protocol URLs from the selected control plane and preserves edited variables', () => {

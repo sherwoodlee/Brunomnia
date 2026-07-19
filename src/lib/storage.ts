@@ -411,6 +411,11 @@ const normalizeFolders = (value: unknown, defaultAuth: AuthConfig): RequestFolde
     const folder = record(item);
     if (!folder) return [];
     const id = stringValue(folder.id, `migrated-folder-${index}`);
+    const folderSource = record(folder.source);
+    const source = folderSource && stringValue(folderSource.format) ? {
+      format: stringValue(folderSource.format).slice(0, 200),
+      sourceId: stringValue(folderSource.sourceId).slice(0, 10_000) || undefined,
+    } : undefined;
     return [{
       id,
       name: stringValue(folder.name, `Folder ${index + 1}`),
@@ -422,6 +427,7 @@ const normalizeFolders = (value: unknown, defaultAuth: AuthConfig): RequestFolde
       preRequestScript: stringValue(folder.preRequestScript),
       tests: stringValue(folder.tests),
       documentation: stringValue(folder.documentation),
+      source,
     }];
   });
   const ids = new Set(folders.map((folder) => folder.id));
