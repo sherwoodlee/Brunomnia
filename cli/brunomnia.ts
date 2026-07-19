@@ -1186,7 +1186,7 @@ const main = async () => {
         results,
       };
     }
-    const reporter = parseRunnerReporter(flag('--reporter') ?? flag('-r'), subject === 'test' ? 'spec' : 'json');
+    const reporter = parseRunnerReporter(flag('--reporter') ?? flag('-r'), 'spec');
     const reporterArtifact = createRunnerReportArtifact(report, reporter);
     const artifact = subject === 'collection' && reportOutputPath
       ? includeFullData

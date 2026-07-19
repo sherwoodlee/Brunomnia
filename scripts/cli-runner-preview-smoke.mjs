@@ -359,11 +359,12 @@ try {
   assert.equal(rejectedFullReport.code, 1);
   assert.match(rejectedFullReport.stderr, /Full-data reports may contain secrets.*--acceptRisk/);
   assert.equal(mutualArrivals.length, arrivalsBeforeRejectedReport, 'risk rejection happened after transport');
-  await run([
+  const redactedReporterOutput = await run([
     'run', 'collection', collection.id, '-w', temporary, '--item', 'request-mutual',
     '--env-var', 'row=redacted', '--env-var', 'region=redacted', '--httpsProxy', fullReportProxy, '--noProxy', '127.0.0.1',
     '--includeFullData', 'redact', '--acceptRisk', '--output', 'reports/nested/redacted.json',
   ]);
+  assert.match(redactedReporterOutput, /^Preview collection\n  ✓ Mutual TLS \(iteration 1, attempt 1\)/);
   const redactedReportText = await readFile(join(temporary, 'reports', 'nested', 'redacted.json'), 'utf8');
   const redactedReport = JSON.parse(redactedReportText);
   assert.equal(redactedReport.format, 'brunomnia-inso-full-report');
@@ -462,7 +463,7 @@ try {
   const missingScript = await runFailure(['script', '--config', join(temporary, '.insorc'), 'missing']);
   assert.equal(missingScript.code, 1);
   assert.match(missingScript.stderr, /Available scripts: preview, invalid/);
-  console.log('CLI runner preview smoke passed: metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  console.log('CLI runner preview smoke passed: pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await close(secureServer).catch(() => undefined);

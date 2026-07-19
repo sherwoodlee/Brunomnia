@@ -95,7 +95,7 @@ Pinned `--iteration-data`/`-d` accepts either a local path or an explicit HTTP(S
 
 ## CLI reporters
 
-`run test` defaults to the readable `spec` reporter. `run collection` retains JSON as its default for automation. Select an explicit format with `--reporter` (or `-r`):
+Both `run test` and `run collection` default to the pinned readable `spec` reporter. Select an explicit format with `--reporter` (or `-r`); automation that needs Brunomnia's complete machine envelope should request `--reporter json` explicitly:
 
 ```sh
 node bin/brunomnia.cjs run test workspace.json "Contract suite" --allow-scripts --reporter tap
