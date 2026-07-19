@@ -48,3 +48,5 @@ Rendered interaction QA is omitted by standing direction. This milestone makes n
 ## Acceptance boundary
 
 Milestone 136 accepts Server-Sent Events parity for the pinned source-backed lifecycle, history, and response-inspection workflows. Bounded inline device-local persistence replaces response-owned NDJSON paths without omitting a user-visible action; per-message export is not presented as a whole-log export. WebSocket and Socket.IO remain `Baseline` because PAC-authenticated system proxy discovery is still open. The Server-Sent Events row is `Complete`; 22 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 137.
+
+Retrospective correction from Milestone 137: a deeper audit of the pinned WebSocket and Socket.IO connect paths disproved the PAC/system-proxy requirement recorded above. Those paths install an explicit manual HTTP/HTTPS proxy agent when configured and otherwise install no proxy agent. The 22-row count remains the historical Milestone 136 ledger state; Milestone 137 closes WebSocket after separately implementing its actual redirect-policy gap.

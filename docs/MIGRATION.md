@@ -2033,7 +2033,22 @@ Compatibility bounds remain explicit: introspection/imports and normalized schem
 
 Compatibility bounds remain explicit: stream sessions retain the newest 5,000 events and about five million text characters, migration caps each loaded message at 1,048,576 characters, and per-message export is not misrepresented as a whole-log export. Inline local persistence differs from pinned NDJSON only below the user-visible response model. The Server-Sent Events row is Complete; WebSocket and Socket.IO remain `Baseline` because PAC-authenticated system proxy discovery is still open. Twenty-two parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 137 — remaining parity closure and release hardening
+## Milestone 137 — complete WebSocket redirect and proxy parity (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Corrective pinned proxy audit | Complete | Pinned WebSocket uses explicit manual HTTP/HTTPS proxy agents only when global proxying and request proxy use are enabled; pinned Socket.IO uses them only when global proxying is enabled. Neither path resolves Electron PAC/system proxies, so the prior ledger gap was false |
+| Redirect policy | Complete | Native WebSocket and GraphQL-subscription upgrades now honor effective follow/off policy plus zero, finite, and unlimited maximums; the same connector covers Socket.IO WebSocket upgrade attempts |
+| Redirect locations | Complete | Relative and absolute WS(S) `Location` values resolve against the current hop; missing, malformed, non-UTF-8, or non-WS(S) locations fail explicitly without scheme downgrades by accident |
+| Header safety | Complete | Every hop regenerates Connection/Upgrade/version/key headers and retains same-origin authored headers; a scheme, hostname, or effective-port change strips Host, Authorization, and Cookie so the target authority is regenerated safely |
+| Per-hop transport policy | Complete | Each target rebuild re-applies direct/manual/custom HTTP or HTTPS proxy selection, Basic proxy credentials, no-proxy matching, WSS validation, workspace CA, and domain-scoped PEM/PFX identity |
+| Executable redirect evidence | Complete | Loopback tests prove relative redirects, fresh handshake keys, same-origin header retention, cross-origin credential stripping, disabled redirects, and zero/finite/unlimited limit decisions |
+| Existing WebSocket surface | Complete | Exact text/binary frames, subprotocols, GraphQL subscriptions, proxy/TLS/client identity, event/history/timeline metadata, runner sampling, selection/filter/search/clear, Friendly/Source/Raw preview, copy, export, delete, and clear remain account-free |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), README, and [Milestone 137 verification](QA_MILESTONE_137.md); the WebSocket row is Complete |
+
+Compatibility bounds remain explicit: `-1` is an iterative no-ceiling redirect mode, each handshake/proxy/TLS operation retains the configured per-hop timeout, and redirects accept only WS(S). Pinned realtime proxy code is manual/direct rather than PAC-aware. Socket.IO stays `Baseline` because its default automatic reconnection after transient Engine.IO loss remains open; initial connect errors and explicit disconnects are not treated as reconnectable. The WebSocket row is Complete; 21 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 138 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -35,8 +35,14 @@ use tokio_tungstenite::{
     tungstenite::{
         client::IntoClientRequest,
         handshake::client::Response as WebSocketResponse,
-        http::{header::SEC_WEBSOCKET_PROTOCOL, HeaderName, HeaderValue},
-        Message,
+        http::{
+            header::{
+                AUTHORIZATION, CONNECTION, COOKIE, HOST, LOCATION, PROXY_AUTHORIZATION,
+                SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION, UPGRADE,
+            },
+            HeaderMap, HeaderName, HeaderValue,
+        },
+        Error as WebSocketError, Message,
     },
     Connector, MaybeTlsStream, WebSocketStream,
 };
@@ -795,45 +801,180 @@ async fn websocket_base_stream(
     Ok((stream, None))
 }
 
-async fn connect_native_websocket(
+enum NativeWebSocketConnectError {
+    Transport(String),
+    Handshake(WebSocketError),
+}
+
+impl NativeWebSocketConnectError {
+    fn message(self) -> String {
+        match self {
+            Self::Transport(message) => message,
+            Self::Handshake(error) => error.to_string(),
+        }
+    }
+}
+
+fn websocket_redirect_headers(request: &http::Request<()>) -> HeaderMap {
+    let mut headers = request.headers().clone();
+    headers.remove(CONNECTION);
+    headers.remove(UPGRADE);
+    headers.remove(SEC_WEBSOCKET_KEY);
+    headers.remove(SEC_WEBSOCKET_VERSION);
+    headers.remove(PROXY_AUTHORIZATION);
+    headers.remove(HeaderName::from_static("proxy-connection"));
+    headers
+}
+
+fn websocket_request_for_url(url: &Url, headers: &HeaderMap) -> Result<http::Request<()>, String> {
+    let mut request = url
+        .as_str()
+        .into_client_request()
+        .map_err(|error| format!("Invalid redirected WebSocket URL: {error}"))?;
+    for (name, value) in headers {
+        request.headers_mut().insert(name, value.clone());
+    }
+    Ok(request)
+}
+
+fn websocket_same_origin(left: &Url, right: &Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host_str().map(str::to_ascii_lowercase)
+            == right.host_str().map(str::to_ascii_lowercase)
+        && left.port_or_known_default() == right.port_or_known_default()
+}
+
+fn websocket_redirect_url(current: &Url, response: &WebSocketResponse) -> Result<Url, String> {
+    let location = response
+        .headers()
+        .get(LOCATION)
+        .ok_or_else(|| {
+            format!(
+                "WebSocket redirect HTTP {} has no Location header.",
+                response.status()
+            )
+        })?
+        .to_str()
+        .map_err(|_| "The WebSocket redirect Location is not valid UTF-8.".to_string())?;
+    let next = current
+        .join(location)
+        .map_err(|error| format!("Invalid WebSocket redirect Location: {error}"))?;
+    if !matches!(next.scheme(), "ws" | "wss") {
+        return Err("WebSocket redirects must use WS or WSS.".into());
+    }
+    Ok(next)
+}
+
+fn websocket_redirect_allowed(transport: &TransportConfig, followed: usize) -> bool {
+    transport.follow_redirects
+        && (transport.max_redirects < 0
+            || followed < usize::try_from(transport.max_redirects).unwrap_or(usize::MAX))
+}
+
+async fn connect_native_websocket_once(
     mut request: http::Request<()>,
     transport: &TransportConfig,
     request_url: &str,
-) -> Result<(SocketIoWebSocket, WebSocketResponse), String> {
-    let target =
-        Url::parse(request_url).map_err(|error| format!("Invalid WebSocket URL: {error}"))?;
+) -> Result<(SocketIoWebSocket, WebSocketResponse), NativeWebSocketConnectError> {
+    let target = Url::parse(request_url).map_err(|error| {
+        NativeWebSocketConnectError::Transport(format!("Invalid WebSocket URL: {error}"))
+    })?;
     if !matches!(target.scheme(), "ws" | "wss") {
-        return Err("WebSocket URLs must use WS or WSS.".into());
+        return Err(NativeWebSocketConnectError::Transport(
+            "WebSocket URLs must use WS or WSS.".into(),
+        ));
     }
-    let (stream, forward_proxy) = websocket_base_stream(transport, &target).await?;
+    let (stream, forward_proxy) = websocket_base_stream(transport, &target)
+        .await
+        .map_err(NativeWebSocketConnectError::Transport)?;
     let stream: BoxedWebSocketIo = if let Some(proxy) = forward_proxy {
-        if let Some(authorization) = proxy_authorization(&proxy)? {
+        if let Some(authorization) =
+            proxy_authorization(&proxy).map_err(NativeWebSocketConnectError::Transport)?
+        {
             request.headers_mut().insert(
                 HeaderName::from_static("proxy-authorization"),
-                HeaderValue::from_str(&authorization)
-                    .map_err(|error| format!("Invalid proxy authorization header: {error}"))?,
+                HeaderValue::from_str(&authorization).map_err(|error| {
+                    NativeWebSocketConnectError::Transport(format!(
+                        "Invalid proxy authorization header: {error}"
+                    ))
+                })?,
             );
         }
         request
             .headers_mut()
             .entry(HeaderName::from_static("proxy-connection"))
             .or_insert(HeaderValue::from_static("Keep-Alive"));
-        Box::pin(ForwardProxyStream::new(stream, forward_proxy_url(&target)?))
+        Box::pin(ForwardProxyStream::new(
+            stream,
+            forward_proxy_url(&target).map_err(NativeWebSocketConnectError::Transport)?,
+        ))
     } else {
         stream
     };
-    let connector = websocket_tls_connector(transport, request_url)?;
+    let connector = websocket_tls_connector(transport, request_url)
+        .map_err(NativeWebSocketConnectError::Transport)?;
     let connect = client_async_tls_with_config(request, stream, None, connector);
     if transport.timeout_ms == 0 {
-        connect.await.map_err(|error| error.to_string())
+        connect
+            .await
+            .map_err(NativeWebSocketConnectError::Handshake)
     } else {
         tokio::time::timeout(
             std::time::Duration::from_millis(transport.timeout_ms),
             connect,
         )
         .await
-        .map_err(|_| "The WebSocket handshake timed out.".to_string())?
-        .map_err(|error| error.to_string())
+        .map_err(|_| {
+            NativeWebSocketConnectError::Transport("The WebSocket handshake timed out.".into())
+        })?
+        .map_err(NativeWebSocketConnectError::Handshake)
+    }
+}
+
+async fn connect_native_websocket(
+    request: http::Request<()>,
+    transport: &TransportConfig,
+    request_url: &str,
+) -> Result<(SocketIoWebSocket, WebSocketResponse), String> {
+    let mut current_url =
+        Url::parse(request_url).map_err(|error| format!("Invalid WebSocket URL: {error}"))?;
+    if !matches!(current_url.scheme(), "ws" | "wss") {
+        return Err("WebSocket URLs must use WS or WSS.".into());
+    }
+    let mut headers = websocket_redirect_headers(&request);
+    let mut current_request = request;
+    let mut followed = 0_usize;
+    loop {
+        match connect_native_websocket_once(current_request, transport, current_url.as_str()).await
+        {
+            Ok(connected) => return Ok(connected),
+            Err(NativeWebSocketConnectError::Handshake(WebSocketError::Http(response)))
+                if response.status().is_redirection() =>
+            {
+                if !websocket_redirect_allowed(transport, followed) {
+                    if !transport.follow_redirects {
+                        return Err(format!(
+                            "WebSocket redirect HTTP {} was not followed because redirects are disabled.",
+                            response.status()
+                        ));
+                    }
+                    return Err(format!(
+                        "WebSocket redirect limit of {} was exceeded.",
+                        transport.max_redirects
+                    ));
+                }
+                let next_url = websocket_redirect_url(&current_url, &response)?;
+                if !websocket_same_origin(&current_url, &next_url) {
+                    headers.remove(HOST);
+                    headers.remove(AUTHORIZATION);
+                    headers.remove(COOKIE);
+                }
+                current_url = next_url;
+                current_request = websocket_request_for_url(&current_url, &headers)?;
+                followed = followed.saturating_add(1);
+            }
+            Err(error) => return Err(error.message()),
+        }
     }
 }
 
@@ -2651,6 +2792,263 @@ mod tests {
                 .unwrap(),
             "http://api.example.test:8443/socket?token=one"
         );
+    }
+
+    #[test]
+    fn resolves_websocket_redirects_and_honors_redirect_limits() {
+        let current = Url::parse("ws://example.test/start/path?old=1").unwrap();
+        let relative = http::Response::builder()
+            .status(302)
+            .header(LOCATION, "../final?next=1")
+            .body(None)
+            .unwrap();
+        assert_eq!(
+            websocket_redirect_url(&current, &relative)
+                .unwrap()
+                .as_str(),
+            "ws://example.test/final?next=1"
+        );
+        let invalid = http::Response::builder()
+            .status(307)
+            .header(LOCATION, "https://example.test/not-websocket")
+            .body(None)
+            .unwrap();
+        assert!(websocket_redirect_url(&current, &invalid)
+            .unwrap_err()
+            .contains("WS or WSS"));
+
+        let mut transport = crate::models::TransportConfig {
+            follow_redirects: false,
+            max_redirects: 10,
+            ..Default::default()
+        };
+        assert!(!websocket_redirect_allowed(&transport, 0));
+        transport.follow_redirects = true;
+        transport.max_redirects = 0;
+        assert!(!websocket_redirect_allowed(&transport, 0));
+        transport.max_redirects = 2;
+        assert!(websocket_redirect_allowed(&transport, 0));
+        assert!(websocket_redirect_allowed(&transport, 1));
+        assert!(!websocket_redirect_allowed(&transport, 2));
+        transport.max_redirects = -1;
+        assert!(websocket_redirect_allowed(&transport, usize::MAX));
+    }
+
+    #[allow(clippy::result_large_err)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn follows_relative_websocket_redirects_with_fresh_handshake_keys() {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await.unwrap();
+            let first_request = read_test_http_request(&mut first).await;
+            assert_eq!(first_request.target, "/start");
+            let first_key = first_request.headers["sec-websocket-key"].clone();
+            first
+                .write_all(
+                    b"HTTP/1.1 302 Found\r\nLocation: /final?redirected=1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            first.shutdown().await.unwrap();
+
+            let (second, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_hdr_async(
+                second,
+                move |request: &http::Request<()>, response: http::Response<()>| {
+                    assert_eq!(request.uri().to_string(), "/final?redirected=1");
+                    assert_eq!(request.headers()["x-redirect-test"], "preserved");
+                    assert_eq!(request.headers()[AUTHORIZATION], "Bearer same-origin");
+                    assert_eq!(request.headers()[COOKIE], "session=same-origin");
+                    assert_ne!(
+                        request.headers()[SEC_WEBSOCKET_KEY].to_str().unwrap(),
+                        first_key
+                    );
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
+        });
+
+        let state = StreamingState::default();
+        let output = connect_websocket(
+            StreamConnectInput {
+                session_id: "redirected-websocket".into(),
+                url: format!("ws://{address}/start"),
+                headers: vec![
+                    KeyValue {
+                        name: "X-Redirect-Test".into(),
+                        value: "preserved".into(),
+                        enabled: true,
+                    },
+                    KeyValue {
+                        name: "Authorization".into(),
+                        value: "Bearer same-origin".into(),
+                        enabled: true,
+                    },
+                    KeyValue {
+                        name: "Cookie".into(),
+                        value: "session=same-origin".into(),
+                        enabled: true,
+                    },
+                ],
+                transport: crate::models::TransportConfig {
+                    follow_redirects: true,
+                    max_redirects: 1,
+                    timeout_ms: 5_000,
+                    proxy_mode: "disabled".into(),
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            discard_stream_channel(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.status, 101);
+        disconnect_websocket("redirected-websocket".into(), state)
+            .await
+            .unwrap();
+        server.await.unwrap();
+    }
+
+    #[allow(clippy::result_large_err)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn strips_sensitive_headers_from_cross_origin_websocket_redirects() {
+        use tokio::net::TcpListener;
+
+        let target_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_address = target_listener.local_addr().unwrap();
+        let target = tokio::spawn(async move {
+            let (stream, _) = target_listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_hdr_async(
+                stream,
+                |request: &http::Request<()>, response: http::Response<()>| {
+                    assert_eq!(request.uri().path(), "/final");
+                    assert_eq!(request.headers()[HOST], target_address.to_string());
+                    assert_eq!(request.headers()["x-public"], "preserved");
+                    assert!(!request.headers().contains_key(AUTHORIZATION));
+                    assert!(!request.headers().contains_key(COOKIE));
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
+        });
+
+        let redirect_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let redirect_address = redirect_listener.local_addr().unwrap();
+        let redirect = tokio::spawn(async move {
+            let (mut stream, _) = redirect_listener.accept().await.unwrap();
+            let _ = read_test_http_request(&mut stream).await;
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 307 Temporary Redirect\r\nLocation: ws://{target_address}/final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            stream.shutdown().await.unwrap();
+        });
+
+        let state = StreamingState::default();
+        let output = connect_websocket(
+            StreamConnectInput {
+                session_id: "cross-origin-redirect".into(),
+                url: format!("ws://{redirect_address}/start"),
+                headers: vec![
+                    KeyValue {
+                        name: "X-Public".into(),
+                        value: "preserved".into(),
+                        enabled: true,
+                    },
+                    KeyValue {
+                        name: "Host".into(),
+                        value: "authored.invalid".into(),
+                        enabled: true,
+                    },
+                    KeyValue {
+                        name: "Authorization".into(),
+                        value: "Bearer secret".into(),
+                        enabled: true,
+                    },
+                    KeyValue {
+                        name: "Cookie".into(),
+                        value: "session=secret".into(),
+                        enabled: true,
+                    },
+                ],
+                transport: crate::models::TransportConfig {
+                    follow_redirects: true,
+                    max_redirects: 1,
+                    timeout_ms: 5_000,
+                    proxy_mode: "disabled".into(),
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            discard_stream_channel(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.status, 101);
+        disconnect_websocket("cross-origin-redirect".into(), state)
+            .await
+            .unwrap();
+        redirect.await.unwrap();
+        target.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn refuses_websocket_redirects_when_disabled() {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _ = read_test_http_request(&mut stream).await;
+            stream
+                .write_all(
+                    b"HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            stream.shutdown().await.unwrap();
+        });
+
+        let error = connect_websocket(
+            StreamConnectInput {
+                session_id: "disabled-redirect".into(),
+                url: format!("ws://{address}/start"),
+                headers: Vec::new(),
+                transport: crate::models::TransportConfig {
+                    follow_redirects: false,
+                    timeout_ms: 5_000,
+                    proxy_mode: "disabled".into(),
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            discard_stream_channel(),
+            StreamingState::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("redirects are disabled"));
+        server.await.unwrap();
     }
 
     #[allow(clippy::result_large_err)]
