@@ -753,6 +753,8 @@ kbd {
 
 .stream-console { height: 100%; min-height: 0; }
 .stream-console.with-composer { display: grid; grid-template-rows: minmax(0, 1fr) 94px; }
+.stream-main { display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; }
+.stream-main.with-inspector { grid-template-rows: minmax(120px, 1fr) minmax(150px, .85fr); }
 .stream-log { min-height: 0; overflow: auto; padding: 12px; }
 .stream-log-toolbar { align-items: center; backdrop-filter: blur(10px); background: color-mix(in srgb, var(--panel) 92%, transparent); display: flex; flex-wrap: wrap; gap: 8px; margin: -12px -12px 10px; padding: 10px 12px; position: sticky; top: -12px; z-index: 2; }
 .stream-log-toolbar select, .stream-log-toolbar input { background: var(--panel-soft); border: 1px solid var(--border); color: var(--text-soft); font: 9px var(--font-mono); height: 30px; outline: 0; }
@@ -767,11 +769,29 @@ kbd {
 .stream-message.incoming { border-left-color: var(--mint); }
 .stream-message.outgoing { border-left-color: var(--blue); }
 .stream-message.system { border-left-color: var(--amber); }
+.stream-message.selected { background: color-mix(in srgb, var(--accent) 8%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.stream-message > button { background: transparent; border: 0; color: inherit; cursor: pointer; display: block; padding: 0; text-align: left; width: 100%; }
+.stream-message > button:disabled { cursor: default; opacity: 1; }
+.stream-message > button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .stream-message header { align-items: center; background: rgba(255,255,255,.018); display: flex; gap: 8px; padding: 7px 9px; }
 .stream-message header span { color: var(--muted); font: 8px var(--font-mono); text-transform: uppercase; }
 .stream-message header strong { color: var(--text-soft); flex: 1; font: 10px var(--font-mono); }
 .stream-message time { color: var(--faint); font: 8px var(--font-mono); }
 .stream-message pre { color: #f0c08f; font: 10px/1.55 var(--font-mono); margin: 0; overflow-wrap: anywhere; padding: 9px; white-space: pre-wrap; }
+.stream-event-inspector { border-top: 1px solid var(--border); display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; }
+.stream-event-inspector > header { align-items: center; background: var(--panel-soft); display: flex; gap: 12px; justify-content: space-between; padding: 8px 10px; }
+.stream-event-inspector > header > div:first-child { display: grid; gap: 2px; min-width: 0; }
+.stream-event-inspector > header small { color: var(--muted); font: 8px var(--font-mono); text-transform: uppercase; }
+.stream-event-inspector > header strong { color: var(--text); font: 10px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stream-event-inspector > header span { color: var(--faint); font: 8px var(--font-mono); }
+.stream-event-inspector > header > div:last-child { align-items: center; display: flex; gap: 5px; }
+.stream-event-inspector select, .stream-event-inspector button { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font: 9px var(--font-mono); min-height: 28px; padding: 0 8px; }
+.stream-event-inspector button { align-items: center; display: inline-flex; gap: 5px; }
+.stream-event-inspector > pre { background: #0b1115; color: #f0c08f; font: 10px/1.55 var(--font-mono); margin: 0; min-height: 0; overflow: auto; padding: 11px; white-space: pre-wrap; }
+.stream-event-inspector > pre.raw { white-space: pre; }
+.stream-event-arguments { align-items: center; background: var(--panel); border-bottom: 1px solid var(--border-soft); display: flex; gap: 4px; overflow-x: auto; padding: 5px 8px; }
+.stream-event-arguments button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+.stream-event-error { background: color-mix(in srgb, var(--red) 10%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--red) 35%, var(--border)); color: var(--red); font: 9px var(--font-mono); padding: 6px 10px; }
 .stream-composer { border-top: 1px solid var(--border); display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 88px; padding: 10px; }
 .stream-frame-tools { align-items: center; display: flex; gap: 8px; grid-column: 1 / -1; }
 .stream-frame-tools select { background: var(--panel-soft); border: 1px solid var(--border); color: var(--text-soft); font: 9px var(--font-mono); height: 30px; padding: 0 8px; }

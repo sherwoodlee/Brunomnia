@@ -2018,7 +2018,22 @@ Compatibility bounds remain explicit: the CLI is still a `Baseline` capability. 
 
 Compatibility bounds remain explicit: introspection/imports and normalized schema collections have documented local resource ceilings, remote introspection deliberately disables redirects and cookie storage, and GraphQL query text remains literal while variables support templates. These safeguards do not remove a pinned authoring workflow or introduce an entitlement. The GraphQL ledger row is Complete; 23 rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 136 — remaining parity closure and release hardening
+## Milestone 136 — complete SSE and shared realtime event inspection (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned realtime audit | Complete | Pinned WebSocket, Socket.IO, GraphQL-subscription, and Event Stream responses share response history, NDJSON-backed event retrieval, event selection, message detail, Friendly/Source/Raw preview, raw copy/export, search, type filtering except cURL Event Stream, clear-view, headers/cookies, and timeline presentation |
+| Selectable event detail | Complete | Incoming/outgoing rows now open a bounded detail pane while open/error/close/informational rows retain their effective list-only behavior; selection clears on session changes or retention eviction |
+| Preview and Socket.IO arguments | Complete | The existing request-persistent Friendly/Source/Raw choice pretty-prints valid JSON or preserves source text, and Socket.IO Friendly mode exposes up to 100 ordered arguments separately |
+| Copy and exact export | Complete | Raw copy uses the unformatted message text; text and JSON export preserve authored bytes, while WebSocket binary Base64 is decoded back to exact bytes with a deterministic safe filename |
+| Compact event list | Complete | Rows show bounded one-line summaries and binary byte counts rather than rendering up to 1 MiB of message data in every list entry; the complete selected message remains inspectable |
+| Storage equivalence | Complete | Pinned response models point to NDJSON event/timeline files; Brunomnia persists the same bounded values directly in device-local project data, preserving incremental updates, history selection, filtering, deletion, clearing, and reload without making an Electron path user-visible |
+| SSE lifecycle | Complete | Existing native parsing, retry hints, event IDs, `Last-Event-ID`, bounded/unlimited reconnect, explicit cancellation, metadata/timeline/history, runner sampling, and real loopback evidence combine with the completed shared response pane |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), README, and [Milestone 136 verification](QA_MILESTONE_136.md); the Server-Sent Events row is Complete |
+
+Compatibility bounds remain explicit: stream sessions retain the newest 5,000 events and about five million text characters, migration caps each loaded message at 1,048,576 characters, and per-message export is not misrepresented as a whole-log export. Inline local persistence differs from pinned NDJSON only below the user-visible response model. The Server-Sent Events row is Complete; WebSocket and Socket.IO remain `Baseline` because PAC-authenticated system proxy discovery is still open. Twenty-two parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 137 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
