@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRunnerCliCommand, quotePosixShellArgument } from './runnerCli';
+import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, quotePosixShellArgument } from './runnerCli';
 
 describe('Runner CLI command preview', () => {
   it('preserves selected request order and every execution control', () => {
@@ -33,5 +33,15 @@ describe('Runner CLI command preview', () => {
     expect(quotePosixShellArgument('')).toBe("''");
     expect(quotePosixShellArgument("/tmp/Sam's data.csv")).toBe("'/tmp/Sam'\"'\"'s data.csv'");
     expect(quotePosixShellArgument('$(touch nope)')).toBe("'$(touch nope)'");
+  });
+
+  it('applies repeated Inso-style environment overrides to every data row', () => {
+    const rows = [{ row: '1', region: 'file' }, { row: '2', region: 'file' }];
+    expect(applyRunnerEnvironmentOverrides(rows, ['region=first', 'region=override', 'token=a%2Bb', 'label=hello+world'])).toEqual([
+      { row: '1', region: 'override', token: 'a+b', label: 'hello world' },
+      { row: '2', region: 'override', token: 'a+b', label: 'hello world' },
+    ]);
+    expect(applyRunnerEnvironmentOverrides([], ['missing=', 'flag'])).toEqual([{ missing: '', flag: '' }]);
+    expect(applyRunnerEnvironmentOverrides(rows, [])).toBe(rows);
   });
 });

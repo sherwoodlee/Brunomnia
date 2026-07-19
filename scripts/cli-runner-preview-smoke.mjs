@@ -16,6 +16,16 @@ const run = (args) => new Promise((resolve, reject) => {
   child.on('close', (code) => code === 0 ? resolve(stdout) : reject(new Error(`CLI exited ${code}: ${stderr || stdout}`)));
 });
 
+const runFailure = (args) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, [join(process.cwd(), 'bin', 'brunomnia.cjs'), ...args], { cwd: process.cwd() });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('error', reject);
+  child.on('close', (code) => resolve({ code, stdout, stderr }));
+});
+
 const listen = (server) => new Promise((resolve, reject) => {
   server.once('error', reject);
   server.listen(0, '127.0.0.1', () => resolve(server.address()));
@@ -39,7 +49,7 @@ try {
     ...structuredClone(baseRequest),
     id,
     name,
-    url: `http://127.0.0.1:${address.port}/${path}`,
+    url: `http://127.0.0.1:${address.port}/${path}?row={{ row }}&region={{ region }}`,
     preRequestScript: '',
     tests: '',
   });
@@ -64,7 +74,7 @@ try {
   }));
   await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
   await writeFile(join(temporary, 'environments', 'preview.yaml'), stringify(environment));
-  await writeFile(join(temporary, 'iterations.csv'), 'row\n1\n2\n');
+  await writeFile(join(temporary, 'iterations.csv'), 'row,region\n1,file\n2,file\n');
 
   const output = await run([
     'run', 'collection', temporary, collection.id,
@@ -74,6 +84,7 @@ try {
     '--iterations', '2',
     '--delay-request', '35',
     '--data', join(temporary, 'iterations.csv'),
+    '--env-var', 'region=override',
     '--allow-scripts',
     '--reporter', 'json',
   ]);
@@ -83,7 +94,10 @@ try {
   assert.deepEqual(artifact.report.results.map((result) => result.requestId), [
     'request-third', 'request-first', 'request-third', 'request-first',
   ]);
-  assert.deepEqual(arrivals.map((arrival) => arrival.path), ['/third', '/first', '/third', '/first']);
+  assert.deepEqual(arrivals.map((arrival) => arrival.path), [
+    '/third?row=1&region=override', '/first?row=1&region=override',
+    '/third?row=2&region=override', '/first?row=2&region=override',
+  ]);
   const scriptedResults = artifact.report.results.filter((result) => result.requestId === 'request-third');
   assert.equal(scriptedResults.length, 2);
   scriptedResults.forEach((result) => {
@@ -94,7 +108,10 @@ try {
     assert.equal(typeof result.tests[1].durationMs, 'number');
   });
   for (let index = 1; index < arrivals.length; index += 1) assert.ok(arrivals[index].at - arrivals[index - 1].at >= 20, 'request delay was not applied');
-  console.log('CLI runner preview smoke passed: split project, selected order, data, delay, and assertion evidence.');
+  const rejected = await runFailure(['run', 'test', join(process.cwd(), 'examples', 'cli-workspace.json'), 'CLI Health', '--env-var', 'region=override']);
+  assert.equal(rejected.code, 1);
+  assert.match(rejected.stderr, /--env-var is only available for run collection/);
+  console.log('CLI runner preview smoke passed: split project, selected order, data, environment overrides, delay, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });

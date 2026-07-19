@@ -1104,6 +1104,13 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Identical History row, tooltip, and guarded delete-label integration: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx)
 - Updated account-free History documentation and exact verification record: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md) and [`docs/QA_MILESTONE_198.md`](QA_MILESTONE_198.md)
 
+## Milestone 199 acceptance evidence
+
+- Pinned Inso collection-only `--env-var`, URLSearchParams, and iteration-data merge audit: [`docs/QA_MILESTONE_199.md`](QA_MILESTONE_199.md)
+- Shared later-wins override application with focused decoding/merge regressions: [`src/lib/runnerCli.ts`](../src/lib/runnerCli.ts) and [`src/lib/runnerCli.test.ts`](../src/lib/runnerCli.test.ts)
+- Bundled CLI flag parsing, collection/test boundary, and localhost CSV/override execution smoke: [`cli/brunomnia.ts`](../cli/brunomnia.ts), [`bin/brunomnia.cjs`](../bin/brunomnia.cjs), and [`scripts/cli-runner-preview-smoke.mjs`](../scripts/cli-runner-preview-smoke.mjs)
+- Updated command examples, account-free CI documentation, and exact verification record: [`README.md`](../README.md), [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md), and [`docs/QA_MILESTONE_199.md`](QA_MILESTONE_199.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).

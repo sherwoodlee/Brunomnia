@@ -24,6 +24,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
+import { applyRunnerEnvironmentOverrides } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -556,7 +557,7 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-i, --request <name-or-id>]... [-n, --iterations N] [--retries N] [--delay-request MS] [-d, --data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
+  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-i, --request <name-or-id>]... [--env-var <key=value>]... [-n, --iterations N] [--retries N] [--delay-request MS] [-d, --data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
   brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [same options except --request/--delay-request]
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
@@ -609,8 +610,10 @@ const main = async () => {
     const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
     const dataPath = firstFlag('--data', '-d');
     const requestedRequests = flagValues('--request', '-i');
+    const environmentOverrides = flagValues('--env-var');
     const requestedDelay = firstFlag('--delay-request', '--delay');
     if (subject === 'test' && requestedRequests.length) fail('--request is only available for run collection.');
+    if (subject === 'test' && environmentOverrides.length) fail('--env-var is only available for run collection.');
     if (subject === 'test' && requestedDelay !== undefined) fail('--delay-request is only available for run collection.');
     const requestIds = requestedRequests.map((requestIdentifier) => {
       const idMatch = collection.requests.find((request) => request.id === requestIdentifier);
@@ -699,7 +702,7 @@ const main = async () => {
     const retries = Math.min(10, Math.max(0, Math.floor(Number(flag('--retries') ?? 0) || 0)));
     const delayMs = Math.min(30_000, Math.max(0, Math.floor(Number(requestedDelay ?? 0) || 0)));
     const scriptTimeoutMs = Math.min(60_000, Math.max(1_000, Number(flag('--script-timeout') ?? 10_000)));
-    const dataRows = dataPath ? parseRunnerData(await loadText(dataPath)) : [];
+    const dataRows = applyRunnerEnvironmentOverrides(dataPath ? parseRunnerData(await loadText(dataPath)) : [], environmentOverrides);
     let report: RunnerReport;
     if (subject === 'collection') {
       report = await runCollection(collection, environment, {

@@ -17,6 +17,15 @@ export const quotePosixShellArgument = (value: string) => {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 };
 
+export const applyRunnerEnvironmentOverrides = (rows: Record<string, string>[], values: string[]) => {
+  if (!values.length) return rows;
+  const overrides = values.reduce<Record<string, string>>((current, value) => ({
+    ...current,
+    ...Object.fromEntries(new URLSearchParams(value).entries()),
+  }), {});
+  return (rows.length ? rows : [{}]).map((row) => ({ ...row, ...overrides }));
+};
+
 const boundedInteger = (value: number, minimum: number, maximum: number) => {
   if (!Number.isFinite(value)) return minimum;
   return Math.max(minimum, Math.min(maximum, Math.floor(value)));

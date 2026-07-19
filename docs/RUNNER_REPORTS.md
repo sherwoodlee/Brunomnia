@@ -81,6 +81,8 @@ node bin/brunomnia.cjs run test workspace.json api-spec-id --allow-scripts --bai
 node bin/brunomnia.cjs run collection workspace.json "Collection" --reporter json --output report.json
 ```
 
+`run collection` accepts repeated `--env-var key=value` overrides. Values use URL-query decoding, later entries win, and overrides replace matching fields in every JSON/CSV iteration row. Without a data file, the overrides form one reusable iteration row. The flag is collection-only, matching pinned Inso.
+
 Supported names are `dot`, `list`, `min`, `progress`, `spec`, and `tap`, matching the names in the current Inso `run test` reference, plus machine-readable `json` and `junit`. `--output`/`-o` writes the selected artifact to a file; without it, the report goes to standard output. A failed attempt still makes the process exit non-zero regardless of reporter or destination.
 
 For `run collection`, `--bail` stops subsequent requests and iterations only after the current request exhausts its configured retries. For `run test`, it stops subsequent standalone tests after the current test exhausts its retries. Without it, the runner records the complete plan.
