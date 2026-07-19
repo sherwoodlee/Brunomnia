@@ -34,7 +34,7 @@ Provide a separate writable mount for `--output`. Networked collection runs requ
 Every push to `main` publishes the multi-architecture `ghcr.io/sherwoodlee/brunomnia-cli:edge` image. A `v*` tag additionally publishes that tag and `latest`. The workflow:
 
 1. Rebuilds the CLI and refuses a stale committed bundle.
-2. Executes a no-network suite from a read-only mounted workspace.
+2. Executes a no-network suite and an explicitly granted stored-plugin tag from read-only mounted workspaces.
 3. Publishes Linux AMD64 and ARM64 manifests with BuildKit provenance and an SBOM.
 4. Signs the immutable manifest digest through GitHub Actions OIDC and Sigstore Cosign.
 

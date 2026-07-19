@@ -47,6 +47,12 @@ Each operation receives a cloned input in a new Blob Worker and has a two-second
 
 This boundary reduces plugin authority; it is not a claim that arbitrary third-party JavaScript is harmless. Read source before granting access, especially `network`, clipboard, actions, and request/response data. Package dependencies, full Node APIs, native modules, automatic plugin discovery/hot reload, and the entire Insomnia context surface are intentionally unsupported in this baseline.
 
+## CLI template tags
+
+`brunomnia run collection` and `brunomnia run test` leave stored plugins disabled at the process boundary unless `--allow-plugins` is present. That flag does not invent a grant: a plugin must also be enabled in the workspace and already hold its reviewed `template` permission. Imported plugins remain disabled and stripped of grants/data.
+
+The CLI reuses the same validated CommonJS wrapper in a fresh resource-limited Node worker for each tag operation. It hides Node `process`/`global`, supplies only the safe `buffer` shim, refuses every host network/prompt/clipboard RPC, and provides no file, external-vault, hook, action, or theme adapter. Output and per-plugin string storage are capped at 1 MB; stores have at most 256 entries and persist only in memory for the current run. A two-second deadline plus 16 MB old-generation, 4 MB young-generation, and 2 MB stack ceilings bound each worker. The signed Node 22 container smoke runs this path with `--network none` and a read-only workspace mount.
+
 ## Minimal example
 
 ```js

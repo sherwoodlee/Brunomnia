@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 
 const run = (command, argumentsList) => new Promise((resolveRun, rejectRun) => {
   const child = spawn(command, argumentsList, { cwd: process.cwd() });
@@ -17,6 +17,29 @@ const run = (command, argumentsList) => new Promise((resolveRun, rejectRun) => {
 
 const packageVersion = JSON.parse(await readFile(resolve('package.json'), 'utf8')).version;
 const image = `brunomnia-cli-smoke:${process.pid}`;
+const temporary = await mkdtemp(join(process.cwd(), '.brunomnia-cli-container-'));
+const workspace = JSON.parse(await readFile(resolve('examples', 'cli-workspace.json'), 'utf8'));
+const pluginRequest = structuredClone(workspace.collections[0].requests[0]);
+pluginRequest.id = 'container-plugin-request';
+pluginRequest.name = 'Container plugin tag';
+pluginRequest.url = "data:application/json,%7B%22value%22%3A%22{% cli_value 'fallback' %}%22%7D";
+pluginRequest.preRequestScript = '';
+pluginRequest.tests = '';
+workspace.collections.push({
+  ...structuredClone(workspace.collections[0]),
+  id: 'container-plugin-collection',
+  name: 'Container plugin collection',
+  requests: [pluginRequest],
+  folders: [],
+  resourceOrder: [pluginRequest.id],
+});
+workspace.plugins = [{
+  id: 'container-plugin', name: 'Container plugin', version: '1.0.0', description: '', sourceFormat: 'insomnia-commonjs', enabled: true,
+  requestedPermissions: ['template', 'store'], grantedPermissions: ['template', 'store'], installedAt: '2026-07-19T00:00:00.000Z',
+  source: "module.exports.templateTags = [{ name: 'cli_value', async run(context, fallback = 'fallback') { return (await context.store.getItem('value')) || fallback; } }];",
+}];
+workspace.pluginData = { 'container-plugin': { value: 'container' } };
+await writeFile(join(temporary, 'workspace.json'), JSON.stringify(workspace));
 
 try {
   await run('docker', [
@@ -38,7 +61,16 @@ try {
   const artifact = JSON.parse(suite.stdout);
   assert.equal(artifact.report.failed, 0);
   assert.equal(artifact.report.passed, 1);
-  console.log('CLI container smoke passed: pinned image, non-root runtime, exact version, read-only workspace, no network, and standalone suite execution.');
+  const pluginRun = await run('docker', [
+    'run', '--rm', '--network', 'none',
+    '--volume', `${temporary}:/workspace:ro`,
+    image, 'run', 'collection', 'container-plugin-collection', '--workingDir', '/workspace/workspace.json',
+    '--ci', '--allow-plugins', '--reporter', 'json',
+  ]);
+  const pluginArtifact = JSON.parse(pluginRun.stdout);
+  assert.deepEqual(pluginArtifact.report.results.map(result => [result.requestId, result.status]), [['container-plugin-request', 200]]);
+  console.log('CLI container smoke passed: pinned image, non-root runtime, exact version, read-only workspace, no network, standalone suite execution, and explicit-grant plugin tags.');
 } finally {
   await run('docker', ['image', 'rm', '--force', image]).catch(() => undefined);
+  await rm(temporary, { recursive: true, force: true });
 }

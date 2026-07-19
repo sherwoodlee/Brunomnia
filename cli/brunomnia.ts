@@ -30,6 +30,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { generateUnitTestCliArtifact, orderedTestSuites, orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
+import { createCliPluginTemplateRuntime } from './pluginRuntime';
 import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, selectRunnerResource, type RunnerInsoConfig } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
@@ -677,6 +678,7 @@ type CliRequestContext = {
   resolveResponse?: Parameters<typeof renderApiRequest>[2]['resolveResponse'];
   requestAncestors?: string[];
   requestChain?: string[];
+  pluginTemplate?: (name: string, args: string[], request: ApiRequest) => Promise<string | undefined>;
 };
 
 type CliFullExecution = {
@@ -822,6 +824,7 @@ const executeHttp = async (
     resolveResponse: context?.resolveResponse,
     requestChain: context?.requestChain,
     osInfo: async () => ({ arch: arch(), cpus: cpus(), freemem: freemem(), hostname: hostname(), platform: platform(), release: release(), userInfo: userInfo() }),
+    customTag: context?.pluginTemplate ? (name, args) => context.pluginTemplate!(name, args, request) : undefined,
   });
   let url = buildRequestUrl(request, {});
   request = { ...request, transport: applyWorkspaceCertificates(request.transport, url, context?.certificates) };
@@ -889,7 +892,7 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <design-name-id-prefix-or-file> [-w <workspace-or-project>] [-r, --ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <design-name-or-id-prefix> -w <workspace-or-project> [-s, --skipAnnotations] [--output <file>]
-  brunomnia run collection <workspace-or-project> <collection-name-or-id-prefix> [-g, --globals <name-id-prefix-or-file>] [-e, --env <name-or-id-prefix>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--includeFullData <redact|plaintext> --acceptRisk] [-f, --dataFolders <folder...>] [--httpProxy URL] [--httpsProxy URL] [--noProxy HOSTS] [--disableCertValidation] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
+  brunomnia run collection <workspace-or-project> <collection-name-or-id-prefix> [-g, --globals <name-id-prefix-or-file>] [-e, --env <name-or-id-prefix>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--includeFullData <redact|plaintext> --acceptRisk] [-f, --dataFolders <folder...>] [--httpProxy URL] [--httpsProxy URL] [--noProxy HOSTS] [--disableCertValidation] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults] [--allow-plugins]
   brunomnia run test <workspace> <suite-name-or-id-prefix|spec-name-or-id-prefix> [-g, --globals <name-id-prefix-or-file>] [-e, --env <name-or-id-prefix>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [--keepFile] [-f, --dataFolders <folder...>] [-k, --disableCertValidation] [same transport/trust options]
   brunomnia script <name> [arguments...] [--config <path>]
 
@@ -912,8 +915,8 @@ const cliHelp = (command?: string, subject?: string) => {
   const key = [command, subject].filter(Boolean).join(' ');
   const topics: Record<string, string> = {
     run: `Usage: brunomnia run <command>\n\nExecution utilities\n\nCommands:\n  collection [identifier]  Run a request collection\n  test [identifier]        Run standalone unit test suites\n\n${globalHelp}`,
-    'run test': `Usage: brunomnia run test [identifier] [options]\n\nRun standalone unit test suites selected by suite or API-design name/ID.\n\nOptions:\n  -e, --env <identifier>  -g, --globals <identifier-or-file>\n  -t, --testNamePattern <regex>\n  -n, --iteration-count <count>  -d, --iteration-data <path-or-url>\n  --retries <count>  --script-timeout <milliseconds>\n  -r, --reporter <name>  -b, --bail\n  --keepFile  --requestTimeout <milliseconds>\n  -k, --disableCertValidation\n  --httpProxy <url>  --httpsProxy <url>  --noProxy <hosts>\n  -f, --dataFolders <folders...>  --output <file>\n  --allow-scripts  --allow-script-requests  --allow-script-files\n  --allow-template-files  --allow-external-vaults\n\n${globalHelp}`,
-    'run collection': `Usage: brunomnia run collection [identifier] [options]\n\nRun a request collection selected by name or ID.\n\nOptions:\n  -t, --requestNamePattern <regex>\n  -i, --item <request-or-folder>\n  -e, --env <identifier>  -g, --globals <identifier-or-file>\n  --delay-request <milliseconds>  --requestTimeout <milliseconds>\n  --env-var <key=value>\n  -n, --iteration-count <count>  -d, --iteration-data <path-or-url>\n  --retries <count>  --script-timeout <milliseconds>\n  -r, --reporter <name>  -b, --bail\n  --disableCertValidation\n  --httpProxy <url>  --httpsProxy <url>  --noProxy <hosts>\n  -f, --dataFolders <folders...>\n  --output <file>  --includeFullData <redact|plaintext>  --acceptRisk\n  --allow-scripts  --allow-script-requests  --allow-script-files\n  --allow-template-files  --allow-external-vaults\n\n${globalHelp}`,
+    'run test': `Usage: brunomnia run test [identifier] [options]\n\nRun standalone unit test suites selected by suite or API-design name/ID.\n\nOptions:\n  -e, --env <identifier>  -g, --globals <identifier-or-file>\n  -t, --testNamePattern <regex>\n  -n, --iteration-count <count>  -d, --iteration-data <path-or-url>\n  --retries <count>  --script-timeout <milliseconds>\n  -r, --reporter <name>  -b, --bail\n  --keepFile  --requestTimeout <milliseconds>\n  -k, --disableCertValidation\n  --httpProxy <url>  --httpsProxy <url>  --noProxy <hosts>\n  -f, --dataFolders <folders...>  --output <file>\n  --allow-scripts  --allow-script-requests  --allow-script-files\n  --allow-template-files  --allow-external-vaults  --allow-plugins\n\n${globalHelp}`,
+    'run collection': `Usage: brunomnia run collection [identifier] [options]\n\nRun a request collection selected by name or ID.\n\nOptions:\n  -t, --requestNamePattern <regex>\n  -i, --item <request-or-folder>\n  -e, --env <identifier>  -g, --globals <identifier-or-file>\n  --delay-request <milliseconds>  --requestTimeout <milliseconds>\n  --env-var <key=value>\n  -n, --iteration-count <count>  -d, --iteration-data <path-or-url>\n  --retries <count>  --script-timeout <milliseconds>\n  -r, --reporter <name>  -b, --bail\n  --disableCertValidation\n  --httpProxy <url>  --httpsProxy <url>  --noProxy <hosts>\n  -f, --dataFolders <folders...>\n  --output <file>  --includeFullData <redact|plaintext>  --acceptRisk\n  --allow-scripts  --allow-script-requests  --allow-script-files\n  --allow-template-files  --allow-external-vaults  --allow-plugins\n\n${globalHelp}`,
     lint: `Usage: brunomnia lint spec [identifier]\n\nLint a local file or stored API specification.\n\n${globalHelp}`,
     'lint spec': `Usage: brunomnia lint spec [identifier] [options]\n\nLint an API specification selected by file, name, or ID.\n\nOptions:\n  -r, --ruleset <path>\n  --json\n\n${globalHelp}`,
     export: `Usage: brunomnia export spec [identifier]\n\nExport a stored API specification.\n\n${globalHelp}`,
@@ -1108,6 +1111,9 @@ const main = async () => {
     const externalSecret = hasFlag('--allow-external-vaults')
       ? createCliExternalSecretResolver(workspace.governance.policy.externalVaultAllowlist)
       : async () => { throw new Error('External vault access is disabled. Re-run trusted workspaces with --allow-external-vaults.'); };
+    const pluginTemplateRuntime = hasFlag('--allow-plugins')
+      ? createCliPluginTemplateRuntime(workspace.plugins, workspace.pluginData)
+      : undefined;
     const httpProxy = firstFlag('--httpProxy', '--http-proxy') ?? process.env.HTTP_PROXY ?? process.env.http_proxy ?? '';
     const httpsProxy = firstFlag('--httpsProxy', '--https-proxy') ?? process.env.HTTPS_PROXY ?? process.env.https_proxy ?? '';
     const noProxy = firstFlag('--noProxy', '--no-proxy') ?? process.env.NO_PROXY ?? process.env.no_proxy ?? '';
@@ -1143,6 +1149,7 @@ const main = async () => {
         resolveResponse,
         requestAncestors: requestAncestorNames(workspace.collections, request),
         requestChain,
+        pluginTemplate: pluginTemplateRuntime?.render,
       });
       const { result } = executed;
       request = executed.request;

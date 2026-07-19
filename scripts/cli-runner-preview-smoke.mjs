@@ -45,6 +45,7 @@ assert.match(testHelp, /--keepFile/);
 assert.match(testHelp, /--testNamePattern/);
 assert.match(testHelp, /--iteration-data/);
 assert.match(testHelp, /--script-timeout/);
+assert.match(testHelp, /--allow-plugins/);
 assert.match(testHelp, /Global options:/);
 const collectionHelp = await run(['help', 'run', 'collection'], baseEnvironment);
 assert.match(collectionHelp, /^Usage: brunomnia run collection \[identifier\] \[options\]/);
@@ -169,6 +170,19 @@ try {
     ],
     resourceOrder: ['request-first', 'folder-selected', 'request-second', 'folder-nested', 'request-third', 'request-slow', 'request-secure', 'request-mutual', 'request-custom-proxy', 'request-direct', 'folder-empty'],
   };
+  const pluginRequest = request('request-plugin-tag', 'Plugin tag', 'plugin');
+  pluginRequest.url = `http://127.0.0.1:${address.port}/plugin?value={% cli_value 'fallback' %}`;
+  const pluginCollection = {
+    ...source.collections[0],
+    id: 'plugin-collection',
+    name: 'Plugin collection',
+    environment: [],
+    subEnvironments: [],
+    activeSubEnvironmentId: '',
+    requests: [pluginRequest],
+    folders: [],
+    resourceOrder: [pluginRequest.id],
+  };
   const environment = {
     id: 'preview-environment',
     name: 'Preview environment',
@@ -206,9 +220,16 @@ paths:
   const metadataPath = join(temporary, '.brunomnia', 'project.yaml');
   const metadata = {
     format: 'brunomnia', version: 37, name: 'CLI preview project', activeRequestId: 'request-first', activeEnvironmentId: environment.id,
+    plugins: [{
+      id: 'cli-template-plugin', name: 'CLI template plugin', version: '1.0.0', description: '', sourceFormat: 'insomnia-commonjs', enabled: true,
+      requestedPermissions: ['template', 'store'], grantedPermissions: ['template', 'store'], installedAt: '2026-07-19T00:00:00.000Z',
+      source: "module.exports.templateTags = [{ name: 'cli_value', async run(context, fallback = 'fallback') { return (await context.store.getItem('value')) || fallback; } }];",
+    }],
+    pluginData: { 'cli-template-plugin': { value: 'stored' } },
   };
   await writeFile(metadataPath, stringify(metadata));
   await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
+  await writeFile(join(temporary, 'collections', 'zz-plugin.yaml'), stringify(pluginCollection));
   await writeFile(join(temporary, 'environments', 'preview.yaml'), stringify(environment));
   await writeFile(join(temporary, 'environments', 'selected.yaml'), stringify(selectedGlobals));
   await writeFile(join(temporary, 'designs', 'preview.yaml'), stringify(apiDesign));
@@ -309,6 +330,18 @@ paths:
     assert.equal(typeof result.tests[1].durationMs, 'number');
   });
   for (let index = 1; index < arrivals.length; index += 1) assert.ok(arrivals[index].at - arrivals[index - 1].at >= 20, 'request delay was not applied');
+  const arrivalsBeforePlugin = arrivals.length;
+  const deniedPlugin = await runFailure([
+    'run', 'collection', pluginCollection.id, '-w', temporary, '--reporter', 'json',
+  ]);
+  assert.equal(deniedPlugin.code, 1);
+  assert.match(deniedPlugin.stdout, /Template tag 'cli_value' is not supported/);
+  assert.equal(arrivals.length, arrivalsBeforePlugin, 'plugin tag rendered without explicit CLI consent');
+  const allowedPlugin = JSON.parse(await run([
+    'run', 'collection', pluginCollection.id, '-w', temporary, '--allow-plugins', '--reporter', 'json',
+  ]));
+  assert.deepEqual(allowedPlugin.report.results.map(result => [result.requestId, result.status]), [['request-plugin-tag', 200]]);
+  assert.equal(arrivals.at(-1).path, '/plugin?value=stored');
   const fileGlobals = JSON.parse(await run([
     'run', 'collection', collection.id, '-w', temporary, '--item', 'request-first',
     '--globals', globalFile, '--env', 'Selected collection environment',
@@ -573,7 +606,7 @@ paths:
   assert.equal(rejectedNonInteractiveEnvironment.code, 1);
   assert.match(rejectedNonInteractiveEnvironment.stderr, /Collection environment selection requires an interactive terminal.*--env <identifier> or --ci/);
   assert.equal(arrivals.length, arrivalsBeforeEnvironmentRefusals, 'environment refusal happened after transport');
-console.log('CLI runner preview smoke passed: prefix IDs, deterministic non-interactive resource/environment selection and refusal, pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, cross-command global-option diagnostics, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+console.log('CLI runner preview smoke passed: prefix IDs, deterministic non-interactive resource/environment selection and refusal, pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, cross-command global-option diagnostics, explicit-grant plugin template tags, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await close(secureServer).catch(() => undefined);

@@ -57,6 +57,8 @@ jobs:
         run: |
           test "$(docker run --rm brunomnia-cli:verification --version)" = "$(node -p "require('./package.json').version")"
           docker run --rm --network none --volume "$PWD/examples:/workspace:ro" brunomnia-cli:verification run test "CLI Health" --workingDir /workspace/cli-workspace.json --ci --allow-scripts --reporter min
+      - name: Extended container trust smoke
+        run: node scripts/cli-container-smoke.mjs
 
   publish:
     if: github.event_name == 'push'
