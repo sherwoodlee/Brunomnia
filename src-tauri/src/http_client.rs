@@ -66,7 +66,7 @@ fn domain_matches(pattern: &str, hostname: &str) -> bool {
     hostname == pattern
 }
 
-fn identity_enabled(transport: &TransportConfig, request_url: Option<&str>) -> bool {
+pub(crate) fn identity_enabled(transport: &TransportConfig, request_url: Option<&str>) -> bool {
     if transport.client_certificate_domains.trim().is_empty() {
         return true;
     }

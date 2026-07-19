@@ -1,5 +1,7 @@
 use crate::{
-    http_client::{apply_preferred_request_version, build_streaming_client, flatten_headers},
+    http_client::{
+        apply_preferred_request_version, build_streaming_client, flatten_headers, identity_enabled,
+    },
     models::{
         KeyValue, SocketIoConnectInput, StreamConnectInput, StreamConnectOutput, StreamEvent,
         TransportConfig,
@@ -7,6 +9,12 @@ use crate::{
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::{SinkExt, StreamExt};
+use rustls::{
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    crypto::ring::default_provider,
+    DigitallySignedStruct, Error as RustlsError, RootCertStore, SignatureScheme,
+};
+use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -20,13 +28,13 @@ use tokio::{
     sync::{mpsc, Mutex},
 };
 use tokio_tungstenite::{
-    connect_async,
+    connect_async, connect_async_tls_with_config,
     tungstenite::{
         client::IntoClientRequest,
         http::{header::SEC_WEBSOCKET_PROTOCOL, HeaderValue},
         Message,
     },
-    MaybeTlsStream, WebSocketStream,
+    Connector, MaybeTlsStream, WebSocketStream,
 };
 use url::Url;
 
@@ -181,6 +189,105 @@ fn graphql_message_type(message: &str) -> Option<String> {
         .get("type")?
         .as_str()
         .map(str::to_string)
+}
+
+#[derive(Debug)]
+struct AcceptInvalidServerCertificate;
+
+impl ServerCertVerifier for AcceptInvalidServerCertificate {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, RustlsError> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, RustlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, RustlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+fn native_root_store() -> Result<RootCertStore, String> {
+    let loaded = rustls_native_certs::load_native_certs();
+    if loaded.certs.is_empty() {
+        return Err(format!(
+            "No native root certificates were available: {:?}",
+            loaded.errors
+        ));
+    }
+    let mut roots = RootCertStore::empty();
+    let (added, _) = roots.add_parsable_certificates(loaded.certs);
+    if added == 0 {
+        return Err("No native root certificates could be parsed.".into());
+    }
+    Ok(roots)
+}
+
+fn websocket_tls_connector(
+    transport: &TransportConfig,
+    request_url: &str,
+) -> Result<Option<Connector>, String> {
+    let url = Url::parse(request_url).map_err(|error| format!("Invalid WebSocket URL: {error}"))?;
+    if url.scheme() != "wss" {
+        return Ok(None);
+    }
+    let has_certificate = !transport.client_certificate_pem.trim().is_empty();
+    let has_key = !transport.client_key_pem.trim().is_empty();
+    if has_certificate != has_key {
+        return Err("A client certificate and private key must be supplied together.".into());
+    }
+    let use_identity = has_certificate && identity_enabled(transport, Some(request_url));
+    if transport.validate_certificates && !use_identity {
+        return Ok(None);
+    }
+    let builder = if transport.validate_certificates {
+        rustls::ClientConfig::builder().with_root_certificates(native_root_store()?)
+    } else {
+        rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptInvalidServerCertificate))
+    };
+    let config = if use_identity {
+        let certificates =
+            CertificateDer::pem_slice_iter(transport.client_certificate_pem.trim().as_bytes())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| format!("Invalid client certificate PEM: {error}"))?;
+        if certificates.is_empty() {
+            return Err("The client certificate PEM contains no certificates.".into());
+        }
+        let key = PrivateKeyDer::from_pem_slice(transport.client_key_pem.trim().as_bytes())
+            .map_err(|error| format!("Invalid client private key PEM: {error}"))?;
+        builder
+            .with_client_auth_cert(certificates, key)
+            .map_err(|error| format!("Invalid client identity PEM: {error}"))?
+    } else {
+        builder.with_no_client_auth()
+    };
+    Ok(Some(Connector::Rustls(Arc::new(config))))
 }
 
 #[derive(Clone, Default)]
@@ -843,8 +950,9 @@ pub async fn connect_websocket(
         );
     }
 
+    let connector = websocket_tls_connector(&input.transport, &input.url)?;
     let started = Instant::now();
-    let (socket, response) = connect_async(request)
+    let (socket, response) = connect_async_tls_with_config(request, None, false, connector)
         .await
         .map_err(|error| format!("WebSocket connection failed: {error}"))?;
     let status = response.status();
@@ -1868,6 +1976,12 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    const TLS_CA_CERTIFICATE: &str = include_str!("../tests/fixtures/tls/ca.cert.pem");
+    const TLS_SERVER_CERTIFICATE: &str = include_str!("../tests/fixtures/tls/server.cert.pem");
+    const TLS_SERVER_KEY: &str = include_str!("../tests/fixtures/tls/server.key.pem");
+    const TLS_CLIENT_CERTIFICATE: &str = include_str!("../tests/fixtures/tls/client.cert.pem");
+    const TLS_CLIENT_KEY: &str = include_str!("../tests/fixtures/tls/client.key.pem");
+
     struct TestHttpRequest {
         method: String,
         target: String,
@@ -1923,6 +2037,34 @@ mod tests {
         );
         stream.write_all(response.as_bytes()).await.unwrap();
         stream.shutdown().await.unwrap();
+    }
+
+    fn test_tls_server_config(require_client_identity: bool) -> rustls::ServerConfig {
+        let certificates = CertificateDer::pem_slice_iter(TLS_SERVER_CERTIFICATE.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let key = PrivateKeyDer::from_pem_slice(TLS_SERVER_KEY.as_bytes()).unwrap();
+        let builder = rustls::ServerConfig::builder();
+        if require_client_identity {
+            let mut roots = RootCertStore::empty();
+            let authorities = CertificateDer::pem_slice_iter(TLS_CA_CERTIFICATE.as_bytes())
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            let (added, _) = roots.add_parsable_certificates(authorities);
+            assert_eq!(added, 1);
+            let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(roots))
+                .build()
+                .unwrap();
+            builder
+                .with_client_cert_verifier(verifier)
+                .with_single_cert(certificates, key)
+                .unwrap()
+        } else {
+            builder
+                .with_no_client_auth()
+                .with_single_cert(certificates, key)
+                .unwrap()
+        }
     }
 
     #[test]
@@ -2075,6 +2217,105 @@ mod tests {
             .lock()
             .await
             .contains_key("graphql-subscription-session"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn applies_wss_validation_and_domain_scoped_client_identity() {
+        use tauri::ipc::InvokeResponseBody;
+        use tokio::net::TcpListener;
+        use tokio_rustls::TlsAcceptor;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let plain_acceptor = TlsAcceptor::from(Arc::new(test_tls_server_config(false)));
+        let mutual_acceptor = TlsAcceptor::from(Arc::new(test_tls_server_config(true)));
+        let server = tokio::spawn(async move {
+            let (strict_stream, _) = listener.accept().await.unwrap();
+            assert!(plain_acceptor.accept(strict_stream).await.is_err());
+
+            let (unmatched_stream, _) = listener.accept().await.unwrap();
+            assert!(mutual_acceptor.accept(unmatched_stream).await.is_err());
+
+            let (matched_stream, _) = listener.accept().await.unwrap();
+            let tls = mutual_acceptor.accept(matched_stream).await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(tls).await.unwrap();
+            assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
+        });
+
+        let channel = || {
+            Channel::<StreamEvent>::new(|body| {
+                if let InvokeResponseBody::Json(json) = body {
+                    let _: Value = serde_json::from_str(&json)?;
+                }
+                Ok(())
+            })
+        };
+        let state = StreamingState::default();
+        let url = format!("wss://127.0.0.1:{}/secure", address.port());
+        let strict = connect_websocket(
+            StreamConnectInput {
+                session_id: "wss-strict".into(),
+                url: url.clone(),
+                headers: Vec::new(),
+                transport: crate::models::TransportConfig::default(),
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            channel(),
+            state.clone(),
+        )
+        .await;
+        assert!(strict.unwrap_err().contains("WebSocket connection failed"));
+
+        let unmatched = connect_websocket(
+            StreamConnectInput {
+                session_id: "wss-unmatched-identity".into(),
+                url: url.clone(),
+                headers: Vec::new(),
+                transport: crate::models::TransportConfig {
+                    validate_certificates: false,
+                    client_certificate_pem: TLS_CLIENT_CERTIFICATE.into(),
+                    client_key_pem: TLS_CLIENT_KEY.into(),
+                    client_certificate_domains: "localhost".into(),
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            channel(),
+            state.clone(),
+        )
+        .await;
+        assert!(unmatched
+            .unwrap_err()
+            .contains("WebSocket connection failed"));
+
+        let output = connect_websocket(
+            StreamConnectInput {
+                session_id: "wss-matched-identity".into(),
+                url,
+                headers: Vec::new(),
+                transport: crate::models::TransportConfig {
+                    validate_certificates: false,
+                    client_certificate_pem: TLS_CLIENT_CERTIFICATE.into(),
+                    client_key_pem: TLS_CLIENT_KEY.into(),
+                    client_certificate_domains: "127.0.0.1".into(),
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            channel(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.status, 101);
+        assert_eq!(output.transport, "WebSocket");
+        disconnect_websocket("wss-matched-identity".into(), state)
+            .await
+            .unwrap();
+        server.await.unwrap();
     }
 
     #[test]

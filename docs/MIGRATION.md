@@ -29,7 +29,7 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | Rich HTTP bodies | Complete | None, JSON, text, URL-encoded, multipart text/files and binary files |
 | Transport configuration | Complete for HTTP/SSE | Redirect policy, inherited/custom connect/HTTP timeout with `0` disabled, inherited/always/never API certificate validation, unlimited active SSE duration, HTTP proxy and PEM client identity |
 | gRPC TLS | Complete | System trust roots, timeout and PEM client identity |
-| WebSocket TLS | Baseline | System trust roots and arbitrary handshake headers; custom proxy/client identity is deferred |
+| WebSocket TLS | Baseline | System trust roots and arbitrary handshake headers; Milestone 109 later adds inherited validation overrides and domain-scoped PEM client identity, while custom proxy transport remains deferred |
 | Workspace migration | Complete | Version 1 workspaces migrate in place to the version 2 protocol schema |
 
 Streaming gRPC currently returns up to 100 messages within the configured deadline. WebSocket binary frames are reported with their byte count; binary-frame composition is deferred. These bounds are product behavior, not commercial gates.
@@ -80,7 +80,7 @@ Compatibility bounds remain explicit: nested source folders are represented in f
 | Script/test API | Complete baseline | Environment/base/collection/local/iteration variable APIs, replacement helpers, request getters/setters, response header/cookie helpers, console capture, and Jest/Chai-style expectation aliases |
 | Interoperability and migration | Complete | Workspace v5, advanced Insomnia/Postman auth mapping, Insomnia v4/v5 cookie-jar round trips, and collision-safe cookie import |
 
-Compatibility bounds at Milestone 5 were explicit: OAuth 2 authorization used a copied URL and manual returned code/token. Milestone 88 adds native system-browser loopback capture while retaining that browser-development fallback. Netrc contents were project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, and arbitrary Spectral JavaScript/functions/remote `extends` remained deferred. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. WebSocket custom proxy/client identity and headless CLI streaming/auth parity remain later closure work. The later permission-bounded scripting expansion is recorded in Milestone 12.
+Compatibility bounds at Milestone 5 were explicit: OAuth 2 authorization used a copied URL and manual returned code/token. Milestone 88 adds native system-browser loopback capture while retaining that browser-development fallback. Netrc contents were project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, and arbitrary Spectral JavaScript/functions/remote `extends` remained deferred. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. Milestone 109 closes WSS client identity and validation overrides; custom WebSocket proxying plus headless CLI streaming/auth parity remain later closure work. The later permission-bounded scripting expansion is recorded in Milestone 12.
 
 ## Milestone 6 — Git Sync and extensibility (complete)
 
@@ -1581,7 +1581,7 @@ Compatibility bounds remain explicit: Brunomnia renders complete event cards rat
 | Executable coverage | Complete baseline | Focused frontend tests cover metadata/timeline merge and migration; native upgraded and polling Socket.IO loopbacks assert returned status/version/transport before full release gates |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 104 verification](QA_MILESTONE_104.md) |
 
-Compatibility bounds remain explicit: timeline rows are bounded structured workspace records rather than upstream filesystem streams, duplicate response headers remain flattened, and failed pre-response connections have errors but no fabricated status/headers. WebSocket proxy/client-identity transport parity, streaming plugin hooks, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds at Milestone 104 were explicit: timeline rows are bounded structured workspace records rather than upstream filesystem streams, duplicate response headers remain flattened, and failed pre-response connections have errors but no fabricated status/headers. Milestone 109 closes WSS validation/client identity; custom WebSocket proxy transport, streaming plugin hooks, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 105 — live SSE reconnect and resume evidence (complete)
 
@@ -1635,16 +1635,30 @@ Compatibility bounds remain explicit: selected local files are persisted as appr
 | Current upstream audit | Complete | Pinned Insomnia detects the selected GraphQL `subscription`, converts HTTP(S) to WS(S), negotiates `graphql-transport-ws`, sends `connection_init`, subscribes after `connection_ack`, and closes on protocol `error` or `complete` |
 | Operation selection | Complete baseline | Brunomnia honors operation name, sole anonymous operations, comments, strings, fragments, directives, and object/list variable defaults without routing ordinary queries or mutations away from HTTP |
 | Native protocol lifecycle | Complete | Tauri forces the required subprotocol, sends exact init and UUID subscribe envelopes, preserves the HTTP GraphQL payload shape, types ordered protocol events, and closes on terminal server messages |
-| Request continuity | Complete baseline | Resolved path/query rows, cookies, enabled headers, Basic/Bearer/API-key auth, and an existing OAuth 2 token reach the subscription handshake; advanced signing and WebSocket proxy/client-identity parity remain open |
+| Request continuity | Complete baseline | Resolved path/query rows, cookies, enabled headers, Basic/Bearer/API-key auth, and an existing OAuth 2 token reach the subscription handshake; Milestone 109 adds WSS validation/identity, while advanced signing and WebSocket proxy transport remain open |
 | Realtime UI and history | Complete baseline | GraphQL subscriptions use Connect/Disconnect, the realtime summary/console/headers/timeline, finite/zero/unlimited history, environment filtering, historical request restoration, filtering/search, clear-view, delete, and clear |
 | Collection runner | Complete baseline | Operation-aware GraphQL subscriptions use the shared bounded stream sampler instead of being sent as ordinary HTTP |
 | Workspace schema | Complete | Workspace v28 accepts bounded GraphQL stream sessions while retaining the existing validation and local-only history boundary |
 | Executable coverage | Complete | Frontend operation/routing/history/storage tests and a real native `graphql-transport-ws` loopback verify subprotocol, init, ack, subscribe payload, next, complete, close, and session cleanup |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 108 verification](QA_MILESTONE_108.md) |
 
-Compatibility bounds remain explicit: full GraphQL language-service validation/autocomplete, richer schema workflows, streaming plugin hooks, advanced signing, WebSocket proxy/client identity, filesystem-backed event logs, and broad third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: full GraphQL language-service validation/autocomplete, richer schema workflows, streaming plugin hooks, advanced signing, WebSocket proxy transport, filesystem-backed event logs, and broad third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 109 — remaining parity closure and release hardening
+## Milestone 109 — WSS validation and scoped client identity (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia applies global certificate validation plus filtered client certificates to WSS, including GraphQL subscriptions, and supplies certificate/key pairs only for matching hosts |
+| Effective validation | Complete | The existing global and per-request API validation resolver now reaches native WebSocket handshakes; the default/native-root path remains unchanged and Never uses a request-local Rustls verifier |
+| PEM identity | Complete | Complete certificate chains and PKCS#1/PKCS#8/SEC1 keys parse in memory, are installed only for WSS, and reuse exact/wildcard/comma/newline domain matching from native HTTP |
+| GraphQL continuity | Complete | GraphQL subscriptions use the same native WebSocket connector, so their converted WSS endpoint receives identical validation and identity behavior |
+| Dependency boundary | Complete | Rustls, native roots, PKI types, and Tokio-Rustls become direct dependencies at versions already present in the lockfile; no remote runtime service or entitlement is introduced |
+| Executable coverage | Complete | One real WSS loopback rejects an untrusted server under validation, proves a domain-mismatched identity is omitted and rejected by mTLS, then succeeds with validation disabled plus a matching client identity |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 109 verification](QA_MILESTONE_109.md) |
+
+Compatibility bounds remain explicit: custom WebSocket proxy transport, redirect-chain evidence, upstream filesystem-backed event/timeline logs, streaming plugin hooks, and broad third-party fixtures remain open. Socket.IO deliberately stays on its fully functional polling transport whenever proxy/client-identity/disabled-validation policy would make its current WebSocket upgrade lose authority. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 110 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
