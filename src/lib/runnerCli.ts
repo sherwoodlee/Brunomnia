@@ -19,14 +19,14 @@ const runnerCliValueOptions = new Set([
   '--env', '-e', '--globals', '-g', '--requestNamePattern', '--request-name-pattern', '--testNamePattern', '--test-name-pattern', '-t',
   '--item', '--request', '-i', '--requestTimeout', '--request-timeout', '--env-var', '--iteration-count', '--iterations', '-n',
   '--retries', '--delay-request', '--delay', '--iteration-data', '--data', '-d', '--script-timeout', '--reporter', '-r',
-  '--output', '-o', '--workingDir', '--working-dir', '-w', '--config', '--httpProxy', '--http-proxy', '--httpsProxy', '--https-proxy', '--noProxy', '--no-proxy',
+  '--output', '-o', '--workingDir', '--working-dir', '-w', '--config', '--httpProxy', '--http-proxy', '--httpsProxy', '--https-proxy', '--noProxy', '--no-proxy', '--includeFullData', '--include-full-data',
 ]);
 
 const runnerCliVariadicValueOptions = new Set(['--dataFolders', '--data-folders', '-f']);
 
 const runnerCliBooleanOptions = new Set([
   '--bail', '-b', '--allow-scripts', '--allow-script-requests', '--allow-script-files', '--allow-template-files',
-  '--allow-external-vaults', '--disableCertValidation', '--disable-cert-validation', '-k', '--ci', '--verbose', '--printOptions', '--print-options', '--help', '-h',
+  '--allow-external-vaults', '--disableCertValidation', '--disable-cert-validation', '-k', '--acceptRisk', '--accept-risk', '--ci', '--verbose', '--printOptions', '--print-options', '--help', '-h',
 ]);
 
 export const runnerCliPositionalArguments = (values: string[]) => {
@@ -42,6 +42,8 @@ export const runnerCliPositionalArguments = (values: string[]) => {
       index += 1;
       continue;
     }
+    const inlineOption = value.slice(0, value.indexOf('='));
+    if (value.includes('=') && runnerCliValueOptions.has(inlineOption)) continue;
     positionals.push(value);
   }
   return positionals;

@@ -115,6 +115,12 @@ try {
   secure.url = `https://127.0.0.1:${secureAddress.port}/secure?row={{ row }}&region={{ region }}`;
   const mutual = request('request-mutual', 'Mutual TLS', 'mutual');
   mutual.url = `https://127.0.0.1:${mutualAddress.port}/mutual?row={{ row }}&region={{ region }}`;
+  mutual.auth = { ...mutual.auth, type: 'basic', username: 'full-report-user', password: 'full-report-password' };
+  mutual.headers = [
+    ...mutual.headers,
+    { id: 'full-report-sensitive-header', name: 'X-API-Key', value: 'full-report-header-secret', enabled: true },
+    { id: 'full-report-visible-header', name: 'X-Report-Label', value: 'full-report-visible', enabled: true },
+  ];
   const customProxy = request('request-custom-proxy', 'Custom proxy', 'custom-proxy');
   customProxy.transport = { ...customProxy.transport, proxyMode: 'custom', proxyUrl: `http://127.0.0.1:${proxyAddress.port}`, proxyExclusions: '' };
   const direct = request('request-direct', 'Direct', 'direct');
@@ -146,7 +152,14 @@ try {
     ],
     resourceOrder: ['request-first', 'folder-selected', 'request-second', 'folder-nested', 'request-third', 'request-slow', 'request-secure', 'request-mutual', 'request-custom-proxy', 'request-direct', 'folder-empty'],
   };
-  const environment = { id: 'preview-environment', name: 'Preview environment', variables: [{ id: 'preview-global-default-row', name: 'globalChoice', value: 'default', enabled: true }] };
+  const environment = {
+    id: 'preview-environment',
+    name: 'Preview environment',
+    variables: [
+      { id: 'preview-global-default-row', name: 'globalChoice', value: 'default', enabled: true },
+      { id: 'preview-full-report-secret', name: 'fullReportSecret', value: 'full-report-environment-secret', enabled: true },
+    ],
+  };
   const selectedGlobals = { id: 'preview-selected-globals', name: 'Selected globals', variables: [{ id: 'preview-global-selected-row', name: 'globalChoice', value: 'selected', enabled: true }] };
   const globalFile = join(temporary, 'global-environment.yaml');
   const brunomniaGlobalFile = join(temporary, 'brunomnia-global-environment.yaml');
@@ -305,6 +318,60 @@ try {
   ]));
   assert.deepEqual(mutualPfx.report.results.map((result) => [result.requestId, result.status]), [['request-mutual', 200]]);
   assert.deepEqual(mutualArrivals.at(-1), { path: '/mutual?row=pfx&region=pfx', authorized: true });
+  const arrivalsBeforeRejectedReport = mutualArrivals.length;
+  const rejectedFullReport = await runFailure([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-mutual',
+    '--env-var', 'row=report', '--env-var', 'region=report', '--includeFullData=redact', '--output', 'reports/rejected.json',
+  ]);
+  assert.equal(rejectedFullReport.code, 1);
+  assert.match(rejectedFullReport.stderr, /Full-data reports may contain secrets.*--acceptRisk/);
+  assert.equal(mutualArrivals.length, arrivalsBeforeRejectedReport, 'risk rejection happened after transport');
+  const fullReportProxy = `http://proxy-user:proxy-password@127.0.0.1:${proxyAddress.port}`;
+  await run([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-mutual',
+    '--env-var', 'row=redacted', '--env-var', 'region=redacted', '--httpsProxy', fullReportProxy, '--noProxy', '127.0.0.1',
+    '--includeFullData', 'redact', '--acceptRisk', '--output', 'reports/nested/redacted.json',
+  ]);
+  const redactedReportText = await readFile(join(temporary, 'reports', 'nested', 'redacted.json'), 'utf8');
+  const redactedReport = JSON.parse(redactedReportText);
+  assert.equal(redactedReport.format, 'brunomnia-inso-full-report');
+  assert.equal(redactedReport.version, 1);
+  assert.equal(redactedReport.mode, 'redact');
+  assert.equal(redactedReport.executions.length, 1);
+  assert.equal(redactedReport.executions[0].iteration, 1);
+  assert.equal(redactedReport.executions[0].attempt, 1);
+  assert.equal(redactedReport.executions[0].environment.fullReportSecret, '<Redacted by Insomnia>');
+  assert.equal(redactedReport.environment.variables.find((variable) => variable.name === 'fullReportSecret').value, '<Redacted by Insomnia>');
+  assert.equal(redactedReport.executions[0].request.auth.type, 'basic');
+  assert.equal(redactedReport.executions[0].request.auth.disabled, false);
+  assert.equal(redactedReport.executions[0].request.auth.username, '<Redacted by Insomnia>');
+  assert.equal(redactedReport.executions[0].request.auth.password, '<Redacted by Insomnia>');
+  assert.equal(redactedReport.executions[0].request.headers.find((header) => header.name === 'X-API-Key').value, '<Redacted by Insomnia>');
+  assert.equal(redactedReport.executions[0].request.headers.find((header) => header.name === 'X-Report-Label').value, 'full-report-visible');
+  assert.equal(redactedReport.executions[0].request.transport.clientCertificatePfxBase64, '<Redacted by Insomnia>');
+  assert.equal(redactedReport.executions[0].request.transport.clientCertificatePassphrase, '<Redacted by Insomnia>');
+  assert.equal(redactedReport.executions[0].request.transport.caCertificatePem, '<Redacted by Insomnia>');
+  for (const secret of ['full-report-environment-secret', 'full-report-user', 'full-report-password', 'full-report-header-secret', 'proxy-user', 'proxy-password', clientPfxBase64, 'openssl-secret']) {
+    assert.equal(redactedReportText.includes(secret), false, `redacted report leaked ${secret.slice(0, 40)}`);
+  }
+  await run([
+    'run', 'collection', collection.id, '--workingDir', temporary, '--item', 'request-mutual',
+    '--env-var', 'row=plaintext', '--env-var', 'region=plaintext', '--httpsProxy', fullReportProxy, '--noProxy', '127.0.0.1',
+    '--includeFullData=plaintext', '--acceptRisk', '--output', 'reports/plaintext.json',
+  ]);
+  const plaintextReport = JSON.parse(await readFile(join(temporary, 'reports', 'plaintext.json'), 'utf8'));
+  assert.equal(plaintextReport.mode, 'plaintext');
+  assert.equal(plaintextReport.executions[0].environment.fullReportSecret, 'full-report-environment-secret');
+  assert.equal(plaintextReport.environment.variables.find((variable) => variable.name === 'fullReportSecret').value, 'full-report-environment-secret');
+  assert.equal(plaintextReport.executions[0].request.auth.username, 'full-report-user');
+  assert.equal(plaintextReport.executions[0].request.auth.password, 'full-report-password');
+  assert.equal(plaintextReport.executions[0].request.headers.find((header) => header.name === 'X-API-Key').value, 'full-report-header-secret');
+  assert.equal(plaintextReport.executions[0].request.transport.clientCertificatePfxBase64, clientPfxBase64);
+  assert.equal(plaintextReport.executions[0].request.transport.clientCertificatePassphrase, 'openssl-secret');
+  assert.equal(plaintextReport.executions[0].request.transport.caCertificatePem, tlsCa);
+  assert.equal(plaintextReport.proxy.httpsProxy, fullReportProxy);
+  assert.deepEqual(plaintextReport.stats.requests, { total: 1, failed: 0 });
+  assert.equal(typeof plaintextReport.timing.responseAverage, 'number');
   const rejected = await runFailure(['run', 'test', join(process.cwd(), 'examples', 'cli-workspace.json'), 'CLI Health', '--env-var', 'region=override']);
   assert.equal(rejected.code, 1);
   assert.match(rejected.stderr, /--env-var is only available for run collection/);
@@ -363,7 +430,7 @@ try {
   const missingScript = await runFailure(['script', '--config', join(temporary, '.insorc'), 'missing']);
   assert.equal(missingScript.code, 1);
   assert.match(missingScript.stderr, /Available scripts: preview, invalid/);
-  console.log('CLI runner preview smoke passed: HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, working directory, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  console.log('CLI runner preview smoke passed: explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await close(secureServer).catch(() => undefined);

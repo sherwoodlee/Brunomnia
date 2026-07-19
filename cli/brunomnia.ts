@@ -1,4 +1,4 @@
-import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -31,11 +31,16 @@ import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunn
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
-  const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] : undefined;
+  const index = args.findIndex((argument) => argument === name || argument.startsWith(`${name}=`));
+  if (index < 0) return undefined;
+  return args[index] === name ? args[index + 1] : args[index].slice(name.length + 1);
 };
 const firstFlag = (...names: string[]) => names.map(flag).find((value) => value !== undefined);
-const flagValues = (...names: string[]) => args.flatMap((argument, index) => names.includes(argument) && args[index + 1] !== undefined ? [args[index + 1]] : []);
+const flagValues = (...names: string[]) => args.flatMap((argument, index) => {
+  const name = names.find((candidate) => argument === candidate || argument.startsWith(`${candidate}=`));
+  if (!name) return [];
+  return argument === name ? args[index + 1] === undefined ? [] : [args[index + 1]] : [argument.slice(name.length + 1)];
+});
 const hasFlag = (name: string) => args.includes(name);
 const fail = (message: string, code = 1): never => {
   console.error(message);
@@ -620,6 +625,86 @@ type CliRequestContext = {
   requestChain?: string[];
 };
 
+type CliFullExecution = {
+  request: ApiRequest;
+  response: HttpResponse;
+  environment: Record<string, string>;
+  tests: RunnerItemResult['tests'];
+  iteration: number;
+  attempt: number;
+};
+
+const fullDataRedaction = '<Redacted by Insomnia>';
+const sensitiveReportHeaders = new Set(['cookie', 'set-cookie', 'authorization', 'auth', 'x-auth-token', 'x-api-key', 'api-key', 'x-csrf-token', 'x-xsrf-token', 'x-access-token', 'x-refresh-token', 'bearer', 'basic', 'x-forwarded-for', 'x-real-ip', 'x-client-ip', 'proxy-authorization']);
+const redactProxyUrl = (value: string) => {
+  try {
+    const url = new URL(value);
+    if (url.username) url.username = fullDataRedaction;
+    if (url.password) url.password = fullDataRedaction;
+    return url.toString();
+  } catch {
+    return value;
+  }
+};
+const redactCliExecution = (execution: CliFullExecution): CliFullExecution => ({
+  ...execution,
+  environment: Object.fromEntries(Object.keys(execution.environment).map((name) => [name, fullDataRedaction])),
+  request: {
+    ...execution.request,
+    headers: execution.request.headers.map((header) => sensitiveReportHeaders.has(header.name.toLowerCase()) ? { ...header, value: fullDataRedaction } : header),
+    auth: Object.fromEntries(Object.entries(execution.request.auth).map(([name, value]) => [name, ['type', 'disabled', 'oauth2GrantType'].includes(name) ? value : fullDataRedaction])) as ApiRequest['auth'],
+    transport: {
+      ...execution.request.transport,
+      proxyUrl: redactProxyUrl(execution.request.transport.proxyUrl),
+      clientCertificatePem: execution.request.transport.clientCertificatePem ? fullDataRedaction : '',
+      clientKeyPem: execution.request.transport.clientKeyPem ? fullDataRedaction : '',
+      clientCertificatePfxBase64: execution.request.transport.clientCertificatePfxBase64 ? fullDataRedaction : '',
+      clientCertificatePassphrase: execution.request.transport.clientCertificatePassphrase ? fullDataRedaction : '',
+      caCertificatePem: execution.request.transport.caCertificatePem ? fullDataRedaction : '',
+    },
+  },
+  response: {
+    ...execution.response,
+    headers: Object.fromEntries(Object.entries(execution.response.headers).map(([name, value]) => [name, sensitiveReportHeaders.has(name.toLowerCase()) ? fullDataRedaction : value])),
+    setCookies: execution.response.setCookies?.map(() => fullDataRedaction),
+  },
+});
+const createCliFullDataReport = (
+  report: RunnerReport,
+  collection: Workspace['collections'][number],
+  environment: Environment,
+  proxy: ProxyPreferences,
+  executions: CliFullExecution[],
+  mode: 'redact' | 'plaintext',
+) => {
+  const selectedExecutions = mode === 'redact' ? executions.map(redactCliExecution) : executions;
+  const responseTimes = selectedExecutions.map((execution) => Math.max(0, execution.response.durationMs));
+  return {
+    format: 'brunomnia-inso-full-report',
+    version: 1,
+    mode,
+    collection: { id: collection.id, name: collection.name, documentation: collection.documentation ?? '' },
+    environment: mode === 'redact'
+      ? { ...environment, variables: environment.variables.map((variable) => ({ ...variable, value: fullDataRedaction })) }
+      : environment,
+    proxy: { enabled: proxy.enabled, httpProxy: mode === 'redact' ? redactProxyUrl(proxy.httpProxy) : proxy.httpProxy, httpsProxy: mode === 'redact' ? redactProxyUrl(proxy.httpsProxy) : proxy.httpsProxy, noProxy: proxy.noProxy },
+    executions: selectedExecutions,
+    timing: {
+      started: report.startedAt,
+      completed: report.finishedAt,
+      responseAverage: responseTimes.length ? responseTimes.reduce((total, value) => total + value, 0) / responseTimes.length : 0,
+      responseMin: responseTimes.length ? Math.min(...responseTimes) : 0,
+      responseMax: responseTimes.length ? Math.max(...responseTimes) : 0,
+    },
+    stats: {
+      iterations: { total: report.iterations, failed: new Set(report.results.filter((result) => !result.passed).map((result) => result.iteration)).size },
+      requests: { total: report.total, failed: report.failed },
+      tests: { total: report.results.reduce((total, result) => total + result.tests.length, 0), failed: report.results.reduce((total, result) => total + result.tests.filter(scriptTestFailed).length, 0) },
+    },
+    error: report.flowError ?? null,
+  };
+};
+
 const executeHttp = async (
   request: ApiRequest,
   variables: Record<string, string>,
@@ -627,7 +712,7 @@ const executeHttp = async (
   validateCertificates = true,
   proxyPreferences?: ProxyPreferences,
   context?: CliRequestContext,
-): Promise<HttpResponse> => {
+): Promise<{ result: HttpResponse; request: ApiRequest }> => {
   if (request.protocol !== 'http' && request.protocol !== 'graphql') throw new Error(`CLI collection execution does not yet support ${request.protocol}.`);
   request = await renderApiRequest(request, variables, {
     cookies: context?.cookies,
@@ -695,7 +780,7 @@ const executeHttp = async (
     });
     const responseBody = await response.text();
     const getSetCookie = response.headers.getSetCookie;
-    return { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url, setCookies: getSetCookie.call(response.headers) };
+    return { request, result: { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url, setCookies: getSetCookie.call(response.headers) } };
   } finally {
     await dispatcher.close();
   }
@@ -706,7 +791,7 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [-f, --dataFolders <folder...>] [--httpProxy URL] [--httpsProxy URL] [--noProxy HOSTS] [--disableCertValidation] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
+  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--includeFullData <redact|plaintext> --acceptRisk] [-f, --dataFolders <folder...>] [--httpProxy URL] [--httpsProxy URL] [--noProxy HOSTS] [--disableCertValidation] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
   brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [-f, --dataFolders <folder...>] [-k, --disableCertValidation] [same transport/trust options]
   brunomnia script <name> [arguments...] [--config <path>]
 
@@ -819,6 +904,20 @@ const main = async () => {
       : runnerRequestIdsMatchingPattern(collection.requests, requestedRequests.length ? selectedRequestIds : undefined, requestedRequestNamePattern);
     if ((requestedRequests.length || requestedRequestNamePattern !== undefined) && !requestIds.length) fail('No requests identified; nothing to run.');
     const testNamePattern = subject === 'test' ? validateTestNamePattern(requestedTestNamePattern) : undefined;
+    const includeFullDataValue = firstFlag('--includeFullData', '--include-full-data');
+    const includeFullData = includeFullDataValue === 'redact' || includeFullDataValue === 'plaintext' ? includeFullDataValue : undefined;
+    const outputOption = firstFlag('--output', '-o');
+    if (includeFullDataValue !== undefined && !includeFullData) fail('--includeFullData must be either redact or plaintext.');
+    if (subject === 'test' && includeFullData) fail('--includeFullData is only available for run collection.');
+    if (includeFullData && !outputOption) fail('--includeFullData requires --output <file>.');
+    if (includeFullData && !hasFlag('--acceptRisk') && !hasFlag('--accept-risk')) fail('Full-data reports may contain secrets. Re-run with --acceptRisk after reviewing the output destination.');
+    let reportOutputPath = '';
+    if (outputOption) {
+      const outputBase = workingDir
+        ? (await stat(workingDir)).isDirectory() ? resolve(workingDir) : dirname(resolve(workingDir))
+        : process.cwd();
+      reportOutputPath = resolve(outputBase, outputOption);
+    }
     let cliCookies = [...workspace.cookies];
     let cliResponses = [...workspace.responses];
     const dataFolders = await canonicalCliDataFolders(runnerCliVariadicOptionValues(args, '--dataFolders', '--data-folders', '-f'));
@@ -834,6 +933,9 @@ const main = async () => {
     const noProxy = firstFlag('--noProxy', '--no-proxy') ?? process.env.NO_PROXY ?? process.env.no_proxy ?? '';
     const proxyPreferences = { enabled: Boolean(httpProxy || httpsProxy), httpProxy, httpsProxy, noProxy };
     const validateCertificates = !hasFlag('--disableCertValidation') && !hasFlag('--disable-cert-validation') && !hasFlag('-k');
+    const fullExecutions: CliFullExecution[] = [];
+    const pendingFullExecutions = new Map<string, Omit<CliFullExecution, 'tests' | 'iteration' | 'attempt'>>();
+    const fullExecutionKey = (key: string, attempt: number) => `${key}\n${attempt}`;
     let resolveResponse: NonNullable<CliRequestContext['resolveResponse']>;
     const executeAndStore = async (
       request: ApiRequest,
@@ -843,8 +945,8 @@ const main = async () => {
       cookies: CookieRecord[] = cliCookies,
       responses: StoredResponse[] = cliResponses,
       collectionEnvironmentId = collection.activeSubEnvironmentId ?? '',
-    ): Promise<{ result: HttpResponse; stored: StoredResponse }> => {
-      const result = await executeHttp(request, variables, requestTimeoutMs, validateCertificates, proxyPreferences, {
+    ): Promise<{ result: HttpResponse; stored: StoredResponse; request: ApiRequest }> => {
+      const executed = await executeHttp(request, variables, requestTimeoutMs, validateCertificates, proxyPreferences, {
         environmentId,
         cookies,
         responses,
@@ -855,6 +957,8 @@ const main = async () => {
         requestAncestors: requestAncestorNames(workspace.collections, request),
         requestChain,
       });
+      const { result } = executed;
+      request = executed.request;
       const requestUrl = result.requestUrl ?? request.url;
       if (request.transport.storeCookies) {
         const updatedCookies = storeResponseCookies(cookies, requestUrl, result.setCookies ?? []);
@@ -879,7 +983,7 @@ const main = async () => {
       responses.splice(0, responses.length, ...updatedResponses);
       cliCookies = cookies;
       cliResponses = responses;
-      return { result, stored };
+      return { result, stored, request };
     };
     resolveResponse = async ({ requestId, requestChain, cookies, responses }) => {
       const dependencyCollection = subject === 'test'
@@ -906,12 +1010,30 @@ const main = async () => {
         dataRows,
         ...(requestedRequests.length || requestedRequestNamePattern !== undefined ? { requestIds } : {}),
         onResult: (result) => {
+          if (includeFullData && result.key) {
+            const key = fullExecutionKey(result.key, result.attempt);
+            const execution = pendingFullExecutions.get(key);
+            if (execution) {
+              fullExecutions.push({ ...execution, tests: structuredClone(result.tests), iteration: result.iteration, attempt: result.attempt });
+              pendingFullExecutions.delete(key);
+            }
+          }
           const responseIndex = cliResponses.findIndex((response) => response.requestId === result.requestId);
           if (responseIndex < 0) return;
           const requestTestResults = result.tests.slice(0, 1_000).map((test) => ({ ...test, name: test.name.slice(0, 2_000), ...(test.error ? { error: test.error.slice(0, 20_000) } : {}) }));
           cliResponses[responseIndex] = { ...cliResponses[responseIndex], requestTestResults };
         },
-      }, executeWorkspaceHttp, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => {
+      }, async (request, variables, execution) => {
+        const executed = await executeAndStore(request, variables, environment.id);
+        if (includeFullData) {
+          pendingFullExecutions.set(fullExecutionKey(execution.key, execution.attempt), {
+            request: structuredClone(executed.request),
+            response: structuredClone(executed.result),
+            environment: { ...variables },
+          });
+        }
+        return executed.result;
+      }, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => {
         if (source.trim() && !hasFlag('--allow-scripts')) throw new Error('CLI script execution is disabled. Re-run trusted workspaces with --allow-scripts.');
         return runNodeScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
           ...scriptOptions,
@@ -1014,11 +1136,13 @@ const main = async () => {
       };
     }
     const reporter = parseRunnerReporter(flag('--reporter') ?? flag('-r'), subject === 'test' ? 'spec' : 'json');
-    const artifact = createRunnerReportArtifact(report, reporter);
-    const output = flag('--output') ?? flag('-o');
-    if (output) {
-      await writeFile(output, artifact.contents);
-      console.log(`Wrote ${reporter} report to ${output}`);
+    const artifact = includeFullData
+      ? { contents: `${JSON.stringify(createCliFullDataReport(report, collection, environment, proxyPreferences, fullExecutions, includeFullData), null, 2)}\n`, label: `${includeFullData} full-data` }
+      : { contents: createRunnerReportArtifact(report, reporter).contents, label: reporter };
+    if (reportOutputPath) {
+      await mkdir(dirname(reportOutputPath), { recursive: true });
+      await writeFile(reportOutputPath, artifact.contents);
+      console.log(`Wrote ${artifact.label} report to ${reportOutputPath}`);
     } else {
       process.stdout.write(artifact.contents);
     }
