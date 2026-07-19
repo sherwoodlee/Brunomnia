@@ -4,7 +4,9 @@ Brunomnia keeps the latest 30 collection-run reports in device-local workspace s
 
 ## Request plan
 
-The desktop runner lists the selected collection's requests before execution. Clear a checkbox to omit a request. Drag rows to reorder them, or use each row's labeled up/down buttons for the same operation without dragging. The plan is transient runner state and does not reorder or remove requests in the collection itself. Newly created requests enter the plan enabled; removed requests are discarded.
+The desktop runner lists the selected collection's requests before execution. **Select All** selects every request when selection is empty or partial; **Unselect All** clears a complete selection, and the toolbar shows selected/total state. Each row exposes its HTTP/custom method, complete parent-folder breadcrumb, and request name. Selecting the name promotes the current Runner document and opens that request without discarding the Runner draft. Clear a checkbox to omit a request. Drag rows to reorder them, or use each row's labeled up/down buttons for the same operation without dragging. The plan is transient runner state and does not reorder or remove requests in the collection itself. Newly created requests enter the plan enabled; removed requests are discarded.
+
+While execution is active, collection, environment, selection, row navigation, drag/drop, keyboard-equivalent up/down controls, iterations, retries, bail, log retention, delay, stream window, raw iteration data, and data upload/view controls are disabled. This freezes the visible execution contract instead of allowing edits that cannot affect the already-started run. Results Skip and Cancel all remain available through their dedicated live controls.
 
 Enable **Stop after first exhausted failure** to bail once a request has used all configured retry attempts and still fails. A failure that succeeds on retry does not bail. Manual cancellation and bail remain distinct report states.
 

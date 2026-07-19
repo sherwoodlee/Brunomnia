@@ -3053,6 +3053,10 @@ export default function App() {
         applyRequestDocumentState(openRequestTab(state, collection.requests[0].id));
       }
     }}
+    onOpenRequest={(requestId) => {
+      if (section === 'runner' && activeDocumentTab?.type === 'runner') promoteRequestDocument(activeDocumentTab.requestId);
+      openRequestDocument(requestId);
+    }}
     onMockChange={section === 'mocks' && activeMockDocument ? () => promoteRequestDocument(activeRequestDocumentState.activeRequestId) : undefined}
     onOpenMock={openMockDocument}
     onOpenDesign={openDesignDocument}

@@ -18,9 +18,10 @@ import { aggregateRunnerTimeline, discardRunnerReport, parseRunnerData, resolveR
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
 import { summarizeRunnerAssertions, summarizeRunnerHistory } from '../lib/runnerHistory';
 import { isRunnerItemFinished, summarizeRunnerLiveProgress } from '../lib/runnerFeedback';
+import { runnerPlanSelectionState, toggleRunnerPlanSelection } from '../lib/runnerPlan';
 import type { ScriptTestFilter } from '../lib/scriptTests';
 import { formatResponseTimeline } from '../lib/timeline';
-import { applyCollectionConfiguration, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
+import { applyCollectionConfiguration, folderAncestors, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
 import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
 import { readDesktopScriptFile, readDesktopTemplateFile } from '../lib/scriptFiles';
 import { storeResponseCookies } from '../lib/cookies';
@@ -50,6 +51,7 @@ type AutomationWorkbenchProps = {
   vault: Record<string, string>;
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
   onOpenCollection: (collection: Collection) => void;
+  onOpenRequest?: (requestId: string) => void;
   runningMocks: Record<string, RunningMock>;
   mockTarget?: { serverId: string; routeId?: string };
   onMockChange?: () => void;
@@ -153,7 +155,7 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection, desig
   );
 }
 
-function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onChangeWorkspace, templatePrompt, runnerTarget, onRunnerStart, runnerDraft, runnerDraftKey, onRunnerDraftChange }: AutomationWorkbenchProps) {
+function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onChangeWorkspace, onOpenRequest, templatePrompt, runnerTarget, onRunnerStart, runnerDraft, runnerDraftKey, onRunnerDraftChange }: AutomationWorkbenchProps) {
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
     certificates: workspace.certificates,
     prompt: templatePrompt,
@@ -201,6 +203,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
   const selectedEnvironment = workspace.environments.find((candidate) => candidate.id === environmentId) ?? activeEnvironment;
   const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
   const selectedRequestIds = requestPlan.filter((item) => item.enabled).map((item) => item.id);
+  const planSelection = runnerPlanSelectionState(requestPlan);
 
   useEffect(() => {
     if (!runnerDraftKey || !onRunnerDraftChange) return;
@@ -546,20 +549,22 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
       </AutomationHeader>
       <div className="runner-grid">
         <aside className="runner-config">
-          <label>Collection<select aria-label="Runner collection" disabled={Boolean(runnerTarget?.collectionId)} value={collection?.id ?? ''} onChange={(event) => { setCollectionId(event.target.value); setCanceledRun(false); setResults([]); setLiveItems([]); setSelectedReportId(''); }}>{workspace.collections.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.requests.length}</option>)}</select></label>
+          <label>Collection<select aria-label="Runner collection" disabled={running || Boolean(runnerTarget?.collectionId)} value={collection?.id ?? ''} onChange={(event) => { setCollectionId(event.target.value); setCanceledRun(false); setResults([]); setLiveItems([]); setSelectedReportId(''); }}>{workspace.collections.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.requests.length}</option>)}</select></label>
           {targetFolder ? <label>Folder<input aria-label="Runner folder" disabled value={targetFolder.name} /></label> : null}
-          <label>Environment<select aria-label="Runner environment" value={environment.id} onChange={(event) => setEnvironmentId(event.target.value)}>{workspace.environments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <fieldset className="runner-plan"><legend>Request order</legend>{requestPlan.map((item, index) => {
+          <label>Environment<select aria-label="Runner environment" disabled={running} value={environment.id} onChange={(event) => setEnvironmentId(event.target.value)}>{workspace.environments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <fieldset className="runner-plan"><legend>Request order</legend><div className="runner-plan-toolbar"><button aria-pressed={planSelection === 'some' ? 'mixed' : planSelection === 'all'} disabled={running || !requestPlan.length} onClick={() => setRequestPlan(toggleRunnerPlanSelection)} type="button">{planSelection === 'all' ? 'Unselect All' : 'Select All'}</button><span>{selectedRequestIds.length} / {requestPlan.length}</span></div>{requestPlan.map((item, index) => {
             const request = collection?.requests.find((candidate) => candidate.id === item.id);
             if (!request) return null;
-            return <div draggable key={item.id} onDragEnd={() => { draggedRequestId.current = ''; }} onDragOver={(event) => event.preventDefault()} onDragStart={() => { draggedRequestId.current = item.id; }} onDrop={() => dropRequest(item.id)}><input aria-label={`Include ${request.name}`} checked={item.enabled} onChange={(event) => setRequestPlan((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, enabled: event.target.checked } : candidate))} type="checkbox" /><span title={request.name}>{request.name}</span><div><button aria-label={`Move ${request.name} up`} disabled={index === 0} onClick={() => moveRequest(item.id, -1)} type="button">↑</button><button aria-label={`Move ${request.name} down`} disabled={index === requestPlan.length - 1} onClick={() => moveRequest(item.id, 1)} type="button">↓</button></div></div>;
+            const ancestorNames = collection ? folderAncestors(collection, request.folderId).map((folder) => folder.name) : [];
+            const methodClass = request.method.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+            return <div aria-disabled={running} draggable={!running} key={item.id} onDragEnd={() => { draggedRequestId.current = ''; }} onDragOver={(event) => { if (!running) event.preventDefault(); }} onDragStart={() => { if (!running) draggedRequestId.current = item.id; }} onDrop={() => { if (!running) dropRequest(item.id); }}><input aria-label={`Include ${request.name}`} checked={item.enabled} disabled={running} onChange={(event) => setRequestPlan((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, enabled: event.target.checked } : candidate))} type="checkbox" /><span className={`method method-${methodClass}`}>{request.method.toUpperCase()}</span><span className="runner-plan-identity"><button disabled={running || !onOpenRequest} onClick={() => onOpenRequest?.(request.id)} title={`Open ${request.name}`} type="button">{request.name}</button>{ancestorNames.length ? <small title={ancestorNames.join(' / ')}>{ancestorNames.join(' / ')}</small> : null}</span><div><button aria-label={`Move ${request.name} up`} disabled={running || index === 0} onClick={() => moveRequest(item.id, -1)} type="button">↑</button><button aria-label={`Move ${request.name} down`} disabled={running || index === requestPlan.length - 1} onClick={() => moveRequest(item.id, 1)} type="button">↓</button></div></div>;
           })}</fieldset>
-          <div className="runner-number-grid"><label>Iterations<input min="1" max="1000" type="number" value={iterations} onChange={(event) => setIterations(Number(event.target.value))} /></label><label>Retries<input min="0" max="10" type="number" value={retries} onChange={(event) => setRetries(Number(event.target.value))} /></label></div>
-          <label className="runner-toggle"><input checked={bail} onChange={(event) => setBail(event.target.checked)} type="checkbox" /><span>Stop after first exhausted failure</span></label>
+          <div className="runner-number-grid"><label>Iterations<input disabled={running} min="1" max="1000" type="number" value={iterations} onChange={(event) => setIterations(Number(event.target.value))} /></label><label>Retries<input disabled={running} min="0" max="10" type="number" value={retries} onChange={(event) => setRetries(Number(event.target.value))} /></label></div>
+          <label className="runner-toggle"><input checked={bail} disabled={running} onChange={(event) => setBail(event.target.checked)} type="checkbox" /><span>Stop after first exhausted failure</span></label>
           <label className="runner-toggle"><input checked={keepLog} disabled={running} onChange={(event) => setKeepLog(event.target.checked)} type="checkbox" /><span>Keep logs after run</span></label>
-          <label>Delay before each request (ms)<input min="0" max="30000" type="number" value={delayMs} onChange={(event) => setDelayMs(Number(event.target.value))} /></label>
-          <label>Stream sample window (ms)<input min="100" max="30000" type="number" value={streamWindowMs} onChange={(event) => setStreamWindowMs(Number(event.target.value))} /></label>
-          <div className="runner-data-control"><label>Iteration data<textarea aria-label="Runner iteration data" placeholder={'JSON array or CSV\norderId,status\nord_1,open'} value={data} onChange={(event) => { setData(event.target.value); setDataFileName(''); setDataFileEncoding('utf-8'); setDataFileBytesBase64(''); }} /></label><button disabled={running} onClick={() => setShowDataDialog(true)} type="button"><Icon name={dataFileName ? 'history' : 'import'} size={13} /> {dataFileName ? `View data · ${dataFileName}` : 'Upload data'}</button></div>
+          <label>Delay before each request (ms)<input disabled={running} min="0" max="30000" type="number" value={delayMs} onChange={(event) => setDelayMs(Number(event.target.value))} /></label>
+          <label>Stream sample window (ms)<input disabled={running} min="100" max="30000" type="number" value={streamWindowMs} onChange={(event) => setStreamWindowMs(Number(event.target.value))} /></label>
+          <div className="runner-data-control"><label>Iteration data<textarea aria-label="Runner iteration data" disabled={running} placeholder={'JSON array or CSV\norderId,status\nord_1,open'} value={data} onChange={(event) => { setData(event.target.value); setDataFileName(''); setDataFileEncoding('utf-8'); setDataFileBytesBase64(''); }} /></label><button disabled={running} onClick={() => setShowDataDialog(true)} type="button"><Icon name={dataFileName ? 'history' : 'import'} size={13} /> {dataFileName ? `View data · ${dataFileName}` : 'Upload data'}</button></div>
           <p>Dataset values override environment variables for each iteration.</p>
         </aside>
         <div className="runner-results">
