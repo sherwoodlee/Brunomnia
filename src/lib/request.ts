@@ -1,4 +1,4 @@
-import type { ApiRequest, Environment, HttpResponse, KeyValue } from '../types';
+import type { ApiRequest, BodyMode, Environment, HttpResponse, KeyValue } from '../types';
 
 const templatePattern = /{{\s*([^{}]+?)\s*}}/g;
 const methodPattern = /^[!#$%&'*+.^_`|~0-9A-Z-]+$/;
@@ -98,6 +98,33 @@ export const prettyRequestBody = (request: ApiRequest): string => {
   const contentType = request.headers.find((header) => header.enabled && header.name.toLowerCase() === 'content-type')?.value.toLowerCase() ?? '';
   if (request.bodyMode === 'text' && (contentType.includes('xml') || /^\s*<[^>]+>/.test(request.body))) return prettyXml(request.body);
   return request.body;
+};
+
+const withoutContentType = (request: ApiRequest) => request.headers.filter((header) => header.name.toLowerCase() !== 'content-type');
+
+export const requestBodyContentType = (request: ApiRequest): string => request.headers.find(
+  (header) => header.enabled && header.name.toLowerCase() === 'content-type',
+)?.value ?? (request.bodyMode === 'json' ? 'application/json' : request.bodyMode === 'text' ? 'text/plain' : '');
+
+export const changeRequestBodyContentType = (request: ApiRequest, value: string): Partial<ApiRequest> => ({
+  bodyMode: value.toLowerCase().includes('json') ? 'json' : 'text',
+  headers: [{ ...(request.headers.find((header) => header.name.toLowerCase() === 'content-type') ?? { id: `${request.id}-body-content-type`, name: 'Content-Type' }), value, enabled: true }, ...withoutContentType(request)],
+});
+
+export const changeRequestBodyMode = (request: ApiRequest, bodyMode: BodyMode): Partial<ApiRequest> => {
+  if (request.bodyMode === bodyMode) return { bodyMode };
+  const contentTypes: Partial<Record<BodyMode, string>> = {
+    json: 'application/json',
+    text: 'text/plain',
+    'form-urlencoded': 'application/x-www-form-urlencoded',
+    multipart: 'multipart/form-data',
+  };
+  const contentType = contentTypes[bodyMode];
+  if (!contentType) return { bodyMode, headers: withoutContentType(request) };
+  return {
+    bodyMode,
+    headers: [{ ...(request.headers.find((header) => header.name.toLowerCase() === 'content-type') ?? { id: `${request.id}-body-content-type`, name: 'Content-Type' }), value: contentType, enabled: true }, ...withoutContentType(request)],
+  };
 };
 
 export const mockResponse = (): HttpResponse => {

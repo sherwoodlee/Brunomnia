@@ -2063,7 +2063,21 @@ Compatibility bounds remain explicit: `-1` is an iterative no-ceiling redirect m
 
 Compatibility bounds remain explicit: the backoff is bounded in time per attempt but has no attempt ceiling, queued emits are memory-resident for the live session, and no event already handed to the failed transport is replayed. Reconnect reuses the initially rendered values, matching the pinned client's fixed connection options; it does not rerun templates or plugin hooks. The Socket.IO row is Complete; 20 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 139 — remaining parity closure and release hardening
+## Milestone 139 — complete request-body parity (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Raw MIME authoring | Complete | JSON and text bodies now expose an editable MIME control with pinned JSON/XML/YAML/EDN/Plain Text suggestions, arbitrary values, synchronized Content-Type, and mode-safe stale-header replacement |
+| URL-encoded fidelity | Complete | Native and browser paths preserve enabled order, repeated names, empty names, empty values, percent encoding, and disabled-row omission |
+| Multipart row inclusion | Complete | Completely blank enabled rows are skipped like pinned multipart construction, while empty-name rows carrying text or file values remain valid and ordered |
+| Multipart metadata and bytes | Complete | One-line/multiline text MIME, edited file names/types, duplicate names, generated boundaries, and exact binary bytes remain covered by native loopback plus browser/editor/interchange tests |
+| File safety boundary | Complete | Pinned reusable absolute paths are represented by user-approved persisted bytes, preserving the send/export/generation action without ambient future filesystem reads |
+| Cross-surface behavior | Complete | Direct native/browser sends, runners, CLI, scripts/plugins, imports/exports, and generated clients retain the applicable body rendering, ordering, metadata, and exact-byte contract |
+| Documentation and ledger | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), README, and [Milestone 139 verification](QA_MILESTONE_139.md); Request bodies is Complete |
+
+Compatibility bounds remain explicit: browser development's `FormData` cannot attach a custom MIME type to a text part without fabricating file disposition, so only packaged/native and portable generated execution claim that metadata. Approved bytes replace reusable filesystem paths by design. Neither difference omits a packaged Tauri user action. The Request bodies row is Complete; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 140 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

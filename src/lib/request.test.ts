@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRequestUrl, normalizeHttpMethod, prettyRequestBody, resolveTemplate } from './request';
+import { buildRequestUrl, changeRequestBodyContentType, changeRequestBodyMode, normalizeHttpMethod, prettyRequestBody, requestBodyContentType, resolveTemplate } from './request';
 import { createBlankRequest } from '../data/seed';
 
 describe('request templates', () => {
@@ -50,5 +50,26 @@ describe('request templates', () => {
     expect(prettyRequestBody(request)).toBe('<root>\n  <item>one</item>\n</root>');
     request.body = 'leave me alone';
     expect(prettyRequestBody(request)).toBe('leave me alone');
+  });
+
+  it('synchronizes body modes and arbitrary raw MIME types with Content-Type', () => {
+    const request = createBlankRequest('body-content-type');
+    request.headers = [{ id: 'old', name: 'content-type', value: 'application/legacy', enabled: false }];
+
+    Object.assign(request, changeRequestBodyMode(request, 'json'));
+    expect(requestBodyContentType(request)).toBe('application/json');
+    expect(request.headers).toEqual([{ id: 'old', name: 'content-type', value: 'application/json', enabled: true }]);
+
+    Object.assign(request, changeRequestBodyContentType(request, 'application/yaml'));
+    expect(request.bodyMode).toBe('text');
+    expect(requestBodyContentType(request)).toBe('application/yaml');
+    expect(changeRequestBodyMode(request, 'text')).toEqual({ bodyMode: 'text' });
+    Object.assign(request, changeRequestBodyContentType(request, ''));
+    expect(requestBodyContentType(request)).toBe('');
+
+    Object.assign(request, changeRequestBodyMode(request, 'multipart'));
+    expect(request.headers[0].value).toBe('multipart/form-data');
+    Object.assign(request, changeRequestBodyMode(request, 'binary'));
+    expect(request.headers).toEqual([]);
   });
 });

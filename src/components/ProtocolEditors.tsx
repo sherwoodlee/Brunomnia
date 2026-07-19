@@ -17,7 +17,7 @@ import {
   validateGraphqlDocument,
   type GraphqlCompletion,
 } from '../lib/graphql';
-import { prettyRequestBody } from '../lib/request';
+import { changeRequestBodyContentType, changeRequestBodyMode, prettyRequestBody, requestBodyContentType } from '../lib/request';
 import { applyEditorCompletion, applyEditorTab } from '../lib/editorText';
 import { Icon } from './Icon';
 
@@ -155,6 +155,8 @@ const MultipartEditor = lazy(() => import('./MultipartEditor'));
 const FormBodyEditor = lazy(() => import('./MultipartEditor').then((module) => ({ default: module.FormBodyEditor })));
 
 export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onChange: ChangeRequest }) {
+  const rawBody = request.bodyMode === 'json' || request.bodyMode === 'text';
+  const rawContentType = rawBody ? requestBodyContentType(request) : '';
   return (
     <div className="editor-stack body-editor">
       <div className="editor-toolbar body-mode-toolbar">
@@ -164,7 +166,7 @@ export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onC
               aria-selected={request.bodyMode === mode.value}
               className={request.bodyMode === mode.value ? 'active' : ''}
               key={mode.value}
-              onClick={() => onChange({ bodyMode: mode.value })}
+              onClick={() => onChange(changeRequestBodyMode(request, mode.value))}
               role="tab"
               type="button"
             >
@@ -173,6 +175,8 @@ export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onC
           ))}
         </div>
         <div className="body-toolbar-actions">
+          {rawBody ? <label>Content type<input aria-label="Request body content type" list="request-body-content-types" onChange={(event) => onChange(changeRequestBodyContentType(request, event.target.value))} spellCheck={false} value={rawContentType} /></label> : null}
+          <datalist id="request-body-content-types"><option value="application/json" /><option value="application/xml" /><option value="application/yaml" /><option value="application/edn" /><option value="text/plain" /></datalist>
           <label className="inline-toggle"><input checked={request.renderBodyTemplates !== false} onChange={(event) => onChange({ renderBodyTemplates: event.target.checked })} type="checkbox" /> Render body templates</label>
           {request.bodyMode === 'json' || request.bodyMode === 'text' ? <button onClick={() => onChange({ body: prettyRequestBody(request) })} type="button">Beautify</button> : null}
           <small>{request.bodyMode === 'none' ? 'No payload' : 'Native request body'}</small>

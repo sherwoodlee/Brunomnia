@@ -62,12 +62,12 @@ const browserBody = (request: ApiRequest): BodyInit | undefined => {
   if (request.protocol === 'graphql') return serializeGraphqlBody(request, request.graphql.variables);
   if (request.bodyMode === 'form-urlencoded') {
     return new URLSearchParams(request.formBody
-      .filter((row) => row.enabled && row.name)
+      .filter((row) => row.enabled)
       .map((row) => [row.name, row.value]));
   }
   if (request.bodyMode === 'multipart') {
     const body = new FormData();
-    request.multipartBody.filter((part) => part.enabled && part.name).forEach((part) => {
+    request.multipartBody.filter((part) => part.enabled && Boolean(part.name || part.value || part.fileName || part.file?.fileName)).forEach((part) => {
       if (part.kind === 'file' && part.file) {
         const bytes = Uint8Array.from(atob(part.file.dataBase64), (character) => character.charCodeAt(0));
         body.append(part.name, new Blob([bytes], { type: part.contentType || part.file.mimeType }), part.fileName || part.file.fileName);
@@ -85,7 +85,7 @@ const browserBody = (request: ApiRequest): BodyInit | undefined => {
 
 const signingBody = (request: ApiRequest, variables: Record<string, string>) => {
   if (request.protocol === 'graphql') return graphqlBody(request, variables);
-  if (request.bodyMode === 'form-urlencoded') return new URLSearchParams(request.formBody.filter((field) => field.enabled && field.name).map((field) => [field.name, field.value])).toString();
+  if (request.bodyMode === 'form-urlencoded') return new URLSearchParams(request.formBody.filter((field) => field.enabled).map((field) => [field.name, field.value])).toString();
   if (request.bodyMode === 'json' || request.bodyMode === 'text') return request.body;
   return '';
 };

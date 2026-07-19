@@ -179,7 +179,16 @@ fn build_request(
         }
         "multipart" => {
             let mut form = multipart::Form::new();
-            for part in input.multipart_body.iter().filter(|part| part.enabled) {
+            for part in input.multipart_body.iter().filter(|part| {
+                part.enabled
+                    && (!part.name.is_empty()
+                        || !part.value.is_empty()
+                        || !part.file_name.is_empty()
+                        || part
+                            .file
+                            .as_ref()
+                            .is_some_and(|file| !file.file_name.is_empty()))
+            }) {
                 if part.kind == "file" {
                     let file = part
                         .file
@@ -820,6 +829,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sends_ordered_repeated_and_empty_name_urlencoded_fields() {
+        use tokio::{io::AsyncWriteExt, net::TcpListener};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_loopback_request(&mut stream).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+            request
+        });
+
+        let mut input = body_test_input("form-urlencoded");
+        input.url = format!("http://{address}/form");
+        input.form_body = vec![
+            KeyValue {
+                name: "repeat".into(),
+                value: "one".into(),
+                enabled: true,
+            },
+            KeyValue {
+                name: "repeat".into(),
+                value: "two & more".into(),
+                enabled: true,
+            },
+            KeyValue {
+                name: String::new(),
+                value: "nameless".into(),
+                enabled: true,
+            },
+            KeyValue {
+                name: String::new(),
+                value: String::new(),
+                enabled: true,
+            },
+            KeyValue {
+                name: "disabled".into(),
+                value: "omit".into(),
+                enabled: false,
+            },
+        ];
+
+        let response = send(input).await.unwrap();
+        assert_eq!(response.status, 200);
+        let (headers, body) = server.await.unwrap();
+        assert!(headers.lines().any(
+            |line| line.eq_ignore_ascii_case("content-type: application/x-www-form-urlencoded")
+        ));
+        assert_eq!(
+            String::from_utf8(body).unwrap(),
+            "repeat=one&repeat=two+%26+more&=nameless&="
+        );
+    }
+
+    #[tokio::test]
     async fn sends_enabled_multipart_metadata_and_exact_file_bytes() {
         use tokio::{io::AsyncWriteExt, net::TcpListener};
 
@@ -869,6 +936,42 @@ mod tests {
                 content_type: String::new(),
                 file_name: String::new(),
             },
+            MultipartPart {
+                name: String::new(),
+                value: String::new(),
+                enabled: true,
+                kind: "text".into(),
+                file: None,
+                content_type: "application/x-omit".into(),
+                file_name: String::new(),
+            },
+            MultipartPart {
+                name: String::new(),
+                value: "nameless".into(),
+                enabled: true,
+                kind: "text".into(),
+                file: None,
+                content_type: String::new(),
+                file_name: String::new(),
+            },
+            MultipartPart {
+                name: "repeat".into(),
+                value: "first".into(),
+                enabled: true,
+                kind: "text".into(),
+                file: None,
+                content_type: String::new(),
+                file_name: String::new(),
+            },
+            MultipartPart {
+                name: "repeat".into(),
+                value: "second".into(),
+                enabled: true,
+                kind: "text".into(),
+                file: None,
+                content_type: String::new(),
+                file_name: String::new(),
+            },
         ];
 
         let response = send(input).await.unwrap();
@@ -892,6 +995,10 @@ mod tests {
         ));
         assert!(body_text.contains("Content-Type: application/x-custom"));
         assert!(!body_text.contains("disabled"));
+        assert!(!body_text.contains("application/x-omit"));
+        assert!(body_text.contains("Content-Disposition: form-data; name=\"\""));
+        assert!(body_text.contains("nameless"));
+        assert_eq!(body_text.matches("name=\"repeat\"").count(), 2);
         assert!(body.windows(4).any(|window| window == [0, 255, 10, 13]));
     }
 }
