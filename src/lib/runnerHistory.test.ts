@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunnerReport } from '../types';
-import { formatRunnerDuration, runnerReportDurationMs, summarizeRunnerAssertions, summarizeRunnerHistory } from './runnerHistory';
+import { formatRunnerDuration, formatRunnerHistoryTimestamp, runnerReportDurationMs, summarizeRunnerAssertions, summarizeRunnerHistory } from './runnerHistory';
 
 const report = (patch: Partial<RunnerReport> = {}): RunnerReport => ({
   id: 'run',
@@ -24,6 +24,13 @@ const report = (patch: Partial<RunnerReport> = {}): RunnerReport => ({
 });
 
 describe('Runner history presentation', () => {
+  it('formats local timestamps with the pinned fixed field order', () => {
+    const local = new Date(2026, 6, 9, 4, 5, 6);
+    expect(formatRunnerHistoryTimestamp(local)).toBe('2026-07-09 04:05:06');
+    expect(formatRunnerHistoryTimestamp(local.toISOString())).toBe('2026-07-09 04:05:06');
+    expect(formatRunnerHistoryTimestamp('invalid')).toBe('Invalid date');
+  });
+
   it('counts retained assertions rather than request attempts', () => {
     expect(summarizeRunnerHistory(report())).toEqual({ durationMs: 50, duration: '50 ms', total: 4, passed: 2, failed: 1, skipped: 1 });
   });

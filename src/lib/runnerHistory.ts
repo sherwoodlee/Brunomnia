@@ -1,6 +1,14 @@
 import type { RunnerItemResult, RunnerReport } from '../types';
 import { scriptTestStatus } from './scriptTests';
 
+const padTimestampPart = (value: number) => String(value).padStart(2, '0');
+
+export const formatRunnerHistoryTimestamp = (value: string | number | Date) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return 'Invalid date';
+  return `${date.getFullYear()}-${padTimestampPart(date.getMonth() + 1)}-${padTimestampPart(date.getDate())} ${padTimestampPart(date.getHours())}:${padTimestampPart(date.getMinutes())}:${padTimestampPart(date.getSeconds())}`;
+};
+
 export const runnerReportDurationMs = (report: RunnerReport) => {
   if (typeof report.durationMs === 'number' && Number.isFinite(report.durationMs) && report.durationMs >= 0) return report.durationMs;
   const duration = Date.parse(report.finishedAt) - Date.parse(report.startedAt);

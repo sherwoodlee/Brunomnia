@@ -1097,6 +1097,13 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Pointer-captured focusable ARIA separator and static-render regression: [`src/components/RunnerHistoryColumnResizer.tsx`](../src/components/RunnerHistoryColumnResizer.tsx) and [`src/components/RunnerHistoryColumnResizer.test.tsx`](../src/components/RunnerHistoryColumnResizer.test.tsx)
 - CSS-grid width integration, horizontal overflow, account-free documentation, and exact verification record: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx), [`src/styles.css`](../src/styles.css), [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md), and [`docs/QA_MILESTONE_197.md`](QA_MILESTONE_197.md)
 
+## Milestone 198 acceptance evidence
+
+- Pinned date-fns fixed local timestamp and Source-tooltip audit: [`docs/QA_MILESTONE_198.md`](QA_MILESTONE_198.md)
+- Shared zero-padded local timestamp formatter with focused Date/ISO/invalid regressions: [`src/lib/runnerHistory.ts`](../src/lib/runnerHistory.ts) and [`src/lib/runnerHistory.test.ts`](../src/lib/runnerHistory.test.ts)
+- Identical History row, tooltip, and guarded delete-label integration: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx)
+- Updated account-free History documentation and exact verification record: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md) and [`docs/QA_MILESTONE_198.md`](QA_MILESTONE_198.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).
