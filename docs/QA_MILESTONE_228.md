@@ -36,6 +36,16 @@ The full native suite ran with loopback access because unrelated HTTP, streaming
 
 The local browser restriction still prevents a rendered interaction claim. Deterministic frontend transport fixtures and a real disposable STDIO child prove the cancellation lifecycle; no external MCP credentials or server are required.
 
+## Remote gate
+
+Main commit `d1ee8bc997f7c282692e396367398d307706e24a` completed verify and publish in [Actions run 29708689281](https://github.com/sherwoodlee/Brunomnia/actions/runs/29708689281). Node 22 rebuilt the generated CLI, passed its freshness check, and ran the non-root read-only smoke with `--network none`, standalone suites, and explicitly granted TypeScript config/plugin tags. The publish job produced signed AMD64/ARM64 provenance/SBOM manifests at:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:f5a1e0e7dbd186966cb4108eeb63768fd35bc6f494606075e5eb89b8f8c4cd2e
+```
+
+Independent `cosign verify` passed issuer `https://token.actions.githubusercontent.com` and the exact `cli-container.yml@refs/heads/main` identity, validated the M228 commit and digest claims plus the trusted certificate chain, and found transparency-log entry `2204514896`.
+
 ## Acceptance boundary
 
 M228 closes active HTTP and fresh-process STDIO discovery/invocation cancellation. Recursive/conditional schema forms, long-lived streaming, persistent-session cancellation/reconnect semantics, elicitation and reviewed sampling UI, notification response UI, persistent STDIO sessions, multiple authorization-server failover, DPoP, live third-party fixtures, and OS-keychain-wrapped runtime credentials remain. MCP clients stay `Baseline`; exactly 19 parity rows remain incomplete, so Brunomnia is not feature-complete.

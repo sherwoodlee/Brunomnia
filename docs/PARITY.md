@@ -1304,6 +1304,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Abort-aware HTTP discovery/invocation with detached session/request-aware cancellation notifications and focused transport fixtures: [`src/lib/mcp.ts`](../src/lib/mcp.ts), [`src/lib/mcp.test.ts`](../src/lib/mcp.test.ts), and [`src/lib/mcpOAuth.test.ts`](../src/lib/mcpOAuth.test.ts)
 - Race-safe bounded native cancellation registration, protocol notification, child termination, reader cleanup, and live-process regression: [`src-tauri/src/mcp_stdio.rs`](../src-tauri/src/mcp_stdio.rs) and [`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs)
 - Visible cancel action, unmount cleanup, retained cancellation evidence, full regression/native/build gates, and exact verification record: [`src/components/IntegrationWorkbench.tsx`](../src/components/IntegrationWorkbench.tsx), [`docs/MCP_AI_KONNECT.md`](MCP_AI_KONNECT.md), and [`docs/QA_MILESTONE_228.md`](QA_MILESTONE_228.md)
+- Successful remote Node 22 rebuild/no-network smoke, signed AMD64/ARM64 publication, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_228.md`](QA_MILESTONE_228.md)
 
 ## Parity declaration rule
 
