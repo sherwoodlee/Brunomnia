@@ -2351,7 +2351,21 @@ Compatibility bounds remain explicit: this milestone changes document navigation
 
 Compatibility bounds remain explicit: this milestone changes mock navigation, not the existing local mock engine's named Liquid/Faker/AI/hosting bounds. Pinned hosted/self-host deployment workflows and exact runtime identity remain outside Brunomnia's local-only baseline. Test-suite resources still do not participate in the shared strip, collection workspaces remain represented by request/folder documents, and raw-JSON environment editing remains. Collections and Mock servers stay `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 161 — remaining parity closure and release hardening
+## Milestone 161 — collection workspace document tabs (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned workspace audit | Complete | Pinned `inferTabType` returns `collection` for an ordinary request workspace, distinct from design/environment/mock scopes, and builds its tab from workspace ID/name through ordinary navigation |
+| Local identity mapping | Complete baseline | Every Brunomnia collection ID is a valid `collection` document reference; this adapts the project's multi-collection local model without inventing upstream workspace records |
+| Shared lifecycle | Complete | Collection documents coexist with all prior types and share temporary replacement/promotion, active history, cycling, drag order, middle/final/all/other close, reopen, persistence, and dashboard behavior |
+| Embedded configuration | Complete baseline | The previous modal is a full collection document with name, base/selected sub-environment variables, add/select/rename/delete environment actions, and Markdown documentation/preview |
+| Entry paths | Complete | New collection creation opens its document, sidebar Configure and dashboard cards open or activate it, and empty collections are navigable without requiring a placeholder request |
+| Request continuity | Complete | Collection request/folder resources remain independent tabs and sidebar targets; generated collections still open their first generated request, preserving M159's source-to-request handoff |
+| Executable evidence | Complete baseline | Focused typed-tab/resource regressions, strict React/TypeScript compilation, full frontend/native suites, CLI/audit gates, and a rebuilt macOS app verify the milestone without rendered Browser QA |
+
+Compatibility bounds remain explicit: pinned ordinary workspaces contain the request tree itself, while Brunomnia's collection document intentionally exposes collection-level configuration and keeps request/folder editors as separate resources in the same strip. Standalone test-suite documents and raw-JSON environment editing remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 162 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -406,6 +406,7 @@ kbd {
 .folder-document-panel > header h2 { font-size: 17px; margin: 4px 0 0; }
 .folder-document-panel > header button { align-items: center; display: flex; font-size: 9px; gap: 6px; padding: 8px 10px; }
 .folder-document-panel > header > div:last-child { display: flex; gap: 7px; }
+.collection-document-summary { color: var(--muted); font: 8px var(--font-mono); }
 .folder-document-panel > .folder-identity { padding-top: 12px; }
 .folder-document-panel > .interchange-tabs { flex: 0 0 auto; }
 .folder-document-panel > .folder-modal-content { flex: 1 1 auto; }

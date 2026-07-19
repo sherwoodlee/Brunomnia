@@ -163,4 +163,10 @@ describe('request document tabs', () => {
       activeRequestId: 'mock_server', history: [], closed: [], dashboard: false,
     });
   });
+
+  it('persists collection workspace documents', () => {
+    const state = openDocumentTab(emptyRequestTabState(), 'collection_one', 'collection');
+    expect(parseRequestTabState(JSON.stringify(state)).tabs).toEqual([{ requestId: 'collection_one', type: 'collection', temporary: true }]);
+    expect(reopenClosedDocumentTab(closeRequestTab(state, 'collection_one'), [{ id: 'collection_one', type: 'collection' }]).tabs).toEqual([{ requestId: 'collection_one', type: 'collection', temporary: false }]);
+  });
 });
