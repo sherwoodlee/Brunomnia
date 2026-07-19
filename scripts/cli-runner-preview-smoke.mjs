@@ -96,7 +96,13 @@ try {
   }));
   await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
   await writeFile(join(temporary, 'environments', 'preview.yaml'), stringify(environment));
-  await writeFile(join(temporary, '.insorc'), stringify({ options: { workingDir: temporary, ci: true, verbose: true, printOptions: false }, scripts: { preview: `inso run collection ${collection.id}` } }));
+  await writeFile(join(temporary, '.insorc'), stringify({
+    options: { workingDir: temporary, ci: true, verbose: true, printOptions: false },
+    scripts: {
+      preview: `inso run collection ${collection.id} --item request-first --env-var row=script --env-var region=script --reporter json`,
+      invalid: 'echo unsafe',
+    },
+  }));
 
   const output = await run([
     'run', 'collection', collection.id, '--config', join(temporary, '.insorc'),
@@ -182,7 +188,15 @@ try {
   const missingConfig = await runFailure(['run', 'collection', collection.id, '--config', join(temporary, 'missing.insorc')]);
   assert.equal(missingConfig.code, 1);
   assert.match(missingConfig.stderr, /Could not find config file/);
-  console.log('CLI runner preview smoke passed: config, CI fallback, working directory, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  const scriptOutput = JSON.parse(await run(['script', '--config', join(temporary, '.insorc'), 'preview', '--requestTimeout', '500']));
+  assert.deepEqual(scriptOutput.report.results.map((result) => [result.requestId, result.status]), [['request-first', 200]]);
+  const invalidScript = await runFailure(['script', '--config', join(temporary, '.insorc'), 'invalid']);
+  assert.equal(invalidScript.code, 1);
+  assert.match(invalidScript.stderr, /start with `inso`/);
+  const missingScript = await runFailure(['script', '--config', join(temporary, '.insorc'), 'missing']);
+  assert.equal(missingScript.code, 1);
+  assert.match(missingScript.stderr, /Available scripts: preview, invalid/);
+  console.log('CLI runner preview smoke passed: config scripts, config, CI fallback, working directory, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });

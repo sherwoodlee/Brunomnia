@@ -1,4 +1,5 @@
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import vm from 'node:vm';
@@ -24,7 +25,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
-import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, type RunnerInsoConfig } from '../src/lib/runnerCli';
+import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, type RunnerInsoConfig } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -117,6 +118,17 @@ const loadRunnerConfig = async (configPath: string | undefined, searchStart: str
   }
   return findRunnerConfig(searchStart ?? process.cwd());
 };
+const runCliChild = (childArgs: string[]) => new Promise<number>((resolveChild, rejectChild) => {
+  const depth = Math.max(0, Number.parseInt(process.env.BRUNOMNIA_SCRIPT_DEPTH ?? '0', 10) || 0);
+  if (depth >= 10) throw new Error('Inso script recursion exceeds 10 nested invocations.');
+  const child = spawn(process.execPath, [process.argv[1], ...childArgs], {
+    cwd: process.cwd(),
+    env: { ...process.env, BRUNOMNIA_SCRIPT_DEPTH: String(depth + 1) },
+    stdio: 'inherit',
+  });
+  child.on('error', rejectChild);
+  child.on('close', (code) => resolveChild(code ?? 1));
+});
 
 const expectApi = createScriptExpect();
 
@@ -598,6 +610,7 @@ const usage = `Brunomnia CLI
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
   brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
   brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [--requestTimeout MS] [same options except --item/--env-var/--delay-request]
+  brunomnia script <name> [arguments...] [--config <path>]
 
 Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the collection, suite, or API-spec identifier positionally.
 Config: --config <path> or discovered .insorc/.json/.yaml/.yml/package.json supports workingDir, ci, verbose, printOptions, and bounded script definitions.
@@ -636,6 +649,30 @@ const main = async () => {
     const output = flag('--output');
     if (output) { await writeFile(output, design.contents); console.log(`Exported ${output}`); }
     else console.log(design.contents);
+    return;
+  }
+
+  if (command === 'script') {
+    const positionals = runnerCliPositionalArguments(args.slice(1));
+    const scriptName = positionals[0] ?? fail('Provide an Inso script name.');
+    const cliWorkingDir = firstFlag('--workingDir', '--working-dir', '-w');
+    const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
+    const task = config.scripts[scriptName];
+    if (!task) fail(`Could not find inso script "${scriptName}" in the config file. Available scripts: ${Object.keys(config.scripts).join(', ') || 'none'}.`);
+    const taskArgs = parseRunnerInsoScript(task);
+    const scriptNameIndex = args.indexOf(scriptName, 1);
+    const passThroughArgs = args.slice(scriptNameIndex + 1).flatMap((value, index, values) => {
+      if (['--config', '--workingDir', '--working-dir', '-w'].includes(value)) return [];
+      if (index > 0 && ['--config', '--workingDir', '--working-dir', '-w'].includes(values[index - 1])) return [];
+      if (['--ci', '--verbose', '--printOptions', '--print-options'].includes(value)) return [];
+      return [value];
+    });
+    if (config.filePath && !taskArgs.includes('--config')) taskArgs.push('--config', config.filePath);
+    if (cliWorkingDir && !taskArgs.some((value) => ['--workingDir', '--working-dir', '-w'].includes(value))) taskArgs.push('--workingDir', cliWorkingDir);
+    if (hasFlag('--ci') && !taskArgs.includes('--ci')) taskArgs.push('--ci');
+    if (hasFlag('--verbose') && !taskArgs.includes('--verbose')) taskArgs.push('--verbose');
+    const code = await runCliChild([...taskArgs, ...passThroughArgs]);
+    process.exitCode = code;
     return;
   }
 

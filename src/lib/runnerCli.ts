@@ -60,6 +60,46 @@ export const normalizeRunnerInsoConfig = (value: unknown): RunnerInsoConfig => {
   return { options, scripts };
 };
 
+export const parseRunnerInsoScript = (command: string) => {
+  if (command.length > 10_000) throw new Error('Inso script exceeds 10,000 characters.');
+  const tokens: string[] = [];
+  let current = '';
+  let quote = '';
+  let escaped = false;
+  let started = false;
+  for (const character of command) {
+    if (escaped) {
+      current += character;
+      escaped = false;
+      started = true;
+    } else if (character === '\\' && quote !== "'") {
+      escaped = true;
+      started = true;
+    } else if (quote) {
+      if (character === quote) quote = '';
+      else current += character;
+      started = true;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+      started = true;
+    } else if (/\s/.test(character)) {
+      if (started) {
+        tokens.push(current);
+        current = '';
+        started = false;
+      }
+    } else {
+      current += character;
+      started = true;
+    }
+  }
+  if (escaped || quote) throw new Error('Inso script contains an unterminated quote or escape.');
+  if (started) tokens.push(current);
+  if (tokens[0] !== 'inso') throw new Error('Tasks in a script should start with `inso`.');
+  if (tokens.length < 2) throw new Error('Inso script does not contain a command.');
+  return tokens.slice(1);
+};
+
 const shellSafeToken = /^[A-Za-z0-9_@%+=:,./-]+$/;
 
 export const quotePosixShellArgument = (value: string) => {

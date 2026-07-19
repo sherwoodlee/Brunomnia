@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
+import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
 
 describe('Runner CLI command preview', () => {
   it('preserves selected request order and every execution control', () => {
@@ -117,5 +117,15 @@ describe('Runner CLI command preview', () => {
     const bounded = normalizeRunnerInsoConfig({ scripts: Object.fromEntries(Array.from({ length: 102 }, (_, index) => [`script-${index}`, 'inso run test'])) });
     expect(Object.keys(bounded.scripts)).toHaveLength(100);
     expect(normalizeRunnerInsoConfig({ scripts: { ['x'.repeat(201)]: 'inso run test', valid: 'x'.repeat(10_001) } }).scripts).toEqual({});
+  });
+
+  it('tokenizes pinned config scripts without invoking a shell', () => {
+    expect(parseRunnerInsoScript(`inso run test "Contract suite" --testNamePattern '^Status \\d+$' --env "Local env"`)).toEqual([
+      'run', 'test', 'Contract suite', '--testNamePattern', '^Status \\d+$', '--env', 'Local env',
+    ]);
+    expect(parseRunnerInsoScript(`inso run collection '' --item 'request one'`)).toEqual(['run', 'collection', '', '--item', 'request one']);
+    expect(() => parseRunnerInsoScript('echo unsafe')).toThrow(/start with `inso`/);
+    expect(() => parseRunnerInsoScript('inso run "unterminated')).toThrow(/unterminated/);
+    expect(() => parseRunnerInsoScript('inso')).toThrow(/does not contain a command/);
   });
 });
