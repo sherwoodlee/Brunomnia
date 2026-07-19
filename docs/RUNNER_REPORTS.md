@@ -14,6 +14,8 @@ The optional 0–30,000 ms delay runs after an item becomes active but before ea
 
 Select a result row with the pointer, Enter, or Space to open its response snapshot. Successful attempts show status text, duration, original response size, retained headers, and a text body preview. Failed attempts that never received a response show the runner or transport error instead.
 
+The same attempt pane lists every retained script assertion before the request and response snapshots. Each row shows PASS or FAIL, the assertion name, and its recorded error text; attempts without assertions and failed assertions without retained error text have explicit states. Saved assertions do not contain upstream category or per-assertion execution-time fields, so Brunomnia does not fabricate them. The list works for active, latest, and reopened historical results because it reads the saved attempt evidence directly.
+
 The Results toolbar can show All, Passed, Failed, or Skipped attempts and filter by request name/URL, status/error text, or assertion name/error. Filters apply equally to the live run, the last run, and reopened history without changing aggregate counters, saved reports, Console evidence, or exports. Canceled attempts appear under Failed because pinned Runner exposes the same four result categories.
 
 Snapshots are intentionally bounded device-local evidence, not a second full response archive:

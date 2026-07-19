@@ -1195,6 +1195,20 @@ kbd {
 .runner-response-detail > header strong { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runner-response-detail button { background: transparent; border: 1px solid var(--border); border-radius: 3px; color: var(--muted); font-size: 8px; padding: 5px 8px; }
 .runner-response-detail > p { color: var(--muted); font-size: 10px; margin: 18px; }
+.runner-assertion-evidence { border-bottom: 1px solid var(--border-soft); padding: 12px 16px; }
+.runner-assertion-evidence > header { align-items: baseline; display: flex; gap: 10px; justify-content: space-between; }
+.runner-assertion-evidence > header small, .runner-assertion-list article small { color: var(--muted); font-size: 8px; }
+.runner-assertion-evidence > header small { letter-spacing: .06em; text-transform: uppercase; }
+.runner-assertion-evidence > header strong { color: var(--text-soft); font: 9px var(--font-mono); }
+.runner-assertion-evidence > p { color: var(--muted); font-size: 9px; margin: 10px 0 0; }
+.runner-assertion-list { display: grid; gap: 6px; margin-top: 10px; }
+.runner-assertion-list article { align-items: start; background: var(--panel-soft); border: 1px solid var(--border-soft); border-radius: 3px; display: grid; gap: 10px; grid-template-columns: 42px minmax(0, 1fr); padding: 8px 10px; }
+.runner-assertion-list article > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.runner-assertion-list article strong { color: var(--text-soft); font-size: 9px; }
+.runner-assertion-list pre { color: var(--red); font: 9px/1.5 var(--font-mono); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.runner-assertion-status { font: 700 8px var(--font-mono); letter-spacing: .04em; padding-top: 1px; }
+.runner-assertion-list article.passed .runner-assertion-status { color: var(--mint); }
+.runner-assertion-list article.failed .runner-assertion-status { color: var(--red); }
 .runner-request-content { background: var(--panel-soft); border-bottom: 1px solid var(--border-soft); display: grid; gap: 10px; grid-template-columns: minmax(260px, 1.2fr) minmax(180px, .7fr) minmax(220px, .8fr); padding: 12px 16px; }
 .runner-request-content > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .runner-request-content small { color: var(--muted); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
