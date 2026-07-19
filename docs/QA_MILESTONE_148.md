@@ -45,3 +45,5 @@ Rendered interaction and assistive-technology QA are omitted by standing directi
 ## Acceptance boundary
 
 Milestone 148 accepts persistent temporary/permanent request document tabs, active history, close/reopen, keyboard cycling, and drag order. The final-tab dashboard difference and broader non-request tab types remain explicit adaptations. Multi-select/bulk actions, richer collected data, explicit legacy response-only labeling, richer libcurl-style header/text timeline evidence, and arbitrary mixed-order third-party exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 149.
+
+Milestone 153 later adds the pinned Close Other Tabs action through a per-tab right-click menu. True Close All remains coupled to the still-missing project-dashboard route because Brunomnia's request workbench deliberately retains one request tab.

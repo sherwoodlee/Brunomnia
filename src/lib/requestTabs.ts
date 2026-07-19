@@ -129,6 +129,19 @@ export const closeRequestTab = (state: RequestTabState, requestId: string): Requ
   };
 };
 
+export const closeOtherRequestTabs = (state: RequestTabState, requestId: string): RequestTabState => {
+  const reserved = state.tabs.find((tab) => tab.requestId === requestId);
+  if (!reserved || state.tabs.length <= 1) return state;
+  const closingIds = state.tabs.filter((tab) => tab.requestId !== requestId).map((tab) => tab.requestId);
+  const closing = new Set(closingIds);
+  return {
+    tabs: [reserved],
+    activeRequestId: requestId,
+    history: [],
+    closed: [...state.closed.filter((id) => id !== requestId && !closing.has(id)), ...closingIds].slice(-MAX_CLOSED_TABS),
+  };
+};
+
 export const reopenClosedRequestTab = (state: RequestTabState, validRequestIds: string[]): RequestTabState => {
   const validIds = new Set(validRequestIds);
   const requestId = [...state.closed].reverse().find((id) => validIds.has(id) && !state.tabs.some((tab) => tab.requestId === id));

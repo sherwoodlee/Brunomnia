@@ -2245,7 +2245,19 @@ Compatibility bounds remain explicit: Brunomnia still lacks persisted raw duplic
 
 Compatibility bounds remain explicit: this milestone guarantees arbitrary mixed sibling order for Brunomnia's supported hierarchical Insomnia v4/v5 adapters, not a fictional universal hierarchy in flat HAR, raw OpenAPI, or formats Brunomnia does not export. Existing binary/external-file/script/protocol downgrade warnings remain. Import and export formats stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 153 — remaining parity closure and release hardening
+## Milestone 153 — request-tab Close Other Tabs (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned action audit | Complete | Pinned `tab-list.tsx` exposes only `Close All` and `Close Other Tabs`; `closeOtherTabs` reserves the selected tab, batch-closes every other tab, and activates/navigates the reserved tab when necessary |
+| Pure state mutation | Complete | Brunomnia retains the selected temporary/permanent tab unchanged, makes it active, clears stale active history, appends every removed ID to bounded closed-tab history, and rejects missing/single-tab operations |
+| Discoverable control | Complete baseline | Right-clicking any request tab or pressing Shift+F10/Menu on its focusable tab opens a labeled menu; outside pointer input or Escape dismisses it, and the action disables when no other tab exists |
+| Reopen continuity | Complete | Closed IDs use the existing newest-valid reopen path, while the reserved tab is removed from closed history and never duplicated |
+| Executable evidence | Complete baseline | Focused lifecycle tests, strict React/TypeScript compilation, full frontend/native suites, CLI/audit gates, and a rebuilt macOS app verify the milestone without rendered Browser QA |
+
+Compatibility bounds remain explicit: pinned Close All empties the tab list and navigates to the project dashboard. Brunomnia does not yet have that project-dashboard route and deliberately retains one request-workbench tab, so it does not relabel Close Others as Close All. Broader folder/environment/mock/spec/runner tabs and true Close All remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 154 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

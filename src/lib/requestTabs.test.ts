@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { closeRequestTab, cycleRequestTab, emptyRequestTabState, moveRequestTab, openRequestTab, parseRequestTabState, promoteRequestTab, reconcileRequestTabState, reopenClosedRequestTab } from './requestTabs';
+import { closeOtherRequestTabs, closeRequestTab, cycleRequestTab, emptyRequestTabState, moveRequestTab, openRequestTab, parseRequestTabState, promoteRequestTab, reconcileRequestTabState, reopenClosedRequestTab } from './requestTabs';
 
 describe('request document tabs', () => {
   it('parses bounded unique tabs and only one temporary tab', () => {
@@ -47,6 +47,16 @@ describe('request document tabs', () => {
     const moved = moveRequestTab(state, 'second', 'third', 'after');
     expect(moved.tabs.map((tab) => tab.requestId)).toEqual(['first', 'third', 'second']);
     expect(moved.tabs.at(-1)?.temporary).toBe(true);
+  });
+
+  it('closes every other tab and activates the reserved tab', () => {
+    let state = openRequestTab(emptyRequestTabState(), 'first', true);
+    state = openRequestTab(state, 'second');
+    state = openRequestTab(state, 'third', true);
+    const closed = closeOtherRequestTabs(state, 'second');
+    expect(closed).toEqual({ tabs: [{ requestId: 'second', temporary: true }], activeRequestId: 'second', history: [], closed: ['first', 'third'] });
+    expect(closeOtherRequestTabs(closed, 'missing')).toBe(closed);
+    expect(closeOtherRequestTabs(closed, 'second')).toBe(closed);
   });
 
   it('reconciles deleted tabs, history, closed IDs, and a fallback request', () => {

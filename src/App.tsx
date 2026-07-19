@@ -21,7 +21,7 @@ import type { WorkspaceEnvironmentMove, WorkspaceResourceKeyboardAction, Workspa
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
 import { parsePinnedRequestIds, pinnedWorkspaceRequests, reconcilePinnedRequestIds, togglePinnedRequestId } from './lib/requestPins';
-import { closeRequestTab, cycleRequestTab, emptyRequestTabState, moveRequestTab, openRequestTab, parseRequestTabState, promoteRequestTab, reconcileRequestTabState, reopenClosedRequestTab } from './lib/requestTabs';
+import { closeOtherRequestTabs, closeRequestTab, cycleRequestTab, emptyRequestTabState, moveRequestTab, openRequestTab, parseRequestTabState, promoteRequestTab, reconcileRequestTabState, reopenClosedRequestTab } from './lib/requestTabs';
 import type { RequestTabPlacement, RequestTabState } from './lib/requestTabs';
 import type { AppliedResponseMockTarget } from './lib/mockRouteFromResponse';
 import type { OAuthAuthorizationStatus } from './components/OAuthAuthorizationDialog';
@@ -603,6 +603,7 @@ type RequestPanelProps = {
   onSocketIoListenerToggle: (eventName: string, enabled: boolean) => void;
   onAddRequest: () => void;
   onCloseDocumentTab: (requestId: string) => void;
+  onCloseOtherDocumentTabs: (requestId: string) => void;
   onGenerateCode: () => void;
   onMoveDocumentTab: (requestId: string, targetRequestId: string, placement: RequestTabPlacement) => void;
   onPromoteDocumentTab: (requestId: string) => void;
@@ -637,6 +638,7 @@ function RequestPanel({
   onSocketIoListenerToggle,
   onAddRequest,
   onCloseDocumentTab,
+  onCloseOtherDocumentTabs,
   onGenerateCode,
   onMoveDocumentTab,
   onPromoteDocumentTab,
@@ -661,6 +663,7 @@ function RequestPanel({
   const documentDragRef = useRef<string | undefined>(undefined);
   const [draggedDocumentId, setDraggedDocumentId] = useState('');
   const [documentDrop, setDocumentDrop] = useState<{ id: string; placement: RequestTabPlacement }>();
+  const [documentMenu, setDocumentMenu] = useState<{ requestId: string; left: number; top: number }>();
   const streamProtocol = isStreamingRequest(request);
   const changeHeaders = (headers: KeyValue[]) => onChange({
     headers,
@@ -695,13 +698,31 @@ function RequestPanel({
       clearDocumentDrag();
     }
   };
+  const openDocumentMenu = (requestId: string, left: number, top: number) => setDocumentMenu({
+    requestId,
+    left: Math.max(4, Math.min(left, window.innerWidth - 190)),
+    top: Math.max(4, Math.min(top, window.innerHeight - 52)),
+  });
+  useEffect(() => {
+    if (!documentMenu) return;
+    const closeMenu = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.document-tab-menu')) setDocumentMenu(undefined);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setDocumentMenu(undefined); };
+    window.addEventListener('pointerdown', closeMenu);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', closeMenu);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [documentMenu]);
   return (
     <section className="request-panel">
       <div className="document-tabs">
         <div aria-label="Open request tabs" className="document-tab-list" role="tablist">{documentTabs.map((document) => {
           const activeDocument = document.request.id === request.id;
           const dropClass = documentDrop?.id === document.request.id ? ` drop-${documentDrop.placement}` : '';
-          return <div aria-selected={activeDocument} className={`document-tab${activeDocument ? ' active' : ''}${document.temporary ? ' temporary' : ''}${draggedDocumentId === document.request.id ? ' is-dragging' : ''}${dropClass}`} draggable key={document.request.id} onClick={() => onSelectDocumentTab(document.request.id)} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('button,input')) onPromoteDocumentTab(document.request.id); }} onDragEnd={clearDocumentDrag} onDragOver={(event) => dropOnDocument(event, document.request.id, false)} onDragStart={(event) => beginDocumentDrag(event, document.request.id)} onDrop={(event) => dropOnDocument(event, document.request.id, true)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) onSelectDocumentTab(document.request.id); }} role="tab" tabIndex={0} title={document.temporary ? 'Temporary tab · Double-click to keep open' : document.request.name}>
+          return <div aria-haspopup="menu" aria-selected={activeDocument} className={`document-tab${activeDocument ? ' active' : ''}${document.temporary ? ' temporary' : ''}${draggedDocumentId === document.request.id ? ' is-dragging' : ''}${dropClass}`} draggable key={document.request.id} onClick={() => onSelectDocumentTab(document.request.id)} onContextMenu={(event) => { event.preventDefault(); openDocumentMenu(document.request.id, event.clientX, event.clientY); }} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('button,input')) onPromoteDocumentTab(document.request.id); }} onDragEnd={clearDocumentDrag} onDragOver={(event) => dropOnDocument(event, document.request.id, false)} onDragStart={(event) => beginDocumentDrag(event, document.request.id)} onDrop={(event) => dropOnDocument(event, document.request.id, true)} onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') onSelectDocumentTab(document.request.id); else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); openDocumentMenu(document.request.id, bounds.left, bounds.bottom); } }} role="tab" tabIndex={0} title={document.temporary ? 'Temporary tab · Double-click to keep open' : document.request.name}>
             <span className={`method method-${methodClass(document.request.method)} protocol-${document.request.protocol}`}>{protocolLabel(document.request)}</span>
             {activeDocument ? <input aria-label="Request name" onChange={(event) => onChange({ name: event.target.value })} onClick={(event) => event.stopPropagation()} spellCheck={false} value={request.name} /> : <span className="document-tab-name">{document.request.name}</span>}
             {document.temporary ? <button aria-label={`Keep ${document.request.name} tab open`} onClick={(event) => { event.stopPropagation(); onPromoteDocumentTab(document.request.id); }} title="Keep tab open" type="button"><Icon name="check" size={11} /></button> : null}
@@ -709,6 +730,7 @@ function RequestPanel({
             <button aria-label={`Close ${document.request.name}`} disabled={documentTabs.length <= 1} onClick={(event) => { event.stopPropagation(); onCloseDocumentTab(document.request.id); }} title={documentTabs.length <= 1 ? 'The request workbench keeps one tab open' : 'Close tab'} type="button"><Icon name="x" size={12} /></button>
           </div>;
         })}</div>
+        {documentMenu ? <div className="document-tab-menu" role="menu" style={{ left: documentMenu.left, top: documentMenu.top }}><button disabled={documentTabs.length <= 1} onClick={() => { onCloseOtherDocumentTabs(documentMenu.requestId); setDocumentMenu(undefined); }} role="menuitem" type="button">Close other tabs</button></div> : null}
         <select aria-label="Request folder" className="request-folder-select" onChange={(event) => onChange({ folderId: event.target.value })} value={request.folderId ?? ''}><option value="">Collection root</option>{(collection.folders ?? []).map((folder) => <option key={folder.id} value={folder.id}>{folderPath(collection, folder.id)}</option>)}</select>
         <button aria-label="Reopen closed request tab" className="tab-plus" disabled={!canReopenDocumentTab} onClick={onReopenDocumentTab} title="Reopen closed tab · Command/Ctrl+Shift+T" type="button"><Icon name="history" size={15} /></button>
         <button aria-label="New request" className="tab-plus" onClick={onAddRequest} type="button"><Icon name="plus" size={16} /></button>
@@ -1635,6 +1657,10 @@ export default function App() {
 
   const closeRequestDocument = (requestId: string) => {
     applyRequestDocumentState(closeRequestTab(activeRequestDocumentState, requestId));
+  };
+
+  const closeOtherRequestDocuments = (requestId: string) => {
+    applyRequestDocumentState(closeOtherRequestTabs(activeRequestDocumentState, requestId));
   };
 
   const reopenRequestDocument = () => {
@@ -2735,6 +2761,7 @@ export default function App() {
             onAddRequest={addRequest}
             onCancelScheduled={cancelScheduledSends}
             onCloseDocumentTab={closeRequestDocument}
+            onCloseOtherDocumentTabs={closeOtherRequestDocuments}
             onGenerateCode={() => setShowCodeGeneration(true)}
             onMoveDocumentTab={reorderRequestDocument}
             onPromoteDocumentTab={promoteRequestDocument}
