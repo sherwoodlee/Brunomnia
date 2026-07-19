@@ -10,6 +10,7 @@ import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resource
 import { hydrateScriptFileReferences, prepareScriptSubrequest, type ScriptFileBudget, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 import { createScriptExpect } from '../src/lib/scriptExpect';
 import { createScriptModules } from '../src/lib/scriptModules';
+import { applyWorkspaceCertificates } from '../src/lib/certificates';
 import { resolveCertificateValidation, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from '../src/lib/transport';
 import { migrateWorkspace } from '../src/lib/storage';
 
@@ -205,18 +206,24 @@ const runNodeScript = async (
     else if (input.host) request.transport.proxyUrl = `${String(input.protocol ?? 'http')}://${String(input.host)}${input.port ? `:${String(input.port)}` : ''}`;
     request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(',') : String(input.exclusions ?? request.transport.proxyExclusions);
   } };
-  const certificateApi = requestWithHelpers.certificate = { key: { src: '' }, cert: { src: '' }, pfx: { src: '' }, passphrase: '', update: (input) => {
-    removeFileReferences('certificate-cert', 'certificate-key');
-    if (input.disabled === true) { request.transport.clientCertificatePem = ''; request.transport.clientKeyPem = ''; request.transport.clientCertificateDomains = ''; certificateApi.key.src = ''; certificateApi.cert.src = ''; certificateApi.pfx.src = ''; return; }
+  const certificateApi = requestWithHelpers.certificate = { key: { src: '' }, cert: { src: '' }, pfx: { src: '' }, passphrase: request.transport.clientCertificatePassphrase || '', update: (input) => {
+    removeFileReferences('certificate-cert', 'certificate-key', 'certificate-pfx');
+    if (input.disabled === true) { request.transport.clientCertificatePem = ''; request.transport.clientKeyPem = ''; request.transport.clientCertificatePfxBase64 = ''; request.transport.clientCertificatePassphrase = ''; request.transport.clientCertificateDomains = ''; certificateApi.key.src = ''; certificateApi.cert.src = ''; certificateApi.pfx.src = ''; certificateApi.passphrase = ''; return; }
     const key = input.key as Record<string, unknown> | undefined;
     const cert = input.cert as Record<string, unknown> | undefined;
-    const pfx = input.pfx as Record<string, unknown> | undefined;
-    if (pfx?.src || input.pfxPath) throw new Error('PFX certificate files are not supported by the native PEM transport.');
+    const pfx = input.pfx && typeof input.pfx === 'object' ? input.pfx as Record<string, unknown> : undefined;
     const certPath = input.certPath ?? cert?.src; const keyPath = input.keyPath ?? key?.src;
-    if (certPath) { certificateApi.cert.src = addFileReference({ kind: 'certificate-cert', path: String(certPath) }); request.transport.clientCertificatePem = ''; }
-    else request.transport.clientCertificatePem = String(cert?.pem ?? input.cert ?? input.certificate ?? '');
-    if (keyPath) { certificateApi.key.src = addFileReference({ kind: 'certificate-key', path: String(keyPath) }); request.transport.clientKeyPem = ''; }
-    else request.transport.clientKeyPem = String(key?.pem ?? input.key ?? '');
+    const pfxPath = input.pfxPath ?? input.path ?? pfx?.src;
+    if (pfxPath && (certPath || keyPath || input.cert || input.key || input.certificate)) throw new Error('Script certificates must use either PFX/PKCS#12 or PEM certificate and key material.');
+    if (pfxPath) { certificateApi.pfx.src = addFileReference({ kind: 'certificate-pfx', path: String(pfxPath) }); certificateApi.cert.src = ''; certificateApi.key.src = ''; request.transport.clientCertificatePfxBase64 = ''; request.transport.clientCertificatePem = ''; request.transport.clientKeyPem = ''; }
+    else {
+      if (certPath) { certificateApi.cert.src = addFileReference({ kind: 'certificate-cert', path: String(certPath) }); request.transport.clientCertificatePem = ''; }
+      else request.transport.clientCertificatePem = String(cert?.pem ?? input.cert ?? input.certificate ?? '');
+      if (keyPath) { certificateApi.key.src = addFileReference({ kind: 'certificate-key', path: String(keyPath) }); request.transport.clientKeyPem = ''; }
+      else request.transport.clientKeyPem = String(key?.pem ?? input.key ?? '');
+      certificateApi.pfx.src = ''; request.transport.clientCertificatePfxBase64 = '';
+    }
+    certificateApi.passphrase = String(input.passphrase ?? ''); request.transport.clientCertificatePassphrase = certificateApi.passphrase;
     request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(',') : String(input.domains ?? '');
   } };
   const baseGlobalApi = variableApi(baseGlobals, baseGlobalDisabled);
@@ -395,6 +402,9 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
   if (resolveProxyTransport(request.transport, url, proxyPreferences).proxyMode === 'custom') {
     throw new Error('The CLI cannot use a manual proxy because Node Fetch does not expose per-request proxy configuration. Use the native desktop transport or configure a supported runner-level proxy.');
   }
+  if (request.transport.caCertificatePem || request.transport.clientCertificatePem || request.transport.clientKeyPem || request.transport.clientCertificatePfxBase64) {
+    throw new Error('The CLI cannot attach custom CA or client-certificate material because Node Fetch does not expose per-request TLS configuration. Use the native desktop transport for workspace CA, PEM, or PFX/PKCS#12 identities.');
+  }
   const response = await fetch(url, {
     method: request.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled && header.name).map((header) => [header.name, header.value])),
@@ -463,11 +473,13 @@ const main = async () => {
     if (subject === 'collection' && requestedTestNamePattern !== undefined) fail('--testNamePattern is only available for run test.');
     const testNamePattern = subject === 'test' ? validateTestNamePattern(requestedTestNamePattern) : undefined;
     const executeWorkspaceHttp = (request: ApiRequest, variables: Record<string, string>) => {
+      const requestUrl = buildRequestUrl(request, variables);
+      const preparedRequest = { ...request, transport: applyWorkspaceCertificates(request.transport, requestUrl, workspace.certificates) };
       const validateCertificates = workspace.preferences.validateCertificates;
-      if (!resolveCertificateValidation(request.transport, validateCertificates)) {
+      if (!resolveCertificateValidation(preparedRequest.transport, validateCertificates)) {
         throw new Error('The CLI cannot disable TLS certificate validation because Node Fetch does not expose that authority. Use the native desktop transport for explicitly untrusted development certificates.');
       }
-      return executeHttp(request, variables, workspace.preferences.requestTimeoutMs, {
+      return executeHttp(preparedRequest, variables, workspace.preferences.requestTimeoutMs, {
         enabled: workspace.preferences.proxyEnabled,
         httpProxy: workspace.preferences.httpProxy,
         httpsProxy: workspace.preferences.httpsProxy,

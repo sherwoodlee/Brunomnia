@@ -3,7 +3,7 @@ use crate::models::{
     GrpcSchemaOutput, GrpcServiceInfo, KeyValue, TransportConfig,
 };
 use crate::{
-    http_client::{identity_enabled, validate_certificate_material},
+    client_identity::{effective_client_identity_pem, validate_certificate_material},
     streaming::AcceptInvalidServerCertificate,
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -232,24 +232,19 @@ async fn connect_channel(endpoint: &str, transport: &TransportConfig) -> Result<
         builder = builder.connect_timeout(timeout).timeout(timeout);
     }
     if secure {
-        let has_certificate = !transport.client_certificate_pem.trim().is_empty();
-        let has_key = !transport.client_key_pem.trim().is_empty();
-        if has_certificate != has_key {
-            return Err("A client certificate and private key must be supplied together.".into());
-        }
-        let use_identity = has_certificate && identity_enabled(transport, Some(endpoint));
+        let identity = effective_client_identity_pem(transport, Some(endpoint))?;
         if !transport.validate_certificates
-            || use_identity
+            || identity.is_some()
             || !transport.ca_certificate_pem.trim().is_empty()
         {
             let mut tls = ClientTlsConfig::new();
             if transport.timeout_ms > 0 {
                 tls = tls.timeout(std::time::Duration::from_millis(transport.timeout_ms));
             }
-            if use_identity {
+            if let Some(identity) = identity {
                 tls = tls.identity(Identity::from_pem(
-                    transport.client_certificate_pem.clone(),
-                    transport.client_key_pem.clone(),
+                    identity.certificate_pem,
+                    identity.private_key_pem,
                 ));
             }
             if transport.validate_certificates && !transport.ca_certificate_pem.trim().is_empty() {
@@ -729,6 +724,9 @@ mod tests {
             let (matched_stream, _) = listener.accept().await.unwrap();
             assert!(mutual_acceptor.accept(matched_stream).await.is_ok());
 
+            let (pfx_stream, _) = listener.accept().await.unwrap();
+            assert!(mutual_acceptor.accept(pfx_stream).await.is_ok());
+
             let (trusted_stream, _) = listener.accept().await.unwrap();
             assert!(plain_acceptor.accept(trusted_stream).await.is_ok());
         });
@@ -762,6 +760,20 @@ mod tests {
                 client_certificate_pem: TLS_CLIENT_CERTIFICATE.into(),
                 client_key_pem: TLS_CLIENT_KEY.into(),
                 client_certificate_domains: "127.0.0.1".into(),
+                ..Default::default()
+            },
+        )
+        .await;
+        let _ = connect_channel(
+            &endpoint,
+            &TransportConfig {
+                timeout_ms: 1_000,
+                validate_certificates: false,
+                client_certificate_pfx_base64: crate::client_identity::test_pfx_base64(
+                    "grpc-secret",
+                    false,
+                ),
+                client_certificate_passphrase: "grpc-secret".into(),
                 ..Default::default()
             },
         )

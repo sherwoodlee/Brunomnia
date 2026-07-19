@@ -76,6 +76,8 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
     proxyExclusions: '',
     clientCertificatePem: '',
     clientKeyPem: '',
+    clientCertificatePfxBase64: '',
+    clientCertificatePassphrase: '',
     clientCertificateDomains: '',
     caCertificatePem: '',
     sendCookies: true,
@@ -128,7 +130,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 30,
+  version: 31,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',

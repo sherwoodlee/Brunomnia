@@ -27,8 +27,8 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | gRPC schema discovery | Complete | Server Reflection v1 and pasted `.proto` compilation into a local descriptor pool |
 | gRPC execution | Complete | Dynamic protobuf JSON mapping; unary, client-streaming, server-streaming and bidirectional calls |
 | Rich HTTP bodies | Complete | None, JSON, text, URL-encoded, multipart text/files and binary files |
-| Transport configuration | Complete for HTTP/SSE | Redirect policy, inherited/custom connect/HTTP timeout with `0` disabled, inherited/always/never API certificate validation, unlimited active SSE duration, HTTP proxy and PEM client identity |
-| gRPC TLS | Complete baseline | System roots plus workspace CA trust, timeout, inherited/overridden validation, and host/port-scoped PEM client identity; PFX remains later closure |
+| Transport configuration | Complete for HTTP/SSE | Redirect policy, inherited/custom connect/HTTP timeout with `0` disabled, inherited/always/never API certificate validation, unlimited active SSE duration, HTTP proxy and PEM/PFX client identity |
+| gRPC TLS | Complete baseline | System roots plus workspace CA trust, timeout, inherited/overridden validation, and host/port-scoped PEM or PFX/PKCS#12 client identity; custom proxy transport remains later closure |
 | WebSocket TLS and proxy | Complete baseline | System roots and arbitrary handshake headers; Milestone 109 adds inherited validation overrides plus domain-scoped PEM identity, Milestone 110 adds authenticated HTTP/HTTPS custom proxy transport plus no-proxy handling, and Milestone 111 matches plain-WS absolute-form forwarding |
 | Workspace migration | Complete | Version 1 workspaces migrate in place to the version 2 protocol schema |
 
@@ -1733,7 +1733,22 @@ Compatibility bounds remain explicit: custom gRPC proxy transport, custom CA/PFX
 
 Compatibility bounds remain explicit: PFX/PKCS#12 identities, certificate-path compatibility exports, custom gRPC proxy transport, richer gRPC metadata/schema workflows, and broad third-party certificate fixtures remain open. Related ledger rows stay Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 116 — remaining parity closure and release hardening
+## Milestone 116 — PFX/PKCS#12 client identities (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia models PFX/PKCS#12 plus passphrase as the mutually exclusive alternative to PEM certificate/key paths and forwards the selected identity through HTTP, realtime, authentication, scripting, and gRPC transports |
+| Workspace and request editors | Complete baseline | Workspace v31 and request-local Transport import binary `.p12`/`.pfx` bundles up to 5 MiB, mask passphrases, clear conflicting PEM material, retain port-first host matching, and introduce no account or entitlement gate |
+| Native decoding | Complete | One pure-Rust resolver verifies base64/size/mutual-exclusion bounds, supports modern PBES2/PBKDF2/AES-256 and legacy PKCS#12 encryption, selects the first private-key chain, and emits request-local in-memory PEM for Reqwest, Rustls, and Tonic |
+| Transport continuity | Complete | Workspace or request-local PFX identity reaches HTTP/GraphQL, OAuth/authentication, introspection, WebSocket/subscriptions, Socket.IO polling/upgrade, SSE, runners, plugins, integrations, and all secure gRPC operations |
+| Script files | Complete baseline | Opt-in primary and secondary script requests accept `pfx.src`/`pfxPath` plus passphrase under the existing path allowlist, 5 MB per-file, 20-file, and 20 MB aggregate boundaries; the Worker receives only inert paths |
+| Local and publication boundaries | Complete | Workspace PFX bytes/passphrases remain excluded from split-YAML/Git and encrypted-sync payloads while explicit Brunomnia JSON export includes them; request-local PFX secrets join the plaintext-publication guardrail |
+| Executable coverage | Complete | Frontend tests cover matching, precedence, scripts, migration, persistence, explicit export, and publication checks; native tests decode modern/legacy and OpenSSL-produced bundles and complete real HTTPS, WSS, and gRPC mTLS handshakes |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [scripting](SCRIPTING.md), [security guide](SECURITY_AND_SYNC.md), [parity ledger](PARITY.md), and [Milestone 116 verification](QA_MILESTONE_116.md) |
+
+Compatibility bounds remain explicit: certificate-path compatibility import/export, encrypted PEM-key passphrases, portable CLI client-certificate transport, custom gRPC proxy transport, richer gRPC metadata/schema workflows, and broader third-party certificate fixtures remain open. Related ledger rows stay Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 117 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

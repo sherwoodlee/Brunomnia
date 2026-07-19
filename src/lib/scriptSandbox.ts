@@ -8,7 +8,7 @@ import { createScriptModules } from './scriptModules';
 export type ScriptFolderState = { id: string; name: string; environment: Record<string, string>; disabled?: string[] };
 
 export type ScriptFileReference = {
-  kind: 'body' | 'multipart' | 'certificate-cert' | 'certificate-key';
+  kind: 'body' | 'multipart' | 'certificate-cert' | 'certificate-key' | 'certificate-pfx';
   path: string;
   partId?: string;
   fileName?: string;
@@ -117,8 +117,10 @@ export const hydrateScriptFileReferences = async (
       part.contentType = reference.contentType || payload.mimeType;
     } else if (reference.kind === 'certificate-cert') {
       request.transport.clientCertificatePem = payloadText(payload);
-    } else {
+    } else if (reference.kind === 'certificate-key') {
       request.transport.clientKeyPem = payloadText(payload);
+    } else {
+      request.transport.clientCertificatePfxBase64 = payload.dataBase64;
     }
   }
   return request;
@@ -198,14 +200,23 @@ const normalizeScriptSubrequestInput = (input: unknown, sourceRequest: ApiReques
     const cert = record(certificate.cert);
     const key = record(certificate.key);
     const pfx = record(certificate.pfx);
-    if (pfx?.src || certificate.pfxPath || certificate.path) throw new Error('PFX certificate files are not supported by the native PEM transport.');
     const certPath = certificate.certPath ?? cert?.src;
     const keyPath = certificate.keyPath ?? key?.src;
-    if ((certPath || keyPath) && !allowFileReferences) throw new Error('Script requests cannot read certificate file paths without script file access.');
-    if (certPath) fileReferences.push({ kind: 'certificate-cert', path: stringValue(certPath) });
-    else request.transport.clientCertificatePem = stringValue(cert?.pem ?? certificate.cert ?? certificate.certificate);
-    if (keyPath) fileReferences.push({ kind: 'certificate-key', path: stringValue(keyPath) });
-    else request.transport.clientKeyPem = stringValue(key?.pem ?? certificate.key);
+    const pfxPath = certificate.pfxPath ?? certificate.path ?? pfx?.src;
+    if (pfxPath && (certPath || keyPath || certificate.cert || certificate.key || certificate.certificate)) throw new Error('Script certificates must use either PFX/PKCS#12 or PEM certificate and key material.');
+    if ((certPath || keyPath || pfxPath) && !allowFileReferences) throw new Error('Script requests cannot read certificate file paths without script file access.');
+    if (pfxPath) {
+      fileReferences.push({ kind: 'certificate-pfx', path: stringValue(pfxPath) });
+      request.transport.clientCertificatePem = '';
+      request.transport.clientKeyPem = '';
+    } else {
+      if (certPath) fileReferences.push({ kind: 'certificate-cert', path: stringValue(certPath) });
+      else request.transport.clientCertificatePem = stringValue(cert?.pem ?? certificate.cert ?? certificate.certificate);
+      if (keyPath) fileReferences.push({ kind: 'certificate-key', path: stringValue(keyPath) });
+      else request.transport.clientKeyPem = stringValue(key?.pem ?? certificate.key);
+      request.transport.clientCertificatePfxBase64 = '';
+    }
+    request.transport.clientCertificatePassphrase = stringValue(certificate.passphrase);
     request.transport.clientCertificateDomains = Array.isArray(certificate.domains) ? certificate.domains.map(String).join(',') : stringValue(certificate.domains);
   }
 
@@ -477,17 +488,23 @@ self.onmessage = async ({ data }) => {
     key: { src: '' },
     cert: { src: '' },
     pfx: { src: '' },
-    passphrase: '',
+    passphrase: state.request.transport.clientCertificatePassphrase || '',
     update: (certificate) => {
       const input = certificate || {};
-      removeFileReferences('certificate-cert', 'certificate-key');
-      if (input.disabled === true) { state.request.transport.clientCertificatePem = ''; state.request.transport.clientKeyPem = ''; state.request.transport.clientCertificateDomains = ''; certificateApi.key.src = ''; certificateApi.cert.src = ''; certificateApi.pfx.src = ''; return; }
-      if (input.pfx?.src || input.pfxPath) throw new Error('PFX certificate files are not supported by the native PEM transport.');
+      removeFileReferences('certificate-cert', 'certificate-key', 'certificate-pfx');
+      if (input.disabled === true) { state.request.transport.clientCertificatePem = ''; state.request.transport.clientKeyPem = ''; state.request.transport.clientCertificatePfxBase64 = ''; state.request.transport.clientCertificatePassphrase = ''; state.request.transport.clientCertificateDomains = ''; certificateApi.key.src = ''; certificateApi.cert.src = ''; certificateApi.pfx.src = ''; certificateApi.passphrase = ''; return; }
       const certPath = input.certPath ?? input.cert?.src; const keyPath = input.keyPath ?? input.key?.src;
-      if (certPath) { certificateApi.cert.src = addFileReference({ kind: 'certificate-cert', path: certPath }); state.request.transport.clientCertificatePem = ''; }
-      else state.request.transport.clientCertificatePem = String(input.cert?.pem ?? input.cert ?? input.certificate ?? '');
-      if (keyPath) { certificateApi.key.src = addFileReference({ kind: 'certificate-key', path: keyPath }); state.request.transport.clientKeyPem = ''; }
-      else state.request.transport.clientKeyPem = String(input.key?.pem ?? input.key ?? '');
+      const pfxPath = input.pfxPath ?? input.path ?? input.pfx?.src;
+      if (pfxPath && (certPath || keyPath || input.cert || input.key || input.certificate)) throw new Error('Script certificates must use either PFX/PKCS#12 or PEM certificate and key material.');
+      if (pfxPath) { certificateApi.pfx.src = addFileReference({ kind: 'certificate-pfx', path: pfxPath }); certificateApi.cert.src = ''; certificateApi.key.src = ''; state.request.transport.clientCertificatePfxBase64 = ''; state.request.transport.clientCertificatePem = ''; state.request.transport.clientKeyPem = ''; }
+      else {
+        if (certPath) { certificateApi.cert.src = addFileReference({ kind: 'certificate-cert', path: certPath }); state.request.transport.clientCertificatePem = ''; }
+        else state.request.transport.clientCertificatePem = String(input.cert?.pem ?? input.cert ?? input.certificate ?? '');
+        if (keyPath) { certificateApi.key.src = addFileReference({ kind: 'certificate-key', path: keyPath }); state.request.transport.clientKeyPem = ''; }
+        else state.request.transport.clientKeyPem = String(input.key?.pem ?? input.key ?? '');
+        certificateApi.pfx.src = ''; state.request.transport.clientCertificatePfxBase64 = '';
+      }
+      certificateApi.passphrase = String(input.passphrase ?? ''); state.request.transport.clientCertificatePassphrase = certificateApi.passphrase;
       state.request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(',') : String(input.domains ?? '');
     },
   };

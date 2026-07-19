@@ -1,10 +1,24 @@
+import { useRef, useState } from 'react';
+import { base64ByteLength, readPfxFile } from '../lib/certificates';
 import type { ApiRequest } from '../types';
 
 type ChangeRequest = (patch: Partial<ApiRequest>) => void;
 
 export function TransportEditor({ request, globalTimeoutMs, onChange }: { request: ApiRequest; globalTimeoutMs: number; onChange: ChangeRequest }) {
   const transport = request.transport;
+  const pfxInput = useRef<HTMLInputElement>(null);
+  const [certificateError, setCertificateError] = useState('');
   const update = (patch: Partial<ApiRequest['transport']>) => onChange({ transport: { ...transport, ...patch } });
+  const importPfx = async (file: File | undefined) => {
+    try {
+      const clientCertificatePfxBase64 = await readPfxFile(file);
+      if (!clientCertificatePfxBase64) return;
+      setCertificateError('');
+      update({ clientCertificatePfxBase64, clientCertificatePem: '', clientKeyPem: '' });
+    } catch (caught) {
+      setCertificateError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
   return (
     <div className="transport-editor">
       <div className="transport-grid">
@@ -22,10 +36,11 @@ export function TransportEditor({ request, globalTimeoutMs, onChange }: { reques
         <label><input checked={transport.storeCookies} type="checkbox" onChange={(event) => update({ storeCookies: event.target.checked })} /><span>Store response cookies</span></label>
       </div>
       <div className="certificate-grid">
-        <label>Client certificate (PEM)<textarea aria-label="Client certificate PEM" placeholder="-----BEGIN CERTIFICATE-----" value={transport.clientCertificatePem} onChange={(event) => update({ clientCertificatePem: event.target.value })} /></label>
-        <label>Client private key (PEM)<textarea aria-label="Client private key PEM" placeholder="-----BEGIN PRIVATE KEY-----" value={transport.clientKeyPem} onChange={(event) => update({ clientKeyPem: event.target.value })} /></label>
+        <label>Client certificate (PEM)<textarea aria-label="Client certificate PEM" disabled={Boolean(transport.clientCertificatePfxBase64)} placeholder="-----BEGIN CERTIFICATE-----" value={transport.clientCertificatePem} onChange={(event) => update({ clientCertificatePem: event.target.value, clientCertificatePfxBase64: '', clientCertificatePassphrase: '' })} /></label>
+        <label>Client private key (PEM)<textarea aria-label="Client private key PEM" disabled={Boolean(transport.clientCertificatePfxBase64)} placeholder="-----BEGIN PRIVATE KEY-----" value={transport.clientKeyPem} onChange={(event) => update({ clientKeyPem: event.target.value, clientCertificatePfxBase64: '', clientCertificatePassphrase: '' })} /></label>
       </div>
-      <p className="transport-note">Request-local PEM overrides the workspace certificate manager. Transport secrets export only when you explicitly export this workspace.</p>
+      <div className="transport-pfx"><div><strong>{transport.clientCertificatePfxBase64 ? 'PFX / PKCS#12 identity loaded' : 'PFX / PKCS#12 identity'}</strong><small>{transport.clientCertificatePfxBase64 ? `${base64ByteLength(transport.clientCertificatePfxBase64).toLocaleString()} bytes` : 'Alternative to the PEM certificate and key fields'}</small></div><label>Passphrase<input autoComplete="off" disabled={!transport.clientCertificatePfxBase64} type="password" value={transport.clientCertificatePassphrase} onChange={(event) => update({ clientCertificatePassphrase: event.target.value })} /></label><button onClick={() => pfxInput.current?.click()} type="button">Import PFX</button>{transport.clientCertificatePfxBase64 ? <button onClick={() => update({ clientCertificatePfxBase64: '', clientCertificatePassphrase: '' })} type="button">Clear</button> : null}<input accept=".p12,.pfx,application/x-pkcs12" hidden ref={pfxInput} type="file" onChange={(event) => { void importPfx(event.target.files?.[0]); event.target.value = ''; }} /></div>
+      {certificateError ? <p className="transport-note error">{certificateError}</p> : <p className="transport-note">Request-local PEM or PFX overrides the workspace certificate manager. Transport secrets export only when you explicitly export this workspace.</p>}
     </div>
   );
 }

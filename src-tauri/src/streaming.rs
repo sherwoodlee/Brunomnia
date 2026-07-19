@@ -1,8 +1,6 @@
 use crate::{
-    http_client::{
-        apply_preferred_request_version, build_streaming_client, flatten_headers, identity_enabled,
-        validate_certificate_material,
-    },
+    client_identity::{effective_client_identity_pem, validate_certificate_material},
+    http_client::{apply_preferred_request_version, build_streaming_client, flatten_headers},
     models::{
         KeyValue, SocketIoConnectInput, StreamConnectInput, StreamConnectOutput, StreamEvent,
         TransportConfig,
@@ -410,14 +408,9 @@ fn websocket_tls_connector(
     if url.scheme() != "wss" {
         return Ok(None);
     }
-    let has_certificate = !transport.client_certificate_pem.trim().is_empty();
-    let has_key = !transport.client_key_pem.trim().is_empty();
-    if has_certificate != has_key {
-        return Err("A client certificate and private key must be supplied together.".into());
-    }
-    let use_identity = has_certificate && identity_enabled(transport, Some(request_url));
+    let identity = effective_client_identity_pem(transport, Some(request_url))?;
     if transport.validate_certificates
-        && !use_identity
+        && identity.is_none()
         && transport.ca_certificate_pem.trim().is_empty()
     {
         return Ok(None);
@@ -430,19 +423,18 @@ fn websocket_tls_connector(
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(AcceptInvalidServerCertificate))
     };
-    let config = if use_identity {
-        let certificates =
-            CertificateDer::pem_slice_iter(transport.client_certificate_pem.trim().as_bytes())
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| format!("Invalid client certificate PEM: {error}"))?;
+    let config = if let Some(identity) = identity {
+        let certificates = CertificateDer::pem_slice_iter(identity.certificate_pem.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Invalid client certificate: {error}"))?;
         if certificates.is_empty() {
-            return Err("The client certificate PEM contains no certificates.".into());
+            return Err("The client identity contains no certificates.".into());
         }
-        let key = PrivateKeyDer::from_pem_slice(transport.client_key_pem.trim().as_bytes())
-            .map_err(|error| format!("Invalid client private key PEM: {error}"))?;
+        let key = PrivateKeyDer::from_pem_slice(identity.private_key_pem.as_bytes())
+            .map_err(|error| format!("Invalid client private key: {error}"))?;
         builder
             .with_client_auth_cert(certificates, key)
-            .map_err(|error| format!("Invalid client identity PEM: {error}"))?
+            .map_err(|error| format!("Invalid client identity: {error}"))?
     } else {
         builder.with_no_client_auth()
     };
@@ -2826,6 +2818,11 @@ mod tests {
             let mut socket = tokio_tungstenite::accept_async(tls).await.unwrap();
             assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
 
+            let (pfx_stream, _) = listener.accept().await.unwrap();
+            let tls = mutual_acceptor.accept(pfx_stream).await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(tls).await.unwrap();
+            assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
+
             let (trusted_stream, _) = listener.accept().await.unwrap();
             let tls = plain_acceptor.accept(trusted_stream).await.unwrap();
             let mut socket = tokio_tungstenite::accept_async(tls).await.unwrap();
@@ -2903,6 +2900,32 @@ mod tests {
         assert_eq!(output.status, 101);
         assert_eq!(output.transport, "WebSocket");
         disconnect_websocket("wss-matched-identity".into(), state.clone())
+            .await
+            .unwrap();
+        let pfx = connect_websocket(
+            StreamConnectInput {
+                session_id: "wss-pfx-identity".into(),
+                url: url.clone(),
+                headers: Vec::new(),
+                transport: crate::models::TransportConfig {
+                    validate_certificates: false,
+                    client_certificate_pfx_base64: crate::client_identity::test_pfx_base64(
+                        "wss-secret",
+                        false,
+                    ),
+                    client_certificate_passphrase: "wss-secret".into(),
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            channel(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(pfx.status, 101);
+        disconnect_websocket("wss-pfx-identity".into(), state.clone())
             .await
             .unwrap();
         let trusted = connect_websocket(

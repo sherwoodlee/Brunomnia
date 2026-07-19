@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { WorkspaceCertificates } from '../types';
-import { MAX_CA_CERTIFICATE_TEXT_BYTES, MAX_CERTIFICATE_TEXT_BYTES, MAX_WORKSPACE_CLIENT_CERTIFICATES } from '../lib/certificates';
+import { base64ByteLength, MAX_CA_CERTIFICATE_TEXT_BYTES, MAX_CERTIFICATE_TEXT_BYTES, MAX_WORKSPACE_CLIENT_CERTIFICATES, readPfxFile } from '../lib/certificates';
 import { Icon } from './Icon';
 
 type CertificateManagerProps = {
@@ -19,9 +19,13 @@ export function CertificateManager({ certificates, canEdit, onChange }: Certific
   const caInput = useRef<HTMLInputElement>(null);
   const certificateInput = useRef<HTMLInputElement>(null);
   const keyInput = useRef<HTMLInputElement>(null);
+  const pfxInput = useRef<HTMLInputElement>(null);
   const [host, setHost] = useState('');
+  const [identityFormat, setIdentityFormat] = useState<'pem' | 'pfx'>('pem');
   const [certificatePem, setCertificatePem] = useState('');
   const [keyPem, setKeyPem] = useState('');
+  const [pfxBase64, setPfxBase64] = useState('');
+  const [passphrase, setPassphrase] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const updateCa = (patch: Partial<WorkspaceCertificates['ca']>) => onChange({ ...certificates, ca: { ...certificates.ca, ...patch } });
@@ -40,8 +44,8 @@ export function CertificateManager({ certificates, canEdit, onChange }: Certific
   };
   const addClient = () => {
     if (!canEdit) return;
-    if (!host.trim() || !certificatePem.trim() || !keyPem.trim()) {
-      setError('Enter a host, certificate PEM, and private key PEM.'); return;
+    if (!host.trim() || (identityFormat === 'pem' ? !certificatePem.trim() || !keyPem.trim() : !pfxBase64)) {
+      setError(identityFormat === 'pem' ? 'Enter a host, certificate PEM, and private key PEM.' : 'Enter a host and import a PFX/PKCS#12 file.'); return;
     }
     if (new Blob([certificatePem]).size > MAX_CERTIFICATE_TEXT_BYTES || new Blob([keyPem]).size > MAX_CERTIFICATE_TEXT_BYTES) {
       setError('Client certificate and private key text must each be 1 MiB or smaller.'); return;
@@ -51,9 +55,26 @@ export function CertificateManager({ certificates, canEdit, onChange }: Certific
     }
     onChange({
       ...certificates,
-      clients: [...certificates.clients, { id: `workspace-certificate-${crypto.randomUUID()}`, host: host.trim(), enabled: true, certificatePem, keyPem }],
+      clients: [...certificates.clients, {
+        id: `workspace-certificate-${crypto.randomUUID()}`,
+        host: host.trim(),
+        enabled: true,
+        certificatePem: identityFormat === 'pem' ? certificatePem : '',
+        keyPem: identityFormat === 'pem' ? keyPem : '',
+        pfxBase64: identityFormat === 'pfx' ? pfxBase64 : '',
+        passphrase: identityFormat === 'pfx' ? passphrase : '',
+      }],
     });
-    setHost(''); setCertificatePem(''); setKeyPem(''); setError(''); setMessage('Client certificate added.');
+    setHost(''); setCertificatePem(''); setKeyPem(''); setPfxBase64(''); setPassphrase(''); setError(''); setMessage('Client certificate added.');
+  };
+  const importPfx = async (file: File | undefined) => {
+    try {
+      const encoded = await readPfxFile(file);
+      if (!encoded) return;
+      setPfxBase64(encoded); setError(''); setMessage(`Imported ${file?.name ?? 'PFX/PKCS#12 file'}.`);
+    } catch (caught) {
+      setMessage(''); setError(caught instanceof Error ? caught.message : String(caught));
+    }
   };
   return (
     <div className="security-grid certificate-manager-grid">
@@ -66,19 +87,20 @@ export function CertificateManager({ certificates, canEdit, onChange }: Certific
       </section>
 
       <section className="security-card certificate-add-card">
-        <header><div><small>PEM identity</small><h2>Add Client Certificate</h2></div><span>{certificates.clients.length}/{MAX_WORKSPACE_CLIENT_CERTIFICATES}</span></header>
+        <header><div><small>PEM or PKCS#12 identity</small><h2>Add Client Certificate</h2></div><span>{certificates.clients.length}/{MAX_WORKSPACE_CLIENT_CERTIFICATES}</span></header>
         <label>Host<input disabled={!canEdit} maxLength={512} onChange={(event) => setHost(event.target.value)} placeholder="api.example.com:443 or *.example.com" value={host} /></label>
-        <label>Certificate PEM<textarea disabled={!canEdit} onChange={(event) => setCertificatePem(event.target.value)} placeholder="-----BEGIN CERTIFICATE-----" value={certificatePem} /></label>
-        <label>Private key PEM<textarea disabled={!canEdit} onChange={(event) => setKeyPem(event.target.value)} placeholder="-----BEGIN PRIVATE KEY-----" value={keyPem} /></label>
-        <div className="certificate-actions"><button disabled={!canEdit} onClick={() => certificateInput.current?.click()} type="button"><Icon name="import" size={13} />Certificate file</button><button disabled={!canEdit} onClick={() => keyInput.current?.click()} type="button"><Icon name="import" size={13} />Key file</button><button disabled={!canEdit} onClick={addClient} type="button"><Icon name="plus" size={13} />Add identity</button></div>
+        <label>Identity format<select disabled={!canEdit} onChange={(event) => setIdentityFormat(event.target.value as 'pem' | 'pfx')} value={identityFormat}><option value="pem">PEM certificate + key</option><option value="pfx">PFX / PKCS#12</option></select></label>
+        {identityFormat === 'pem' ? <><label>Certificate PEM<textarea disabled={!canEdit} onChange={(event) => setCertificatePem(event.target.value)} placeholder="-----BEGIN CERTIFICATE-----" value={certificatePem} /></label><label>Private key PEM<textarea disabled={!canEdit} onChange={(event) => setKeyPem(event.target.value)} placeholder="-----BEGIN PRIVATE KEY-----" value={keyPem} /></label></> : <><div className="certificate-file-summary"><strong>{pfxBase64 ? 'PFX/PKCS#12 loaded' : 'No PFX/PKCS#12 file selected'}</strong><small>{pfxBase64 ? `${base64ByteLength(pfxBase64).toLocaleString()} bytes kept device-local` : 'Modern PBES2/AES and legacy PKCS#12 encryption are accepted.'}</small></div><label>Passphrase<input autoComplete="off" disabled={!canEdit} onChange={(event) => setPassphrase(event.target.value)} type="password" value={passphrase} /></label></>}
+        <div className="certificate-actions">{identityFormat === 'pem' ? <><button disabled={!canEdit} onClick={() => certificateInput.current?.click()} type="button"><Icon name="import" size={13} />Certificate file</button><button disabled={!canEdit} onClick={() => keyInput.current?.click()} type="button"><Icon name="import" size={13} />Key file</button></> : <button disabled={!canEdit} onClick={() => pfxInput.current?.click()} type="button"><Icon name="import" size={13} />PFX / PKCS#12 file</button>}<button disabled={!canEdit} onClick={addClient} type="button"><Icon name="plus" size={13} />Add identity</button></div>
         <input accept=".pem,.crt,.cer" hidden ref={certificateInput} type="file" onChange={(event) => { void importFile(event.target.files?.[0], MAX_CERTIFICATE_TEXT_BYTES, setCertificatePem); event.target.value = ''; }} />
         <input accept=".pem,.key" hidden ref={keyInput} type="file" onChange={(event) => { void importFile(event.target.files?.[0], MAX_CERTIFICATE_TEXT_BYTES, setKeyPem); event.target.value = ''; }} />
+        <input accept=".p12,.pfx,application/x-pkcs12" hidden ref={pfxInput} type="file" onChange={(event) => { void importPfx(event.target.files?.[0]); event.target.value = ''; }} />
       </section>
 
       <section className="security-card certificate-list-card">
         <header><div><small>Host and port matched</small><h2>Client Certificates</h2></div><span>{certificates.clients.filter((client) => client.enabled).length} enabled</span></header>
-        <div className="certificate-list">{certificates.clients.map((client) => <article key={client.id}><div><strong>{client.host}</strong><small>{client.certificatePem.includes('BEGIN CERTIFICATE') ? 'PEM certificate' : 'Certificate text'} · {client.keyPem.includes('PRIVATE KEY') ? 'PEM private key' : 'Key text'}</small></div><label><input checked={client.enabled} disabled={!canEdit} onChange={(event) => onChange({ ...certificates, clients: certificates.clients.map((candidate) => candidate.id === client.id ? { ...candidate, enabled: event.target.checked } : candidate) })} type="checkbox" />{client.enabled ? 'Enabled' : 'Disabled'}</label><button aria-label={`Delete certificate ${client.host}`} disabled={!canEdit} onClick={() => onChange({ ...certificates, clients: certificates.clients.filter((candidate) => candidate.id !== client.id) })} type="button"><Icon name="trash" size={13} /></button></article>)}{!certificates.clients.length ? <p>No workspace client certificates. Request-local PEM identity fields remain available in Transport.</p> : null}</div>
-        <p>Port-specific matches win first; if none match, Brunomnia retries by hostname like Insomnia. PFX/PKCS#12 identities remain a separate compatibility gap.</p>
+        <div className="certificate-list">{certificates.clients.map((client) => <article key={client.id}><div><strong>{client.host}</strong><small>{client.pfxBase64 ? `PFX / PKCS#12 · ${base64ByteLength(client.pfxBase64).toLocaleString()} bytes${client.passphrase ? ' · passphrase set' : ''}` : `${client.certificatePem.includes('BEGIN CERTIFICATE') ? 'PEM certificate' : 'Certificate text'} · ${client.keyPem.includes('PRIVATE KEY') ? 'PEM private key' : 'Key text'}`}</small></div><label><input checked={client.enabled} disabled={!canEdit} onChange={(event) => onChange({ ...certificates, clients: certificates.clients.map((candidate) => candidate.id === client.id ? { ...candidate, enabled: event.target.checked } : candidate) })} type="checkbox" />{client.enabled ? 'Enabled' : 'Disabled'}</label><button aria-label={`Delete certificate ${client.host}`} disabled={!canEdit} onClick={() => onChange({ ...certificates, clients: certificates.clients.filter((candidate) => candidate.id !== client.id) })} type="button"><Icon name="trash" size={13} /></button></article>)}{!certificates.clients.length ? <p>No workspace client certificates. Request-local PEM and PFX identity fields remain available in Transport.</p> : null}</div>
+        <p>Port-specific matches win first; if none match, Brunomnia retries by hostname like Insomnia. Identity files and passphrases stay device-local unless explicitly exported.</p>
       </section>
       {error ? <div className="automation-message error">{error}</div> : message ? <div className="automation-message">{message}</div> : null}
     </div>

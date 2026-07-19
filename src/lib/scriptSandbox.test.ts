@@ -103,6 +103,12 @@ describe('script sandbox source validation', () => {
       { kind: 'certificate-key', path: '/tmp/fixtures/client.key' },
       { kind: 'body', path: '/tmp/fixtures/payload.bin' },
     ]);
+    const pfx = normalizeScriptSubrequestWithFiles({
+      url: 'https://api.example.com/private',
+      certificate: { pfx: { src: '{{ fixtures }}/client.p12' }, passphrase: 'secret' },
+    }, source);
+    expect(pfx.request.transport).toMatchObject({ clientCertificatePassphrase: 'secret', clientCertificatePem: '', clientKeyPem: '' });
+    expect(resolveScriptFileReferencePaths(pfx.fileReferences, { fixtures: '/tmp/fixtures' })).toEqual([{ kind: 'certificate-pfx', path: '/tmp/fixtures/client.p12' }]);
 
     const multipart = normalizeScriptSubrequestWithFiles({
       url: 'https://api.example.com/upload',
@@ -190,6 +196,9 @@ describe('script sandbox source validation', () => {
       { kind: 'certificate-cert', path: '/tmp/client.crt' },
       { kind: 'certificate-key', path: '/tmp/client.key' },
     ]);
+
+    const pfx = await runWorkerSource("insomnia.request.certificate.update({ pfx: { src: '/tmp/client.p12' }, passphrase: 'pfx-secret' });", { permissions: { network: false, files: true, vault: false, maxSubrequests: 5 } });
+    expect(pfx).toMatchObject({ ok: true, request: { transport: { clientCertificatePassphrase: 'pfx-secret', clientCertificatePem: '', clientKeyPem: '' } }, fileReferences: [{ kind: 'certificate-pfx', path: '/tmp/client.p12' }] });
   });
 
   it('hydrates bounded body, multipart, and PEM references outside the Worker', async () => {
@@ -209,6 +218,10 @@ describe('script sandbox source validation', () => {
     expect(multipart.multipartBody[0]).toMatchObject({ fileName: 'renamed.bin', file: { fileName: 'payload.bin' } });
     expect(multipart.transport.clientCertificatePem).toContain('BEGIN TEST');
     expect(multipart.transport.clientKeyPem).toContain('BEGIN TEST');
+
+    const pfx = createBlankRequest('pfx');
+    await hydrateScriptFileReferences(pfx, [{ kind: 'certificate-pfx', path: '/tmp/client.p12' }], readFile);
+    expect(pfx.transport.clientCertificatePfxBase64).toBe(Buffer.from('payload').toString('base64'));
 
     const references = Array.from({ length: 21 }, (_, index) => ({ kind: 'body' as const, path: `/tmp/${index}.bin` }));
     await expect(hydrateScriptFileReferences(createBlankRequest('too-many'), references, readFile)).rejects.toThrow(/20-file/);
@@ -241,6 +254,8 @@ describe('script sandbox source validation', () => {
     }, source, { root: '/tmp' }, readFile);
     expect(prepared.binaryBody).toMatchObject({ fileName: 'payload.bin', dataBase64: Buffer.from('secondary-bytes').toString('base64') });
     expect(prepared.transport).toMatchObject({ clientCertificateDomains: 'api.example.com', clientCertificatePem: expect.stringContaining('BEGIN TEST'), clientKeyPem: expect.stringContaining('BEGIN TEST') });
+    const preparedPfx = await prepareScriptSubrequest({ url: 'https://api.example.com/private', certificate: { pfx: { src: '{{ root }}/client.p12' }, passphrase: 'secret' } }, source, { root: '/tmp' }, readFile);
+    expect(preparedPfx.transport).toMatchObject({ clientCertificatePfxBase64: Buffer.from('secondary-bytes').toString('base64'), clientCertificatePassphrase: 'secret', clientCertificatePem: '', clientKeyPem: '' });
     await expect(prepareScriptSubrequest({ url: 'https://api.example.com/upload', body: { mode: 'file', file: '/tmp/denied.bin' } }, source, {})).rejects.toThrow(/file access is disabled/);
   });
 

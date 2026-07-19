@@ -3,6 +3,8 @@ import type { TransportConfig, WorkspaceCertificates, WorkspaceClientCertificate
 export const MAX_WORKSPACE_CLIENT_CERTIFICATES = 100;
 export const MAX_CERTIFICATE_TEXT_BYTES = 1_048_576;
 export const MAX_CA_CERTIFICATE_TEXT_BYTES = 5_242_880;
+export const MAX_CERTIFICATE_PFX_BYTES = 5_242_880;
+export const MAX_CERTIFICATE_PASSPHRASE_BYTES = 4_096;
 export const MAX_CERTIFICATE_HOST_LENGTH = 512;
 
 const encoder = new TextEncoder();
@@ -19,6 +21,30 @@ const truncateBytes = (value: string, limit: number) => {
 
 const record = (value: unknown) => value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
 const stringValue = (value: unknown) => typeof value === 'string' ? value : '';
+export const base64ByteLength = (value: string) => {
+  const base64 = value.trim();
+  if (!base64 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 !== 0) return -1;
+  return Math.floor(base64.length * 3 / 4) - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0);
+};
+
+export const readPfxFile = async (file: File | undefined) => {
+  if (!file) return '';
+  if (file.size > MAX_CERTIFICATE_PFX_BYTES) throw new Error('PFX/PKCS#12 files cannot exceed 5 MiB.');
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 32_768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32_768));
+  return btoa(binary);
+};
+
+export const normalizeCertificatePfxBase64 = (value: unknown) => {
+  const pfxBase64 = stringValue(value).trim();
+  const bytes = base64ByteLength(pfxBase64);
+  return bytes >= 0 && bytes <= MAX_CERTIFICATE_PFX_BYTES ? pfxBase64 : '';
+};
+
+export const normalizeCertificatePassphrase = (value: unknown) => truncateBytes(stringValue(value), MAX_CERTIFICATE_PASSPHRASE_BYTES);
+
+const hasClientIdentity = (client: Pick<WorkspaceClientCertificate, 'certificatePem' | 'keyPem' | 'pfxBase64'>) => Boolean(client.pfxBase64 || (client.certificatePem.trim() && client.keyPem.trim()));
 
 export const normalizeWorkspaceCertificates = (value: unknown): WorkspaceCertificates => {
   const source = record(value);
@@ -34,12 +60,15 @@ export const normalizeWorkspaceCertificates = (value: unknown): WorkspaceCertifi
     let suffix = 1;
     while (ids.has(id)) id = `workspace-certificate-${index}-${suffix++}`;
     ids.add(id);
+    const pfxBase64 = normalizeCertificatePfxBase64(client.pfxBase64);
     return [{
       id,
       host,
       enabled: client.enabled !== false,
-      certificatePem: truncateBytes(stringValue(client.certificatePem), MAX_CERTIFICATE_TEXT_BYTES),
-      keyPem: truncateBytes(stringValue(client.keyPem), MAX_CERTIFICATE_TEXT_BYTES),
+      certificatePem: pfxBase64 ? '' : truncateBytes(stringValue(client.certificatePem), MAX_CERTIFICATE_TEXT_BYTES),
+      keyPem: pfxBase64 ? '' : truncateBytes(stringValue(client.keyPem), MAX_CERTIFICATE_TEXT_BYTES),
+      pfxBase64,
+      passphrase: normalizeCertificatePassphrase(client.passphrase),
     }];
   }).slice(0, MAX_WORKSPACE_CLIENT_CERTIFICATES);
   return {
@@ -74,18 +103,18 @@ export const certificateHostMatches = (certificateHost: string, requestUrl: stri
 };
 
 export const selectWorkspaceClientCertificate = (certificates: WorkspaceCertificates, requestUrl: string) => {
-  const enabled = certificates.clients.filter((certificate) => certificate.enabled && certificate.certificatePem.trim() && certificate.keyPem.trim());
+  const enabled = certificates.clients.filter((certificate) => certificate.enabled && hasClientIdentity(certificate));
   return enabled.find((certificate) => certificateHostMatches(certificate.host, requestUrl, true))
     ?? enabled.find((certificate) => certificateHostMatches(certificate.host, requestUrl, false));
 };
 
-export const applyWorkspaceCertificates = <Transport extends Pick<TransportConfig, 'clientCertificatePem' | 'clientKeyPem' | 'clientCertificateDomains' | 'caCertificatePem'>>(
+export const applyWorkspaceCertificates = <Transport extends Pick<TransportConfig, 'clientCertificatePem' | 'clientKeyPem' | 'clientCertificatePfxBase64' | 'clientCertificatePassphrase' | 'clientCertificateDomains' | 'caCertificatePem'>>(
   transport: Transport,
   requestUrl: string,
   certificates?: WorkspaceCertificates,
 ): Transport => {
   if (!certificates) return transport;
-  const selected = transport.clientCertificatePem.trim() || transport.clientKeyPem.trim()
+  const selected = transport.clientCertificatePem.trim() || transport.clientKeyPem.trim() || transport.clientCertificatePfxBase64.trim()
     ? undefined
     : selectWorkspaceClientCertificate(certificates, requestUrl);
   const caCertificatePem = transport.caCertificatePem.trim()
@@ -97,6 +126,8 @@ export const applyWorkspaceCertificates = <Transport extends Pick<TransportConfi
     ...(selected ? {
       clientCertificatePem: selected.certificatePem,
       clientKeyPem: selected.keyPem,
+      clientCertificatePfxBase64: selected.pfxBase64,
+      clientCertificatePassphrase: selected.passphrase,
       clientCertificateDomains: '',
     } : {}),
   } as Transport;

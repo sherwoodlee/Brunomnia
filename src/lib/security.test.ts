@@ -12,7 +12,7 @@ describe('encrypted collaboration boundaries', () => {
     workspace.project.path = '/private/repository';
     workspace.plugins = [{ id: 'plugin', name: 'Private plugin', version: '1', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true, requestedPermissions: [], grantedPermissions: [], installedAt: new Date().toISOString() }];
     workspace.collaboration.path = '/private/share.enc.json';
-    workspace.certificates = { ca: { enabled: true, pem: 'private-ca' }, clients: [{ id: 'cert', host: 'private.example', enabled: true, certificatePem: 'certificate', keyPem: 'private-key' }] };
+    workspace.certificates = { ca: { enabled: true, pem: 'private-ca' }, clients: [{ id: 'cert', host: 'private.example', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }] };
     workspace.collections[0].requests[0].auth = { ...workspace.collections[0].requests[0].auth, type: 'oauth2', code: 'code', codeVerifier: 'verifier', accessToken: 'access', identityToken: 'identity', refreshToken: 'refresh', expiresAt: 123 };
 
     const shared = shareableWorkspace(workspace);
@@ -47,7 +47,7 @@ describe('encrypted collaboration boundaries', () => {
     current.streamSessions = [{ id: 'stream', requestId: request.id, requestName: request.name, requestUrl: request.url, environmentId: current.activeEnvironmentId, protocol: 'sse', startedAt: new Date().toISOString(), messages: [] }];
     current.history = [{ id: 'history', requestId: 'request', name: 'Keep', method: 'GET', url: 'https://local.example', status: 200, durationMs: 1, createdAt: new Date().toISOString() }];
     current.collaboration.path = '/local/team.enc.json';
-    current.certificates = { ca: { enabled: true, pem: 'local-ca' }, clients: [{ id: 'cert', host: 'local.test', enabled: true, certificatePem: 'cert', keyPem: 'key' }] };
+    current.certificates = { ca: { enabled: true, pem: 'local-ca' }, clients: [{ id: 'cert', host: 'local.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }] };
     current.collections[0].requests[0].auth = { ...current.collections[0].requests[0].auth, type: 'oauth2', accessToken: 'local-access', refreshToken: 'local-refresh', expiresAt: 123 };
     const remote = cloneSeedWorkspace();
     remote.name = 'Remote workspace';
@@ -99,6 +99,17 @@ describe('encrypted collaboration boundaries', () => {
     expect(plaintextSecretCandidates(workspace)).toEqual(['MCP Local tools: OAuth client secret']);
     workspace.mcpClients[0].oauthClientSecret = '{{ vault.mcp_client_secret }}';
     expect(plaintextSecretCandidates(workspace)).toEqual([]);
+  });
+
+  it('flags request-local PFX identities and passphrases before plaintext publication', () => {
+    const workspace = cloneSeedWorkspace();
+    const request = workspace.collections[0].requests[0];
+    request.transport.clientCertificatePfxBase64 = 'cGZ4';
+    request.transport.clientCertificatePassphrase = 'secret';
+    expect(plaintextSecretCandidates(workspace)).toEqual([
+      'Orders / List Orders: client PFX/PKCS#12 identity',
+      'Orders / List Orders: client-certificate passphrase',
+    ]);
   });
 
   it('checks inherited collection and folder configuration for plaintext credentials', () => {

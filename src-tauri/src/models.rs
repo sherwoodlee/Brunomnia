@@ -51,6 +51,10 @@ pub struct TransportConfig {
     #[serde(default)]
     pub client_key_pem: String,
     #[serde(default)]
+    pub client_certificate_pfx_base64: String,
+    #[serde(default)]
+    pub client_certificate_passphrase: String,
+    #[serde(default)]
     pub client_certificate_domains: String,
     #[serde(default)]
     pub ca_certificate_pem: String,
@@ -71,6 +75,8 @@ impl Default for TransportConfig {
             proxy_exclusions: String::new(),
             client_certificate_pem: String::new(),
             client_key_pem: String::new(),
+            client_certificate_pfx_base64: String::new(),
+            client_certificate_passphrase: String::new(),
             client_certificate_domains: String::new(),
             ca_certificate_pem: String::new(),
             preferred_http_version: String::new(),

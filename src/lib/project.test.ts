@@ -24,7 +24,7 @@ describe('filesystem project OAuth boundaries', () => {
       refreshToken: 'refresh',
       expiresAt: 123,
     };
-    workspace.certificates = { ca: { enabled: true, pem: 'local-ca' }, clients: [{ id: 'cert', host: 'api.test', enabled: true, certificatePem: 'cert', keyPem: 'key' }] };
+    workspace.certificates = { ca: { enabled: true, pem: 'local-ca' }, clients: [{ id: 'cert', host: 'api.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }] };
     tauri.invoke.mockResolvedValue({ path: '/tmp/project', filesWritten: 1, filesUnchanged: 0, filesRemoved: 0 });
 
     await writeProject('/tmp/project', workspace);
@@ -40,7 +40,7 @@ describe('filesystem project OAuth boundaries', () => {
     const request = current.collections[0].requests[0];
     current.streamSessions = [{ id: 'stream', requestId: request.id, requestName: request.name, requestUrl: request.url, environmentId: current.activeEnvironmentId, protocol: 'socketio', startedAt: new Date().toISOString(), messages: [] }];
     current.collections[0].requests[0].auth = { ...current.collections[0].requests[0].auth, type: 'oauth2', clientId: 'local-client', accessToken: 'local-access', refreshToken: 'local-refresh', expiresAt: 123 };
-    current.certificates = { ca: { enabled: true, pem: 'local-ca' }, clients: [{ id: 'cert', host: 'api.test', enabled: true, certificatePem: 'cert', keyPem: 'key' }] };
+    current.certificates = { ca: { enabled: true, pem: 'local-ca' }, clients: [{ id: 'cert', host: 'api.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }] };
     const incoming = cloneSeedWorkspace();
     incoming.collections[0].requests[0].auth = { ...incoming.collections[0].requests[0].auth, type: 'oauth2', clientId: 'project-client' };
     tauri.invoke.mockResolvedValue(incoming);

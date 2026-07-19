@@ -1,4 +1,7 @@
-use crate::models::{HttpRequestInput, HttpResponseOutput, TransportConfig};
+use crate::{
+    client_identity::{effective_client_identity_pem, validate_certificate_material},
+    models::{HttpRequestInput, HttpResponseOutput, TransportConfig},
+};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use digest_auth::{AuthContext, HttpMethod as DigestMethod};
 use reqwest::{
@@ -6,6 +9,9 @@ use reqwest::{
     multipart, Certificate, Client, Method, RequestBuilder, Response, Version,
 };
 use std::{collections::BTreeMap, time::Instant};
+
+#[cfg(test)]
+use crate::client_identity::domain_matches;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum HttpVersionMode {
@@ -21,22 +27,6 @@ enum RedirectMode {
     Disabled,
     Limited(usize),
     Unlimited,
-}
-
-const MAX_CERTIFICATE_TEXT_BYTES: usize = 1_048_576;
-const MAX_CA_CERTIFICATE_TEXT_BYTES: usize = 5_242_880;
-
-pub(crate) fn validate_certificate_material(transport: &TransportConfig) -> Result<(), String> {
-    if transport.ca_certificate_pem.len() > MAX_CA_CERTIFICATE_TEXT_BYTES {
-        return Err("The CA certificate PEM exceeds the 5 MiB limit.".into());
-    }
-    if transport.client_certificate_pem.len() > MAX_CERTIFICATE_TEXT_BYTES {
-        return Err("The client certificate PEM exceeds the 1 MiB limit.".into());
-    }
-    if transport.client_key_pem.len() > MAX_CERTIFICATE_TEXT_BYTES {
-        return Err("The client private key PEM exceeds the 1 MiB limit.".into());
-    }
-    Ok(())
 }
 
 fn redirect_mode(transport: &TransportConfig) -> RedirectMode {
@@ -68,33 +58,6 @@ pub fn apply_preferred_request_version(
         HttpVersionMode::Http11 => request.version(Version::HTTP_11),
         _ => request,
     }
-}
-
-fn domain_matches(pattern: &str, hostname: &str) -> bool {
-    let pattern = pattern.trim().trim_matches(['[', ']']).to_ascii_lowercase();
-    let hostname = hostname.trim_matches(['[', ']']).to_ascii_lowercase();
-    if pattern == "*" {
-        return true;
-    }
-    if let Some(suffix) = pattern.strip_prefix("*.") {
-        return hostname.ends_with(&format!(".{suffix}"));
-    }
-    hostname == pattern
-}
-
-pub(crate) fn identity_enabled(transport: &TransportConfig, request_url: Option<&str>) -> bool {
-    if transport.client_certificate_domains.trim().is_empty() {
-        return true;
-    }
-    let hostname = request_url
-        .and_then(|value| url::Url::parse(value).ok())
-        .and_then(|value| value.host_str().map(str::to_string));
-    hostname.is_some_and(|hostname| {
-        transport
-            .client_certificate_domains
-            .split([',', '\n'])
-            .any(|pattern| domain_matches(pattern, &hostname))
-    })
 }
 
 pub fn build_client(
@@ -174,24 +137,11 @@ fn build_client_with_options(
         builder = builder.proxy(proxy);
     }
 
-    if !transport.client_certificate_pem.trim().is_empty()
-        || !transport.client_key_pem.trim().is_empty()
-    {
-        if transport.client_certificate_pem.trim().is_empty()
-            || transport.client_key_pem.trim().is_empty()
-        {
-            return Err("A client certificate and private key must be supplied together.".into());
-        }
-        if identity_enabled(transport, request_url) {
-            let identity_pem = format!(
-                "{}\n{}",
-                transport.client_certificate_pem.trim(),
-                transport.client_key_pem.trim()
-            );
-            let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
-                .map_err(|error| format!("Invalid client identity PEM: {error}"))?;
-            builder = builder.identity(identity);
-        }
+    if let Some(identity) = effective_client_identity_pem(transport, request_url)? {
+        let identity_pem = format!("{}\n{}", identity.certificate_pem, identity.private_key_pem);
+        let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
+            .map_err(|error| format!("Invalid client identity: {error}"))?;
+        builder = builder.identity(identity);
     }
 
     builder.build().map_err(|error| error.to_string())
@@ -695,6 +645,59 @@ mod tests {
         let (headers, body) = server.await.unwrap();
         assert!(headers.starts_with("POST /trusted HTTP/1.1"));
         assert_eq!(body, b"hello");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sends_modern_pkcs12_identity_for_https_requests() {
+        use rustls::{RootCertStore, ServerConfig};
+        use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+        use std::sync::Arc;
+        use tokio::{io::AsyncWriteExt, net::TcpListener};
+        use tokio_rustls::TlsAcceptor;
+
+        const CA: &str = include_str!("../tests/fixtures/tls/ca.cert.pem");
+        const CERTIFICATE: &str = include_str!("../tests/fixtures/tls/server.cert.pem");
+        const KEY: &str = include_str!("../tests/fixtures/tls/server.key.pem");
+        let certificates = CertificateDer::pem_slice_iter(CERTIFICATE.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let key = PrivateKeyDer::from_pem_slice(KEY.as_bytes()).unwrap();
+        let mut roots = RootCertStore::empty();
+        let authorities = CertificateDer::pem_slice_iter(CA.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(roots.add_parsable_certificates(authorities).0, 1);
+        let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(roots))
+            .build()
+            .unwrap();
+        let mut config = ServerConfig::builder()
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(certificates, key)
+            .unwrap();
+        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut stream = acceptor.accept(stream).await.unwrap();
+            let request = read_loopback_request(&mut stream).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+            request
+        });
+
+        let mut input = body_test_input("text");
+        input.url = format!("https://127.0.0.1:{}/pfx", address.port());
+        input.transport.validate_certificates = false;
+        input.transport.client_certificate_pfx_base64 =
+            crate::client_identity::test_pfx_base64("pfx-secret", false);
+        input.transport.client_certificate_passphrase = "pfx-secret".into();
+        let response = send(input).await.unwrap();
+        assert_eq!(response.status, 200);
+        assert!(server.await.unwrap().0.starts_with("POST /pfx HTTP/1.1"));
     }
 
     #[test]

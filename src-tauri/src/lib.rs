@@ -1,3 +1,4 @@
+mod client_identity;
 mod external_url;
 mod external_vault;
 mod grpc_client;

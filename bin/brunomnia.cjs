@@ -7431,6 +7431,117 @@ var init_cookies = __esm({
   }
 });
 
+// src/lib/certificates.ts
+var MAX_WORKSPACE_CLIENT_CERTIFICATES, MAX_CERTIFICATE_TEXT_BYTES, MAX_CA_CERTIFICATE_TEXT_BYTES, MAX_CERTIFICATE_PFX_BYTES, MAX_CERTIFICATE_PASSPHRASE_BYTES, MAX_CERTIFICATE_HOST_LENGTH, encoder, decoder, byteLength, truncateBytes, record3, stringValue2, base64ByteLength, normalizeCertificatePfxBase64, normalizeCertificatePassphrase, hasClientIdentity, normalizeWorkspaceCertificates, wildcardPattern, certificateHostMatches, selectWorkspaceClientCertificate, applyWorkspaceCertificates;
+var init_certificates = __esm({
+  "src/lib/certificates.ts"() {
+    MAX_WORKSPACE_CLIENT_CERTIFICATES = 100;
+    MAX_CERTIFICATE_TEXT_BYTES = 1048576;
+    MAX_CA_CERTIFICATE_TEXT_BYTES = 5242880;
+    MAX_CERTIFICATE_PFX_BYTES = 5242880;
+    MAX_CERTIFICATE_PASSPHRASE_BYTES = 4096;
+    MAX_CERTIFICATE_HOST_LENGTH = 512;
+    encoder = new TextEncoder();
+    decoder = new TextDecoder();
+    byteLength = (value) => encoder.encode(value).byteLength;
+    truncateBytes = (value, limit) => {
+      const bytes = encoder.encode(value);
+      if (bytes.byteLength <= limit) return value;
+      let end = limit;
+      let truncated = decoder.decode(bytes.slice(0, end));
+      while (byteLength(truncated) > limit && end > 0) truncated = decoder.decode(bytes.slice(0, --end));
+      return truncated;
+    };
+    record3 = (value) => value && typeof value === "object" ? value : void 0;
+    stringValue2 = (value) => typeof value === "string" ? value : "";
+    base64ByteLength = (value) => {
+      const base64 = value.trim();
+      if (!base64 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 !== 0) return -1;
+      return Math.floor(base64.length * 3 / 4) - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
+    };
+    normalizeCertificatePfxBase64 = (value) => {
+      const pfxBase64 = stringValue2(value).trim();
+      const bytes = base64ByteLength(pfxBase64);
+      return bytes >= 0 && bytes <= MAX_CERTIFICATE_PFX_BYTES ? pfxBase64 : "";
+    };
+    normalizeCertificatePassphrase = (value) => truncateBytes(stringValue2(value), MAX_CERTIFICATE_PASSPHRASE_BYTES);
+    hasClientIdentity = (client) => Boolean(client.pfxBase64 || client.certificatePem.trim() && client.keyPem.trim());
+    normalizeWorkspaceCertificates = (value) => {
+      const source = record3(value);
+      const ca = record3(source?.ca);
+      const caPem = truncateBytes(stringValue2(ca?.pem), MAX_CA_CERTIFICATE_TEXT_BYTES);
+      const ids = /* @__PURE__ */ new Set();
+      const clients = (Array.isArray(source?.clients) ? source.clients : []).flatMap((value2, index) => {
+        const client = record3(value2);
+        const host = stringValue2(client?.host).trim().slice(0, MAX_CERTIFICATE_HOST_LENGTH);
+        if (!client || !host) return [];
+        const requestedId = stringValue2(client.id).trim().slice(0, 256) || `workspace-certificate-${index}`;
+        let id = requestedId;
+        let suffix = 1;
+        while (ids.has(id)) id = `workspace-certificate-${index}-${suffix++}`;
+        ids.add(id);
+        const pfxBase64 = normalizeCertificatePfxBase64(client.pfxBase64);
+        return [{
+          id,
+          host,
+          enabled: client.enabled !== false,
+          certificatePem: pfxBase64 ? "" : truncateBytes(stringValue2(client.certificatePem), MAX_CERTIFICATE_TEXT_BYTES),
+          keyPem: pfxBase64 ? "" : truncateBytes(stringValue2(client.keyPem), MAX_CERTIFICATE_TEXT_BYTES),
+          pfxBase64,
+          passphrase: normalizeCertificatePassphrase(client.passphrase)
+        }];
+      }).slice(0, MAX_WORKSPACE_CLIENT_CERTIFICATES);
+      return {
+        ca: {
+          enabled: ca?.enabled === true && Boolean(caPem.trim()),
+          pem: caPem
+        },
+        clients
+      };
+    };
+    wildcardPattern = (value) => new RegExp(`^${value.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`, "i");
+    certificateHostMatches = (certificateHost, requestUrl, checkPort = true) => {
+      let request;
+      let certificate;
+      try {
+        request = new URL(requestUrl);
+        certificate = new URL(certificateHost.includes("://") ? certificateHost : `https://${certificateHost}`);
+      } catch {
+        return false;
+      }
+      const certificateHostname = decodeURIComponent(certificate.hostname);
+      const certificatePort = decodeURIComponent(certificate.port);
+      const requestPort = request.port;
+      if (checkPort) {
+        if (certificatePort.includes("*")) {
+          if (!wildcardPattern(certificatePort).test(requestPort)) return false;
+        } else if ((Number(certificatePort) || 443) !== (Number(requestPort) || 443)) return false;
+      }
+      return wildcardPattern(certificateHostname).test(request.hostname);
+    };
+    selectWorkspaceClientCertificate = (certificates, requestUrl) => {
+      const enabled = certificates.clients.filter((certificate) => certificate.enabled && hasClientIdentity(certificate));
+      return enabled.find((certificate) => certificateHostMatches(certificate.host, requestUrl, true)) ?? enabled.find((certificate) => certificateHostMatches(certificate.host, requestUrl, false));
+    };
+    applyWorkspaceCertificates = (transport, requestUrl, certificates) => {
+      if (!certificates) return transport;
+      const selected = transport.clientCertificatePem.trim() || transport.clientKeyPem.trim() || transport.clientCertificatePfxBase64.trim() ? void 0 : selectWorkspaceClientCertificate(certificates, requestUrl);
+      const caCertificatePem = transport.caCertificatePem.trim() ? transport.caCertificatePem : certificates.ca.enabled ? certificates.ca.pem : "";
+      return {
+        ...transport,
+        caCertificatePem,
+        ...selected ? {
+          clientCertificatePem: selected.certificatePem,
+          clientKeyPem: selected.keyPem,
+          clientCertificatePfxBase64: selected.pfxBase64,
+          clientCertificatePassphrase: selected.passphrase,
+          clientCertificateDomains: ""
+        } : {}
+      };
+    };
+  }
+});
+
 // src/lib/transport.ts
 var normalizeRequestTimeout, resolveRequestTimeout, resolveCertificateValidation, resolveProxyTransport;
 var init_transport = __esm({
@@ -7549,60 +7660,6 @@ var init_core = __esm({
 var init_auth = __esm({
   "src/lib/auth.ts"() {
     init_request();
-  }
-});
-
-// src/lib/certificates.ts
-var MAX_WORKSPACE_CLIENT_CERTIFICATES, MAX_CERTIFICATE_TEXT_BYTES, MAX_CA_CERTIFICATE_TEXT_BYTES, MAX_CERTIFICATE_HOST_LENGTH, encoder, decoder, byteLength, truncateBytes, record3, stringValue2, normalizeWorkspaceCertificates;
-var init_certificates = __esm({
-  "src/lib/certificates.ts"() {
-    MAX_WORKSPACE_CLIENT_CERTIFICATES = 100;
-    MAX_CERTIFICATE_TEXT_BYTES = 1048576;
-    MAX_CA_CERTIFICATE_TEXT_BYTES = 5242880;
-    MAX_CERTIFICATE_HOST_LENGTH = 512;
-    encoder = new TextEncoder();
-    decoder = new TextDecoder();
-    byteLength = (value) => encoder.encode(value).byteLength;
-    truncateBytes = (value, limit) => {
-      const bytes = encoder.encode(value);
-      if (bytes.byteLength <= limit) return value;
-      let end = limit;
-      let truncated = decoder.decode(bytes.slice(0, end));
-      while (byteLength(truncated) > limit && end > 0) truncated = decoder.decode(bytes.slice(0, --end));
-      return truncated;
-    };
-    record3 = (value) => value && typeof value === "object" ? value : void 0;
-    stringValue2 = (value) => typeof value === "string" ? value : "";
-    normalizeWorkspaceCertificates = (value) => {
-      const source = record3(value);
-      const ca = record3(source?.ca);
-      const caPem = truncateBytes(stringValue2(ca?.pem), MAX_CA_CERTIFICATE_TEXT_BYTES);
-      const ids = /* @__PURE__ */ new Set();
-      const clients = (Array.isArray(source?.clients) ? source.clients : []).flatMap((value2, index) => {
-        const client = record3(value2);
-        const host = stringValue2(client?.host).trim().slice(0, MAX_CERTIFICATE_HOST_LENGTH);
-        if (!client || !host) return [];
-        const requestedId = stringValue2(client.id).trim().slice(0, 256) || `workspace-certificate-${index}`;
-        let id = requestedId;
-        let suffix = 1;
-        while (ids.has(id)) id = `workspace-certificate-${index}-${suffix++}`;
-        ids.add(id);
-        return [{
-          id,
-          host,
-          enabled: client.enabled !== false,
-          certificatePem: truncateBytes(stringValue2(client.certificatePem), MAX_CERTIFICATE_TEXT_BYTES),
-          keyPem: truncateBytes(stringValue2(client.keyPem), MAX_CERTIFICATE_TEXT_BYTES)
-        }];
-      }).slice(0, MAX_WORKSPACE_CLIENT_CERTIFICATES);
-      return {
-        ca: {
-          enabled: ca?.enabled === true && Boolean(caPem.trim()),
-          pem: caPem
-        },
-        clients
-      };
-    };
   }
 });
 
@@ -7845,6 +7902,8 @@ var createRequest = (id, name, method, url) => ({
     proxyExclusions: "",
     clientCertificatePem: "",
     clientKeyPem: "",
+    clientCertificatePfxBase64: "",
+    clientCertificatePassphrase: "",
     clientCertificateDomains: "",
     caCertificatePem: "",
     sendCookies: true,
@@ -7894,7 +7953,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 30,
+  version: 31,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -10644,8 +10703,10 @@ var hydrateScriptFileReferences = async (request, references, readFile2, budget 
       part.contentType = reference.contentType || payload.mimeType;
     } else if (reference.kind === "certificate-cert") {
       request.transport.clientCertificatePem = payloadText(payload);
-    } else {
+    } else if (reference.kind === "certificate-key") {
       request.transport.clientKeyPem = payloadText(payload);
+    } else {
+      request.transport.clientCertificatePfxBase64 = payload.dataBase64;
     }
   }
   return request;
@@ -10737,14 +10798,23 @@ var normalizeScriptSubrequestInput = (input, sourceRequest, allowFileReferences)
     const cert = record2(certificate.cert);
     const key = record2(certificate.key);
     const pfx = record2(certificate.pfx);
-    if (pfx?.src || certificate.pfxPath || certificate.path) throw new Error("PFX certificate files are not supported by the native PEM transport.");
     const certPath = certificate.certPath ?? cert?.src;
     const keyPath = certificate.keyPath ?? key?.src;
-    if ((certPath || keyPath) && !allowFileReferences) throw new Error("Script requests cannot read certificate file paths without script file access.");
-    if (certPath) fileReferences.push({ kind: "certificate-cert", path: stringValue(certPath) });
-    else request.transport.clientCertificatePem = stringValue(cert?.pem ?? certificate.cert ?? certificate.certificate);
-    if (keyPath) fileReferences.push({ kind: "certificate-key", path: stringValue(keyPath) });
-    else request.transport.clientKeyPem = stringValue(key?.pem ?? certificate.key);
+    const pfxPath = certificate.pfxPath ?? certificate.path ?? pfx?.src;
+    if (pfxPath && (certPath || keyPath || certificate.cert || certificate.key || certificate.certificate)) throw new Error("Script certificates must use either PFX/PKCS#12 or PEM certificate and key material.");
+    if ((certPath || keyPath || pfxPath) && !allowFileReferences) throw new Error("Script requests cannot read certificate file paths without script file access.");
+    if (pfxPath) {
+      fileReferences.push({ kind: "certificate-pfx", path: stringValue(pfxPath) });
+      request.transport.clientCertificatePem = "";
+      request.transport.clientKeyPem = "";
+    } else {
+      if (certPath) fileReferences.push({ kind: "certificate-cert", path: stringValue(certPath) });
+      else request.transport.clientCertificatePem = stringValue(cert?.pem ?? certificate.cert ?? certificate.certificate);
+      if (keyPath) fileReferences.push({ kind: "certificate-key", path: stringValue(keyPath) });
+      else request.transport.clientKeyPem = stringValue(key?.pem ?? certificate.key);
+      request.transport.clientCertificatePfxBase64 = "";
+    }
+    request.transport.clientCertificatePassphrase = stringValue(certificate.passphrase);
     request.transport.clientCertificateDomains = Array.isArray(certificate.domains) ? certificate.domains.map(String).join(",") : stringValue(certificate.domains);
   }
   const body = source.body;
@@ -11002,17 +11072,23 @@ self.onmessage = async ({ data }) => {
     key: { src: '' },
     cert: { src: '' },
     pfx: { src: '' },
-    passphrase: '',
+    passphrase: state.request.transport.clientCertificatePassphrase || '',
     update: (certificate) => {
       const input = certificate || {};
-      removeFileReferences('certificate-cert', 'certificate-key');
-      if (input.disabled === true) { state.request.transport.clientCertificatePem = ''; state.request.transport.clientKeyPem = ''; state.request.transport.clientCertificateDomains = ''; certificateApi.key.src = ''; certificateApi.cert.src = ''; certificateApi.pfx.src = ''; return; }
-      if (input.pfx?.src || input.pfxPath) throw new Error('PFX certificate files are not supported by the native PEM transport.');
+      removeFileReferences('certificate-cert', 'certificate-key', 'certificate-pfx');
+      if (input.disabled === true) { state.request.transport.clientCertificatePem = ''; state.request.transport.clientKeyPem = ''; state.request.transport.clientCertificatePfxBase64 = ''; state.request.transport.clientCertificatePassphrase = ''; state.request.transport.clientCertificateDomains = ''; certificateApi.key.src = ''; certificateApi.cert.src = ''; certificateApi.pfx.src = ''; certificateApi.passphrase = ''; return; }
       const certPath = input.certPath ?? input.cert?.src; const keyPath = input.keyPath ?? input.key?.src;
-      if (certPath) { certificateApi.cert.src = addFileReference({ kind: 'certificate-cert', path: certPath }); state.request.transport.clientCertificatePem = ''; }
-      else state.request.transport.clientCertificatePem = String(input.cert?.pem ?? input.cert ?? input.certificate ?? '');
-      if (keyPath) { certificateApi.key.src = addFileReference({ kind: 'certificate-key', path: keyPath }); state.request.transport.clientKeyPem = ''; }
-      else state.request.transport.clientKeyPem = String(input.key?.pem ?? input.key ?? '');
+      const pfxPath = input.pfxPath ?? input.path ?? input.pfx?.src;
+      if (pfxPath && (certPath || keyPath || input.cert || input.key || input.certificate)) throw new Error('Script certificates must use either PFX/PKCS#12 or PEM certificate and key material.');
+      if (pfxPath) { certificateApi.pfx.src = addFileReference({ kind: 'certificate-pfx', path: pfxPath }); certificateApi.cert.src = ''; certificateApi.key.src = ''; state.request.transport.clientCertificatePfxBase64 = ''; state.request.transport.clientCertificatePem = ''; state.request.transport.clientKeyPem = ''; }
+      else {
+        if (certPath) { certificateApi.cert.src = addFileReference({ kind: 'certificate-cert', path: certPath }); state.request.transport.clientCertificatePem = ''; }
+        else state.request.transport.clientCertificatePem = String(input.cert?.pem ?? input.cert ?? input.certificate ?? '');
+        if (keyPath) { certificateApi.key.src = addFileReference({ kind: 'certificate-key', path: keyPath }); state.request.transport.clientKeyPem = ''; }
+        else state.request.transport.clientKeyPem = String(input.key?.pem ?? input.key ?? '');
+        certificateApi.pfx.src = ''; state.request.transport.clientCertificatePfxBase64 = '';
+      }
+      certificateApi.passphrase = String(input.passphrase ?? ''); state.request.transport.clientCertificatePassphrase = certificateApi.passphrase;
       state.request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(',') : String(input.domains ?? '');
     },
   };
@@ -11175,6 +11251,7 @@ self.onmessage = async ({ data }) => {
 `;
 
 // cli/brunomnia.ts
+init_certificates();
 init_transport();
 
 // src/lib/storage.ts
@@ -11788,7 +11865,9 @@ var migrateWorkspace = (value) => {
           timeoutMs: typeof request.transport?.timeoutMs === "number" && Number.isFinite(request.transport.timeoutMs) ? Math.min(2147483647, Math.max(0, Math.trunc(request.transport.timeoutMs))) : defaults.transport.timeoutMs,
           validateCertificates: validateCertificatesMode !== "off",
           validateCertificatesMode,
-          proxyMode
+          proxyMode,
+          clientCertificatePfxBase64: normalizeCertificatePfxBase64(request.transport?.clientCertificatePfxBase64),
+          clientCertificatePassphrase: normalizeCertificatePassphrase(request.transport?.clientCertificatePassphrase)
         },
         sse: {
           ...defaults.sse,
@@ -11852,7 +11931,7 @@ var migrateWorkspace = (value) => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 30,
+    version: 31,
     name: workspace.name || "Imported Workspace",
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? "",
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
@@ -12154,31 +12233,48 @@ var runNodeScript = async (source, originalRequest, originalEnvironment, respons
     else if (input.host) request.transport.proxyUrl = `${String(input.protocol ?? "http")}://${String(input.host)}${input.port ? `:${String(input.port)}` : ""}`;
     request.transport.proxyExclusions = Array.isArray(input.exclusions) ? input.exclusions.join(",") : String(input.exclusions ?? request.transport.proxyExclusions);
   } };
-  const certificateApi = requestWithHelpers.certificate = { key: { src: "" }, cert: { src: "" }, pfx: { src: "" }, passphrase: "", update: (input) => {
-    removeFileReferences("certificate-cert", "certificate-key");
+  const certificateApi = requestWithHelpers.certificate = { key: { src: "" }, cert: { src: "" }, pfx: { src: "" }, passphrase: request.transport.clientCertificatePassphrase || "", update: (input) => {
+    removeFileReferences("certificate-cert", "certificate-key", "certificate-pfx");
     if (input.disabled === true) {
       request.transport.clientCertificatePem = "";
       request.transport.clientKeyPem = "";
+      request.transport.clientCertificatePfxBase64 = "";
+      request.transport.clientCertificatePassphrase = "";
       request.transport.clientCertificateDomains = "";
       certificateApi.key.src = "";
       certificateApi.cert.src = "";
       certificateApi.pfx.src = "";
+      certificateApi.passphrase = "";
       return;
     }
     const key = input.key;
     const cert = input.cert;
-    const pfx = input.pfx;
-    if (pfx?.src || input.pfxPath) throw new Error("PFX certificate files are not supported by the native PEM transport.");
+    const pfx = input.pfx && typeof input.pfx === "object" ? input.pfx : void 0;
     const certPath = input.certPath ?? cert?.src;
     const keyPath = input.keyPath ?? key?.src;
-    if (certPath) {
-      certificateApi.cert.src = addFileReference({ kind: "certificate-cert", path: String(certPath) });
+    const pfxPath = input.pfxPath ?? input.path ?? pfx?.src;
+    if (pfxPath && (certPath || keyPath || input.cert || input.key || input.certificate)) throw new Error("Script certificates must use either PFX/PKCS#12 or PEM certificate and key material.");
+    if (pfxPath) {
+      certificateApi.pfx.src = addFileReference({ kind: "certificate-pfx", path: String(pfxPath) });
+      certificateApi.cert.src = "";
+      certificateApi.key.src = "";
+      request.transport.clientCertificatePfxBase64 = "";
       request.transport.clientCertificatePem = "";
-    } else request.transport.clientCertificatePem = String(cert?.pem ?? input.cert ?? input.certificate ?? "");
-    if (keyPath) {
-      certificateApi.key.src = addFileReference({ kind: "certificate-key", path: String(keyPath) });
       request.transport.clientKeyPem = "";
-    } else request.transport.clientKeyPem = String(key?.pem ?? input.key ?? "");
+    } else {
+      if (certPath) {
+        certificateApi.cert.src = addFileReference({ kind: "certificate-cert", path: String(certPath) });
+        request.transport.clientCertificatePem = "";
+      } else request.transport.clientCertificatePem = String(cert?.pem ?? input.cert ?? input.certificate ?? "");
+      if (keyPath) {
+        certificateApi.key.src = addFileReference({ kind: "certificate-key", path: String(keyPath) });
+        request.transport.clientKeyPem = "";
+      } else request.transport.clientKeyPem = String(key?.pem ?? input.key ?? "");
+      certificateApi.pfx.src = "";
+      request.transport.clientCertificatePfxBase64 = "";
+    }
+    certificateApi.passphrase = String(input.passphrase ?? "");
+    request.transport.clientCertificatePassphrase = certificateApi.passphrase;
     request.transport.clientCertificateDomains = Array.isArray(input.domains) ? input.domains.join(",") : String(input.domains ?? "");
   } };
   const baseGlobalApi = variableApi(baseGlobals, baseGlobalDisabled);
@@ -12395,6 +12491,9 @@ var executeHttp = async (request, variables, requestTimeoutMs = 3e4, proxyPrefer
   if (resolveProxyTransport(request.transport, url, proxyPreferences).proxyMode === "custom") {
     throw new Error("The CLI cannot use a manual proxy because Node Fetch does not expose per-request proxy configuration. Use the native desktop transport or configure a supported runner-level proxy.");
   }
+  if (request.transport.caCertificatePem || request.transport.clientCertificatePem || request.transport.clientKeyPem || request.transport.clientCertificatePfxBase64) {
+    throw new Error("The CLI cannot attach custom CA or client-certificate material because Node Fetch does not expose per-request TLS configuration. Use the native desktop transport for workspace CA, PEM, or PFX/PKCS#12 identities.");
+  }
   const response = await fetch(url, {
     method: request.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled && header.name).map((header) => [header.name, header.value])),
@@ -12463,11 +12562,13 @@ var main = async () => {
     if (subject === "collection" && requestedTestNamePattern !== void 0) fail("--testNamePattern is only available for run test.");
     const testNamePattern = subject === "test" ? validateTestNamePattern(requestedTestNamePattern) : void 0;
     const executeWorkspaceHttp = (request, variables) => {
+      const requestUrl = buildRequestUrl(request, variables);
+      const preparedRequest = { ...request, transport: applyWorkspaceCertificates(request.transport, requestUrl, workspace.certificates) };
       const validateCertificates = workspace.preferences.validateCertificates;
-      if (!resolveCertificateValidation(request.transport, validateCertificates)) {
+      if (!resolveCertificateValidation(preparedRequest.transport, validateCertificates)) {
         throw new Error("The CLI cannot disable TLS certificate validation because Node Fetch does not expose that authority. Use the native desktop transport for explicitly untrusted development certificates.");
       }
-      return executeHttp(request, variables, workspace.preferences.requestTimeoutMs, {
+      return executeHttp(preparedRequest, variables, workspace.preferences.requestTimeoutMs, {
         enabled: workspace.preferences.proxyEnabled,
         httpProxy: workspace.preferences.httpProxy,
         httpsProxy: workspace.preferences.httpsProxy,

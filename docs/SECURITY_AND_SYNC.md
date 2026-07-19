@@ -45,9 +45,9 @@ When the vault policy is enabled, Brunomnia scans likely secret-named environmen
 
 ## Workspace certificates
 
-The **Certificates** tab stores one optional CA PEM and up to 100 host/port-scoped PEM client identities in the local project catalog. Enabled CA certificates extend native roots without disabling normal platform trust. Enabled client identities use port-aware wildcard matching first and hostname-only fallback second; request-local Transport PEM fields take precedence.
+The **Certificates** tab stores one optional CA PEM and up to 100 host/port-scoped PEM or PFX/PKCS#12 client identities in the local project catalog. PEM certificate/key text is limited to 1 MiB per field; binary PFX/PKCS#12 bundles are limited to 5 MiB and can carry a masked passphrase. Enabled CA certificates extend native roots without disabling normal platform trust. Enabled client identities use port-aware wildcard matching first and hostname-only fallback second; request-local Transport PEM or PFX material takes precedence.
 
-Workspace certificate records are omitted from split-YAML/Git writes and encrypted-sync payloads, then restored from the current device after reload or pull. They therefore do not trigger the plaintext-publication guardrail. Explicit Brunomnia JSON export remains an intentional disclosure path. PFX/PKCS#12 import is not yet supported.
+Workspace certificate records and passphrases are omitted from split-YAML/Git writes and encrypted-sync payloads, then restored from the current device after reload or pull. They therefore do not trigger the plaintext-publication guardrail. Explicit Brunomnia JSON export remains an intentional disclosure path. Request-local PFX bytes/passphrases follow the same explicit-request export boundary as request-local PEM keys and are flagged before plaintext project publication.
 
 ## End-to-end encrypted shared file
 

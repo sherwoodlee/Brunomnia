@@ -245,7 +245,7 @@ describe('native HTTP transport preferences', () => {
 
     await sendRequest(request, undefined, { certificates: {
       ca: { enabled: true, pem: 'workspace-ca' },
-      clients: [{ id: 'client', host: '*.example.test', enabled: true, certificatePem: 'workspace-cert', keyPem: 'workspace-key' }],
+      clients: [{ id: 'client', host: '*.example.test', enabled: true, certificatePem: 'workspace-cert', keyPem: 'workspace-key', pfxBase64: '', passphrase: '' }],
     } });
 
     expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({

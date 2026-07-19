@@ -177,6 +177,8 @@ export type TransportConfig = {
   proxyExclusions: string;
   clientCertificatePem: string;
   clientKeyPem: string;
+  clientCertificatePfxBase64: string;
+  clientCertificatePassphrase: string;
   clientCertificateDomains: string;
   caCertificatePem: string;
   sendCookies: boolean;
@@ -189,6 +191,8 @@ export type WorkspaceClientCertificate = {
   enabled: boolean;
   certificatePem: string;
   keyPem: string;
+  pfxBase64: string;
+  passphrase: string;
 };
 
 export type WorkspaceCertificates = {
@@ -370,7 +374,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 30;
+  version: 31;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

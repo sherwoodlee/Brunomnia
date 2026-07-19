@@ -89,12 +89,14 @@ describe('artifact export adapters', () => {
 
   it('creates scoped Brunomnia and raw OpenAPI exports', () => {
     const workspace = cloneSeedWorkspace();
+    workspace.certificates.clients = [{ id: 'pfx', host: 'api.example.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }];
     const collection = workspace.collections[1];
     const scoped = exportArtifact(workspace, { format: 'brunomnia', scope: 'collection', collectionId: collection.id });
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(30);
+    expect(parsed.version).toBe(31);
+    expect(parsed.certificates.clients[0]).toMatchObject({ pfxBase64: 'cGZ4', passphrase: 'secret' });
 
     const design = workspace.apiDesigns[0];
     const spec = exportArtifact(workspace, { format: 'openapi', scope: 'design', designId: design.id });

@@ -3,7 +3,7 @@ import { cloneSeedWorkspace } from '../data/seed';
 import type { AiSettings, ApiRequest, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ShortcutAction, StoredResponse, StoredStreamSession, StreamMessage, Workspace } from '../types';
 import { normalizeGraphqlSchema } from './graphql';
 import { normalizeGrpcProtoTree } from './grpcProto';
-import { normalizeWorkspaceCertificates } from './certificates';
+import { normalizeCertificatePassphrase, normalizeCertificatePfxBase64, normalizeWorkspaceCertificates } from './certificates';
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 import { normalizeHttpMethod } from './request';
 
@@ -573,6 +573,8 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           validateCertificates: validateCertificatesMode !== 'off',
           validateCertificatesMode,
           proxyMode,
+          clientCertificatePfxBase64: normalizeCertificatePfxBase64(request.transport?.clientCertificatePfxBase64),
+          clientCertificatePassphrase: normalizeCertificatePassphrase(request.transport?.clientCertificatePassphrase),
         },
         sse: {
           ...defaults.sse,
@@ -636,7 +638,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 30,
+    version: 31,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

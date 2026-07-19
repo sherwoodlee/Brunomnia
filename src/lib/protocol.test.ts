@@ -121,9 +121,9 @@ describe('streamTransportConfig', () => {
     request.url = 'wss://events.example.test/socket';
     const transport = streamTransportConfig(request, 'default', 10, true, 30_000, true, undefined, request.url, {
       ca: { enabled: true, pem: 'workspace-ca' },
-      clients: [{ id: 'client', host: '*.example.test', enabled: true, certificatePem: 'workspace-cert', keyPem: 'workspace-key' }],
+      clients: [{ id: 'client', host: '*.example.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }],
     });
-    expect(transport).toMatchObject({ caCertificatePem: 'workspace-ca', clientCertificatePem: 'workspace-cert', clientKeyPem: 'workspace-key' });
+    expect(transport).toMatchObject({ caCertificatePem: 'workspace-ca', clientCertificatePfxBase64: 'cGZ4', clientCertificatePassphrase: 'secret', clientCertificatePem: '', clientKeyPem: '' });
   });
 });
 
