@@ -327,7 +327,7 @@ fn graphql_message_type(message: &str) -> Option<String> {
 }
 
 #[derive(Debug)]
-struct AcceptInvalidServerCertificate;
+pub(crate) struct AcceptInvalidServerCertificate;
 
 impl ServerCertVerifier for AcceptInvalidServerCertificate {
     fn verify_server_cert(

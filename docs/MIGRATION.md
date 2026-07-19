@@ -28,7 +28,7 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | gRPC execution | Complete | Dynamic protobuf JSON mapping; unary, client-streaming, server-streaming and bidirectional calls |
 | Rich HTTP bodies | Complete | None, JSON, text, URL-encoded, multipart text/files and binary files |
 | Transport configuration | Complete for HTTP/SSE | Redirect policy, inherited/custom connect/HTTP timeout with `0` disabled, inherited/always/never API certificate validation, unlimited active SSE duration, HTTP proxy and PEM client identity |
-| gRPC TLS | Complete | System trust roots, timeout and PEM client identity |
+| gRPC TLS | Complete baseline | System roots, timeout, inherited/overridden validation, and domain-scoped PEM client identity; custom CA/PFX remain later closure |
 | WebSocket TLS and proxy | Complete baseline | System roots and arbitrary handshake headers; Milestone 109 adds inherited validation overrides plus domain-scoped PEM identity, Milestone 110 adds authenticated HTTP/HTTPS custom proxy transport plus no-proxy handling, and Milestone 111 matches plain-WS absolute-form forwarding |
 | Workspace migration | Complete | Version 1 workspaces migrate in place to the version 2 protocol schema |
 
@@ -1686,7 +1686,21 @@ Compatibility bounds at Milestone 110 were explicit: PAC-authenticated system pr
 
 Compatibility bounds remain explicit: PAC-authenticated system proxy discovery, digest/NTLM proxy authentication, upstream filesystem-backed event/timeline streams, streaming plugin hooks, and broad third-party proxy matrices remain open. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 112 — remaining parity closure and release hardening
+## Milestone 112 — gRPC validation and scoped identity (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia passes `rejectUnauthorized` plus filtered PEM client certificate/key material into secure gRPC channel credentials and uses insecure credentials for plain gRPC |
+| Effective validation | Complete | HTTPS gRPC channels resolve device/per-request API validation; Never installs the existing request-local Rustls verifier through Tonic's public custom-verifier API without global state |
+| Scoped identity | Complete | Certificate/key pairing is validated only for secure endpoints, and identity attaches only when shared exact/wildcard/comma/newline/IPv6 domain matching selects the endpoint host |
+| Native-root continuity | Complete | Validation-on channels with identity explicitly retain all enabled native roots; channels requiring no override keep Tonic's ordinary automatic TLS connector |
+| Timeout and plaintext boundary | Complete | The effective timeout covers connection, RPC, response streams, and custom TLS handshakes; plain HTTP/2 endpoints neither parse nor attach TLS identity material |
+| Executable coverage | Complete | A real sequential TLS server observes strict rejection of its untrusted certificate, mTLS rejection when the identity domain mismatches, and successful mTLS negotiation when it matches |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 112 verification](QA_MILESTONE_112.md) |
+
+Compatibility bounds remain explicit: importable proto trees, custom CA/PFX identity, gRPC proxy transport, richer reflection/schema workflows, interactive streaming lifecycle controls, and broad third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 113 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

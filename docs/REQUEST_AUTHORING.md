@@ -129,6 +129,8 @@ Workspace v14 and earlier requests migrate their saved timeout to **Custom** so 
 
 Preferences has separate on-by-default choices for **Validate certificates for API requests** and **Validate certificates during authentication**. HTTP, GraphQL, Event Stream, gRPC, collection-run, script/plugin, URL-import, and integration traffic resolve the API setting at execution time. OAuth token acquisition resolves the authentication setting instead, matching current Insomnia's separation.
 
+Secure gRPC endpoints apply the resolved API validation choice through Tonic's request-local Rustls verifier. **Never** accepts an untrusted server only for that channel; it does not change process TLS state. A configured PEM client certificate/key is attached only when the endpoint hostname matches its exact, wildcard, comma-separated, newline-separated, or IPv6 domain rule. Plain HTTP/2 gRPC endpoints do not parse or attach TLS identity material.
+
 Each request selects **Use Preferences**, **Always**, or **Never** in Transport. Workspace v15 and earlier requests migrate their saved boolean to Always/Never so upgrades preserve behavior; **Make every request inherit certificate validation** opts them into the device default. Never affects only native desktop transport. Browser Fetch owns certificate verification, and the CLI safely refuses a request whose effective mode is Never rather than weakening Node globally.
 
 ## Proxy policy

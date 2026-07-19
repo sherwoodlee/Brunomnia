@@ -2,15 +2,16 @@ use crate::models::{
     GrpcCallInput, GrpcCallOutput, GrpcMethodInfo, GrpcSchemaInput, GrpcSchemaOutput,
     GrpcServiceInfo, KeyValue, TransportConfig,
 };
+use crate::{http_client::identity_enabled, streaming::AcceptInvalidServerCertificate};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor};
 use prost_types::{FileDescriptorProto, FileDescriptorSet};
-use std::{collections::HashSet, fs, time::Instant};
+use std::{collections::HashSet, fs, sync::Arc, time::Instant};
 use tonic::{
     codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
     metadata::{Ascii, MetadataKey, MetadataValue},
-    transport::{Channel, Endpoint, Identity},
+    transport::{Channel, ClientTlsConfig, Endpoint, Identity},
     Request, Status,
 };
 
@@ -187,25 +188,38 @@ fn apply_metadata<T>(request: &mut Request<T>, metadata: &[KeyValue]) -> Result<
 async fn connect_channel(endpoint: &str, transport: &TransportConfig) -> Result<Channel, String> {
     let mut builder = Endpoint::from_shared(endpoint.to_string())
         .map_err(|error| format!("Invalid gRPC endpoint: {error}"))?;
+    let secure = url::Url::parse(endpoint)
+        .ok()
+        .is_some_and(|url| url.scheme() == "https");
     if transport.timeout_ms > 0 {
         let timeout = std::time::Duration::from_millis(transport.timeout_ms);
         builder = builder.connect_timeout(timeout).timeout(timeout);
     }
-    if !transport.client_certificate_pem.trim().is_empty()
-        || !transport.client_key_pem.trim().is_empty()
-    {
-        if transport.client_certificate_pem.trim().is_empty()
-            || transport.client_key_pem.trim().is_empty()
-        {
+    if secure {
+        let has_certificate = !transport.client_certificate_pem.trim().is_empty();
+        let has_key = !transport.client_key_pem.trim().is_empty();
+        if has_certificate != has_key {
             return Err("A client certificate and private key must be supplied together.".into());
         }
-        let tls = tonic::transport::ClientTlsConfig::new().identity(Identity::from_pem(
-            transport.client_certificate_pem.clone(),
-            transport.client_key_pem.clone(),
-        ));
-        builder = builder
-            .tls_config(tls)
+        let use_identity = has_certificate && identity_enabled(transport, Some(endpoint));
+        if !transport.validate_certificates || use_identity {
+            let mut tls = ClientTlsConfig::new();
+            if transport.timeout_ms > 0 {
+                tls = tls.timeout(std::time::Duration::from_millis(transport.timeout_ms));
+            }
+            if use_identity {
+                tls = tls.identity(Identity::from_pem(
+                    transport.client_certificate_pem.clone(),
+                    transport.client_key_pem.clone(),
+                ));
+            }
+            builder = if transport.validate_certificates {
+                builder.tls_config(tls.with_enabled_roots())
+            } else {
+                builder.tls_config_with_verifier(tls, Arc::new(AcceptInvalidServerCertificate))
+            }
             .map_err(|error| format!("Invalid gRPC TLS configuration: {error}"))?;
+        }
     }
     builder
         .connect()
@@ -419,6 +433,8 @@ impl Decoder for DynamicDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustls::{RootCertStore, ServerConfig};
+    use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 
     const TEST_PROTO: &str = r#"
         syntax = "proto3";
@@ -430,6 +446,41 @@ mod tests {
         message HelloRequest { string name = 1; }
         message HelloReply { string message = 1; }
     "#;
+    const TLS_CA_CERTIFICATE: &str = include_str!("../tests/fixtures/tls/ca.cert.pem");
+    const TLS_SERVER_CERTIFICATE: &str = include_str!("../tests/fixtures/tls/server.cert.pem");
+    const TLS_SERVER_KEY: &str = include_str!("../tests/fixtures/tls/server.key.pem");
+    const TLS_CLIENT_CERTIFICATE: &str = include_str!("../tests/fixtures/tls/client.cert.pem");
+    const TLS_CLIENT_KEY: &str = include_str!("../tests/fixtures/tls/client.key.pem");
+
+    fn test_tls_server_config(require_client_identity: bool) -> ServerConfig {
+        let certificates = CertificateDer::pem_slice_iter(TLS_SERVER_CERTIFICATE.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let key = PrivateKeyDer::from_pem_slice(TLS_SERVER_KEY.as_bytes()).unwrap();
+        let builder = ServerConfig::builder();
+        let mut config = if require_client_identity {
+            let mut roots = RootCertStore::empty();
+            let authorities = CertificateDer::pem_slice_iter(TLS_CA_CERTIFICATE.as_bytes())
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            let (added, _) = roots.add_parsable_certificates(authorities);
+            assert_eq!(added, 1);
+            let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(roots))
+                .build()
+                .unwrap();
+            builder
+                .with_client_cert_verifier(verifier)
+                .with_single_cert(certificates, key)
+                .unwrap()
+        } else {
+            builder
+                .with_no_client_auth()
+                .with_single_cert(certificates, key)
+                .unwrap()
+        };
+        config.alpn_protocols = vec![b"h2".to_vec()];
+        config
+    }
 
     #[test]
     fn compiles_proto_and_describes_streaming_methods() {
@@ -450,5 +501,61 @@ mod tests {
         let messages = deserialize_messages(r#"{"name":"Ada"}"#, descriptor, false)
             .expect("JSON maps to proto");
         assert_eq!(messages.len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn applies_grpc_validation_and_domain_scoped_client_identity() {
+        use tokio::net::TcpListener;
+        use tokio_rustls::TlsAcceptor;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let plain_acceptor = TlsAcceptor::from(Arc::new(test_tls_server_config(false)));
+        let mutual_acceptor = TlsAcceptor::from(Arc::new(test_tls_server_config(true)));
+        let server = tokio::spawn(async move {
+            let (strict_stream, _) = listener.accept().await.unwrap();
+            assert!(plain_acceptor.accept(strict_stream).await.is_err());
+
+            let (unmatched_stream, _) = listener.accept().await.unwrap();
+            assert!(mutual_acceptor.accept(unmatched_stream).await.is_err());
+
+            let (matched_stream, _) = listener.accept().await.unwrap();
+            assert!(mutual_acceptor.accept(matched_stream).await.is_ok());
+        });
+
+        let endpoint = format!("https://127.0.0.1:{}", address.port());
+        let _ = connect_channel(
+            &endpoint,
+            &TransportConfig {
+                timeout_ms: 1_000,
+                ..Default::default()
+            },
+        )
+        .await;
+        let _ = connect_channel(
+            &endpoint,
+            &TransportConfig {
+                timeout_ms: 1_000,
+                validate_certificates: false,
+                client_certificate_pem: TLS_CLIENT_CERTIFICATE.into(),
+                client_key_pem: TLS_CLIENT_KEY.into(),
+                client_certificate_domains: "localhost".into(),
+                ..Default::default()
+            },
+        )
+        .await;
+        let _ = connect_channel(
+            &endpoint,
+            &TransportConfig {
+                timeout_ms: 1_000,
+                validate_certificates: false,
+                client_certificate_pem: TLS_CLIENT_CERTIFICATE.into(),
+                client_key_pem: TLS_CLIENT_KEY.into(),
+                client_certificate_domains: "127.0.0.1".into(),
+                ..Default::default()
+            },
+        )
+        .await;
+        server.await.unwrap();
     }
 }
