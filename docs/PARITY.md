@@ -1296,6 +1296,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Pinned Insomnia provider plus exact locked MCP SDK audit proving URL-based client IDs are unreachable without `clientMetadataUrl`: [`docs/QA_MILESTONE_227.md`](QA_MILESTONE_227.md)
 - Explicit twenty-hop metadata redirect handling with per-hop URL validation/traces, loop and overflow rejection, and no registration-POST redirect authority: [`src/lib/mcpOAuthDiscovery.ts`](../src/lib/mcpOAuthDiscovery.ts)
 - Redirect success, native-follow denial, insecure-target refusal, loop detection, overflow coverage, full regression/build evidence, and corrected integration guidance: [`src/lib/mcpOAuth.test.ts`](../src/lib/mcpOAuth.test.ts), [`docs/MCP_AI_KONNECT.md`](MCP_AI_KONNECT.md), and [`docs/QA_MILESTONE_227.md`](QA_MILESTONE_227.md)
+- Successful remote Node 22 rebuild/smoke, signed AMD64/ARM64 publication, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_227.md`](QA_MILESTONE_227.md)
 
 ## Parity declaration rule
 

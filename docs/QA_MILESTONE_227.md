@@ -34,6 +34,16 @@ No Rust/native or CLI behavior changed. Milestone 220 remains the latest full na
 
 This milestone changes transport negotiation and event evidence without adding an interaction. No live provider credential or rendered Browser claim is made; deterministic transport fixtures cover the complete redirect boundary.
 
+## Remote gate
+
+Main commit `c82fc59c401d182d142020ec78576770de1f7a7a` completed verify and publish in [Actions run 29708200117](https://github.com/sherwoodlee/Brunomnia/actions/runs/29708200117). Node 22 rebuilt the byte-identical CLI, passed the no-network container trust smoke, and published signed AMD64/ARM64 provenance/SBOM manifests at:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:e68122ef1c92167e7dd0ffe1211dbda29adc5707492ec6c25cc1abc356d37cf2
+```
+
+Independent `cosign verify` passed the exact GitHub Actions issuer and `cli-container.yml@refs/heads/main` identity, validated the exact M227 commit claim and trusted certificate chain, and found transparency-log entry `2204509484`.
+
 ## Acceptance boundary
 
 M227 closes metadata redirects and removes the unreachable URL-based client-ID branch from the parity backlog. Multiple authorization-server failover after valid resource metadata, DPoP, recursive/conditional schema forms, long-lived streaming, cancellation, reviewed sampling/elicitation, notification response UI, persistent STDIO sessions, live third-party fixtures, and OS-keychain-wrapped runtime credentials remain. MCP clients stay `Baseline`; exactly 19 parity rows remain incomplete, so Brunomnia is not feature-complete.
