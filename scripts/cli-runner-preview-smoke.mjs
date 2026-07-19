@@ -515,6 +515,18 @@ paths:
   assert.equal(missingScript.code, 1);
   assert.match(missingScript.stderr, /Available scripts: preview, invalid/);
   await writeFile(join(temporary, 'non-interactive.insorc'), stringify({ options: { workingDir: temporary, ci: false } }));
+  const arrivalsBeforeResourceRefusals = arrivals.length;
+  for (const [args, message] of [
+    [['run', 'collection', '--config', join(temporary, 'non-interactive.insorc')], /Collection selection requires an interactive terminal.*identifier or use --ci/],
+    [['run', 'test', '--config', join(temporary, 'non-interactive.insorc')], /Test suite or API design selection requires an interactive terminal.*identifier or use --ci/],
+    [['lint', 'spec', '--config', join(temporary, 'non-interactive.insorc')], /API design selection requires an interactive terminal.*identifier or use --ci/],
+    [['export', 'spec', '--config', join(temporary, 'non-interactive.insorc')], /API design selection requires an interactive terminal.*identifier or use --ci/],
+  ]) {
+    const rejectedResource = await runFailure(args);
+    assert.equal(rejectedResource.code, 1);
+    assert.match(rejectedResource.stderr, message);
+  }
+  assert.equal(arrivals.length, arrivalsBeforeResourceRefusals, 'resource refusal happened after transport');
   collection.subEnvironments.push({ id: 'preview-collection-secondary', name: 'Secondary collection environment', variables: [] });
   await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
   const arrivalsBeforeEnvironmentRefusals = arrivals.length;
@@ -529,7 +541,7 @@ paths:
   assert.equal(rejectedNonInteractiveEnvironment.code, 1);
   assert.match(rejectedNonInteractiveEnvironment.stderr, /Collection environment selection requires an interactive terminal.*--env <identifier> or --ci/);
   assert.equal(arrivals.length, arrivalsBeforeEnvironmentRefusals, 'environment refusal happened after transport');
-  console.log('CLI runner preview smoke passed: prefix IDs, deterministic non-interactive environment selection and refusal, pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  console.log('CLI runner preview smoke passed: prefix IDs, deterministic non-interactive resource/environment selection and refusal, pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await close(secureServer).catch(() => undefined);

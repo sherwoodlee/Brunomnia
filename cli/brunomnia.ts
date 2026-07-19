@@ -27,7 +27,7 @@ import { applyDefaultUserAgentHeader } from '../src/lib/userAgent';
 import { applyDefaultAcceptHeader } from '../src/lib/calculatedHeaders';
 import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
-import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
+import { orderedTestSuites, orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
 import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, selectRunnerResource, type RunnerInsoConfig } from '../src/lib/runnerCli';
 
@@ -69,6 +69,21 @@ const cliCollectionEnvironmentIdentifier = async (collection: Workspace['collect
     const selectedIndex = answer ? Number(answer) - 1 : activeIndex;
     if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= environments.length) fail('Select a valid collection environment number.');
     return environments[selectedIndex].id;
+  } finally {
+    readline.close();
+  }
+};
+const cliPromptResourceIdentifier = async (resources: Array<{ id: string; name: string }>, entity: string) => {
+  if (!resources.length) fail(`No ${entity} choices are available.`);
+  if (!process.stdin.isTTY || !process.stderr.isTTY) fail(`${entity[0].toUpperCase()}${entity.slice(1)} selection requires an interactive terminal. Provide an identifier or use --ci for non-interactive execution.`);
+  console.error(`Select ${/^[aeiou]/i.test(entity) ? 'an' : 'a'} ${entity}:`);
+  resources.forEach((resource, index) => console.error(`  ${index + 1}) ${resource.name} (${resource.id.slice(0, 14)})`));
+  const readline = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = (await readline.question('Selection [1]: ')).trim();
+    const selectedIndex = answer ? Number(answer) - 1 : 0;
+    if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= resources.length) fail(`Select a valid ${entity} number.`);
+    return resources[selectedIndex].id;
   } finally {
     readline.close();
   }
@@ -865,7 +880,7 @@ const usage = `Brunomnia CLI
   brunomnia run test <workspace> <suite-name-or-id-prefix|spec-name-or-id-prefix> [-g, --globals <name-id-prefix-or-file>] [-e, --env <name-or-id-prefix>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [-f, --dataFolders <folder...>] [-k, --disableCertValidation] [same transport/trust options]
   brunomnia script <name> [arguments...] [--config <path>]
 
-Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the collection, suite, or API-spec identifier positionally. Use --env or --ci for non-interactive runs when collection sub-environments exist.
+Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the optional collection, suite, or API-spec identifier positionally. Omission prompts in a terminal; use --ci for deterministic non-interactive fallback. Use --env or --ci when collection sub-environments exist.
 Config: --config <path> or discovered .insorc/.json/.yaml/.yml/package.json supports workingDir, ci, verbose, printOptions, and bounded script definitions.
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
@@ -877,10 +892,11 @@ const main = async () => {
 
   if (command === 'lint' && subject === 'spec') {
     const positionals = runnerCliPositionalArguments(args.slice(2));
-    const identifier = positionals[0];
+    let identifier = positionals[0];
     const cliWorkingDir = firstFlag('--workingDir', '--working-dir', '-w');
     const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
     const workingDir = cliWorkingDir ?? config.options.workingDir;
+    const ci = hasFlag('--ci') || config.options.ci === true;
     const inputBase = await cliWorkingDirectoryBase(workingDir);
     const candidatePath = identifier ? resolve(inputBase, identifier) : '';
     const candidateStats = candidatePath ? await stat(candidatePath).catch((error: NodeJS.ErrnoException) => {
@@ -902,9 +918,10 @@ const main = async () => {
       }
     } else {
       const workspace = await loadWorkspace(workingDir ?? fail('Provide an OpenAPI file or use --workingDir with a stored API design.'));
-      const design = identifier
-        ? selectRunnerResource(workspace.apiDesigns, identifier, 'API design')
-        : config.options.ci ? workspace.apiDesigns[0] : undefined;
+      if (!identifier) identifier = ci
+        ? workspace.apiDesigns[0]?.id
+        : await cliPromptResourceIdentifier(workspace.apiDesigns, 'API design');
+      const design = identifier ? selectRunnerResource(workspace.apiDesigns, identifier, 'API design') : undefined;
       if (!design) fail(identifier ? `Design '${identifier}' was not found.` : 'Provide a design name or ID.');
       contents = design.contents;
       ruleset = explicitRuleset ? await loadText(resolve(inputBase, explicitRuleset)) : design.ruleset;
@@ -932,7 +949,12 @@ const main = async () => {
     const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
     const workingDir = cliWorkingDir ?? config.options.workingDir;
     const workspace = await loadWorkspace(workingDir ?? positionals[0] ?? fail('Provide a workspace file or use --workingDir.'));
-    const identifier = positionals[workingDir ? 0 : 1] ?? fail('Provide a design name or ID.');
+    const ci = hasFlag('--ci') || config.options.ci === true;
+    let identifier = positionals[workingDir ? 0 : 1];
+    if (!identifier) identifier = ci
+      ? workspace.apiDesigns[0]?.id
+      : await cliPromptResourceIdentifier(workspace.apiDesigns, 'API design');
+    if (!identifier) fail('Provide a design name or ID.');
     const design = selectRunnerResource(workspace.apiDesigns, identifier, 'API design');
     const contents = exportOpenApiSpecification(design.contents, hasFlag('--skipAnnotations') || hasFlag('--skip-annotations') || hasFlag('-s'));
     const output = firstFlag('--output', '-o');
@@ -983,9 +1005,15 @@ const main = async () => {
     if (verbose && config.filePath) console.error(`Found config file at ${config.filePath}.`);
     if (printOptions) console.error('Loaded options', JSON.stringify({ workingDir: workingDir ?? '', ci, verbose, printOptions, config: config.filePath ?? '' }));
     const workspace = await loadWorkspace(workingDir ?? positionals[0] ?? fail('Provide a workspace file or use --workingDir.'));
-    const identifier = positionals[workingDir ? 0 : 1] ?? (ci
-      ? subject === 'test' ? workspace.testSuites[0]?.id : workspace.collections[0]?.id
-      : undefined) ?? fail(subject === 'test' ? 'Provide a test suite or API specification name or ID.' : 'Provide a collection name or ID.');
+    let identifier = positionals[workingDir ? 0 : 1];
+    if (!identifier && ci) identifier = subject === 'test' ? orderedTestSuites(workspace.testSuites)[0]?.id : workspace.collections[0]?.id;
+    if (!identifier && ci) fail(subject === 'test' ? 'No test suites found; cannot run tests.' : 'No collections found; cannot run requests.');
+    if (!identifier) identifier = subject === 'test'
+      ? await cliPromptResourceIdentifier([
+        ...workspace.apiDesigns.map((design) => ({ id: design.id, name: `${design.name} · API design` })),
+        ...orderedTestSuites(workspace.testSuites).map((suite) => ({ id: suite.id, name: `${suite.name} · test suite` })),
+      ], 'test suite or API design')
+      : await cliPromptResourceIdentifier(workspace.collections, 'collection');
     const suites = subject === 'test' ? selectUnitTestSuites(workspace, identifier) : [];
     if (subject === 'test' && !suites.length) fail(`No test suites were found for '${identifier}'.`);
     const sourceCollection = subject === 'test'
