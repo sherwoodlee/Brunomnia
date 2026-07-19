@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1.7
+
+ARG NODE_IMAGE=node:22.17.0-bookworm-slim@sha256:b04ce4ae4e95b522112c2e5c52f781471a5cbc3b594527bcddedee9bc48c03a0
+FROM ${NODE_IMAGE}
+
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG SOURCE=https://github.com/sherwoodlee/Brunomnia
+
+LABEL org.opencontainers.image.title="Brunomnia CLI" \
+      org.opencontainers.image.description="Account-free Brunomnia API client automation" \
+      org.opencontainers.image.source="${SOURCE}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+ENV NODE_ENV=production
+WORKDIR /workspace
+
+COPY --chown=node:node bin/brunomnia.cjs /opt/brunomnia/brunomnia.cjs
+
+USER node
+ENTRYPOINT ["node", "/opt/brunomnia/brunomnia.cjs"]
+CMD ["--help"]

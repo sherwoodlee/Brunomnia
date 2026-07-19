@@ -13,6 +13,7 @@
     "cli": "npm run build:cli && node bin/brunomnia.cjs",
     "test:cli-template-smoke": "npm run build:cli && node scripts/cli-template-smoke.mjs",
     "test:cli-runner-smoke": "npm run build:cli && node scripts/cli-runner-preview-smoke.mjs",
+    "test:cli-container": "npm run build:cli && node scripts/cli-container-smoke.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "tauri": "tauri"
