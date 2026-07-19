@@ -1076,6 +1076,13 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Initial/saved empty-state integration and corrected M188 presentation boundary: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx) and [`docs/QA_MILESTONE_188.md`](QA_MILESTONE_188.md)
 - Exact verification record: [`docs/QA_MILESTONE_194.md`](QA_MILESTONE_194.md)
 
+## Milestone 195 acceptance evidence
+
+- Pinned Runner History PromptButton and two-second confirmation audit: [`docs/QA_MILESTONE_195.md`](QA_MILESTONE_195.md)
+- Pure same-entry confirmation decision with focused regressions: [`src/lib/runnerPlan.ts`](../src/lib/runnerPlan.ts) and [`src/lib/runnerPlan.test.ts`](../src/lib/runnerPlan.test.ts)
+- Per-entry armed warning, timer cleanup, accessible confirmation label, and exact report deletion integration: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx) and [`src/styles.css`](../src/styles.css)
+- Updated account-free History documentation and exact verification record: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md) and [`docs/QA_MILESTONE_195.md`](QA_MILESTONE_195.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).

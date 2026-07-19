@@ -3,6 +3,7 @@ import { normalizeShortcut, shortcutMatches } from './preferences';
 export type RunnerPlanItem = { id: string; enabled: boolean };
 export type RunnerPaneDirection = 'vertical' | 'horizontal';
 export type RunnerResultPane = 'results' | 'history' | 'console';
+export type RunnerHistoryDeleteDecision = { confirmed: boolean; pendingId: string };
 
 export const runnerPlanSelectionState = (plan: RunnerPlanItem[]): 'all' | 'some' | 'none' => {
   if (!plan.length || plan.every((item) => !item.enabled)) return 'none';
@@ -30,6 +31,9 @@ export const runnerLayoutDirection = (forceVerticalLayout: boolean): RunnerPaneD
 
 export const activeRunnerResultPane = (selectedPane: RunnerResultPane, isRunning: boolean): RunnerResultPane =>
   isRunning ? 'results' : selectedPane;
+
+export const runnerHistoryDeleteDecision = (pendingId: string, clickedId: string): RunnerHistoryDeleteDecision =>
+  pendingId === clickedId ? { confirmed: true, pendingId: '' } : { confirmed: false, pendingId: clickedId };
 
 export const clampRunnerPaneSize = (size: number) => Math.max(35, Math.min(90, Number.isFinite(size) ? size : 35));
 

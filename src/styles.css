@@ -1282,6 +1282,7 @@ kbd {
 .runner-history article small { color: var(--muted); font-size: 8px; }
 .runner-history-delete { align-items: center; background: transparent; border: 0; color: var(--muted); display: flex; justify-content: center; padding: 5px; }
 .runner-history-delete:hover { color: var(--red); }
+.runner-history-delete.confirming { color: var(--amber); font: 700 12px var(--font-mono); }
 .runner-data-overlay { align-items: flex-start; background: rgb(0 0 0 / 55%); display: flex; inset: 0; justify-content: center; padding: 7vh 24px; position: fixed; z-index: 120; }
 .runner-data-dialog { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 24px 70px rgb(0 0 0 / 50%); display: grid; gap: 14px; grid-template-rows: auto auto auto auto minmax(160px, 1fr) auto; max-height: 78vh; max-width: 900px; overflow: hidden; padding: 18px; width: min(900px, 92vw); }
 .runner-data-dialog > header { align-items: center; display: flex; justify-content: space-between; }
