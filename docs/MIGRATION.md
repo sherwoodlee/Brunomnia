@@ -1583,7 +1583,22 @@ Compatibility bounds remain explicit: Brunomnia renders complete event cards rat
 
 Compatibility bounds remain explicit: timeline rows are bounded structured workspace records rather than upstream filesystem streams, duplicate response headers remain flattened, and failed pre-response connections have errors but no fabricated status/headers. WebSocket proxy/client-identity transport parity, streaming plugin hooks, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 105 — remaining parity closure and release hardening
+## Milestone 105 — live SSE reconnect and resume evidence (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Initial transport | Complete | A real reqwest SSE connection reaches a loopback HTTP server, sends `Accept: text/event-stream`, receives status/version/headers metadata, parses a named event, and retains its event ID |
+| Server retry policy | Complete | The first response's `retry: 100` overrides the authored 1,000 ms delay within the existing 100–60,000 ms safety clamp and produces matching reconnect evidence |
+| Last-Event-ID resume | Complete | The second real GET is captured and proves `Last-Event-ID: order-1`; its resumed named event reaches the same Tauri event channel |
+| Reconnect lifecycle | Complete | The channel records initial open/data, reconnecting with the server delay, reconnected open, and resumed data in order |
+| Cancellation | Complete | Explicit disconnect cancels the pending next reconnect, removes the native session handle, and produces a terminal closed event without requiring a third server response |
+| Metadata continuity | Complete | The same fixture asserts returned HTTP 200, HTTP/1.1, content type, and Server-Sent Events transport metadata before consuming events |
+| Executable coverage | Complete | The focused four-thread loopback runs through the production `connect_sse`, `open_sse`, parser, reconnect, header, channel, and `disconnect_sse` paths |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 105 verification](QA_MILESTONE_105.md) |
+
+Compatibility bounds remain explicit: Event Stream logs/timelines remain bounded workspace records rather than upstream filesystem paths, and streaming plugin hooks plus external third-party compatibility matrices remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 106 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

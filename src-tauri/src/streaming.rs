@@ -1772,6 +1772,7 @@ mod tests {
     struct TestHttpRequest {
         method: String,
         target: String,
+        headers: HashMap<String, String>,
         body: String,
     }
 
@@ -1793,10 +1794,13 @@ mod tests {
         let mut request_parts = request_line.split_whitespace();
         let method = request_parts.next().unwrap().to_string();
         let target = request_parts.next().unwrap().to_string();
-        let content_length = lines
+        let headers = lines
             .filter_map(|line| line.split_once(':'))
-            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_string()))
+            .collect::<HashMap<_, _>>();
+        let content_length = headers
+            .get("content-length")
+            .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(0);
         while bytes.len() < header_end + content_length {
             let mut chunk = [0_u8; 4096];
@@ -1807,6 +1811,7 @@ mod tests {
         TestHttpRequest {
             method,
             target,
+            headers,
             body: String::from_utf8(bytes[header_end..header_end + content_length].to_vec())
                 .unwrap(),
         }
@@ -2248,6 +2253,104 @@ mod tests {
         disconnect_socket_io("polling-session".into(), state)
             .await
             .unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn reconnects_sse_with_server_retry_and_last_event_id() {
+        use std::{sync::mpsc as std_mpsc, time::Duration};
+        use tauri::ipc::InvokeResponseBody;
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut initial_stream, _) = listener.accept().await.unwrap();
+            let initial_request = read_test_http_request(&mut initial_stream).await;
+            assert_eq!(initial_request.method, "GET");
+            assert_eq!(
+                initial_request.headers.get("accept").map(String::as_str),
+                Some("text/event-stream")
+            );
+            assert!(!initial_request.headers.contains_key("last-event-id"));
+            write_test_http_response(
+                &mut initial_stream,
+                "id: order-1\nretry: 100\nevent: order.created\ndata: first\n\n",
+            )
+            .await;
+
+            let (mut resumed_stream, _) = listener.accept().await.unwrap();
+            let resumed_request = read_test_http_request(&mut resumed_stream).await;
+            assert_eq!(
+                resumed_request
+                    .headers
+                    .get("last-event-id")
+                    .map(String::as_str),
+                Some("order-1")
+            );
+            write_test_http_response(
+                &mut resumed_stream,
+                "id: order-2\nevent: order.updated\ndata: second\n\n",
+            )
+            .await;
+        });
+
+        let (event_sender, event_receiver) = std_mpsc::channel();
+        let channel = Channel::<StreamEvent>::new(move |body| {
+            if let InvokeResponseBody::Json(json) = body {
+                let _ = event_sender.send(serde_json::from_str::<Value>(&json)?);
+            }
+            Ok(())
+        });
+        let state = StreamingState::default();
+        let output = connect_sse(
+            StreamConnectInput {
+                session_id: "sse-reconnect-session".into(),
+                url: format!("http://{address}/events"),
+                headers: Vec::new(),
+                transport: crate::models::TransportConfig {
+                    timeout_ms: 5_000,
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig {
+                    auto_reconnect: true,
+                    reconnect_delay_ms: 1_000,
+                    max_reconnects: 3,
+                    respect_server_retry: true,
+                    send_last_event_id: true,
+                },
+            },
+            channel,
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.status, 200);
+        assert_eq!(output.http_version, "HTTP/1.1");
+        assert_eq!(output.transport, "Server-Sent Events");
+        assert_eq!(
+            output.headers.get("content-type").map(String::as_str),
+            Some("text/plain; charset=UTF-8")
+        );
+
+        let mut events = Vec::new();
+        while !events.iter().any(|event: &Value| event["text"] == "second") {
+            events.push(event_receiver.recv_timeout(Duration::from_secs(3)).unwrap());
+        }
+        assert!(events
+            .iter()
+            .any(|event| event["kind"] == "order.created" && event["text"] == "first"));
+        assert!(events.iter().any(|event| event["kind"] == "reconnecting"
+            && event["text"].as_str().unwrap().contains("100 ms")));
+        assert!(events.iter().any(|event| event["kind"] == "open"
+            && event["text"].as_str().unwrap().contains("Reconnected")));
+
+        disconnect_sse("sse-reconnect-session".into(), state)
+            .await
+            .unwrap();
+        while !events.iter().any(|event| event["kind"] == "closed") {
+            events.push(event_receiver.recv_timeout(Duration::from_secs(3)).unwrap());
+        }
         server.await.unwrap();
     }
 
