@@ -313,6 +313,70 @@ describe('local client code generation', () => {
     }
   });
 
+  it('adds Content-Length only for Node native without replacing an authored value', () => {
+    const request = createBlankRequest('node-content-length');
+    request.method = 'POST';
+    request.bodyMode = 'text';
+    request.body = 'π';
+    expect(generateClientCode('node-native', request, {}).code).toContain('"Content-Length": "2"');
+    expect(generateClientCode('curl', request, {}).code).not.toContain('Content-Length');
+
+    request.headers = [{ id: 'length', name: 'content-length', value: '99', enabled: true }];
+    const authored = generateClientCode('node-native', request, {}).code;
+    expect(authored).toContain('"content-length": "99"');
+    expect(authored).not.toContain('"Content-Length": "2"');
+  });
+
+  it('renders templates before request hooks and includes matching cookie-jar values', async () => {
+    const request = createBlankRequest('prepared-codegen');
+    request.method = 'POST';
+    request.url = '{{ baseUrl }}/team/items';
+    request.headers = [{ id: 'template', name: 'X-Template', value: '{% plugin_value "header" %}', enabled: true }];
+    request.bodyMode = 'text';
+    request.body = '{{ payload }}';
+    const calls: string[] = [];
+    const snippet = await generateClientCodeWithAuth('node-native', request, { baseUrl: 'https://api.example.com', payload: 'π' }, {}, {
+      cookies: [
+        { id: 'matching', name: 'session', value: 'hello world', domain: 'api.example.com', path: '/team', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-19T00:00:00.000Z' },
+        { id: 'expired', name: 'expired', value: 'nope', domain: 'api.example.com', path: '/', expires: '2026-07-18T00:00:00.000Z', secure: true, httpOnly: false, sameSite: '', hostOnly: true, createdAt: '2026-07-17T00:00:00.000Z' },
+        { id: 'other', name: 'ignored', value: 'nope', domain: 'other.example.com', path: '/', secure: true, httpOnly: false, sameSite: '', hostOnly: true, createdAt: '2026-07-19T00:00:00.000Z' },
+      ],
+      pluginRuntime: {
+        templateTag: async (name, args) => {
+          calls.push(`tag:${name}:${args.join(',')}`);
+          return 'rendered-header';
+        },
+        beforeRequest: async (rendered) => {
+          calls.push('hook');
+          expect(rendered.url).toBe('https://api.example.com/team/items');
+          expect(rendered.headers[0].value).toBe('rendered-header');
+          expect(rendered.body).toBe('π');
+          return { ...rendered, headers: [...rendered.headers, { id: 'hook', name: 'X-Plugin-Hook', value: 'applied', enabled: true }] };
+        },
+      },
+    });
+    expect(calls).toEqual(['tag:plugin_value:header', 'hook']);
+    expect(snippet.warnings).toEqual([]);
+    expect(snippet.code).toContain('"X-Template": "rendered-header"');
+    expect(snippet.code).toContain('"X-Plugin-Hook": "applied"');
+    expect(snippet.code).toContain('"Cookie": "session=hello%20world"');
+    expect(snippet.code).toContain('"Content-Length": "2"');
+
+    request.headers = [{ id: 'cookie', name: 'Cookie', value: 'manual=yes', enabled: true }];
+    const authoredCookie = await generateClientCodeWithAuth('curl', request, { baseUrl: 'https://api.example.com', payload: 'π' }, {}, {
+      cookies: [{ id: 'matching', name: 'session', value: 'ignored', domain: 'api.example.com', path: '/', secure: true, httpOnly: false, sameSite: '', hostOnly: true, createdAt: '2026-07-19T00:00:00.000Z' }],
+    });
+    expect(authoredCookie.code).toContain('Cookie: manual=yes');
+    expect(authoredCookie.code).not.toContain('session=ignored');
+
+    request.headers = [];
+    request.transport = { ...request.transport, sendCookies: false };
+    const disabledCookies = await generateClientCodeWithAuth('curl', request, { baseUrl: 'https://api.example.com', payload: 'π' }, {}, {
+      cookies: [{ id: 'matching', name: 'session', value: 'disabled', domain: 'api.example.com', path: '/', secure: true, httpOnly: false, sameSite: '', hostOnly: true, createdAt: '2026-07-19T00:00:00.000Z' }],
+    });
+    expect(disabledCookies.code).not.toContain('session=disabled');
+  });
+
   it('materializes deterministic OAuth 1 and Hawk authorization like HAR export', async () => {
     const oauth = createBlankRequest('oauth-codegen');
     oauth.method = 'GET';

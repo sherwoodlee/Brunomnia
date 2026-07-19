@@ -7663,13 +7663,6 @@ var init_auth = __esm({
   }
 });
 
-// src/lib/templates.ts
-var init_templates = __esm({
-  "src/lib/templates.ts"() {
-    init_cookies();
-  }
-});
-
 // src/lib/timeline.ts
 var init_timeline = __esm({
   "src/lib/timeline.ts"() {
@@ -7714,6 +7707,20 @@ var init_calculatedHeaders = __esm({
   }
 });
 
+// src/lib/templates.ts
+var init_templates = __esm({
+  "src/lib/templates.ts"() {
+    init_cookies();
+  }
+});
+
+// src/lib/requestRender.ts
+var init_requestRender = __esm({
+  "src/lib/requestRender.ts"() {
+    init_templates();
+  }
+});
+
 // src/lib/http.ts
 var init_http = __esm({
   "src/lib/http.ts"() {
@@ -7722,12 +7729,12 @@ var init_http = __esm({
     init_certificates();
     init_cookies();
     init_request();
-    init_templates();
     init_timeline();
     init_responseBytes();
     init_transport();
     init_userAgent();
     init_calculatedHeaders();
+    init_requestRender();
   }
 });
 

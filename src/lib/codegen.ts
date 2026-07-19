@@ -1,6 +1,8 @@
-import type { ApiRequest, KeyValue } from '../types';
+import type { ApiRequest, CookieRecord, KeyValue, StoredResponse } from '../types';
 import { applyAdvancedAuth, type AuthClock } from './auth';
+import { cookiesForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, resolveTemplate } from './request';
+import { renderApiRequest, type RequestRenderContext } from './requestRender';
 
 export const clientCodeFamilies = [
   { id: 'c', label: 'C', defaultClient: 'libcurl', clients: [{ id: 'c-libcurl', key: 'libcurl', label: 'Libcurl' }] },
@@ -79,6 +81,16 @@ export const resolveClientCodeSelection = (familyId?: string, clientKey?: string
 export type ClientCodeSnippet = {
   code: string;
   warnings: string[];
+};
+
+export type ClientCodeGenerationContext = {
+  cookies?: CookieRecord[];
+  responses?: StoredResponse[];
+  pluginRuntime?: {
+    beforeRequest: (request: ApiRequest) => Promise<ApiRequest>;
+    templateTag: (name: string, args: string[], request: ApiRequest) => Promise<string | undefined>;
+  };
+  externalSecret?: RequestRenderContext['externalSecret'];
 };
 
 type MaterializedRequest = {
@@ -901,7 +913,29 @@ const shellWgetSnippet = ({ method, url, headers, body }: MaterializedRequest) =
   --output-document - \\
   ${shell(url)}`;
 
+const withCookieJar = (prepared: MaterializedRequest, request: ApiRequest, cookies: CookieRecord[] = []): MaterializedRequest => {
+  if (!request.transport.sendCookies || !cookies.length) return prepared;
+  if (Object.keys(prepared.headers).some((name) => name.toLowerCase() === 'cookie')) return prepared;
+  try {
+    const value = cookiesForUrl(cookies, prepared.url)
+      .map((cookie) => `${encodeURIComponent(cookie.name)}=${encodeURIComponent(cookie.value)}`)
+      .join('; ');
+    return value ? { ...prepared, headers: { ...prepared.headers, Cookie: value } } : prepared;
+  } catch {
+    return { ...prepared, warnings: [...prepared.warnings, 'Cookie jar values could not be matched because the resolved request URL is invalid.'] };
+  }
+};
+
+const withTargetHeaders = (target: ClientCodeTarget, prepared: MaterializedRequest): MaterializedRequest => {
+  if (target !== 'node-native' || Object.keys(prepared.headers).some((name) => name.toLowerCase() === 'content-length')) return prepared;
+  return {
+    ...prepared,
+    headers: { ...prepared.headers, 'Content-Length': String(prepared.body ? bodyBytes(prepared.body).byteLength : 0) },
+  };
+};
+
 const renderClientCode = (target: ClientCodeTarget, prepared: MaterializedRequest): ClientCodeSnippet => {
+  const converted = withTargetHeaders(target, prepared);
   const generators: Record<ClientCodeTarget, (input: MaterializedRequest) => string> = {
     curl: curlSnippet,
     'c-libcurl': cSnippet,
@@ -944,11 +978,11 @@ const renderClientCode = (target: ClientCodeTarget, prepared: MaterializedReques
     'swift-urlsession': swiftSnippet,
   };
   const targetWarnings = [
-    ...(target === 'http-1.1' && prepared.body?.kind === 'bytes' ? ['Raw HTTP/1.1 cannot carry arbitrary bytes in a text preview; the exact body is shown as Base64 and must be decoded before sending.'] : []),
-    ...(target === 'csharp-restsharp' && !['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'].includes(prepared.method.toUpperCase()) ? [`RestSharp cannot run ${prepared.method} requests.`] : []),
-    ...(target === 'ruby-faraday' && !['COPY', 'DELETE', 'GET', 'HEAD', 'LOCK', 'MOVE', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE', 'UNLOCK'].includes(prepared.method.toUpperCase()) ? [`Faraday cannot run ${prepared.method} requests.`] : []),
+    ...(target === 'http-1.1' && converted.body?.kind === 'bytes' ? ['Raw HTTP/1.1 cannot carry arbitrary bytes in a text preview; the exact body is shown as Base64 and must be decoded before sending.'] : []),
+    ...(target === 'csharp-restsharp' && !['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'].includes(converted.method.toUpperCase()) ? [`RestSharp cannot run ${converted.method} requests.`] : []),
+    ...(target === 'ruby-faraday' && !['COPY', 'DELETE', 'GET', 'HEAD', 'LOCK', 'MOVE', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE', 'UNLOCK'].includes(converted.method.toUpperCase()) ? [`Faraday cannot run ${converted.method} requests.`] : []),
   ];
-  return { code: generators[target](prepared), warnings: [...prepared.warnings, ...targetWarnings] };
+  return { code: generators[target](converted), warnings: [...converted.warnings, ...targetWarnings] };
 };
 
 export const generateClientCode = (target: ClientCodeTarget, request: ApiRequest, variables: Record<string, string>): ClientCodeSnippet =>
@@ -959,16 +993,24 @@ export const generateClientCodeWithAuth = async (
   request: ApiRequest,
   variables: Record<string, string>,
   clock: AuthClock = {},
+  context: ClientCodeGenerationContext = {},
 ): Promise<ClientCodeSnippet> => {
-  const prepared = materialize(request, variables);
-  const authType = request.auth.type;
-  const canMaterialize = !request.auth.disabled && ['oauth1', 'hawk', 'asap'].includes(authType);
+  const rendered = await renderApiRequest(request, variables, {
+    cookies: context.cookies,
+    responses: context.responses,
+    customTag: context.pluginRuntime ? (name, args) => context.pluginRuntime!.templateTag(name, args, request) : undefined,
+    externalSecret: context.externalSecret,
+  });
+  const effectiveRequest = context.pluginRuntime ? await context.pluginRuntime.beforeRequest(rendered) : rendered;
+  const prepared = withCookieJar(materialize(effectiveRequest, {}), effectiveRequest, context.cookies);
+  const authType = effectiveRequest.auth.type;
+  const canMaterialize = !effectiveRequest.auth.disabled && ['oauth1', 'hawk', 'asap'].includes(authType);
   const hasAuthorization = Object.keys(prepared.headers).some((name) => name.toLowerCase() === 'authorization');
   if (!canMaterialize) return renderClientCode(target, prepared);
   const signingWarning = `${authType.toUpperCase()} signing is runtime-specific and is not reproduced in the generated snippet.`;
   if (hasAuthorization) return renderClientCode(target, { ...prepared, warnings: prepared.warnings.filter((warning) => warning !== signingWarning) });
   const signingBody = prepared.body?.kind === 'text' ? prepared.body.value : '';
-  const application = await applyAdvancedAuth(request, variables, {
+  const application = await applyAdvancedAuth(effectiveRequest, {}, {
     url: prepared.url,
     headers: Object.entries(prepared.headers).map(([name, value], index) => ({ id: `codegen-header-${index}`, name, value, enabled: true })),
     body: signingBody,

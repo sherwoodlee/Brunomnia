@@ -24,6 +24,7 @@ import type { OAuthAuthorizationStatus } from './components/OAuthAuthorizationDi
 import { withoutOAuth2RuntimeCredentials } from './lib/oauth2Tokens';
 import { userAgentDisabledAfterHeaderChange } from './lib/userAgent';
 import { calculatedRequestHeaders, type CalculatedHeader } from './lib/calculatedHeaders';
+import type { ClientCodeSnippet, ClientCodeTarget } from './lib/codegen';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -2117,6 +2118,54 @@ export default function App() {
     return <main className="loading-screen"><div className="brand-mark"><span /></div><strong>Brunomnia</strong><span>Opening local workspace…</span></main>;
   }
   const codegenConfiguration = applyCollectionConfiguration(activeCollection, active.request, activeEnvironment);
+  const generateCode = async (target: ClientCodeTarget, request: ApiRequest, variables: Record<string, string>): Promise<ClientCodeSnippet> => {
+    const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
+    const initialPluginData = JSON.stringify(pluginState.data);
+    const pluginCallbacks: PluginHostCallbacks = {
+      network: (pluginRequest) => sendRequest(pluginRequest, codegenConfiguration.environment, {
+        cookies: workspace.cookies,
+        responses: workspace.responses,
+        preferredHttpVersion: workspace.preferences.preferredHttpVersion,
+        maxRedirects: workspace.preferences.maxRedirects,
+        followRedirects: workspace.preferences.followRedirects,
+        requestTimeoutMs: workspace.preferences.requestTimeoutMs,
+        validateCertificates: workspace.preferences.validateCertificates,
+        validateAuthCertificates: workspace.preferences.validateAuthCertificates,
+        proxy: proxyPreferences,
+        maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
+        filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
+        vault: unlockedVault,
+        externalSecret: externalSecretResolver,
+        authorizeOAuth2: authorizeOAuth2WithStatus,
+      }),
+      prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
+      readClipboard: () => navigator.clipboard.readText(),
+      writeClipboard: (value) => navigator.clipboard.writeText(value),
+    };
+    const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
+    try {
+      const { generateClientCodeWithAuth } = await import('./lib/codegen');
+      const snippet = await generateClientCodeWithAuth(target, request, variables, {}, {
+        cookies: workspace.cookies,
+        responses: workspace.preferences.filterResponsesByEnv
+          ? workspace.responses.filter((response) => response.environmentId === codegenConfiguration.environment.id)
+          : workspace.responses,
+        pluginRuntime,
+        externalSecret: externalSecretResolver,
+      });
+      return {
+        ...snippet,
+        warnings: [
+          ...snippet.warnings,
+          ...pluginState.notifications.map((notification) => `${notification.title}: ${notification.message}`),
+        ],
+      };
+    } finally {
+      if (JSON.stringify(pluginState.data) !== initialPluginData) {
+        setWorkspace((current) => ({ ...current, pluginData: { ...current.pluginData, ...pluginState.data } }));
+      }
+    }
+  };
 
   return (
     <main className="app-shell" data-density={workspace.preferences.density} data-editor-indent-size={workspace.preferences.editorIndentSize} data-editor-indent-with-tabs={workspace.preferences.editorIndentWithTabs} data-editor-line-wrapping={workspace.preferences.editorLineWrapping} data-force-vertical-layout={workspace.preferences.forceVerticalLayout} data-theme={workspace.activePluginTheme ? 'plugin' : workspace.preferences.theme} style={{ '--editor-font-size': `${workspace.preferences.fontSize}px`, '--interface-font-size': `${workspace.preferences.interfaceFontSize}px`, '--font-sans': workspace.preferences.fontInterface.trim() || undefined, '--font-mono': workspace.preferences.fontMonospace.trim() || undefined, '--editor-indent-size': workspace.preferences.editorIndentSize, '--font-ligatures': workspace.preferences.fontVariantLigatures ? 'normal' : 'none' } as CSSProperties}>
@@ -2317,7 +2366,7 @@ export default function App() {
       {oauthAuthorization ? <Suspense fallback={null}><OAuthAuthorizationDialog onCancel={() => void cancelActiveOAuthAuthorization()} status={oauthAuthorization} /></Suspense> : null}
       {showImport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading import tools…</div></div>}><ImportDialog onApply={applyImport} onClose={() => setShowImport(false)} onFetchUrl={fetchImportUrl} /></Suspense> : null}
       {showExport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading export tools…</div></div>}><ExportDialog onClose={() => setShowExport(false)} workspace={workspace} /></Suspense> : null}
-      {showCodeGeneration ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading code generator…</div></div>}><CodeGenerationDialog onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /></Suspense> : null}
+      {showCodeGeneration ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading code generator…</div></div>}><CodeGenerationDialog generate={generateCode} onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /></Suspense> : null}
       {showPalette ? <Suspense fallback={<div className="dialog-loading">Loading commands…</div>}><CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => setWorkbenchSection('design')} onEnvironment={() => setShowEnvironment(true)} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => setWorkbenchSection('mocks')} onPreferences={() => setWorkbenchSection('preferences')} onRunner={() => setWorkbenchSection('runner')} /></Suspense> : null}
     </main>
   );

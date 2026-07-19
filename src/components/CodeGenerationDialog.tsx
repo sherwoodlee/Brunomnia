@@ -1,15 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ApiRequest } from '../types';
 import { clientCodeFamilies, generateClientCode, generateClientCodeWithAuth, resolveClientCodeSelection } from '../lib/codegen';
+import type { ClientCodeSnippet, ClientCodeTarget } from '../lib/codegen';
 import { Icon } from './Icon';
 
 type CodeGenerationDialogProps = {
   request: ApiRequest;
   variables: Record<string, string>;
+  generate?: (target: ClientCodeTarget, request: ApiRequest, variables: Record<string, string>) => Promise<ClientCodeSnippet>;
   onClose: () => void;
 };
 
-export function CodeGenerationDialog({ request, variables, onClose }: CodeGenerationDialogProps) {
+export function CodeGenerationDialog({ request, variables, generate, onClose }: CodeGenerationDialogProps) {
   const [selection, setSelection] = useState(() => {
     try {
       return resolveClientCodeSelection(
@@ -23,17 +25,20 @@ export function CodeGenerationDialog({ request, variables, onClose }: CodeGenera
   const [copied, setCopied] = useState(false);
   const family = clientCodeFamilies.find((candidate) => candidate.id === selection.familyId)!;
   const [snippet, setSnippet] = useState(() => generateClientCode(selection.target, request, variables));
+  const generateRef = useRef(generate ?? generateClientCodeWithAuth);
+
+  useEffect(() => { generateRef.current = generate ?? generateClientCodeWithAuth; }, [generate]);
 
   useEffect(() => {
     let active = true;
     const fallback = generateClientCode(selection.target, request, variables);
     setSnippet(fallback);
-    void generateClientCodeWithAuth(selection.target, request, variables)
+    void generateRef.current(selection.target, request, variables)
       .then((generated) => { if (active) setSnippet(generated); })
       .catch((error: unknown) => {
         if (active) setSnippet({
           ...fallback,
-          warnings: [...fallback.warnings, `Authentication could not be materialized: ${error instanceof Error ? error.message : String(error)}`],
+          warnings: [...fallback.warnings, `Generated request could not be prepared: ${error instanceof Error ? error.message : String(error)}`],
         });
       });
     return () => { active = false; };
@@ -71,7 +76,7 @@ export function CodeGenerationDialog({ request, variables, onClose }: CodeGenera
         <label>Client<select aria-label="Code generation client" onChange={(event) => select(selection.familyId, event.target.value)} value={selection.clientKey}>{family.clients.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.label}</option>)}</select></label>
         <button className="secondary-button" onClick={() => void copy()} type="button"><Icon name={copied ? 'check' : 'copy'} size={14} /> {copied ? 'Copied' : 'Copy'}</button>
       </div>
-      <p>Generated on this device from the effective request and active environment. The preview never sends a request.</p>
+      <p>Generated on this device from the effective request and active environment. The generated request is never sent; enabled plugin hooks and template tags run with their existing explicit permissions.</p>
       {snippet.warnings.length ? <div className="codegen-warnings" role="status"><strong>Review before running</strong><ul>{snippet.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div> : null}
       <pre className="codegen-output"><code>{snippet.code}</code></pre>
       <footer><button className="primary-button" onClick={onClose} type="button">Done</button></footer>

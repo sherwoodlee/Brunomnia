@@ -43,4 +43,4 @@ Rendered interaction QA is omitted by standing direction. No screenshot, DOM, co
 
 ## Acceptance boundary
 
-This milestone closes generated OAuth 1, Hawk, and ASAP materialization. Request-plugin hooks, cookie-jar inclusion, and Node native Content-Length injection remain open. Existing `Baseline` and `Early baseline` rows remain; Brunomnia is not declared feature-complete.
+This milestone closes generated OAuth 1, Hawk, and ASAP materialization. Request-plugin hooks, cookie-jar inclusion, and Node native Content-Length injection remained open here and were closed by Milestone 130. Existing `Baseline` and `Early baseline` rows remain; Brunomnia is not declared feature-complete.

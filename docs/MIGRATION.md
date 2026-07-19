@@ -1928,9 +1928,23 @@ Compatibility bounds remain explicit: the pinned modal does not pass per-client 
 | Executable coverage | Complete | Deterministic OAuth 1 and Hawk fixtures, generated-key ASAP claims, authored precedence, OAuth 2 raw-token behavior, and full client-code regressions pass |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 129 verification](QA_MILESTONE_129.md) |
 
-Compatibility bounds remain explicit: request-plugin hooks, cookie-jar inclusion, and Node native Content-Length injection remain open. The Client code generation ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: Milestone 130 later closes request-plugin hooks, cookie-jar inclusion, and Node native Content-Length injection. The Client code generation ledger row stays Baseline at this milestone, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 130 — remaining parity closure and release hardening
+## Milestone 130 — complete generated-request preparation (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia renders the inherited request and cookie jar, applies request hooks, parses GraphQL, optionally adds Content-Length only for Node native, materializes static auth when no authored Authorization exists, and converts HAR locally |
+| Shared rendering order | Complete | Client-code generation and live HTTP now share one full request renderer for environment, response, cookie, dynamic, plugin, and approved external-vault tags; generation runs request hooks only after rendering, matching pinned export order |
+| Request plugins | Complete | Every async preview executes enabled request hooks with existing explicit grants, preserves plugin-local store changes, exposes notifications as review warnings, ignores stale preview completion, and never sends the generated request itself |
+| Cookie jar | Complete | Matching non-expired path/domain/secure cookies are included only when request cookie sending is enabled; pinned URI encoding is preserved and an authored Cookie header remains authoritative |
+| Node native length | Complete | Only the Node native target receives an automatic Content-Length, calculated from exact prepared UTF-8 or binary bytes including zero-length requests, without replacing an authored case-insensitive header |
+| Executable coverage | Complete | Full template-before-hook ordering, hook mutations, matching/nonmatching cookies, authored Cookie precedence, Node-only UTF-8 length, authored length precedence, advanced auth, and all-client regressions pass |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 130 verification](QA_MILESTONE_130.md); the Client code generation row is Complete |
+
+Compatibility bounds remain explicit: Digest, NTLM, Netrc, and IAM remain transport/challenge-managed rather than static HAR Authorization headers. Pinned Insomnia does not expose converter options, dependency installation, target-program validation, or snippet execution, so those are not parity requirements. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 131 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -4,12 +4,12 @@ import { applyAdvancedAuth } from './auth';
 import { applyWorkspaceCertificates } from './certificates';
 import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
-import { renderTemplate } from './templates';
 import { buildResponseTimeline } from './timeline';
 import { decodeHttpResponseBody, responseBodyFromBytes, responseCharset } from './responseBytes';
 import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
 import { applyDefaultUserAgentHeader } from './userAgent';
 import { applyDefaultAcceptHeader } from './calculatedHeaders';
+import { renderApiRequest } from './requestRender';
 
 export type SendRequestContext = {
   cookies?: CookieRecord[];
@@ -77,52 +77,6 @@ const browserBody = (request: ApiRequest): BodyInit | undefined => {
   return request.body;
 };
 
-const renderRows = async (rows: ApiRequest['headers'], render: (value: string) => Promise<string>) => Promise.all(rows.map(async (row) => ({
-  ...row,
-  name: await render(row.name),
-  value: await render(row.value),
-})));
-
-const renderRequest = async (request: ApiRequest, variables: Record<string, string>, context: SendRequestContext) => {
-  const templateContext = {
-    variables,
-    cookies: context.cookies ?? [],
-    responses: context.responses ?? [],
-    request,
-    customTag: context.pluginRuntime ? (name: string, args: string[]) => context.pluginRuntime!.templateTag(name, args, request) : undefined,
-    externalSecret: context.externalSecret,
-  };
-  const render = (value: string) => renderTemplate(value, templateContext);
-  const renderBody = request.renderBodyTemplates !== false ? render : async (value: string) => value;
-  const authEntries = await Promise.all(Object.entries(request.auth).map(async ([key, value]) => [key, typeof value === 'string' ? await render(value) : value]));
-  return {
-    ...request,
-    name: await render(request.name),
-    url: await render(request.url),
-    pathParams: await renderRows(request.pathParams, render),
-    params: await renderRows(request.params, render),
-    headers: await renderRows(request.headers, render),
-    body: await renderBody(request.body),
-    formBody: await renderRows(request.formBody, renderBody),
-    multipartBody: await Promise.all(request.multipartBody.map(async (part) => ({
-      ...part,
-      name: await renderBody(part.name),
-      value: await renderBody(part.value),
-      contentType: await renderBody(part.contentType ?? ''),
-      fileName: await renderBody(part.fileName ?? ''),
-    }))),
-    auth: Object.fromEntries(authEntries) as ApiRequest['auth'],
-    graphql: { ...request.graphql, query: request.graphql.query, variables: await renderBody(request.graphql.variables), operationName: request.graphql.operationName },
-    grpc: { ...request.grpc, service: await render(request.grpc.service), method: await render(request.grpc.method), protoText: await render(request.grpc.protoText), input: await render(request.grpc.input), metadata: await renderRows(request.grpc.metadata, render) },
-    transport: {
-      ...request.transport,
-      proxyUrl: await render(request.transport.proxyUrl),
-      proxyExclusions: await render(request.transport.proxyExclusions),
-      clientCertificateDomains: await render(request.transport.clientCertificateDomains),
-    },
-  };
-};
-
 const signingBody = (request: ApiRequest, variables: Record<string, string>) => {
   if (request.protocol === 'graphql') return graphqlBody(request, variables);
   if (request.bodyMode === 'form-urlencoded') return new URLSearchParams(request.formBody.filter((field) => field.enabled && field.name).map((field) => [field.name, field.value])).toString();
@@ -146,7 +100,12 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
   const renderContext = context.filterResponsesByEnv
     ? { ...context, responses: (context.responses ?? []).filter((response) => response.environmentId === environment?.id) }
     : context;
-  const prepared = await renderRequest(hooked, variables, renderContext);
+  const prepared = await renderApiRequest(hooked, variables, {
+    cookies: renderContext.cookies,
+    responses: renderContext.responses,
+    customTag: renderContext.pluginRuntime ? (name, args) => renderContext.pluginRuntime!.templateTag(name, args, hooked) : undefined,
+    externalSecret: renderContext.externalSecret,
+  });
   const followRedirects = resolveFollowRedirects(prepared.transport, context.followRedirects ?? true);
   const timeoutMs = resolveRequestTimeout(prepared.transport, context.requestTimeoutMs ?? 30_000);
   const validateCertificates = resolveCertificateValidation(prepared.transport, context.validateCertificates ?? true);
