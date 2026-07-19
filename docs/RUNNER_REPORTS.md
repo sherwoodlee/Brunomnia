@@ -37,7 +37,7 @@ JSON is a versioned envelope with `format: "brunomnia-run-report"`, `version: 1`
 
 ## Iteration data
 
-Upload JSON arrays or CSV files up to 5 MB, 1,000 iterations, and 100 variables. The picker exposes the pinned 41-label inventory, detects UTF-8 and UTF-16/32 byte-order marks, and decodes UTF-32, ASCII, and Latin-1 portably alongside the encodings supported by the active WebView. Labels unavailable to the device remain visible and produce an explicit error instead of replacement text.
+Upload JSON arrays or CSV files up to 5 MB, 1,000 iterations, and 100 variables. The picker exposes the pinned 41-label inventory, detects UTF-8 and UTF-16/32 byte-order marks, and decodes every real listed encoding portably through explicit UTF-32, ASCII, Latin-1, EUC-CN, KOI8-RU, and KOI8-T handling plus the active WebView's standard decoders. The listed ISO-8859-12 encoding was never standardized and produces the same explicit unsupported result as the pinned backend's codec check.
 
 The exact selected bytes remain only in the open Runner document's bounded in-memory draft. Closing and reopening the data dialog can therefore change encoding without selecting the file again. Editing the raw data, removing it, or closing the Runner document discards those bytes; Brunomnia does not persist or reuse an unrestricted filesystem path.
 

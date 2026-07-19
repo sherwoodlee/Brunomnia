@@ -784,6 +784,24 @@ const decodeLatin1 = (bytes: Uint8Array) => {
   return output;
 };
 
+const koi8RuCharacters = '─│┌┐└┘├┤┬┴┼▀▄█▌▐░▒▓⌠■∙√≈≤≥\u00a0⌡°²·÷═║╒ёє╔ії╗╘╙╚╛ґў╞╟╠╡ЁЄ╣ІЇ╦╧╨╩╪ҐЎ©юабцдефгхийклмнопярстужвьызшэщчъЮАБЦДЕФГХИЙКЛМНОПЯРСТУЖВЬЫЗШЭЩЧЪ';
+const koi8TCharacters = 'қғ‚Ғ„…†‡�‰ҳ‹ҲҷҶ�Қ‘’“”•–—�™�›�����ӯӮё¤ӣ¦§���«¬\u00ad®�°±²Ё�Ӣ¶·�№�»���©юабцдефгхийклмнопярстужвьызшэщчъЮАБЦДЕФГХИЙКЛМНОПЯРСТУЖВЬЫЗШЭЩЧЪ';
+
+const decodeKoi8 = (bytes: Uint8Array, characters: string) => {
+  let output = '';
+  let chunk = '';
+  for (const byte of bytes) {
+    const character = byte < 0x80 ? String.fromCharCode(byte) : characters[byte - 0x80];
+    if (!character || character === '�') throw new Error('Undefined KOI8 byte.');
+    chunk += character;
+    if (chunk.length === 4_096) {
+      output += chunk;
+      chunk = '';
+    }
+  }
+  return output + chunk;
+};
+
 export const decodeRunnerDataBytes = (bytes: Uint8Array, encoding: string) => {
   if (bytes.byteLength > RUNNER_DATA_FILE_BYTES) throw new Error('Runner data files cannot exceed 5 MB.');
   if (!RUNNER_DATA_ENCODINGS.some((candidate) => candidate.key === encoding)) throw new Error(`Runner data encoding '${encoding}' is not supported on this device.`);
@@ -794,6 +812,7 @@ export const decodeRunnerDataBytes = (bytes: Uint8Array, encoding: string) => {
       return decodeLatin1(bytes);
     }
     if (encoding === 'iso-8859-1') return decodeLatin1(bytes);
+    if (encoding === 'koi8-ru' || encoding === 'koi8-t') return decodeKoi8(bytes, encoding === 'koi8-ru' ? koi8RuCharacters : koi8TCharacters);
     const decoderEncoding = encoding === 'euc-cn' ? 'gbk' : encoding;
     let decoder: TextDecoder;
     try { decoder = new TextDecoder(decoderEncoding, { fatal: true }); } catch { throw new Error(`Runner data encoding '${encoding}' is not supported on this device.`); }

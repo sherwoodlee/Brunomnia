@@ -70,10 +70,13 @@ describe('collection runner', () => {
     expect(decodeRunnerDataBytes(utf32le, 'utf-32le')).toBe('id');
     expect(decodeRunnerDataBytes(utf32be, 'utf-32be')).toBe('🚀');
     expect(decodeRunnerDataBytes(new Uint8Array([0x41, 0x80]), 'iso-8859-1')).toBe('A\u0080');
+    expect(decodeRunnerDataBytes(new Uint8Array([0xae, 0xbe]), 'koi8-ru')).toBe('ўЎ');
+    expect(decodeRunnerDataBytes(new Uint8Array([0x80, 0x81, 0x8a, 0xc0]), 'koi8-t')).toBe('қғҳю');
     expect(RUNNER_DATA_ENCODINGS).toHaveLength(41);
     expect(RUNNER_DATA_ENCODINGS.map((encoding) => encoding.key)).toEqual(expect.arrayContaining(['utf-8', 'utf-16le', 'utf-32be', 'ascii', 'iso-8859-12', 'windows-1252', 'euc-cn', 'shift_jis', 'koi8-ru', 'koi8-t']));
     expect(() => decodeRunnerDataBytes(western, 'utf-8')).toThrow(/not valid utf-8/);
     expect(() => decodeRunnerDataBytes(new Uint8Array([0x80]), 'ascii')).toThrow(/not valid ascii/);
+    expect(() => decodeRunnerDataBytes(new Uint8Array([0x88]), 'koi8-t')).toThrow(/not valid koi8-t/);
   });
 
   it('round-trips bounded Runner source bytes for dialog reopening', () => {
