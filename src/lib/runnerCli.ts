@@ -1,5 +1,6 @@
 import type { Collection } from '../types';
 import { orderedCollectionChildren } from './resources';
+import { normalizeRequestTimeout } from './transport';
 
 export type RunnerCliCommandOptions = {
   workspacePath: string;
@@ -81,6 +82,13 @@ export const resolveRunnerItemRequestIds = (collection: Collection, identifiers:
     if (nameMatches.length > 1) throw new Error(`Request name '${identifier}' is ambiguous in collection '${collection.name}'. Use its ID.`);
     return [nameMatches[0].id];
   }).filter((id) => !seen.has(id) && Boolean(seen.add(id)));
+};
+
+export const parseRunnerRequestTimeout = (value: string | undefined, fallback: number) => {
+  if (value === undefined) return normalizeRequestTimeout(fallback);
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) throw new Error(`Invalid request timeout '${value}'. Provide milliseconds as an integer.`);
+  return normalizeRequestTimeout(parsed);
 };
 
 const boundedInteger = (value: number, minimum: number, maximum: number) => {

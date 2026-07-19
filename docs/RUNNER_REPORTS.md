@@ -73,6 +73,8 @@ Repeated pinned `--item`/`-i` flags preserve the previewed order and omit unchec
 
 For direct CLI use, an `--item` value may also be a folder ID. The folder recursively expands all descendant requests in the collection's mixed resource-tree order; mixed folder/request items retain argument order, and duplicates execute once. Unknown items and folders with no matching requests fail before transport instead of producing an empty successful run.
 
+Pinned `--requestTimeout <milliseconds>` applies to both `run collection` and `run test`. It replaces the workspace request-timeout default for primary, dependent, and saved suite sends, while a request's explicit custom timeout remains higher precedence. `0` disables the inherited deadline; negative values clamp to zero, oversized values clamp to the desktop maximum, integer prefixes match pinned `parseInt` behavior, and invalid values fail before transport. `--request-timeout` is an additional Brunomnia alias.
+
 ## CLI reporters
 
 `run test` defaults to the readable `spec` reporter. `run collection` retains JSON as its default for automation. Select an explicit format with `--reporter` (or `-r`):

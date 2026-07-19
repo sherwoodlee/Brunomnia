@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
+import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
 
 describe('Runner CLI command preview', () => {
   it('preserves selected request order and every execution control', () => {
@@ -77,5 +77,15 @@ describe('Runner CLI command preview', () => {
     expect(() => resolveRunnerItemRequestIds(collection, ['missing'])).toThrow(/Item 'missing' was not found/);
     const cyclic = { ...collection, folders: collection.folders.map((folder) => folder.id === 'folder' ? { ...folder, parentId: 'nested' } : folder) };
     expect(resolveRunnerItemRequestIds(cyclic, ['folder'])).toEqual(['first', 'nested-request', 'last']);
+  });
+
+  it('parses pinned request timeout overrides with desktop bounds and fallback', () => {
+    expect(parseRunnerRequestTimeout(undefined, 12_345)).toBe(12_345);
+    expect(parseRunnerRequestTimeout('3000', 10)).toBe(3_000);
+    expect(parseRunnerRequestTimeout('1000ms', 10)).toBe(1_000);
+    expect(parseRunnerRequestTimeout('0', 10)).toBe(0);
+    expect(parseRunnerRequestTimeout('-5', 10)).toBe(0);
+    expect(parseRunnerRequestTimeout('9999999999', 10)).toBe(2_147_483_647);
+    expect(() => parseRunnerRequestTimeout('later', 10)).toThrow(/Invalid request timeout/);
   });
 });

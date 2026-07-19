@@ -24,7 +24,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
-import { applyRunnerEnvironmentOverrides, resolveRunnerItemRequestIds, runnerRequestIdsMatchingPattern } from '../src/lib/runnerCli';
+import { applyRunnerEnvironmentOverrides, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerRequestIdsMatchingPattern } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -557,8 +557,8 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
-  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [same options except --item/--env-var/--delay-request]
+  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
+  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [--requestTimeout MS] [same options except --item/--env-var/--delay-request]
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
 `;
@@ -612,6 +612,7 @@ const main = async () => {
     const requestedRequests = flagValues('--item', '--request', '-i');
     const environmentOverrides = flagValues('--env-var');
     const requestedDelay = firstFlag('--delay-request', '--delay');
+    const requestTimeoutMs = parseRunnerRequestTimeout(firstFlag('--requestTimeout', '--request-timeout'), workspace.preferences.requestTimeoutMs);
     if (subject === 'test' && requestedRequests.length) fail('--item/--request is only available for run collection.');
     if (subject === 'test' && environmentOverrides.length) fail('--env-var is only available for run collection.');
     if (subject === 'test' && requestedDelay !== undefined) fail('--delay-request is only available for run collection.');
@@ -651,7 +652,7 @@ const main = async () => {
       responses: StoredResponse[] = cliResponses,
       collectionEnvironmentId = collection.activeSubEnvironmentId ?? '',
     ): Promise<{ result: HttpResponse; stored: StoredResponse }> => {
-      const result = await executeHttp(request, variables, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, {
+      const result = await executeHttp(request, variables, requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, {
         environmentId,
         cookies,
         responses,

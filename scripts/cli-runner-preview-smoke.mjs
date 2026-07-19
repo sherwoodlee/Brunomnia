@@ -37,8 +37,12 @@ const arrivals = [];
 const server = http.createServer((request, response) => {
   arrivals.push({ path: request.url, at: performance.now() });
   const status = request.url?.startsWith('/second') ? 500 : 200;
-  response.writeHead(status, { 'Content-Type': 'application/json' });
-  response.end(JSON.stringify({ ok: status === 200 }));
+  const finish = () => {
+    response.writeHead(status, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ ok: status === 200 }));
+  };
+  if (request.url?.startsWith('/slow')) setTimeout(finish, 120);
+  else finish();
 });
 
 try {
@@ -57,8 +61,10 @@ try {
   const scripted = request('request-third', 'Third', 'third');
   scripted.tests = "await insomnia.test.skip('production only', () => { throw new Error('skipped callback executed'); }); await insomnia.test('status is 200', () => insomnia.expect(insomnia.response.status).to.equal(200));";
   const second = request('request-second', 'Second', 'second');
+  const slow = request('request-slow', 'Slow', 'slow');
   second.folderId = 'folder-selected';
   scripted.folderId = 'folder-nested';
+  slow.transport = { ...slow.transport, timeoutMode: 'global', timeoutMs: 0 };
   const collection = {
     ...source.collections[0],
     id: 'preview-collection',
@@ -67,13 +73,14 @@ try {
       request('request-first', 'First', 'first'),
       second,
       scripted,
+      slow,
     ],
     folders: [
       { id: 'folder-selected', name: 'Selected folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
       { id: 'folder-nested', name: 'Nested folder', parentId: 'folder-selected', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
       { id: 'folder-empty', name: 'Empty folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
     ],
-    resourceOrder: ['request-first', 'folder-selected', 'request-second', 'folder-nested', 'request-third', 'folder-empty'],
+    resourceOrder: ['request-first', 'folder-selected', 'request-second', 'folder-nested', 'request-third', 'request-slow', 'folder-empty'],
   };
   const environment = { id: 'preview-environment', name: 'Preview environment', variables: [] };
   await mkdir(join(temporary, '.brunomnia'), { recursive: true });
@@ -142,7 +149,19 @@ try {
   const bailedArtifact = JSON.parse(bailed.stdout);
   assert.equal(bailedArtifact.report.bailed, true);
   assert.deepEqual(bailedArtifact.report.results.map((result) => result.requestId), ['request-second']);
-  console.log('CLI runner preview smoke passed: split project, folder items, pinned aliases, request-name filtering, selected order, data, environment overrides, delay, bail, and assertion evidence.');
+  const timeoutSuccess = JSON.parse(await run([
+    'run', 'collection', temporary, collection.id, '--item', 'request-slow',
+    '--env-var', 'row=timeout', '--env-var', 'region=timeout', '--requestTimeout', '500', '--reporter', 'json',
+  ]));
+  assert.deepEqual(timeoutSuccess.report.results.map((result) => [result.requestId, result.status, result.passed]), [['request-slow', 200, true]]);
+  const timeoutFailure = await runFailure([
+    'run', 'collection', temporary, collection.id, '--item', 'request-slow',
+    '--env-var', 'row=timeout', '--env-var', 'region=timeout', '--requestTimeout', '20', '--reporter', 'json',
+  ]);
+  assert.equal(timeoutFailure.code, 1);
+  const timeoutArtifact = JSON.parse(timeoutFailure.stdout);
+  assert.deepEqual(timeoutArtifact.report.results.map((result) => [result.requestId, result.status, result.passed]), [['request-slow', 0, false]]);
+  console.log('CLI runner preview smoke passed: split project, folder items, pinned aliases, request-name filtering, selected order, data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });
