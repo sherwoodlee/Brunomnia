@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const run = (command, argumentsList) => new Promise((resolveRun, rejectRun) => {
@@ -39,7 +39,10 @@ workspace.plugins = [{
   source: "module.exports.templateTags = [{ name: 'cli_value', async run(context, fallback = 'fallback') { return (await context.store.getItem('value')) || fallback; } }];",
 }];
 workspace.pluginData = { 'container-plugin': { value: 'container' } };
-await writeFile(join(temporary, 'workspace.json'), JSON.stringify(workspace));
+const workspacePath = join(temporary, 'workspace.json');
+await writeFile(workspacePath, JSON.stringify(workspace));
+await chmod(temporary, 0o755);
+await chmod(workspacePath, 0o644);
 
 try {
   await run('docker', [
