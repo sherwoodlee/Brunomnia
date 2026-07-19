@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
+import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, loadRunnerIterationData, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
 
 describe('Runner CLI command preview', () => {
   it('preserves selected request order and every execution control', () => {
@@ -87,5 +87,14 @@ describe('Runner CLI command preview', () => {
     expect(parseRunnerRequestTimeout('-5', 10)).toBe(0);
     expect(parseRunnerRequestTimeout('9999999999', 10)).toBe(2_147_483_647);
     expect(() => parseRunnerRequestTimeout('later', 10)).toThrow(/Invalid request timeout/);
+  });
+
+  it('loads bounded local or explicit HTTP iteration data', async () => {
+    await expect(loadRunnerIterationData('/tmp/data.csv', async (path) => `local:${path}`, fetch, 100)).resolves.toBe('local:/tmp/data.csv');
+    await expect(loadRunnerIterationData('http-data.csv', async (path) => `local:${path}`, fetch, 100)).resolves.toBe('local:http-data.csv');
+    await expect(loadRunnerIterationData('https://example.test/data.csv', async () => '', async () => new Response('row\n1\n'), 100)).resolves.toBe('row\n1\n');
+    await expect(loadRunnerIterationData('https://example.test/missing.csv', async () => '', async () => new Response('missing', { status: 404 }), 100)).rejects.toThrow(/HTTP 404/);
+    await expect(loadRunnerIterationData('https://example.test/large.csv', async () => '', async () => new Response('123456789'), 8)).rejects.toThrow(/5 MB/);
+    await expect(loadRunnerIterationData('/tmp/large.csv', async () => '123456789', fetch, 8)).rejects.toThrow(/5 MB/);
   });
 });

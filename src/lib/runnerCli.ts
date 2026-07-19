@@ -91,6 +91,41 @@ export const parseRunnerRequestTimeout = (value: string | undefined, fallback: n
   return normalizeRequestTimeout(parsed);
 };
 
+export const loadRunnerIterationData = async (
+  source: string,
+  readLocal: (path: string) => Promise<string>,
+  fetchSource: (input: string, init?: RequestInit) => Promise<Response> = fetch,
+  maximumBytes = 5_000_000,
+) => {
+  if (!/^https?:\/\//i.test(source)) {
+    const contents = await readLocal(source);
+    if (new TextEncoder().encode(contents).byteLength > maximumBytes) throw new Error('Runner data files cannot exceed 5 MB.');
+    return contents;
+  }
+  const response = await fetchSource(source, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new Error(`Unable to read iteration data URL ${source}: HTTP ${response.status}.`);
+  const declaredBytes = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredBytes) && declaredBytes > maximumBytes) throw new Error('Runner data files cannot exceed 5 MB.');
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > maximumBytes) {
+      await reader.cancel();
+      throw new Error('Runner data files cannot exceed 5 MB.');
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  chunks.forEach((chunk) => { bytes.set(chunk, offset); offset += chunk.byteLength; });
+  return new TextDecoder().decode(bytes);
+};
+
 const boundedInteger = (value: number, minimum: number, maximum: number) => {
   if (!Number.isFinite(value)) return minimum;
   return Math.max(minimum, Math.min(maximum, Math.floor(value)));

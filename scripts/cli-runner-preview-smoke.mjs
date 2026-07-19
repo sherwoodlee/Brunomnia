@@ -35,6 +35,11 @@ const close = (server) => new Promise((resolve, reject) => server.close((error) 
 const temporary = await mkdtemp(join(tmpdir(), 'brunomnia-cli-runner-'));
 const arrivals = [];
 const server = http.createServer((request, response) => {
+  if (request.url === '/iterations.csv') {
+    response.writeHead(200, { 'Content-Type': 'text/csv' });
+    response.end('row,region\n1,file\n2,file\n');
+    return;
+  }
   arrivals.push({ path: request.url, at: performance.now() });
   const status = request.url?.startsWith('/second') ? 500 : 200;
   const finish = () => {
@@ -91,7 +96,6 @@ try {
   }));
   await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
   await writeFile(join(temporary, 'environments', 'preview.yaml'), stringify(environment));
-  await writeFile(join(temporary, 'iterations.csv'), 'row,region\n1,file\n2,file\n');
 
   const output = await run([
     'run', 'collection', temporary, collection.id,
@@ -101,7 +105,7 @@ try {
     '--requestNamePattern', '^(Third|First)$',
     '--iteration-count', '2',
     '--delay-request', '35',
-    '--iteration-data', join(temporary, 'iterations.csv'),
+    '--iteration-data', `http://127.0.0.1:${address.port}/iterations.csv`,
     '--env-var', 'region=override',
     '--allow-scripts',
     '-b',
@@ -161,7 +165,7 @@ try {
   assert.equal(timeoutFailure.code, 1);
   const timeoutArtifact = JSON.parse(timeoutFailure.stdout);
   assert.deepEqual(timeoutArtifact.report.results.map((result) => [result.requestId, result.status, result.passed]), [['request-slow', 0, false]]);
-  console.log('CLI runner preview smoke passed: split project, folder items, pinned aliases, request-name filtering, selected order, data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  console.log('CLI runner preview smoke passed: split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });
