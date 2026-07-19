@@ -43,4 +43,4 @@ Rendered interaction QA is omitted by standing direction. No screenshot, DOM, co
 
 ## Acceptance boundary
 
-This milestone closes the interactive gRPC lifecycle gap and corrects the proxy audit. Richer reflection/schema authoring, metadata diagnostics, persisted gRPC call history, and broad third-party fixtures remain open. The gRPC and other parity rows remain `Baseline`; Brunomnia is not declared feature-complete.
+This milestone closes the interactive gRPC lifecycle gap and corrects the proxy audit. Milestone 118's response-state audit additionally confirms pinned Insomnia keeps gRPC messages transient, so persisted call history is not a parity requirement. Structured status fidelity, Buf Schema Registry reflection, reflected request examples, disable-user-agent behavior, richer connection-error guidance, and broad third-party fixtures remain open at this checkpoint. The gRPC and other parity rows remain `Baseline`; Brunomnia is not declared feature-complete.

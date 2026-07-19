@@ -91,8 +91,8 @@ describe('gRPC schema loading', () => {
       }),
       onEvent: tauri.channels[0],
     }));
-    tauri.channels[0].onmessage?.({ sessionId: 'session-1', direction: 'incoming', kind: 'message', text: '{}', timestamp: '2026-07-18T00:00:00Z' });
-    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ id: expect.any(String), sessionId: 'session-1', kind: 'message' }));
+    tauri.channels[0].onmessage?.({ sessionId: 'session-1', direction: 'system', kind: 'status', text: '3 INVALID_ARGUMENT: name is required', timestamp: '2026-07-18T00:00:00Z', statusCode: 3, statusName: 'INVALID_ARGUMENT', statusDetails: 'name is required', metadata: { 'x-error-id': ['reject-1'] } });
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ id: expect.any(String), sessionId: 'session-1', kind: 'status', statusCode: 3, metadata: { 'x-error-id': ['reject-1'] } }));
   });
 
   it('maps send, commit, and cancel to independent lifecycle commands', async () => {

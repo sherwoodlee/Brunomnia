@@ -38,6 +38,8 @@ export function GrpcEditor({
   const service = schema?.services.find((candidate) => candidate.fullName === grpc.service) ?? schema?.services[0];
   const method = service?.methods.find((candidate) => candidate.name === grpc.method) ?? service?.methods[0];
   const sessionActive = sessionStatus === 'starting' || sessionStatus === 'active' || sessionStatus === 'committed';
+  const statusEvent = [...sessionMessages].reverse().find((message) => message.kind === 'status' && message.statusCode !== undefined);
+  const statusMetadata = Object.entries(statusEvent?.metadata ?? {});
   const update = (patch: Partial<ApiRequest['grpc']>) => onChange({ grpc: { ...grpc, ...patch } });
   const onSessionEvent = (message: StreamMessage) => {
     setSessionMessages((current) => [...current, message].slice(-500));
@@ -183,7 +185,10 @@ export function GrpcEditor({
                 <button disabled={!sessionMessages.length} onClick={() => setSessionMessages([])} type="button">Clear</button>
                 <span className={`grpc-session-state ${sessionStatus}`}>{sessionStatus}{sessionCallType ? ` · ${sessionCallType}` : ''}</span>
               </div>
-              {sessionError ? <div className="grpc-session-error">{sessionError}</div> : null}
+              {statusEvent || sessionError ? <div className="grpc-session-notices">
+                {statusEvent ? <div className={`grpc-status-summary${statusEvent.statusCode === 0 ? ' ok' : ' bad'}`}><strong>{statusEvent.statusCode} {statusEvent.statusName ?? ''}</strong><span>{statusEvent.statusDetails}</span>{statusMetadata.length ? <details><summary>{statusMetadata.length} metadata {statusMetadata.length === 1 ? 'field' : 'fields'}</summary><div>{statusMetadata.map(([name, values]) => <p key={name}><code>{name}</code><span>{values.join('\n')}</span></p>)}</div></details> : null}</div> : null}
+                {sessionError ? <div className="grpc-session-error">{sessionError}</div> : null}
+              </div> : null}
               <div aria-live="polite" className="grpc-session-log">
                 {sessionMessages.length ? sessionMessages.map((message) => <article className={`stream-message ${message.direction}`} key={message.id}><header><span>{message.direction}</span><strong>{message.kind}</strong><time>{new Date(message.timestamp).toLocaleTimeString()}</time></header><pre>{message.text}</pre></article>) : <div className="empty-state compact"><Icon name="history" size={24} /><strong>No call activity yet</strong><span>Start the call, then send and commit client-stream messages independently.</span></div>}
               </div>

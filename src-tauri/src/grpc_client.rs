@@ -12,7 +12,7 @@ use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor, MethodDescriptor};
 use prost_types::{FileDescriptorProto, FileDescriptorSet};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::{Component, Path},
     sync::Arc,
@@ -23,7 +23,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{
     codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
-    metadata::{Ascii, MetadataKey, MetadataValue},
+    metadata::{Ascii, KeyAndValueRef, MetadataKey, MetadataMap, MetadataValue},
     transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity},
     Request, Status,
 };
@@ -33,6 +33,8 @@ const MAX_GRPC_DESCRIPTOR_BYTES: usize = 10_485_760;
 const MAX_GRPC_MESSAGE_BYTES: usize = 1_048_576;
 const MAX_GRPC_SESSIONS: usize = 100;
 const GRPC_SESSION_COMMAND_CAPACITY: usize = 256;
+const MAX_GRPC_STATUS_METADATA_ENTRIES: usize = 500;
+const MAX_GRPC_STATUS_METADATA_VALUE_BYTES: usize = 65_536;
 
 #[derive(Clone, Default)]
 pub struct GrpcSessionState {
@@ -121,6 +123,83 @@ fn send_session_event(channel: &IpcChannel<StreamEvent>, event: StreamEvent) {
     let _ = channel.send(event);
 }
 
+fn merge_status_metadata(target: &mut BTreeMap<String, Vec<String>>, metadata: &MetadataMap) {
+    let remaining = MAX_GRPC_STATUS_METADATA_ENTRIES
+        .saturating_sub(target.values().map(Vec::len).sum::<usize>());
+    for entry in metadata.iter().take(remaining) {
+        let (key, encoded_value) = match entry {
+            KeyAndValueRef::Ascii(key, value) => (key.as_str(), value.as_encoded_bytes()),
+            KeyAndValueRef::Binary(key, value) => (key.as_str(), value.as_encoded_bytes()),
+        };
+        let value = String::from_utf8_lossy(
+            &encoded_value[..encoded_value
+                .len()
+                .min(MAX_GRPC_STATUS_METADATA_VALUE_BYTES)],
+        )
+        .into_owned();
+        target.entry(key.to_string()).or_default().push(value);
+    }
+}
+
+fn grpc_code_name(code: tonic::Code) -> &'static str {
+    match code {
+        tonic::Code::Ok => "OK",
+        tonic::Code::Cancelled => "CANCELLED",
+        tonic::Code::Unknown => "UNKNOWN",
+        tonic::Code::InvalidArgument => "INVALID_ARGUMENT",
+        tonic::Code::DeadlineExceeded => "DEADLINE_EXCEEDED",
+        tonic::Code::NotFound => "NOT_FOUND",
+        tonic::Code::AlreadyExists => "ALREADY_EXISTS",
+        tonic::Code::PermissionDenied => "PERMISSION_DENIED",
+        tonic::Code::ResourceExhausted => "RESOURCE_EXHAUSTED",
+        tonic::Code::FailedPrecondition => "FAILED_PRECONDITION",
+        tonic::Code::Aborted => "ABORTED",
+        tonic::Code::OutOfRange => "OUT_OF_RANGE",
+        tonic::Code::Unimplemented => "UNIMPLEMENTED",
+        tonic::Code::Internal => "INTERNAL",
+        tonic::Code::Unavailable => "UNAVAILABLE",
+        tonic::Code::DataLoss => "DATA_LOSS",
+        tonic::Code::Unauthenticated => "UNAUTHENTICATED",
+    }
+}
+
+fn session_status_error(
+    status: Status,
+    channel: &IpcChannel<StreamEvent>,
+    session_id: &str,
+) -> String {
+    let mut metadata = BTreeMap::new();
+    merge_status_metadata(&mut metadata, status.metadata());
+    send_session_event(
+        channel,
+        StreamEvent::grpc_status(
+            session_id,
+            status.code() as i32,
+            grpc_code_name(status.code()),
+            status.message(),
+            metadata,
+        ),
+    );
+    format_status(status)
+}
+
+fn send_cancelled_status(channel: &IpcChannel<StreamEvent>, session_id: &str) {
+    send_session_event(
+        channel,
+        StreamEvent::system(session_id, "cancel", "Call cancelled"),
+    );
+    send_session_event(
+        channel,
+        StreamEvent::grpc_status(
+            session_id,
+            tonic::Code::Cancelled as i32,
+            grpc_code_name(tonic::Code::Cancelled),
+            "Call cancelled",
+            BTreeMap::new(),
+        ),
+    );
+}
+
 fn send_response_message(
     channel: &IpcChannel<StreamEvent>,
     session_id: &str,
@@ -163,10 +242,7 @@ fn apply_stream_command(
             Ok(GrpcCommandAction::Continue)
         }
         GrpcSessionCommand::Cancel => {
-            send_session_event(
-                channel,
-                StreamEvent::system(session_id, "cancel", "Call cancelled"),
-            );
+            send_cancelled_status(channel, session_id);
             Ok(GrpcCommandAction::Cancel)
         }
     }
@@ -184,6 +260,7 @@ async fn run_session(
     let method = selection.method;
     let path = selection.path;
     let codec = DynamicCodec::new(method.output());
+    let mut status_metadata = BTreeMap::new();
     match (method.is_client_streaming(), method.is_server_streaming()) {
         (false, false) => {
             let (message, text) = initial_message
@@ -194,15 +271,16 @@ async fn run_session(
             let call = client.unary(request, path, codec);
             tokio::pin!(call);
             let response = tokio::select! {
-                response = &mut call => response.map_err(format_status)?,
+                response = &mut call => response.map_err(|status| session_status_error(status, on_event, session_id))?,
                 command = commands.recv() => match command {
                     Some(GrpcSessionCommand::Cancel) | None => {
-                        send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                        send_cancelled_status(on_event, session_id);
                         return Ok(());
                     }
                     Some(_) => return Err("Unary gRPC calls do not accept stream commands.".into()),
                 }
             };
+            merge_status_metadata(&mut status_metadata, response.metadata());
             send_response_message(on_event, session_id, response.into_inner())?;
         }
         (false, true) => {
@@ -215,30 +293,38 @@ async fn run_session(
             let call = client.server_streaming(request, path, codec);
             tokio::pin!(call);
             let response = tokio::select! {
-                response = &mut call => response.map_err(format_status)?,
+                response = &mut call => response.map_err(|status| session_status_error(status, on_event, session_id))?,
                 command = commands.recv() => match command {
                     Some(GrpcSessionCommand::Cancel) | None => {
-                        send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                        send_cancelled_status(on_event, session_id);
                         return Ok(());
                     }
                     Some(_) => return Err("Server-streaming gRPC calls do not accept request-stream commands.".into()),
                 }
             };
+            merge_status_metadata(&mut status_metadata, response.metadata());
             let mut stream = response.into_inner();
             loop {
                 tokio::select! {
-                    message = stream.message() => match message.map_err(format_status)? {
+                    message = stream.message() => match message.map_err(|status| session_status_error(status, on_event, session_id))? {
                         Some(message) => send_response_message(on_event, session_id, message)?,
                         None => break,
                     },
                     command = commands.recv() => match command {
                         Some(GrpcSessionCommand::Cancel) | None => {
-                            send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                            send_cancelled_status(on_event, session_id);
                             return Ok(());
                         }
                         Some(_) => return Err("Server-streaming gRPC calls do not accept request-stream commands.".into()),
                     }
                 }
+            }
+            if let Some(trailers) = stream
+                .trailers()
+                .await
+                .map_err(|status| session_status_error(status, on_event, session_id))?
+            {
+                merge_status_metadata(&mut status_metadata, &trailers);
             }
         }
         (true, false) => {
@@ -250,16 +336,17 @@ async fn run_session(
             tokio::pin!(call);
             let response = loop {
                 tokio::select! {
-                    response = &mut call => break response.map_err(format_status)?,
+                    response = &mut call => break response.map_err(|status| session_status_error(status, on_event, session_id))?,
                     command = commands.recv() => match command {
                         Some(command) => if matches!(apply_stream_command(command, &mut request_sender, on_event, session_id)?, GrpcCommandAction::Cancel) { return Ok(()); },
                         None => {
-                            send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                            send_cancelled_status(on_event, session_id);
                             return Ok(());
                         }
                     }
                 }
             };
+            merge_status_metadata(&mut status_metadata, response.metadata());
             send_response_message(on_event, session_id, response.into_inner())?;
         }
         (true, true) => {
@@ -271,37 +358,45 @@ async fn run_session(
             tokio::pin!(call);
             let response = loop {
                 tokio::select! {
-                    response = &mut call => break response.map_err(format_status)?,
+                    response = &mut call => break response.map_err(|status| session_status_error(status, on_event, session_id))?,
                     command = commands.recv() => match command {
                         Some(command) => if matches!(apply_stream_command(command, &mut request_sender, on_event, session_id)?, GrpcCommandAction::Cancel) { return Ok(()); },
                         None => {
-                            send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                            send_cancelled_status(on_event, session_id);
                             return Ok(());
                         }
                     }
                 }
             };
+            merge_status_metadata(&mut status_metadata, response.metadata());
             let mut stream = response.into_inner();
             loop {
                 tokio::select! {
-                    message = stream.message() => match message.map_err(format_status)? {
+                    message = stream.message() => match message.map_err(|status| session_status_error(status, on_event, session_id))? {
                         Some(message) => send_response_message(on_event, session_id, message)?,
                         None => break,
                     },
                     command = commands.recv() => match command {
                         Some(command) => if matches!(apply_stream_command(command, &mut request_sender, on_event, session_id)?, GrpcCommandAction::Cancel) { return Ok(()); },
                         None => {
-                            send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                            send_cancelled_status(on_event, session_id);
                             return Ok(());
                         }
                     }
                 }
             }
+            if let Some(trailers) = stream
+                .trailers()
+                .await
+                .map_err(|status| session_status_error(status, on_event, session_id))?
+            {
+                merge_status_metadata(&mut status_metadata, &trailers);
+            }
         }
     }
     send_session_event(
         on_event,
-        StreamEvent::system(session_id, "status", "gRPC OK"),
+        StreamEvent::grpc_status(session_id, 0, "OK", "OK", status_metadata),
     );
     Ok(())
 }
@@ -1015,6 +1110,7 @@ mod tests {
           rpc WatchHello (HelloRequest) returns (stream HelloReply);
           rpc CollectHello (stream HelloRequest) returns (HelloReply);
           rpc ChatHello (stream HelloRequest) returns (stream HelloReply);
+          rpc RejectHello (HelloRequest) returns (HelloReply);
         }
         message HelloRequest { string name = 1; }
         message HelloReply { string message = 1; }
@@ -1050,7 +1146,28 @@ mod tests {
                     reply,
                 )
                 .map_err(Status::internal)?;
-                Ok(Response::new(message))
+                let mut response = Response::new(message);
+                response
+                    .metadata_mut()
+                    .insert("x-received-count", MetadataValue::from_static("2"));
+                Ok(response)
+            })
+        }
+    }
+
+    struct RejectHelloService;
+
+    impl tonic::server::UnaryService<DynamicMessage> for RejectHelloService {
+        type Response = DynamicMessage;
+        type Future = BoxFuture<Response<Self::Response>, Status>;
+
+        fn call(&mut self, _request: Request<DynamicMessage>) -> Self::Future {
+            Box::pin(async move {
+                let mut status = Status::invalid_argument("name is required");
+                status
+                    .metadata_mut()
+                    .insert("x-error-id", MetadataValue::from_static("reject-1"));
+                Err(status)
             })
         }
     }
@@ -1131,6 +1248,14 @@ mod tests {
                         let response = tonic::server::Grpc::new(codec)
                             .streaming(method, request)
                             .await;
+                        Ok(response)
+                    })
+                }
+                "/brunomnia.test.Greeter/RejectHello" => {
+                    let method = RejectHelloService;
+                    let codec = DynamicCodec::new(self.request.clone());
+                    Box::pin(async move {
+                        let response = tonic::server::Grpc::new(codec).unary(method, request).await;
                         Ok(response)
                     })
                 }
@@ -1415,6 +1540,13 @@ mod tests {
                 .get("text")
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|text| text.contains("received 2"))));
+            assert!(client_events.iter().any(|event| {
+                event.get("statusCode").and_then(serde_json::Value::as_i64) == Some(0)
+                    && event
+                        .pointer("/metadata/x-received-count/0")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("2")
+            }));
         }
 
         let bidi_events = Arc::new(StdMutex::new(Vec::new()));
@@ -1469,7 +1601,40 @@ mod tests {
             .await
             .unwrap();
         wait_for_events(&cancel_events, "cancel", 1).await;
+        wait_for_events(&cancel_events, "status", 1).await;
         wait_for_events(&cancel_events, "end", 1).await;
+        assert!(cancel_events.lock().unwrap().iter().any(|event| {
+            event.get("statusCode").and_then(serde_json::Value::as_i64) == Some(1)
+                && event.get("statusName").and_then(serde_json::Value::as_str) == Some("CANCELLED")
+        }));
+
+        let error_events = Arc::new(StdMutex::new(Vec::new()));
+        start_session(
+            lifecycle_input(&endpoint, &descriptor_bytes, "error-status", "RejectHello"),
+            recording_channel(error_events.clone()),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        wait_for_events(&error_events, "status", 1).await;
+        wait_for_events(&error_events, "error", 1).await;
+        wait_for_events(&error_events, "end", 1).await;
+        {
+            let error_events = error_events.lock().unwrap();
+            assert!(error_events.iter().any(|event| {
+                event.get("statusCode").and_then(serde_json::Value::as_i64) == Some(3)
+                    && event.get("statusName").and_then(serde_json::Value::as_str)
+                        == Some("INVALID_ARGUMENT")
+                    && event
+                        .get("statusDetails")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("name is required")
+                    && event
+                        .pointer("/metadata/x-error-id/0")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("reject-1")
+            }));
+        }
 
         let _ = shutdown.send(());
         server.await.unwrap();

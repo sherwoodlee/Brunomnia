@@ -39,6 +39,20 @@ const grpcEvent = (sessionId: string, direction: StreamMessage['direction'], kin
   timestamp: new Date().toISOString(),
 });
 
+const grpcStatusEvent = (
+  sessionId: string,
+  statusCode: number,
+  statusName: string,
+  statusDetails: string,
+  metadata: Record<string, string[]> = {},
+): StreamMessage => ({
+  ...grpcEvent(sessionId, 'system', 'status', statusDetails === statusName ? `${statusCode} ${statusName}` : `${statusCode} ${statusName}: ${statusDetails}`),
+  statusCode,
+  statusName,
+  statusDetails,
+  metadata,
+});
+
 const normalizedGrpcEvent = (message: NativeGrpcEvent): StreamMessage => ({
   ...message,
   id: `${message.sessionId}-${message.timestamp}-${Math.random().toString(36).slice(2, 7)}`,
@@ -174,7 +188,7 @@ export const startGrpcSession = async (
     session.timers.push(window.setTimeout(() => onEvent(grpcEvent(sessionId, 'outgoing', 'message', message)), 60));
     session.timers.push(window.setTimeout(() => onEvent(grpcEvent(sessionId, 'incoming', 'message', JSON.stringify({ browserSimulation: true, method }, null, 2))), 180));
     session.timers.push(window.setTimeout(() => {
-      onEvent(grpcEvent(sessionId, 'system', 'status', 'gRPC OK'));
+      onEvent(grpcStatusEvent(sessionId, 0, 'OK', 'OK', { 'x-brunomnia-simulation': ['true'] }));
       onEvent(grpcEvent(sessionId, 'system', 'end', 'Call ended'));
       browserSessions.delete(sessionId);
     }, 260));
@@ -216,7 +230,7 @@ export const commitGrpcSession = async (sessionId: string) => {
   session.onEvent(grpcEvent(sessionId, 'system', 'commit', 'Request stream committed'));
   session.timers.push(window.setTimeout(() => {
     if (!session.serverStreaming) session.onEvent(grpcEvent(sessionId, 'incoming', 'message', JSON.stringify({ accepted: true }, null, 2)));
-    session.onEvent(grpcEvent(sessionId, 'system', 'status', 'gRPC OK'));
+    session.onEvent(grpcStatusEvent(sessionId, 0, 'OK', 'OK', { 'x-brunomnia-simulation': ['true'] }));
     session.onEvent(grpcEvent(sessionId, 'system', 'end', 'Call ended'));
     browserSessions.delete(sessionId);
   }, 180));
@@ -231,6 +245,7 @@ export const cancelGrpcSession = async (sessionId: string) => {
   if (!session) throw new Error('The gRPC call is not active.');
   session.timers.forEach((timer) => window.clearTimeout(timer));
   session.onEvent(grpcEvent(sessionId, 'system', 'cancel', 'Call cancelled'));
+  session.onEvent(grpcStatusEvent(sessionId, 1, 'CANCELLED', 'Call cancelled'));
   session.onEvent(grpcEvent(sessionId, 'system', 'end', 'Call ended'));
   browserSessions.delete(sessionId);
 };

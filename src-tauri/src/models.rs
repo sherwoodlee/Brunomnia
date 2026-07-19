@@ -228,6 +228,14 @@ pub struct StreamEvent {
     pub kind: String,
     pub text: String,
     pub timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_details: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -366,6 +374,10 @@ impl StreamEvent {
             kind: kind.to_string(),
             text: text.into(),
             timestamp: chrono::Utc::now().to_rfc3339(),
+            status_code: None,
+            status_name: None,
+            status_details: None,
+            metadata: BTreeMap::new(),
         }
     }
 
@@ -376,6 +388,10 @@ impl StreamEvent {
             kind: kind.to_string(),
             text: text.into(),
             timestamp: chrono::Utc::now().to_rfc3339(),
+            status_code: None,
+            status_name: None,
+            status_details: None,
+            metadata: BTreeMap::new(),
         }
     }
 
@@ -386,6 +402,37 @@ impl StreamEvent {
             kind: kind.to_string(),
             text: text.into(),
             timestamp: chrono::Utc::now().to_rfc3339(),
+            status_code: None,
+            status_name: None,
+            status_details: None,
+            metadata: BTreeMap::new(),
+        }
+    }
+
+    pub fn grpc_status(
+        session_id: &str,
+        code: i32,
+        name: impl Into<String>,
+        details: impl Into<String>,
+        metadata: BTreeMap<String, Vec<String>>,
+    ) -> Self {
+        let name = name.into();
+        let details = details.into();
+        let text = if details == name {
+            format!("{code} {name}")
+        } else {
+            format!("{code} {name}: {details}")
+        };
+        Self {
+            session_id: session_id.to_string(),
+            direction: "system".to_string(),
+            kind: "status".to_string(),
+            text,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            status_code: Some(code),
+            status_name: Some(name),
+            status_details: Some(details),
+            metadata,
         }
     }
 }

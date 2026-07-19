@@ -1760,9 +1760,22 @@ Compatibility bounds remain explicit: certificate-path compatibility import/expo
 | Executable coverage | Complete | Renderer tests verify channel wiring, environment resolution, certificate payloads, and lifecycle commands; a real in-process HTTP/2 server verifies client-streaming aggregation, bidi replies, half-close, and cancel |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 117 verification](QA_MILESTONE_117.md) |
 
-Compatibility bounds remain explicit: richer reflection/schema authoring, metadata diagnostics, persisted gRPC call history, and broader third-party fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: structured status fidelity, Buf Schema Registry reflection, reflected request examples, disable-user-agent behavior, richer connection-error guidance, and broader third-party fixtures remain open. Pinned Insomnia keeps call messages transient, so persisted gRPC call history is not a parity requirement. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 118 — remaining parity closure and release hardening
+## Milestone 118 — structured gRPC status fidelity (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned renderer `GrpcRequestState` stores transient request/response messages plus `StatusObject` code/details/metadata and an error fallback; the response pane renders a numeric status tag and does not persist call history |
+| Native status contract | Complete | Shared IPC events add optional numeric code, canonical name, details, and repeated metadata without changing WebSocket, Socket.IO, GraphQL subscription, or SSE event behavior |
+| Metadata capture | Complete | Interactive calls merge at most 500 initial and trailing values, retain ASCII text, retain binary metadata's base64 wire representation, and attach error-status metadata before the ordered error/end events |
+| Response presentation | Complete baseline | The gRPC console shows success/error status color, code/name, details, expandable metadata, and the original ordered status event while browser development emits the same shape |
+| Executable coverage | Complete | A real Tonic server proves `0 OK` response metadata and `3 INVALID_ARGUMENT` details/error metadata; renderer tests prove structured channel fields survive ID normalization |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 118 verification](QA_MILESTONE_118.md) |
+
+Compatibility bounds remain explicit: Buf Schema Registry reflection, reflected request examples, disable-user-agent behavior, richer connection-error guidance, and broader third-party fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 119 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -773,6 +773,10 @@ export type StreamMessage = {
   kind: string;
   text: string;
   timestamp: string;
+  statusCode?: number;
+  statusName?: string;
+  statusDetails?: string;
+  metadata?: Record<string, string[]>;
 };
 
 export type GrpcMethodInfo = {
