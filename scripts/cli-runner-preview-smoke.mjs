@@ -56,15 +56,24 @@ try {
   });
   const scripted = request('request-third', 'Third', 'third');
   scripted.tests = "await insomnia.test.skip('production only', () => { throw new Error('skipped callback executed'); }); await insomnia.test('status is 200', () => insomnia.expect(insomnia.response.status).to.equal(200));";
+  const second = request('request-second', 'Second', 'second');
+  second.folderId = 'folder-selected';
+  scripted.folderId = 'folder-nested';
   const collection = {
     ...source.collections[0],
     id: 'preview-collection',
     name: 'Preview collection',
     requests: [
       request('request-first', 'First', 'first'),
-      request('request-second', 'Second', 'second'),
+      second,
       scripted,
     ],
+    folders: [
+      { id: 'folder-selected', name: 'Selected folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+      { id: 'folder-nested', name: 'Nested folder', parentId: 'folder-selected', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+      { id: 'folder-empty', name: 'Empty folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+    ],
+    resourceOrder: ['request-first', 'folder-selected', 'request-second', 'folder-nested', 'request-third', 'folder-empty'],
   };
   const environment = { id: 'preview-environment', name: 'Preview environment', variables: [] };
   await mkdir(join(temporary, '.brunomnia'), { recursive: true });
@@ -80,8 +89,7 @@ try {
   const output = await run([
     'run', 'collection', temporary, collection.id,
     '--env', environment.id,
-    '--item', 'request-third',
-    '--item', 'request-second',
+    '--item', 'folder-selected',
     '--item', 'request-first',
     '--requestNamePattern', '^(Third|First)$',
     '--iteration-count', '2',
@@ -121,6 +129,9 @@ try {
   const rejectedEmptyPlan = await runFailure(['run', 'collection', temporary, collection.id, '--requestNamePattern', '^Missing$']);
   assert.equal(rejectedEmptyPlan.code, 1);
   assert.match(rejectedEmptyPlan.stderr, /No requests identified; nothing to run/);
+  const rejectedEmptyFolder = await runFailure(['run', 'collection', temporary, collection.id, '--item', 'folder-empty']);
+  assert.equal(rejectedEmptyFolder.code, 1);
+  assert.match(rejectedEmptyFolder.stderr, /No requests identified; nothing to run/);
   const bailed = await runFailure([
     'run', 'collection', temporary, collection.id,
     '--item', 'request-second', '--item', 'request-first',
@@ -131,7 +142,7 @@ try {
   const bailedArtifact = JSON.parse(bailed.stdout);
   assert.equal(bailedArtifact.report.bailed, true);
   assert.deepEqual(bailedArtifact.report.results.map((result) => result.requestId), ['request-second']);
-  console.log('CLI runner preview smoke passed: split project, pinned aliases, request-name filtering, selected order, data, environment overrides, delay, bail, and assertion evidence.');
+  console.log('CLI runner preview smoke passed: split project, folder items, pinned aliases, request-name filtering, selected order, data, environment overrides, delay, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });

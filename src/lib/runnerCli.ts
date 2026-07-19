@@ -1,3 +1,6 @@
+import type { Collection } from '../types';
+import { orderedCollectionChildren } from './resources';
+
 export type RunnerCliCommandOptions = {
   workspacePath: string;
   collectionId: string;
@@ -47,6 +50,37 @@ export const runnerRequestIdsMatchingPattern = (
     ? requests
     : selectedIds.flatMap((id) => requestsById.get(id) ?? []);
   return candidates.filter((request) => pattern.test(request.name)).map((request) => request.id);
+};
+
+const runnerFolderRequestIds = (collection: Collection, folderId: string): string[] => {
+  const requestIds: string[] = [];
+  const visited = new Set([folderId]);
+  const pending = orderedCollectionChildren(collection, folderId).reverse();
+  while (pending.length) {
+    const child = pending.pop()!;
+    if (child.kind === 'request') {
+      requestIds.push(child.id);
+    } else if (!visited.has(child.id)) {
+      visited.add(child.id);
+      pending.push(...orderedCollectionChildren(collection, child.id).reverse());
+    }
+  }
+  return requestIds;
+};
+
+export const resolveRunnerItemRequestIds = (collection: Collection, identifiers: string[]) => {
+  const folderIds = new Set((collection.folders ?? []).map((folder) => folder.id));
+  const requestsById = new Map(collection.requests.map((request) => [request.id, request]));
+  const seen = new Set<string>();
+  return identifiers.flatMap((identifier) => {
+    if (folderIds.has(identifier)) return runnerFolderRequestIds(collection, identifier);
+    const idMatch = requestsById.get(identifier);
+    if (idMatch) return [idMatch.id];
+    const nameMatches = collection.requests.filter((request) => request.name === identifier);
+    if (!nameMatches.length) throw new Error(`Item '${identifier}' was not found in collection '${collection.name}'.`);
+    if (nameMatches.length > 1) throw new Error(`Request name '${identifier}' is ambiguous in collection '${collection.name}'. Use its ID.`);
+    return [nameMatches[0].id];
+  }).filter((id) => !seen.has(id) && Boolean(seen.add(id)));
 };
 
 const boundedInteger = (value: number, minimum: number, maximum: number) => {

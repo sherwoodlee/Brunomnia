@@ -24,7 +24,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
-import { applyRunnerEnvironmentOverrides, runnerRequestIdsMatchingPattern } from '../src/lib/runnerCli';
+import { applyRunnerEnvironmentOverrides, resolveRunnerItemRequestIds, runnerRequestIdsMatchingPattern } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -615,14 +615,7 @@ const main = async () => {
     if (subject === 'test' && requestedRequests.length) fail('--item/--request is only available for run collection.');
     if (subject === 'test' && environmentOverrides.length) fail('--env-var is only available for run collection.');
     if (subject === 'test' && requestedDelay !== undefined) fail('--delay-request is only available for run collection.');
-    const selectedRequestIds = requestedRequests.map((requestIdentifier) => {
-      const idMatch = collection.requests.find((request) => request.id === requestIdentifier);
-      if (idMatch) return idMatch.id;
-      const nameMatches = collection.requests.filter((request) => request.name === requestIdentifier);
-      if (!nameMatches.length) return fail(`Request '${requestIdentifier}' was not found in collection '${collection.name}'.`);
-      if (nameMatches.length > 1) return fail(`Request name '${requestIdentifier}' is ambiguous in collection '${collection.name}'. Use its ID.`);
-      return nameMatches[0].id;
-    });
+    const selectedRequestIds = resolveRunnerItemRequestIds(collection, requestedRequests);
     const explicitRequestNamePattern = firstFlag('--requestNamePattern', '--request-name-pattern');
     const explicitTestNamePattern = firstFlag('--testNamePattern', '--test-name-pattern');
     if (subject === 'test' && explicitRequestNamePattern !== undefined) fail('--requestNamePattern is only available for run collection.');
@@ -632,7 +625,7 @@ const main = async () => {
     const requestIds = requestedRequestNamePattern === undefined
       ? selectedRequestIds
       : runnerRequestIdsMatchingPattern(collection.requests, requestedRequests.length ? selectedRequestIds : undefined, requestedRequestNamePattern);
-    if (requestedRequestNamePattern !== undefined && !requestIds.length) fail('No requests identified; nothing to run.');
+    if ((requestedRequests.length || requestedRequestNamePattern !== undefined) && !requestIds.length) fail('No requests identified; nothing to run.');
     const testNamePattern = subject === 'test' ? validateTestNamePattern(requestedTestNamePattern) : undefined;
     let cliCookies = [...workspace.cookies];
     let cliResponses = [...workspace.responses];

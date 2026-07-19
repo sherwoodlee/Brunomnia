@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, quotePosixShellArgument, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
+import { createBlankRequest } from '../data/seed';
+import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
 
 describe('Runner CLI command preview', () => {
   it('preserves selected request order and every execution control', () => {
@@ -57,5 +58,24 @@ describe('Runner CLI command preview', () => {
     expect(validateRunnerRequestNamePattern('^Post (?:first|second)$')).toBe('^Post (?:first|second)$');
     expect(() => validateRunnerRequestNamePattern('[')).toThrow(/Invalid request name pattern/);
     expect(() => validateRunnerRequestNamePattern('x'.repeat(1_001))).toThrow(/1,000 characters/);
+  });
+
+  it('expands pinned folder items recursively in tree order and de-duplicates mixed selections', () => {
+    const request = (id: string, name: string, folderId = '') => ({ ...createBlankRequest(id), name, folderId });
+    const collection = {
+      id: 'collection', name: 'Collection', expanded: true,
+      folders: [
+        { id: 'folder', name: 'Folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+        { id: 'nested', name: 'Nested', parentId: 'folder', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+        { id: 'empty', name: 'Empty', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+      ],
+      requests: [request('root', 'Root'), request('first', 'First', 'folder'), request('nested-request', 'Nested request', 'nested'), request('last', 'Last', 'folder')],
+      resourceOrder: ['root', 'folder', 'first', 'nested', 'nested-request', 'last', 'empty'],
+    };
+    expect(resolveRunnerItemRequestIds(collection, ['folder', 'root', 'nested-request'])).toEqual(['first', 'nested-request', 'last', 'root']);
+    expect(resolveRunnerItemRequestIds(collection, ['empty'])).toEqual([]);
+    expect(() => resolveRunnerItemRequestIds(collection, ['missing'])).toThrow(/Item 'missing' was not found/);
+    const cyclic = { ...collection, folders: collection.folders.map((folder) => folder.id === 'folder' ? { ...folder, parentId: 'nested' } : folder) };
+    expect(resolveRunnerItemRequestIds(cyclic, ['folder'])).toEqual(['first', 'nested-request', 'last']);
   });
 });

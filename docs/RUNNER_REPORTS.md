@@ -71,6 +71,8 @@ Browser-local projects have no filesystem path, so export all workspace data as 
 
 Repeated pinned `--item`/`-i` flags preserve the previewed order and omit unchecked requests. `--delay-request`/`--delay` uses the same bounded 0–30,000 ms delay before every desktop Runner attempt; `--iteration-count`/`-n`, `--iteration-data`/`-d`, `--bail`/`-b`, and `--env`/`-e` match pinned spellings. The earlier `--request`, `--iterations`, and `--data` forms remain compatible aliases. Duplicate request names are rejected as ambiguous, so generated commands use stable request IDs. CLI script, file, script-network, template-file, and external-vault authorities remain separate explicit `--allow-*` grants and are never added silently by the preview.
 
+For direct CLI use, an `--item` value may also be a folder ID. The folder recursively expands all descendant requests in the collection's mixed resource-tree order; mixed folder/request items retain argument order, and duplicates execute once. Unknown items and folders with no matching requests fail before transport instead of producing an empty successful run.
+
 ## CLI reporters
 
 `run test` defaults to the readable `spec` reporter. `run collection` retains JSON as its default for automation. Select an explicit format with `--reporter` (or `-r`):
