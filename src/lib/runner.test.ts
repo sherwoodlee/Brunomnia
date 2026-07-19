@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { RunnerItemResult, Workspace } from '../types';
-import { RUNNER_DATA_ENCODINGS, RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, decodeRunnerDataBytes, detectRunnerDataEncoding, discardRunnerDraftEntries, discardRunnerReport, parseRunnerData, parseRunnerDataFile, resolveRunnerTarget, runCollection, runnerDraftKey, runnerReportsForTarget, validateTestNamePattern } from './runner';
+import { RUNNER_DATA_ENCODINGS, RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, decodeRunnerDataBytes, detectRunnerDataEncoding, discardRunnerDraftEntries, discardRunnerReport, parseRunnerData, parseRunnerDataFile, resolveRunnerTarget, runCollection, runnerDataBytesFromBase64, runnerDataBytesToBase64, runnerDraftKey, runnerReportsForTarget, validateTestNamePattern } from './runner';
 import { formatResponseTimeline } from './timeline';
 
 describe('collection runner', () => {
@@ -19,7 +19,7 @@ describe('collection runner', () => {
   });
 
   it('keys Runner drafts by workspace and clears only closed documents', () => {
-    const draft = { collectionId: 'collection', environmentId: 'environment', iterations: 2, retries: 1, bail: true, keepLog: true, delayMs: 25, streamWindowMs: 500, data: '[{}]', dataFileName: 'iterations.json', dataFileEncoding: 'utf-8', requestPlan: [{ id: 'request', enabled: false }] };
+    const draft = { collectionId: 'collection', environmentId: 'environment', iterations: 2, retries: 1, bail: true, keepLog: true, delayMs: 25, streamWindowMs: 500, data: '[{}]', dataFileName: 'iterations.json', dataFileEncoding: 'utf-8', dataFileBytesBase64: 'W3t9XQ==', requestPlan: [{ id: 'request', enabled: false }] };
     const drafts = {
       [runnerDraftKey('workspace-a', 'runner_one')]: draft,
       [runnerDraftKey('workspace-a', 'runner_two')]: { ...draft, iterations: 3 },
@@ -63,8 +63,24 @@ describe('collection runner', () => {
     const western = new Uint8Array([0x69, 0x64, 0x2c, 0x6e, 0x61, 0x6d, 0x65, 0x0a, 0x31, 0x2c, 0xe9]);
     expect(detectRunnerDataEncoding(western)).toBe('windows-1252');
     expect(decodeRunnerDataBytes(western, 'windows-1252')).toBe('id,name\n1,é');
-    expect(RUNNER_DATA_ENCODINGS.map((encoding) => encoding.key)).toEqual(expect.arrayContaining(['utf-8', 'utf-16le', 'windows-1252', 'shift_jis']));
+    const utf32le = new Uint8Array([0xff, 0xfe, 0x00, 0x00, 0x69, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00]);
+    const utf32be = new Uint8Array([0x00, 0x00, 0xfe, 0xff, 0x00, 0x01, 0xf6, 0x80]);
+    expect(detectRunnerDataEncoding(utf32le)).toBe('utf-32le');
+    expect(detectRunnerDataEncoding(utf32be)).toBe('utf-32be');
+    expect(decodeRunnerDataBytes(utf32le, 'utf-32le')).toBe('id');
+    expect(decodeRunnerDataBytes(utf32be, 'utf-32be')).toBe('🚀');
+    expect(decodeRunnerDataBytes(new Uint8Array([0x41, 0x80]), 'iso-8859-1')).toBe('A\u0080');
+    expect(RUNNER_DATA_ENCODINGS).toHaveLength(41);
+    expect(RUNNER_DATA_ENCODINGS.map((encoding) => encoding.key)).toEqual(expect.arrayContaining(['utf-8', 'utf-16le', 'utf-32be', 'ascii', 'iso-8859-12', 'windows-1252', 'euc-cn', 'shift_jis', 'koi8-ru', 'koi8-t']));
     expect(() => decodeRunnerDataBytes(western, 'utf-8')).toThrow(/not valid utf-8/);
+    expect(() => decodeRunnerDataBytes(new Uint8Array([0x80]), 'ascii')).toThrow(/not valid ascii/);
+  });
+
+  it('round-trips bounded Runner source bytes for dialog reopening', () => {
+    const bytes = new Uint8Array([0x00, 0x41, 0xff, 0x0a]);
+    const encoded = runnerDataBytesToBase64(bytes);
+    expect(runnerDataBytesFromBase64(encoded)).toEqual(bytes);
+    expect(runnerDataBytesFromBase64('not base64')).toBeUndefined();
   });
 
   it('retries failures and keeps ordered results', async () => {

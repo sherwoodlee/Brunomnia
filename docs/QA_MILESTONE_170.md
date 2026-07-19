@@ -7,7 +7,7 @@ Scope: add pinned-shaped collection-runner data encoding detection, selection, r
 ## Source audit
 
 - Kong/insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` remains the pinned clean-room reference.
-- Pinned Encoding Picker exposes forty labels spanning UTF-8/16/32, ASCII, ISO-8859, Windows code pages, GB18030, EUC, Big5, Shift_JIS, and KOI8 families.
+- Pinned Encoding Picker exposes 41 labels spanning UTF-8/16/32, ASCII, ISO-8859, Windows code pages, GB18030, EUC, Big5, Shift_JIS, and KOI8 families.
 - Pinned upload initially reads through its desktop encoding detector, displays the detected encoding only after a file parses, and re-reads the retained filesystem path whenever the user changes encoding.
 - Browser and Tauri WebView `TextDecoder` implement the portable WHATWG subset rather than every Node iconv label. Brunomnia dynamically offers only labels the current device can construct and names UTF-32/rare unavailable labels as a remaining gap.
 - Browser file handles do not expose durable paths. Brunomnia retains selected bytes only while the upload dialog remains open, persists decoded text plus source name/encoding, and requires file re-selection to change encoding after reopening.

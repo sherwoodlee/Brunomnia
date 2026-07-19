@@ -66,6 +66,7 @@ export type RunnerWorkbenchDraft = {
   data: string;
   dataFileName: string;
   dataFileEncoding: string;
+  dataFileBytesBase64: string;
   requestPlan: Array<{ id: string; enabled: boolean }>;
 };
 
@@ -133,15 +134,49 @@ export const RUNNER_TIMELINE_REPORT_BYTES = 1_000_000;
 export const RUNNER_DATA_FILE_BYTES = 5_000_000;
 export const RUNNER_DATA_FILE_ROWS = 1_000;
 export const RUNNER_DATA_FILE_HEADERS = 100;
-const runnerDataEncodingCandidates = [
-  ['utf-8', 'UTF-8'], ['utf-16le', 'UTF-16 LE'], ['utf-16be', 'UTF-16 BE'],
-  ['windows-1250', 'Windows-1250'], ['windows-1251', 'Windows-1251'], ['windows-1252', 'Western European (Windows-1252)'], ['windows-1253', 'Windows-1253'], ['windows-1254', 'Windows-1254'], ['windows-1255', 'Windows-1255'], ['windows-1256', 'Windows-1256'], ['windows-1257', 'Windows-1257'], ['windows-1258', 'Windows-1258'],
-  ['iso-8859-2', 'Central European (Latin-2)'], ['iso-8859-3', 'South European (Latin-3)'], ['iso-8859-4', 'North European (Latin-4)'], ['iso-8859-5', 'Cyrillic'], ['iso-8859-6', 'Arabic'], ['iso-8859-7', 'Greek'], ['iso-8859-8', 'Hebrew'], ['iso-8859-10', 'Nordic (Latin-6)'], ['iso-8859-13', 'Baltic (Latin-7)'], ['iso-8859-14', 'Celtic (Latin-8)'], ['iso-8859-15', 'Western European (Latin-9)'], ['iso-8859-16', 'Southeastern European (Latin-10)'],
-  ['gb18030', 'GB 18030'], ['euc-jp', 'EUC-JP'], ['euc-kr', 'EUC-KR'], ['big5', 'Big5'], ['shift_jis', 'Shift_JIS'], ['koi8-r', 'KOI8-R'], ['koi8-u', 'KOI8-U'],
+export const RUNNER_DATA_ENCODINGS = [
+  { key: 'utf-8', label: 'utf8' },
+  { key: 'utf-16le', label: 'UTF-16 LE' },
+  { key: 'utf-16be', label: 'UTF-16 BE' },
+  { key: 'utf-32le', label: 'UTF-32 LE' },
+  { key: 'utf-32be', label: 'UTF-32 BE' },
+  { key: 'ascii', label: 'ascii' },
+  { key: 'iso-8859-1', label: 'Western European (Latin-1)' },
+  { key: 'iso-8859-2', label: 'Central European (Latin-2)' },
+  { key: 'iso-8859-3', label: 'South European (Latin-3)' },
+  { key: 'iso-8859-4', label: 'North European (Latin-4)' },
+  { key: 'iso-8859-5', label: 'Cyrillic' },
+  { key: 'iso-8859-6', label: 'Arabic' },
+  { key: 'iso-8859-7', label: 'Greek' },
+  { key: 'iso-8859-8', label: 'Hebrew' },
+  { key: 'iso-8859-9', label: 'Turkish (Latin-5)' },
+  { key: 'iso-8859-10', label: 'Nordic (Latin-6)' },
+  { key: 'iso-8859-11', label: 'Thai' },
+  { key: 'iso-8859-12', label: 'Ethiopic' },
+  { key: 'iso-8859-13', label: 'Baltic (Latin-7)' },
+  { key: 'iso-8859-14', label: 'Celtic (Latin-8)' },
+  { key: 'iso-8859-15', label: 'Western European (Latin-9)' },
+  { key: 'iso-8859-16', label: 'Southeastern European (Latin-10)' },
+  { key: 'windows-1250', label: 'Windows-1250' },
+  { key: 'windows-1251', label: 'Windows-1251' },
+  { key: 'windows-1252', label: 'Windows-1252' },
+  { key: 'windows-1253', label: 'Windows-1253' },
+  { key: 'windows-1254', label: 'Windows-1254' },
+  { key: 'windows-1255', label: 'Windows-1255' },
+  { key: 'windows-1256', label: 'Windows-1256' },
+  { key: 'windows-1257', label: 'Windows-1257' },
+  { key: 'windows-1258', label: 'Windows-1258' },
+  { key: 'gb18030', label: 'GB 18030' },
+  { key: 'euc-jp', label: 'EUC-JP' },
+  { key: 'euc-kr', label: 'EUC-KR' },
+  { key: 'euc-cn', label: 'EUC-CN' },
+  { key: 'big5', label: 'Big5' },
+  { key: 'shift_jis', label: 'Shift_JIS' },
+  { key: 'koi8-r', label: 'KOI8-R' },
+  { key: 'koi8-u', label: 'KOI8-U' },
+  { key: 'koi8-ru', label: 'KOI8-RU' },
+  { key: 'koi8-t', label: 'KOI8-T' },
 ] as const;
-export const RUNNER_DATA_ENCODINGS = runnerDataEncodingCandidates.flatMap(([key, label]) => {
-  try { new TextDecoder(key); return [{ key, label }]; } catch { return []; }
-});
 const RUNNER_RESPONSE_BODY_BYTES = 16_000;
 const RUNNER_RESPONSE_HEADERS = 64;
 const RUNNER_TIMELINE_ENTRIES = 1_000;
@@ -713,15 +748,78 @@ export const parseRunnerData = (contents: string): Record<string, string>[] => {
 export type RunnerDataFilePreview = { rows: Record<string, string>[]; headers: string[] };
 
 export const detectRunnerDataEncoding = (bytes: Uint8Array) => {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe && bytes[2] === 0x00 && bytes[3] === 0x00) return 'utf-32le';
+  if (bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0xfe && bytes[3] === 0xff) return 'utf-32be';
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return 'utf-16le';
   if (bytes[0] === 0xfe && bytes[1] === 0xff) return 'utf-16be';
   try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); return 'utf-8'; } catch { return 'windows-1252'; }
 };
 
+const decodeUtf32 = (bytes: Uint8Array, littleEndian: boolean) => {
+  let offset = littleEndian && bytes[0] === 0xff && bytes[1] === 0xfe && bytes[2] === 0x00 && bytes[3] === 0x00
+    ? 4
+    : !littleEndian && bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0xfe && bytes[3] === 0xff
+      ? 4
+      : 0;
+  if ((bytes.byteLength - offset) % 4 !== 0) throw new Error('Invalid UTF-32 byte length.');
+  let output = '';
+  let codePoints: number[] = [];
+  for (; offset < bytes.byteLength; offset += 4) {
+    const codePoint = littleEndian
+      ? ((bytes[offset]) | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0
+      : ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
+    if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) throw new Error('Invalid UTF-32 code point.');
+    codePoints.push(codePoint);
+    if (codePoints.length === 4_096) {
+      output += String.fromCodePoint(...codePoints);
+      codePoints = [];
+    }
+  }
+  return output + String.fromCodePoint(...codePoints);
+};
+
+const decodeLatin1 = (bytes: Uint8Array) => {
+  let output = '';
+  for (let offset = 0; offset < bytes.byteLength; offset += 8_192) output += String.fromCharCode(...bytes.subarray(offset, offset + 8_192));
+  return output;
+};
+
 export const decodeRunnerDataBytes = (bytes: Uint8Array, encoding: string) => {
   if (bytes.byteLength > RUNNER_DATA_FILE_BYTES) throw new Error('Runner data files cannot exceed 5 MB.');
   if (!RUNNER_DATA_ENCODINGS.some((candidate) => candidate.key === encoding)) throw new Error(`Runner data encoding '${encoding}' is not supported on this device.`);
-  try { return new TextDecoder(encoding, { fatal: true }).decode(bytes); } catch { throw new Error(`The Runner data file is not valid ${encoding}.`); }
+  try {
+    if (encoding === 'utf-32le' || encoding === 'utf-32be') return decodeUtf32(bytes, encoding === 'utf-32le');
+    if (encoding === 'ascii') {
+      if (bytes.some((byte) => byte > 0x7f)) throw new Error('Invalid ASCII byte.');
+      return decodeLatin1(bytes);
+    }
+    if (encoding === 'iso-8859-1') return decodeLatin1(bytes);
+    const decoderEncoding = encoding === 'euc-cn' ? 'gbk' : encoding;
+    let decoder: TextDecoder;
+    try { decoder = new TextDecoder(decoderEncoding, { fatal: true }); } catch { throw new Error(`Runner data encoding '${encoding}' is not supported on this device.`); }
+    return decoder.decode(bytes);
+  } catch (caught) {
+    if (caught instanceof Error && caught.message.includes('not supported on this device')) throw caught;
+    throw new Error(`The Runner data file is not valid ${encoding}.`);
+  }
+};
+
+export const runnerDataBytesToBase64 = (bytes: Uint8Array) => {
+  if (bytes.byteLength > RUNNER_DATA_FILE_BYTES) throw new Error('Runner data files cannot exceed 5 MB.');
+  let binary = '';
+  for (let offset = 0; offset < bytes.byteLength; offset += 8_192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8_192));
+  return btoa(binary);
+};
+
+export const runnerDataBytesFromBase64 = (value: string) => {
+  if (!value) return undefined;
+  try {
+    const binary = atob(value);
+    if (binary.length > RUNNER_DATA_FILE_BYTES) return undefined;
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  } catch {
+    return undefined;
+  }
 };
 
 export const parseRunnerDataFile = (contents: string, fileName: string): RunnerDataFilePreview => {

@@ -179,6 +179,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
   const [data, setData] = useState(runnerDraft?.data ?? '');
   const [dataFileName, setDataFileName] = useState(runnerDraft?.dataFileName ?? '');
   const [dataFileEncoding, setDataFileEncoding] = useState(runnerDraft?.dataFileEncoding ?? 'utf-8');
+  const [dataFileBytesBase64, setDataFileBytesBase64] = useState(runnerDraft?.dataFileBytesBase64 ?? '');
   const [showDataDialog, setShowDataDialog] = useState(false);
   const [showCliDialog, setShowCliDialog] = useState(false);
   const [running, setRunning] = useState(false);
@@ -203,8 +204,8 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
 
   useEffect(() => {
     if (!runnerDraftKey || !onRunnerDraftChange) return;
-    onRunnerDraftChange(runnerDraftKey, { collectionId, environmentId, iterations, retries, bail, keepLog, delayMs, streamWindowMs, data, dataFileName, dataFileEncoding, requestPlan });
-  }, [bail, collectionId, data, dataFileEncoding, dataFileName, delayMs, environmentId, iterations, keepLog, onRunnerDraftChange, requestPlan, retries, runnerDraftKey, streamWindowMs]);
+    onRunnerDraftChange(runnerDraftKey, { collectionId, environmentId, iterations, retries, bail, keepLog, delayMs, streamWindowMs, data, dataFileName, dataFileEncoding, dataFileBytesBase64, requestPlan });
+  }, [bail, collectionId, data, dataFileBytesBase64, dataFileEncoding, dataFileName, delayMs, environmentId, iterations, keepLog, onRunnerDraftChange, requestPlan, retries, runnerDraftKey, streamWindowMs]);
 
   const cancelRunnerOAuthAuthorization = async () => {
     const flowId = oauthFlowId.current;
@@ -560,7 +561,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
           <label className="runner-toggle"><input checked={keepLog} disabled={running} onChange={(event) => setKeepLog(event.target.checked)} type="checkbox" /><span>Keep logs after run</span></label>
           <label>Delay between requests (ms)<input min="0" max="30000" type="number" value={delayMs} onChange={(event) => setDelayMs(Number(event.target.value))} /></label>
           <label>Stream sample window (ms)<input min="100" max="30000" type="number" value={streamWindowMs} onChange={(event) => setStreamWindowMs(Number(event.target.value))} /></label>
-          <div className="runner-data-control"><label>Iteration data<textarea aria-label="Runner iteration data" placeholder={'JSON array or CSV\norderId,status\nord_1,open'} value={data} onChange={(event) => { setData(event.target.value); setDataFileName(''); setDataFileEncoding('utf-8'); }} /></label><button disabled={running} onClick={() => setShowDataDialog(true)} type="button"><Icon name={dataFileName ? 'history' : 'import'} size={13} /> {dataFileName ? `View data · ${dataFileName}` : 'Upload data'}</button></div>
+          <div className="runner-data-control"><label>Iteration data<textarea aria-label="Runner iteration data" placeholder={'JSON array or CSV\norderId,status\nord_1,open'} value={data} onChange={(event) => { setData(event.target.value); setDataFileName(''); setDataFileEncoding('utf-8'); setDataFileBytesBase64(''); }} /></label><button disabled={running} onClick={() => setShowDataDialog(true)} type="button"><Icon name={dataFileName ? 'history' : 'import'} size={13} /> {dataFileName ? `View data · ${dataFileName}` : 'Upload data'}</button></div>
           <p>Dataset values override environment variables for each iteration.</p>
         </aside>
         <div className="runner-results">
@@ -577,7 +578,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
         </div>
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}
-      {showDataDialog ? <RunnerDataDialog data={data} fileEncoding={dataFileEncoding} fileName={dataFileName} onApply={(nextData, nextFileName, nextFileEncoding, rowCount) => { setData(nextData); setDataFileName(nextFileName); setDataFileEncoding(nextFileEncoding); setIterations(rowCount); }} onClear={() => { setData(''); setDataFileName(''); setDataFileEncoding('utf-8'); }} onClose={() => setShowDataDialog(false)} /> : null}
+      {showDataDialog ? <RunnerDataDialog data={data} fileBytesBase64={dataFileBytesBase64} fileEncoding={dataFileEncoding} fileName={dataFileName} onApply={(nextData, nextFileName, nextFileEncoding, nextFileBytesBase64, rowCount) => { setData(nextData); setDataFileName(nextFileName); setDataFileEncoding(nextFileEncoding); setDataFileBytesBase64(nextFileBytesBase64); setIterations(rowCount); }} onClear={() => { setData(''); setDataFileName(''); setDataFileEncoding('utf-8'); setDataFileBytesBase64(''); }} onClose={() => setShowDataDialog(false)} /> : null}
       {showCliDialog && collection ? <RunnerCliDialog bail={bail} collectionId={collection.id} dataFileName={dataFileName} delayMs={delayMs} environmentId={selectedEnvironment.id} hasData={Boolean(data.trim())} iterations={iterations} onClose={() => setShowCliDialog(false)} requestIds={selectedRequestIds} retries={retries} workspace={workspace} workspaceId={workspaceId} /> : null}
       {oauthAuthorization ? <OAuthAuthorizationDialog onCancel={cancelRun} status={oauthAuthorization} /> : null}
     </section>
