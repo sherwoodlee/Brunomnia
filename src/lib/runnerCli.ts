@@ -18,7 +18,7 @@ export type RunnerCliCommandOptions = {
 const runnerCliValueOptions = new Set([
   '--env', '-e', '--globals', '-g', '--requestNamePattern', '--request-name-pattern', '--testNamePattern', '--test-name-pattern', '-t',
   '--item', '--request', '-i', '--requestTimeout', '--request-timeout', '--env-var', '--iteration-count', '--iterations', '-n',
-  '--retries', '--delay-request', '--delay', '--iteration-data', '--data', '-d', '--script-timeout', '--reporter', '-r',
+  '--retries', '--delay-request', '--delay', '--iteration-data', '--data', '-d', '--script-timeout', '--reporter', '--ruleset', '-r',
   '--output', '-o', '--workingDir', '--working-dir', '-w', '--config', '--httpProxy', '--http-proxy', '--httpsProxy', '--https-proxy', '--noProxy', '--no-proxy', '--includeFullData', '--include-full-data',
 ]);
 
@@ -26,7 +26,7 @@ const runnerCliVariadicValueOptions = new Set(['--dataFolders', '--data-folders'
 
 const runnerCliBooleanOptions = new Set([
   '--bail', '-b', '--allow-scripts', '--allow-script-requests', '--allow-script-files', '--allow-template-files',
-  '--allow-external-vaults', '--disableCertValidation', '--disable-cert-validation', '-k', '--acceptRisk', '--accept-risk', '--skipAnnotations', '--skip-annotations', '-s', '--ci', '--verbose', '--printOptions', '--print-options', '--help', '-h',
+  '--allow-external-vaults', '--disableCertValidation', '--disable-cert-validation', '-k', '--acceptRisk', '--accept-risk', '--skipAnnotations', '--skip-annotations', '-s', '--json', '--ci', '--verbose', '--printOptions', '--print-options', '--help', '-h',
 ]);
 
 export const runnerCliPositionalArguments = (values: string[]) => {

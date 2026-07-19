@@ -171,6 +171,7 @@ x-visible: retained-root
 paths:
   /health:
     get:
+      operationId: getHealth
       x-kong-plugin: hidden-operation
       x-visible: retained-operation
       responses: { '200': { description: ok } }
@@ -184,6 +185,7 @@ paths:
   await mkdir(join(temporary, 'collections'));
   await mkdir(join(temporary, 'environments'));
   await mkdir(join(temporary, 'designs'));
+  await mkdir(join(temporary, 'lint-fixture'));
   const metadataPath = join(temporary, '.brunomnia', 'project.yaml');
   const metadata = {
     format: 'brunomnia', version: 37, name: 'CLI preview project', activeRequestId: 'request-first', activeEnvironmentId: environment.id,
@@ -193,6 +195,16 @@ paths:
   await writeFile(join(temporary, 'environments', 'preview.yaml'), stringify(environment));
   await writeFile(join(temporary, 'environments', 'selected.yaml'), stringify(selectedGlobals));
   await writeFile(join(temporary, 'designs', 'preview.yaml'), stringify(apiDesign));
+  const strictRuleset = `rules:
+  info-description:
+    message: API info needs a description
+    severity: error
+    given: $.info
+    then: { field: description, function: truthy }
+`;
+  await writeFile(join(temporary, 'strict-rules.yaml'), strictRuleset);
+  await writeFile(join(temporary, 'lint-fixture', 'openapi.yaml'), apiDesign.contents);
+  await writeFile(join(temporary, 'lint-fixture', '.spectral.yaml'), strictRuleset);
   await writeFile(globalFile, stringify({
     _type: 'export', __export_format: 4,
     resources: [
@@ -223,6 +235,16 @@ paths:
   assert.equal(cleanExport['x-visible'], 'retained-root');
   assert.equal(cleanExport.paths['/health'].get['x-kong-plugin'], undefined);
   assert.equal(cleanExport.paths['/health'].get['x-visible'], 'retained-operation');
+  const designLint = await run(['lint', 'spec', apiDesign.id, '-w', temporary]);
+  assert.match(designLint, /1 operations · 0 issues/);
+  const ciLint = await run(['lint', 'spec', '-w', temporary, '--ci']);
+  assert.match(ciLint, /1 operations · 0 issues/);
+  const explicitLintFailure = await runFailure(['lint', 'spec', apiDesign.id, '-w', temporary, '-r', 'strict-rules.yaml']);
+  assert.equal(explicitLintFailure.code, 1);
+  assert.match(explicitLintFailure.stdout, /API info needs a description/);
+  const discoveredLintFailure = await runFailure(['lint', 'spec', 'lint-fixture/openapi.yaml', '-w', temporary]);
+  assert.equal(discoveredLintFailure.code, 1);
+  assert.match(discoveredLintFailure.stdout, /API info needs a description/);
 
   const output = await run([
     'run', 'collection', collection.id, '--config', join(temporary, '.insorc'),
@@ -492,7 +514,7 @@ paths:
   const missingScript = await runFailure(['script', '--config', join(temporary, '.insorc'), 'missing']);
   assert.equal(missingScript.code, 1);
   assert.match(missingScript.stderr, /Available scripts: preview, invalid/);
-  console.log('CLI runner preview smoke passed: pinned and legacy API-spec export with annotation stripping, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  console.log('CLI runner preview smoke passed: pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await close(secureServer).catch(() => undefined);

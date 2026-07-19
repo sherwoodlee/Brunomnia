@@ -43,6 +43,9 @@ const flagValues = (...names: string[]) => args.flatMap((argument, index) => {
   return argument === name ? args[index + 1] === undefined ? [] : [args[index + 1]] : [argument.slice(name.length + 1)];
 });
 const hasFlag = (name: string) => args.includes(name);
+const cliWorkingDirectoryBase = async (workingDir?: string) => workingDir
+  ? (await stat(workingDir)).isDirectory() ? resolve(workingDir) : dirname(resolve(workingDir))
+  : process.cwd();
 const fail = (message: string, code = 1): never => {
   console.error(message);
   process.exit(code);
@@ -832,7 +835,7 @@ const executeHttp = async (
 
 const usage = `Brunomnia CLI
 
-  brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
+  brunomnia lint spec <design-name-id-or-file> [-w <workspace-or-project>] [-r, --ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <design-name-or-id> -w <workspace-or-project> [-s, --skipAnnotations] [--output <file>]
   brunomnia run collection <workspace-or-project> <collection-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--includeFullData <redact|plaintext> --acceptRisk] [-f, --dataFolders <folder...>] [--httpProxy URL] [--httpsProxy URL] [--noProxy HOSTS] [--disableCertValidation] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
@@ -850,9 +853,40 @@ const main = async () => {
   if (!command || hasFlag('--help') || hasFlag('-h')) { console.log(usage); return; }
 
   if (command === 'lint' && subject === 'spec') {
-    const path = args[2] ?? fail('Provide an OpenAPI file.');
-    const rulesetPath = flag('--ruleset');
-    const analysis = analyzeOpenApi(await loadText(path), rulesetPath ? await loadText(rulesetPath) : '');
+    const positionals = runnerCliPositionalArguments(args.slice(2));
+    const identifier = positionals[0];
+    const cliWorkingDir = firstFlag('--workingDir', '--working-dir', '-w');
+    const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
+    const workingDir = cliWorkingDir ?? config.options.workingDir;
+    const inputBase = await cliWorkingDirectoryBase(workingDir);
+    const candidatePath = identifier ? resolve(inputBase, identifier) : '';
+    const candidateStats = candidatePath ? await stat(candidatePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      return fail(`Unable to inspect specification path '${candidatePath}': ${error.message}`);
+    }) : undefined;
+    const explicitRuleset = firstFlag('--ruleset', '-r');
+    let contents = '';
+    let ruleset = '';
+    if (candidateStats?.isFile()) {
+      contents = await loadText(candidatePath);
+      if (explicitRuleset) {
+        ruleset = await loadText(resolve(inputBase, explicitRuleset));
+      } else {
+        const sibling = (await readdir(dirname(candidatePath), { withFileTypes: true }))
+          .filter((entry) => entry.isFile() && entry.name.startsWith('.spectral'))
+          .sort((left, right) => left.name.localeCompare(right.name))[0];
+        if (sibling) ruleset = await loadText(join(dirname(candidatePath), sibling.name));
+      }
+    } else {
+      const workspace = await loadWorkspace(workingDir ?? fail('Provide an OpenAPI file or use --workingDir with a stored API design.'));
+      const design = identifier
+        ? workspace.apiDesigns.find((candidate) => candidate.id === identifier || candidate.name === identifier)
+        : config.options.ci ? workspace.apiDesigns[0] : undefined;
+      if (!design) fail(identifier ? `Design '${identifier}' was not found.` : 'Provide a design name or ID.');
+      contents = design.contents;
+      ruleset = explicitRuleset ? await loadText(resolve(inputBase, explicitRuleset)) : design.ruleset;
+    }
+    const analysis = analyzeOpenApi(contents, ruleset);
     if (hasFlag('--json')) console.log(JSON.stringify(analysis.issues, null, 2));
     else analysis.issues.forEach((issue) => console.log(`${issue.severity.toUpperCase()} ${issue.path}: ${issue.message}`));
     console.log(`${analysis.operations.length} operations · ${analysis.issues.length} issues`);
@@ -880,9 +914,7 @@ const main = async () => {
     const contents = exportOpenApiSpecification(design.contents, hasFlag('--skipAnnotations') || hasFlag('--skip-annotations') || hasFlag('-s'));
     const output = firstFlag('--output', '-o');
     if (output) {
-      const outputBase = workingDir
-        ? (await stat(workingDir)).isDirectory() ? resolve(workingDir) : dirname(resolve(workingDir))
-        : process.cwd();
+      const outputBase = await cliWorkingDirectoryBase(workingDir);
       const outputPath = resolve(outputBase, output);
       await mkdir(dirname(outputPath), { recursive: true });
       await writeFile(outputPath, contents);
@@ -971,9 +1003,7 @@ const main = async () => {
     if (includeFullData && !hasFlag('--acceptRisk') && !hasFlag('--accept-risk')) fail('Full-data reports may contain secrets. Re-run with --acceptRisk after reviewing the output destination.');
     let reportOutputPath = '';
     if (outputOption) {
-      const outputBase = workingDir
-        ? (await stat(workingDir)).isDirectory() ? resolve(workingDir) : dirname(resolve(workingDir))
-        : process.cwd();
+      const outputBase = await cliWorkingDirectoryBase(workingDir);
       reportOutputPath = resolve(outputBase, outputOption);
       const outputStats = await stat(reportOutputPath).catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') return undefined;

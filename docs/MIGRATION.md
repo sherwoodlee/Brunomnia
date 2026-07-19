@@ -76,7 +76,7 @@ Compatibility bounds remain explicit: nested source folders are represented in f
 | Chaining and dynamic values | Complete baseline | Latest-response body/status/header/URL chaining, JSONPath extraction, iteration/request-local/environment variables, UUID/time/Faker/encoding/hash/cookie/prompt/request tags, and actionable missing-dependency errors |
 | Transport fidelity | Complete baseline | Proxy exclusions, exact/wildcard certificate domains, editable multipart filename/content type, duplicate parts, and text/file/binary payloads |
 | WebSocket and runner fidelity | Complete baseline | Text and base64/file binary composition; bounded WebSocket/SSE collection-run samples with optional WebSocket startup frames |
-| Custom lint | Complete baseline | Safe local Spectral-style `rules`/`given`/`then` support for truthy/falsy/defined/enumeration/length/pattern/casing; CLI accepts `--ruleset` |
+| Custom lint | Complete baseline | Safe local Spectral-style `rules`/`given`/`then` support for truthy/falsy/defined/enumeration/length/pattern/casing; CLI accepts `--ruleset`. Milestone 215 later adds pinned file/stored-design/CI input resolution and sibling `.spectral*` discovery. |
 | Script/test API | Complete baseline | Environment/base/collection/local/iteration variable APIs, replacement helpers, request getters/setters, response header/cookie helpers, console capture, and Jest/Chai-style expectation aliases |
 | Interoperability and migration | Complete | Workspace v5, advanced Insomnia/Postman auth mapping, Insomnia v4/v5 cookie-jar round trips, and collision-safe cookie import |
 

@@ -22,7 +22,7 @@ All of these exited successfully:
 
 ```sh
 node bin/brunomnia.cjs --help
-node bin/brunomnia.cjs lint spec examples/orders-api.yaml
+node bin/brunomnia.cjs lint spec orders-api.yaml -w examples
 node bin/brunomnia.cjs generate collection examples/orders-api.yaml --output /tmp/brunomnia-generated.json
 node bin/brunomnia.cjs export spec "CLI API" -w examples/cli-workspace.json --output /tmp/brunomnia-exported.yaml
 node bin/brunomnia.cjs run collection examples/cli-workspace.json "CLI Health" --iterations 2 --retries 1

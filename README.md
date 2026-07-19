@@ -84,7 +84,7 @@ node bin/brunomnia.cjs --help
 Examples:
 
 ```sh
-node bin/brunomnia.cjs lint spec examples/orders-api.yaml
+node bin/brunomnia.cjs lint spec orders-api.yaml -w examples
 node bin/brunomnia.cjs generate collection examples/orders-api.yaml --output collection.json
 node bin/brunomnia.cjs export spec "CLI API" -w examples/cli-workspace.json --skipAnnotations --output exports/api.yaml
 node bin/brunomnia.cjs run collection collection-id --workingDir workspace.brunomnia.json --globals global-id --env collection-environment-id --item request-third --item request-first --requestNamePattern '^(Third|First)$' --requestTimeout 30000 --env-var region=staging --delay-request 100 --iteration-data iterations.csv --iteration-count 2 --bail
@@ -100,6 +100,8 @@ The checked-in [CLI workspace fixture](examples/cli-workspace.json) is self-cont
 Pinned `--httpProxy`, `--httpsProxy`, and `--noProxy` override matching ambient proxy variables for CLI runs. `--disableCertValidation` (or test `-k`) disables target validation only for that invocation. Request-level Custom/Direct routing, Never/Always validation, matching workspace CA roots, and PEM/PFX client identities use request-scoped Undici dispatchers rather than process-global Node settings.
 
 Pinned `export spec <design-name-or-id> -w <workspace-or-project>` reads Brunomnia JSON or split YAML, preserves source text by default, and supports `-s`/`--skipAnnotations` to recursively remove only `x-kong-*` keys before YAML serialization. `--output`/`-o` resolves under the effective working directory and creates nested parents; without it, the specification is written to stdout. The earlier `export spec <workspace> <identifier>` form remains compatible.
+
+Pinned `lint spec <design-name-id-or-file> -w <workspace-or-project>` resolves a file relative to the working-directory base before falling back to a stored design. `--ci` selects the first stored design when no identifier is supplied. `-r`/`--ruleset` explicitly overrides the design ruleset or file-folder default; file lint otherwise discovers the first deterministic sibling `.spectral*` file. Brunomnia executes its documented safe local Spectral-style function subset rather than arbitrary ruleset JavaScript or remote/package extensions.
 
 Pinned collection `--output` defaults to a versioned metadata-safe report: environment values, auth, headers, bodies, proxy credentials, and certificate material are omitted while collection/request identity, response status/time, tests, iteration/attempt, timing, and statistics remain. `--includeFullData <redact|plaintext>` replaces that file with final rendered requests, complete responses, effective variables, and transport evidence. Full-data mode requires non-interactive `--acceptRisk`; omission fails before transport. `redact` replaces environment values, authentication fields, known sensitive header values, proxy URL credentials, and request/workspace CA or client-identity material with `<Redacted by Insomnia>`. It is not a general secret scanner: URLs, bodies, response bodies, test/error text, and custom non-sensitive-named headers remain complete, so protect either full-data mode as sensitive. Relative output paths resolve from `--workingDir`, missing parent directories are created locally, and existing non-files or non-writable files fail before transport.
 
