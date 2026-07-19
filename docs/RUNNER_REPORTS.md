@@ -8,6 +8,8 @@ The desktop runner lists the selected collection's requests before execution. Cl
 
 Enable **Stop after first exhausted failure** to bail once a request has used all configured retry attempts and still fails. A failure that succeeds on retry does not bail. Manual cancellation and bail remain distinct report states.
 
+The optional 0–30,000 ms delay runs after an item becomes active but before each transport attempt, including the first request and retries. Skip or Cancel during that wait prevents the transport from starting; Brunomnia does not add a trailing delay after the final attempt.
+
 ## Response snapshots
 
 Select a result row with the pointer, Enter, or Space to open its response snapshot. Successful attempts show status text, duration, original response size, retained headers, and a text body preview. Failed attempts that never received a response show the runner or transport error instead.
@@ -43,11 +45,11 @@ The exact selected bytes remain only in the open Runner document's bounded in-me
 
 ## Run via CLI
 
-Use **Run via CLI** in a collection or folder Runner to preview a POSIX-shell command for the current environment, selected request order, iterations, retries, inter-request delay, data file, and bail setting. Values are shell-quoted rather than concatenated into executable syntax. The Tauri app resolves its saved device-local project JSON automatically; connected folder and Git project directories are also valid CLI inputs because the CLI reads their `.brunomnia/project.yaml` metadata and managed split YAML resources.
+Use **Run via CLI** in a collection or folder Runner to preview a POSIX-shell command for the current environment, selected request order, iterations, retries, pre-send delay, data file, and bail setting. Values are shell-quoted rather than concatenated into executable syntax. The Tauri app resolves its saved device-local project JSON automatically; connected folder and Git project directories are also valid CLI inputs because the CLI reads their `.brunomnia/project.yaml` metadata and managed split YAML resources.
 
 Browser-local projects have no filesystem path, so export all workspace data as Brunomnia JSON and enter the downloaded path. Browser file inputs likewise do not reveal a durable data-file path; when the Runner contains iteration data, save the decoded data as UTF-8 JSON/CSV and enter its path before copying. The copy action stays disabled while either required path is unresolved.
 
-Repeated `--request`/`-i` flags preserve the previewed order and omit unchecked requests. `--delay-request`/`--delay` uses the same bounded 0–30,000 ms inter-request delay as the desktop Runner; `--iterations`/`-n`, `--data`/`-d`, and `--env`/`-e` have matching short aliases. Duplicate request names are rejected as ambiguous, so generated commands use stable request IDs. CLI script, file, script-network, template-file, and external-vault authorities remain separate explicit `--allow-*` grants and are never added silently by the preview.
+Repeated `--request`/`-i` flags preserve the previewed order and omit unchecked requests. `--delay-request`/`--delay` uses the same bounded 0–30,000 ms delay before every desktop Runner attempt; `--iterations`/`-n`, `--data`/`-d`, and `--env`/`-e` have matching short aliases. Duplicate request names are rejected as ambiguous, so generated commands use stable request IDs. CLI script, file, script-network, template-file, and external-vault authorities remain separate explicit `--allow-*` grants and are never added silently by the preview.
 
 ## CLI reporters
 

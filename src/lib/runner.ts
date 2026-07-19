@@ -374,6 +374,7 @@ export const runCollection = async (
   const keepLog = options.keepLog !== false;
   const iterations = boundedInteger(options.iterations, 1, 1000);
   const retries = boundedInteger(options.retries, 0, 10);
+  const delayMs = boundedInteger(options.delayMs, 0, 30_000);
   const testNamePattern = validateTestNamePattern(options.testNamePattern);
   const requestsById = new Map(collection.requests.map((request) => [request.id, request]));
   const plannedRequests = options.requestIds === undefined
@@ -485,6 +486,17 @@ export const runCollection = async (
           }
 
           updateLiveItem(key, { status: 'running', attempt, errorMessage: undefined });
+          if (delayMs > 0) {
+            try {
+              await wait(delayMs, controller.signal);
+            } catch {
+              const control = interruption() ?? 'canceled';
+              cancelled ||= control === 'canceled';
+              updateLiveItem(key, { status: control, attempt, errorMessage: control === 'skipped' ? 'Skipped by user.' : 'Canceled by user.' });
+              itemFinished = true;
+              break;
+            }
+          }
           const configured = applyCollectionConfiguration(collection, originalRequest, environment);
           let request = structuredClone(configured.request);
           let response: HttpResponse | undefined;
@@ -648,17 +660,6 @@ export const runCollection = async (
             }
             break;
           }
-          if (options.delayMs > 0) {
-            try {
-              await wait(options.delayMs, controller.signal);
-            } catch {
-              const control = interruption() ?? 'canceled';
-              cancelled ||= control === 'canceled';
-              updateLiveItem(key, { status: control, attempt: attempt + 1, errorMessage: control === 'skipped' ? 'Skipped by user.' : 'Canceled by user.' });
-              itemFinished = true;
-              break;
-            }
-          }
         }
         if (bailed) break outer;
         if (cancelled) {
@@ -666,15 +667,6 @@ export const runCollection = async (
           break outer;
         }
         if (!itemFinished) updateLiveItem(key, { status: 'failed', errorMessage: 'The runner stopped before this item completed.' });
-        if (liveItems.find((item) => item.key === key)?.status !== 'skipped' && options.delayMs > 0) {
-          try {
-            await wait(options.delayMs, controller.signal);
-          } catch {
-            cancelled = true;
-            finishUnfinished('canceled', 'Canceled by user.');
-            break outer;
-          }
-        }
       } finally {
         options.onActiveItem?.(undefined);
       }

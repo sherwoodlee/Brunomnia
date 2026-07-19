@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { RunnerItemResult, Workspace } from '../types';
 import { RUNNER_DATA_ENCODINGS, RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, decodeRunnerDataBytes, detectRunnerDataEncoding, discardRunnerDraftEntries, discardRunnerReport, parseRunnerData, parseRunnerDataFile, resolveRunnerTarget, runCollection, runnerDataBytesFromBase64, runnerDataBytesToBase64, runnerDraftKey, runnerReportsForTarget, validateTestNamePattern } from './runner';
@@ -99,6 +99,90 @@ describe('collection runner', () => {
     expect(report.results.map((result) => result.status)).toEqual([500, 200]);
     expect(report.passed).toBe(1);
     expect(report.failed).toBe(1);
+  });
+
+  it('applies the configured delay before every request attempt', async () => {
+    vi.useFakeTimers();
+    try {
+      const request = createBlankRequest('delayed');
+      let calls = 0;
+      const reportPromise = runCollection(
+        { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+        { id: 'env', name: 'Env', variables: [] },
+        { iterations: 1, retries: 1, delayMs: 25, dataRows: [] },
+        async () => ({ status: ++calls === 1 ? 500 : 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }),
+        async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+      );
+
+      await vi.advanceTimersByTimeAsync(24);
+      expect(calls).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(24);
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(reportPromise).resolves.toMatchObject({ total: 2, passed: 1, failed: 1 });
+      expect(calls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('skips an active item during its pre-send delay without starting transport', async () => {
+    vi.useFakeTimers();
+    try {
+      const request = createBlankRequest('skip-delay');
+      let shouldSkip = false;
+      let cancelActive: (() => void) | undefined;
+      let calls = 0;
+      const reportPromise = runCollection(
+        { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+        { id: 'env', name: 'Env', variables: [] },
+        {
+          iterations: 1,
+          retries: 0,
+          delayMs: 50,
+          dataRows: [],
+          shouldSkip: () => shouldSkip,
+          onActiveItem: (key, cancel) => { if (key) cancelActive = cancel; },
+        },
+        async () => { calls += 1; return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+        async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+      );
+
+      await vi.advanceTimersByTimeAsync(10);
+      shouldSkip = true;
+      cancelActive?.();
+
+      await expect(reportPromise).resolves.toMatchObject({ total: 0, skipped: 1, cancelled: false });
+      expect(calls).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('caps programmatic pre-send delays at thirty seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const request = createBlankRequest('bounded-delay');
+      let calls = 0;
+      const reportPromise = runCollection(
+        { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+        { id: 'env', name: 'Env', variables: [] },
+        { iterations: 1, retries: 0, delayMs: 60_000, dataRows: [] },
+        async () => { calls += 1; return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+        async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+      );
+
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(calls).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(reportPromise).resolves.toMatchObject({ passed: 1, failed: 0 });
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('normalizes non-finite iteration and retry counts', async () => {
