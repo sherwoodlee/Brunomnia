@@ -33,12 +33,13 @@ The HTTP client:
 - carries `Mcp-Session-Id` across initialization, discovery, and invocation;
 - discovers paginated tools, prompts, resources, and resource templates;
 - invokes tools, prompts, and resource reads;
+- cancels active discovery or invocation requests and sends session-aware `notifications/cancelled` messages;
 - accepts Basic, bearer/PAT, manually configured OAuth 2, and custom headers;
 - disables redirects and cookies;
 - permits remote HTTPS endpoints and loopback-only plain HTTP; and
 - records client/server messages in the integration event console.
 
-Discovery is bounded to 100 pages and 5,000 cached items per operation family. Each request has a 30-second deadline. The shared HTTP transport buffers a response before the parser applies its format checks, so this milestone does not claim a pre-allocation Streamable HTTP body limit.
+Discovery is bounded to 100 pages and 5,000 cached items per operation family. Each request has a 30-second deadline. While discovery or invocation is active, **Cancel MCP operation** aborts the local transport and dispatches a detached cancellation notification carrying the exact JSON-RPC request ID and current `Mcp-Session-Id`. That notification has its own five-second deadline, disables redirects and cookies, bypasses plugins and OAuth acquisition, and cannot conceal the local cancellation if delivery fails. Closing the workbench also aborts its active MCP operation; a manual cancellation retains a local event-console record. The shared HTTP transport buffers a response before the parser applies its format checks, so this milestone does not claim a pre-allocation Streamable HTTP body limit.
 
 Discovered resource templates retain `uriTemplate` separately from ordinary resource URIs. Selecting one derives its unique variables in template order, creates required string inputs, and shows the exact expanded URI before `resources/read`. Expansion covers RFC 6570 simple, reserved, fragment, label, path, path-parameter, query, and query-continuation operators; comma variables; explode and scalar-prefix modifiers; and scalar/list/object values. Templates are limited to 8,192 characters, 100 expressions/variables, a 10,000-character prefix modifier, and a 32,768-character expanded URI. Malformed templates remain visible for diagnosis but cannot be invoked. Ordinary resources remain read-only URI selections.
 
@@ -48,11 +49,11 @@ OAuth uses the authorization-code grant, mandatory PKCE S256, an RFC 8707 resour
 
 For automatic setup, Brunomnia parses a Bearer `WWW-Authenticate` challenge, tries the advertised `resource_metadata` URL, then path-aware and root RFC 9728 fallbacks. It validates that protected-resource metadata covers the MCP URL, selects its first authorization server, tries path-aware RFC 8414 and OIDC metadata locations, requires authorization-code and PKCE S256 compatibility when advertised, and chooses explicit scope before challenge, protected-resource, or authorization-server scope. If no client ID exists, it registers a loopback authorization-code/refresh client at the advertised endpoint or legacy `/register` fallback. Metadata GETs follow up to twenty explicit relative or absolute redirects, matching the pinned Fetch ceiling; every hop is revalidated as credential-free, fragment-free HTTPS or loopback HTTP, recorded in the event console, and rejected on a missing `Location`, loop, or overflow. Native automatic redirects remain off, and dynamic-registration POSTs never follow redirects. All discovery/registration requests contain no stored MCP credentials or cookies, have 30-second deadlines, and reject post-buffer JSON over 1 MiB.
 
-MCP OAuth tokens and dynamically registered client ID/secret/expiry/auth-method metadata are retained in the local catalog project but stripped from folder/Git and encrypted-sync payloads. Incoming shared runtime fields are discarded before matching local client state is restored by MCP client ID. Registration state is persisted immediately, even when later browser authorization is canceled. Configured endpoints, manual client ID, scope/state, and protected manual client-secret reference remain project data. The exact SDK supports optional URL-based client IDs, but pinned Insomnia's provider never supplies `clientMetadataUrl`, so client-ID metadata documents are not an observable Insomnia capability or parity requirement. Recursive/conditional JSON-Schema forms, long-lived response streams, transport cancellation, server-request response UI, reviewed sampling/elicitation, and persistent STDIO sessions remain open.
+MCP OAuth tokens and dynamically registered client ID/secret/expiry/auth-method metadata are retained in the local catalog project but stripped from folder/Git and encrypted-sync payloads. Incoming shared runtime fields are discarded before matching local client state is restored by MCP client ID. Registration state is persisted immediately, even when later browser authorization is canceled. Configured endpoints, manual client ID, scope/state, and protected manual client-secret reference remain project data. The exact SDK supports optional URL-based client IDs, but pinned Insomnia's provider never supplies `clientMetadataUrl`, so client-ID metadata documents are not an observable Insomnia capability or parity requirement. Recursive/conditional JSON-Schema forms, long-lived response streams, persistent-session cancellation/reconnect semantics, server-request response UI, reviewed sampling/elicitation, and persistent STDIO sessions remain open.
 
 ### STDIO
 
-The desktop app starts the configured executable directly with an argument array; it never constructs a shell command. Each discovery or invocation creates a fresh process, initializes it, performs one operation, and terminates it. STDIO supports the same four discovery families and three invocation families as HTTP.
+The desktop app starts the configured executable directly with an argument array; it never constructs a shell command. Each discovery or invocation creates a fresh process, initializes it, performs one operation, and terminates it. STDIO supports the same four discovery families and three invocation families as HTTP. Canceling sends `notifications/cancelled` for the pending protocol request, stops waiting within 50 ms, kills the child, joins both output readers, and retains a local cancellation event. A bounded registry also handles cancellation racing ahead of native call registration.
 
 The native boundary limits:
 
@@ -61,9 +62,10 @@ The native boundary limits:
 - individual protocol messages and stderr to 10 MB;
 - total stdout read to 20 MB;
 - pre-response events to 1,000; and
+- cancellation identities to 512 bytes with at most 1,024 pending identities; and
 - the operation deadline to 1–120 seconds (the UI uses 30 seconds).
 
-Servers may call `roots/list`; Brunomnia returns the reviewed project roots. Other server requests, including sampling and elicitation, receive an explicit JSON-RPC “method not found” response explaining that interactive approval UI is required. Persistent process sessions, cancellation, sampling review, and elicitation forms remain parity work.
+Servers may call `roots/list`; Brunomnia returns the reviewed project roots. Other server requests, including sampling and elicitation, receive an explicit JSON-RPC “method not found” response explaining that interactive approval UI is required. Persistent process sessions, persistent-session cancellation/reconnect semantics, sampling review, and elicitation forms remain parity work.
 
 ## AI providers and workflows
 

@@ -282,4 +282,40 @@ describe('MCP OAuth request mapping', () => {
     });
     await expect(discoverMcpClient(client, undefined, {})).rejects.toThrow('exceeded 20 redirects');
   });
+
+  it('aborts an in-flight HTTP operation and sends notifications/cancelled', async () => {
+    const client = oauthClient();
+    const requests: ApiRequest[] = [];
+    transport.sendRequest.mockImplementation(async (request: ApiRequest, _environment: unknown, context: SendRequestContext) => {
+      if (!request) return { status: 204, statusText: 'No Content', headers: {}, body: '', durationMs: 0, sizeBytes: 0 };
+      requests.push(request);
+      const message = JSON.parse(request.body) as { id?: string; method: string; params?: { requestId?: string } };
+      if (message.method === 'notifications/cancelled') {
+        return { status: 202, statusText: 'Accepted', headers: {}, body: '', durationMs: 1, sizeBytes: 0 };
+      }
+      if (message.method === 'initialize') {
+        context.onOAuth2Token?.({ ...request, auth: { ...request.auth, accessToken: 'initial-access', expiresAt: Date.now() + 60_000 } });
+        return { status: 200, statusText: 'OK', headers: { 'Mcp-Session-Id': 'cancel-session' }, body: JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-06-18', capabilities: {} } }), durationMs: 1, sizeBytes: 1 };
+      }
+      if (message.method === 'notifications/initialized') {
+        return { status: 202, statusText: 'Accepted', headers: {}, body: '', durationMs: 1, sizeBytes: 0 };
+      }
+      context.onOAuth2Token?.({ ...request, auth: { ...request.auth, accessToken: 'refreshed-during-call', expiresAt: Date.now() + 60_000 } });
+      return new Promise((_resolve, reject) => context.signal?.addEventListener('abort', () => reject(context.signal?.reason), { once: true }));
+    });
+    const controller = new AbortController();
+    const pending = discoverMcpClient(client, undefined, { signal: controller.signal, cancellationId: 'mcp-http-cancel' });
+    await vi.waitFor(() => expect(requests.some((request) => JSON.parse(request.body).method === 'tools/list')).toBe(true));
+    const toolsRequest = requests.find((request) => JSON.parse(request.body).method === 'tools/list');
+    const toolsMessage = JSON.parse(toolsRequest?.body ?? '{}') as { id: string };
+    controller.abort(new DOMException('MCP operation canceled.', 'AbortError'));
+
+    await expect(pending).rejects.toThrow('MCP operation canceled');
+    await vi.waitFor(() => expect(requests.some((request) => JSON.parse(request.body).method === 'notifications/cancelled')).toBe(true));
+    const cancellation = requests.find((request) => JSON.parse(request.body).method === 'notifications/cancelled');
+    expect(JSON.parse(cancellation?.body ?? '{}').params.requestId).toBe(toolsMessage.id);
+    expect(cancellation?.headers).toContainEqual(expect.objectContaining({ name: 'Mcp-Session-Id', value: 'cancel-session' }));
+    expect(cancellation?.auth).toMatchObject({ type: 'oauth2', accessToken: 'refreshed-during-call' });
+    expect(cancellation?.transport).toMatchObject({ followRedirects: false, timeoutMs: 5_000, sendCookies: false, storeCookies: false });
+  });
 });

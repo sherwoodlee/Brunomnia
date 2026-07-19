@@ -1,5 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import type { ApiRequest, AuthConfig, Environment, JsonValue, McpClient, McpPrompt, McpResource, McpTool } from '../types';
+import type { ApiRequest, AuthConfig, Environment, HttpResponse, JsonValue, McpClient, McpPrompt, McpResource, McpTool } from '../types';
 import { createBlankRequest } from '../data/seed';
 import { sendRequest, type SendRequestContext } from './http';
 import { discoverMcpOAuthConfiguration, mcpOAuthClientCredentials, mcpOAuthConfigurationReady, mcpOAuthResource, parseMcpOAuthChallenge } from './mcpOAuthDiscovery';
@@ -15,6 +15,8 @@ const now = () => new Date().toISOString();
 const requestId = () => `mcp-${Date.now().toString(36)}-${crypto.randomUUID()}`;
 const asRecord = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const asString = (value: unknown) => typeof value === 'string' ? value : '';
+const mcpAbortError = (signal: AbortSignal) => signal.reason instanceof Error ? signal.reason : new DOMException('MCP operation canceled.', 'AbortError');
+const throwIfMcpAborted = (signal?: AbortSignal) => { if (signal?.aborted) throw mcpAbortError(signal); };
 
 const validateHttpEndpoint = (value: string) => {
   const url = new URL(value);
@@ -126,6 +128,40 @@ export const mcpClientWithOAuth2Auth = (client: McpClient, auth: AuthConfig): Mc
   oauthTokenPrefix: auth.tokenPrefix || 'Bearer',
 });
 
+const sendHttpCancellation = async (
+  client: McpClient,
+  requestIdToCancel: string,
+  sessionId: string,
+  auth: AuthConfig,
+  environment: Environment | undefined,
+  context: McpRequestContext,
+) => {
+  const request = createBlankRequest(requestId());
+  request.name = `${client.name} · notifications/cancelled`;
+  request.method = 'POST';
+  request.url = validateHttpEndpoint(client.url);
+  request.bodyMode = 'json';
+  request.body = JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: requestIdToCancel, reason: 'Canceled by user.' } });
+  request.headers = [
+    { id: `${request.id}-content-type`, name: 'Content-Type', value: 'application/json', enabled: true },
+    { id: `${request.id}-accept`, name: 'Accept', value: 'application/json, text/event-stream', enabled: true },
+    ...(sessionId ? [{ id: `${request.id}-session`, name: 'Mcp-Session-Id', value: sessionId, enabled: true }] : []),
+    ...client.headers,
+  ];
+  request.auth = mcpAuthentication(client, auth);
+  request.transport = { ...request.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMode: 'custom', timeoutMs: 5_000, sendCookies: false, storeCookies: false };
+  const detachedContext: SendRequestContext = {
+    ...context,
+    signal: undefined,
+    cancellationId: undefined,
+    pluginRuntime: undefined,
+    skipOAuth2Acquisition: true,
+    onOAuth2Token: undefined,
+    authorizeOAuth2: undefined,
+  };
+  await sendRequest(request, environment, detachedContext);
+};
+
 const httpRequest = async (
   client: McpClient,
   method: string,
@@ -136,6 +172,7 @@ const httpRequest = async (
   notification = false,
   oauthRetry = false,
 ): Promise<McpOperationResult> => {
+  throwIfMcpAborted(context.signal);
   assertProtectedCredentials(client);
   const id = requestId();
   const request = createBlankRequest(id);
@@ -161,13 +198,22 @@ const httpRequest = async (
     : mcpAuthentication(client, request.auth);
   request.transport = { ...request.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMode: 'custom', timeoutMs: 30_000, sendCookies: false, storeCookies: false };
   let updatedClient = client;
-  const response = await sendRequest(request, environment, {
-    ...context,
-    onOAuth2Token: (updatedRequest: ApiRequest) => {
-      updatedClient = mcpClientWithOAuth2Auth(updatedClient, updatedRequest.auth);
-      context.onMcpClient?.(updatedClient);
-    },
-  });
+  const cancel = () => {
+    if (!notification) void sendHttpCancellation(updatedClient, id, sessionId, request.auth, environment, context).catch(() => undefined);
+  };
+  context.signal?.addEventListener('abort', cancel, { once: true });
+  let response: HttpResponse;
+  try {
+    response = await sendRequest(request, environment, {
+      ...context,
+      onOAuth2Token: (updatedRequest: ApiRequest) => {
+        updatedClient = mcpClientWithOAuth2Auth(updatedClient, updatedRequest.auth);
+        context.onMcpClient?.(updatedClient);
+      },
+    });
+  } finally {
+    context.signal?.removeEventListener('abort', cancel);
+  }
   if (response.status === 401 && client.authType === 'oauth2' && !oauthRetry) {
     const discovered = await discoverMcpOAuthConfiguration(updatedClient, response, environment, context);
     context.onMcpClient?.(discovered.client);
@@ -211,10 +257,19 @@ const httpSession = async (client: McpClient, environment: Environment | undefin
   return { client: notification.client, sessionId: notification.sessionId ?? initialized.sessionId ?? '', events: [...initialized.events, ...notification.events] };
 };
 
-const stdioRequest = async (client: McpClient, method: string, params: unknown): Promise<McpOperationResult> => {
+const stdioRequest = async (client: McpClient, method: string, params: unknown, context: McpRequestContext): Promise<McpOperationResult> => {
+  throwIfMcpAborted(context.signal);
   if (!isTauri()) throw new Error('MCP STDIO servers require the Tauri desktop app.');
   if (!client.command.trim()) throw new Error('Enter the MCP STDIO executable and arguments. Brunomnia never invokes a shell.');
-  const output = await invoke<StdioOutput>('mcp_stdio_call', { input: { command: client.command, args: client.args, method, params, roots: client.roots, timeoutMs: 30_000 } });
+  const cancellationId = context.signal ? context.cancellationId ?? `mcp-stdio-${crypto.randomUUID()}` : '';
+  const cancel = () => { if (cancellationId) void invoke('cancel_mcp_stdio_call', { cancellationId }).catch(() => undefined); };
+  context.signal?.addEventListener('abort', cancel, { once: true });
+  let output: StdioOutput;
+  try {
+    output = await invoke<StdioOutput>('mcp_stdio_call', { input: { command: client.command, args: client.args, method, params, roots: client.roots, timeoutMs: 30_000, cancellationId } });
+  } finally {
+    context.signal?.removeEventListener('abort', cancel);
+  }
   const events: McpEvent[] = output.events.map((event) => ({ direction: 'server', method: asString(asRecord(event)?.method) || 'message', detail: JSON.stringify(event), timestamp: now() }));
   if (output.stderr) events.push({ direction: 'stderr', method: 'stderr', detail: output.stderr, timestamp: now() });
   return { result: output.result, events, client };
@@ -228,7 +283,7 @@ const operation = async (
   context: McpRequestContext,
   sessionId?: string,
 ) => client.transport === 'stdio'
-  ? stdioRequest(client, method, params)
+  ? stdioRequest(client, method, params, context)
   : httpRequest(client, method, params, environment, context, sessionId);
 
 const toolList = (value: unknown): McpTool[] => {
@@ -294,6 +349,7 @@ export const discoverMcpClient = async (client: McpClient, environment: Environm
         cursor = asString(asRecord(response.result)?.nextCursor);
         if (!cursor) break;
       } catch (error) {
+        if (context.signal?.aborted) throw mcpAbortError(context.signal);
         warnings.push(`${method}: ${error instanceof Error ? error.message : String(error)}`);
         break;
       }
@@ -306,6 +362,7 @@ export const discoverMcpClient = async (client: McpClient, environment: Environm
   const prompts = await list('prompts/list', 'prompts') as McpPrompt[];
   const resources = await list('resources/list', 'resources') as McpResource[];
   const resourceTemplates = await list('resources/templates/list', 'resourceTemplates') as McpResource[];
+  throwIfMcpAborted(context.signal);
   return { client: { ...activeClient, tools, prompts, resources, resourceTemplates, lastSyncedAt: now() }, events, warnings };
 };
 

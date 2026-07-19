@@ -31,8 +31,8 @@ The final TypeScript, Vite, Vitest, CLI, and Tauri CLI invocations used the bund
 
 ## Deliberate bounds
 
-- HTTP MCP automatic OAuth discovery/callback, long-lived streaming sessions, cancellation, interactive elicitation, approved sampling, server-request response UI, and live notification cache refresh remain open.
-- STDIO starts a fresh direct child process for each operation. Persistent sessions, cancellation, sampling review, and elicitation forms remain open.
+- At this milestone, HTTP MCP automatic OAuth discovery/callback, long-lived streaming sessions, cancellation, interactive elicitation, approved sampling, server-request response UI, and live notification cache refresh remained open. Milestones 92–95 and 227 later close OAuth, redirects, and guided parameters; Milestone 228 closes active discovery and invocation cancellation. Long-lived streaming, persistent-session cancellation/reconnect semantics, elicitation/sampling UI, notification response UI, and live notification cache refresh remain.
+- STDIO starts a fresh direct child process for each operation. Milestone 228 adds active-operation protocol cancellation and child termination; persistent sessions, persistent-session reconnect semantics, sampling review, and elicitation forms remain open.
 - Brunomnia supports local models through a user-run OpenAI-compatible loopback endpoint; it does not load `.gguf` files directly.
 - AI mock input is explicitly pasted prompt/spec/example material. Automatic URL fetching and response-to-mock context selection remain open.
 - AI and Konnect response limits are checked after the shared HTTP transport buffers the response, so a pre-allocation network body limit is not claimed.

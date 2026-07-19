@@ -1,5 +1,5 @@
 import { isTauri } from '@tauri-apps/api/core';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Environment, KeyValue, McpClient, Workspace } from '../types';
 import { generateAiText } from '../lib/ai';
 import type { SendRequestContext } from '../lib/http';
@@ -97,6 +97,7 @@ export function IntegrationWorkbench({ workspace, environment, requestContext: b
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const activeMcpAbort = useRef<AbortController | undefined>(undefined);
   const native = isTauri();
   const active = workspace.mcpClients.find((client) => client.id === activeId) ?? workspace.mcpClients[0];
   const oauthClientStatus = active?.oauthClientId ? 'manual client' : active?.oauthRegisteredClientId ? 'dynamically registered client' : 'client discovery pending';
@@ -110,13 +111,27 @@ export function IntegrationWorkbench({ workspace, environment, requestContext: b
   const canEdit = Boolean(currentMember?.active && currentMember.role !== 'viewer');
   const secretCandidates = plaintextSecretCandidates(workspace).filter((candidate) => /^(MCP|AI provider|Konnect)/.test(candidate));
 
-  const run = async (label: string, operation: () => Promise<void>) => {
+  useEffect(() => () => activeMcpAbort.current?.abort(new DOMException('MCP operation canceled.', 'AbortError')), []);
+
+  const run = async (label: string, operation: (signal?: AbortSignal) => Promise<void>, cancelable = false) => {
     if (busy) return;
+    const controller = cancelable ? new AbortController() : undefined;
+    activeMcpAbort.current = controller;
     setBusy(label); setError(''); setMessage('');
-    try { await operation(); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
-    finally { setBusy(''); }
+    try { await operation(controller?.signal); }
+    catch (caught) {
+      if (controller?.signal.aborted) {
+        const canceledEvent: McpEvent = { direction: 'client', method: 'notifications/cancelled', detail: label, timestamp: new Date().toISOString() };
+        setEvents((current) => [...current, canceledEvent].slice(-1000));
+        setMessage(`${label} canceled.`);
+      }
+      else setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      if (activeMcpAbort.current === controller) activeMcpAbort.current = undefined;
+      setBusy('');
+    }
   };
+  const cancelMcpOperation = () => activeMcpAbort.current?.abort(new DOMException('MCP operation canceled.', 'AbortError'));
 
   const updateClient = (patch: Partial<McpClient>, revoke = false) => {
     if (!active || !canEdit) return;
@@ -141,12 +156,12 @@ export function IntegrationWorkbench({ workspace, environment, requestContext: b
   };
   const persistMcpClient = (updated: McpClient) => onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === updated.id ? updated : client) }));
 
-  const discover = () => active && canEdit && run('Discovering MCP capabilities', async () => {
-    const discovered = await discoverMcpClient(active, environment, { ...requestContext, onMcpClient: persistMcpClient });
+  const discover = () => active && canEdit && run('Discovering MCP capabilities', async (signal) => {
+    const discovered = await discoverMcpClient(active, environment, { ...requestContext, signal, cancellationId: `mcp-discover-${active.id}-${crypto.randomUUID()}`, onMcpClient: persistMcpClient });
     onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === active.id ? discovered.client : client) }));
     setEvents(discovered.events);
     setMessage(`Discovered ${discovered.client.tools.length} tools, ${discovered.client.prompts.length} prompts, ${discovered.client.resources.length} resources, and ${discovered.client.resourceTemplates.length} templates${discovered.warnings.length ? ` · ${discovered.warnings.length} optional list calls unavailable` : ''}.`);
-  });
+  }, true);
 
   const operations = useMemo(() => {
     if (!active) return [];
@@ -214,16 +229,16 @@ export function IntegrationWorkbench({ workspace, environment, requestContext: b
     setParameterText(JSON.stringify({ ...parameterValues, [name]: value }, null, 2));
   };
 
-  const invokeOperation = () => active && operationName && canEdit && run('Invoking MCP operation', async () => {
+  const invokeOperation = () => active && operationName && canEdit && run('Invoking MCP operation', async (signal) => {
     let parsed: Record<string, unknown>;
     try { parsed = JSON.parse(parameters) as Record<string, unknown>; }
     catch { throw new Error('MCP parameters must be a JSON object.'); }
-    const output = await invokeMcpOperation(active, operationKind, operationName, parsed, environment, { ...requestContext, onMcpClient: persistMcpClient });
+    const output = await invokeMcpOperation(active, operationKind, operationName, parsed, environment, { ...requestContext, signal, cancellationId: `mcp-invoke-${active.id}-${crypto.randomUUID()}`, onMcpClient: persistMcpClient });
     onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === active.id ? output.client : client) }));
     setEvents(output.events);
     setResult(JSON.stringify(output.result, null, 2));
     setMessage(`${operationKind} operation completed.`);
-  });
+  }, true);
 
   const addClient = () => {
     if (!canEdit) return;
@@ -288,7 +303,7 @@ export function IntegrationWorkbench({ workspace, environment, requestContext: b
 
       {tab === 'konnect' ? <div className="integration-grid"><section className="integration-card"><header><div><small>Pull-only Gateway integration</small><h2>Konnect</h2></div><label className="inline-toggle"><input checked={workspace.konnect.enabled} disabled={!canEdit} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, enabled: event.target.checked } }))} type="checkbox" /> Enabled</label></header><div className="integration-fields"><label className="wide">Regional API URL<input disabled={!canEdit} value={workspace.konnect.baseUrl} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, baseUrl: event.target.value, enabled: false, controlPlanes: [], controlPlaneId: '' } }))} placeholder="https://us.api.konghq.com" /></label><label className="wide">PAT or system-token reference<IntegrationSecretInput disabled={!canEdit} label="Konnect credential" onChange={(token) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, token } }))} placeholder="{{ vault.konnect_pat }}" showPasswords={workspace.preferences.showPasswords} value={workspace.konnect.token} /></label><label className="wide">Control plane<select disabled={!canEdit || !workspace.konnect.controlPlanes.length} value={workspace.konnect.controlPlaneId} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, controlPlaneId: event.target.value } }))}><option value="">Choose a control plane…</option>{workspace.konnect.controlPlanes.map((plane) => <option key={plane.id} value={plane.id}>{plane.name}</option>)}</select></label></div><div className="integration-actions"><button disabled={!canEdit || !workspace.konnect.enabled || !workspace.konnect.token || Boolean(busy)} onClick={connectKonnect} type="button">Validate and list</button><button disabled={!canEdit || !workspace.konnect.enabled || !workspace.konnect.controlPlaneId || Boolean(busy)} onClick={syncKonnect} type="button">Pull routes</button></div><p>Sync is read-only. Gateway Services become collections with managed route and path/protocol folders; HTTP/HTTPS method/path combinations, WS/WSS paths, and gRPC/GRPCS methods become native requests. Simple expression-router method/path/host/header predicates are converted; unextractable or SNI expressions stay visible in Skipped Routes. Safe control-plane proxy URLs seed managed environment values, with loopback review defaults when unavailable. Later pulls replace remote-managed names, URLs, hierarchy, path parameters, and headers/metadata while preserving local query, auth, body, transport, script, test, custom-header, edited proxy, folder notes, and manually organized local-folder work. SNI and L4 routes remain explicit skips.</p>{workspace.konnect.lastSyncedAt ? <small>Last pulled {new Date(workspace.konnect.lastSyncedAt).toLocaleString()}</small> : null}</section><section className="integration-card"><header><div><small>Credential confinement</small><h2>Konnect boundary</h2></div><Icon name="lock" size={24} /></header><ul><li>Only HTTPS hosts under `*.api.konghq.com` are accepted.</li><li>Pagination cannot leave the configured origin.</li><li>Redirects and cookies are disabled for control-plane calls.</li><li>The PAT is resolved at send time from your local vault or approved external provider.</li><li>Brunomnia never pushes Gateway configuration.</li></ul></section></div> : null}
 
-      {busy ? <div className="automation-message">{busy}…</div> : null}{error ? <div className="automation-message error">{error}</div> : null}{message ? <div className="automation-message">{message}</div> : null}
+      {busy ? <div className="automation-message">{busy}…{activeMcpAbort.current ? <button onClick={cancelMcpOperation} type="button">Cancel MCP operation</button> : null}</div> : null}{error ? <div className="automation-message error">{error}</div> : null}{message ? <div className="automation-message">{message}</div> : null}
     </section>
   );
 }

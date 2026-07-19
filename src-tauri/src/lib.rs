@@ -594,8 +594,18 @@ async fn secure_external_secret(
 #[tauri::command]
 async fn mcp_stdio_call(
     input: mcp_stdio::McpStdioInput,
+    state: State<'_, mcp_stdio::McpStdioCancellationState>,
 ) -> Result<mcp_stdio::McpStdioOutput, String> {
-    blocking(move || mcp_stdio::call(input)).await
+    let state = state.inner().clone();
+    blocking(move || state.call(input)).await
+}
+
+#[tauri::command]
+fn cancel_mcp_stdio_call(
+    cancellation_id: String,
+    state: State<'_, mcp_stdio::McpStdioCancellationState>,
+) -> bool {
+    state.cancel(&cancellation_id)
 }
 
 #[tauri::command]
@@ -771,6 +781,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(streaming::StreamingState::default())
         .manage(http_client::HttpCancellationState::default())
+        .manage(mcp_stdio::McpStdioCancellationState::default())
         .manage(grpc_client::GrpcSessionState::default())
         .manage(mock_server::MockServerState::default())
         .manage(oauth2_callback::OAuthCallbackState::default())
@@ -834,6 +845,7 @@ pub fn run() {
             secure_external_secret,
             secure_external_cache_clear,
             mcp_stdio_call,
+            cancel_mcp_stdio_call,
             connect_websocket,
             send_websocket_message,
             disconnect_websocket,
