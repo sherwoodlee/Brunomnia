@@ -232,7 +232,7 @@ export type StoredStreamSession = {
   requestName: string;
   requestUrl: string;
   environmentId: string;
-  protocol: 'websocket' | 'socketio' | 'sse';
+  protocol: 'graphql' | 'websocket' | 'socketio' | 'sse';
   startedAt: string;
   endedAt?: string;
   messages: StreamMessage[];
@@ -347,7 +347,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 27;
+  version: 28;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

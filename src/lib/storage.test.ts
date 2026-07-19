@@ -148,7 +148,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(27);
+    expect(migrated.version).toBe(28);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
@@ -196,7 +196,7 @@ describe('workspace migrations', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(27);
+    expect(migrated.version).toBe(28);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
@@ -278,7 +278,7 @@ describe('workspace migrations', () => {
     collection.subEnvironments = [{ id: 'staging', name: 'Staging', variables: [{ name: 'host', value: 'staging.example', enabled: true }] }, null];
     collection.activeSubEnvironmentId = 'missing';
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(27);
+    expect(migrated.version).toBe(28);
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });
@@ -492,6 +492,7 @@ describe('workspace migrations', () => {
     const requestId = String(requestSnapshot.id);
     workspace.streamSessions = [
       { requestId, requestName: 'Socket events', requestUrl: 'https://example.test/events', environmentId: 'environment', protocol: 'socketio', startedAt: '2026-07-18T00:00:00.000Z', messages: [{ direction: 'incoming', kind: 'order.created', text: '{"id":42}', timestamp: '2026-07-18T00:00:01.000Z' }, null], requestSnapshot, status: 101.9, statusText: 'Switching Protocols', headers: { upgrade: 'websocket' }, httpVersion: 'HTTP/1.1', durationMs: 42.8, transport: 'WebSocket', timeline: [{ name: 'Text', value: 'Connected', elapsedMs: 42 }] },
+      { id: 'graphql', requestId, requestName: 'GraphQL events', requestUrl: 'https://example.test/graphql', environmentId: 'environment', protocol: 'graphql', startedAt: '2026-07-18T00:00:02.000Z', messages: [] },
       { id: 'orphan', requestId: 'missing', protocol: 'sse', messages: [] },
     ];
 
@@ -512,6 +513,15 @@ describe('workspace migrations', () => {
       durationMs: 42,
       transport: 'WebSocket',
       timeline: [{ name: 'Text', value: 'Connected', elapsedMs: 42 }],
+    }, {
+      id: 'graphql',
+      requestId,
+      requestName: 'GraphQL events',
+      requestUrl: 'https://example.test/graphql',
+      environmentId: 'environment',
+      protocol: 'graphql',
+      startedAt: '2026-07-18T00:00:02.000Z',
+      messages: [],
     }]);
   });
 

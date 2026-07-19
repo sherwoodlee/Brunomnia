@@ -4,7 +4,7 @@ import { isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from './data/seed';
 import { sendRequest, type SendRequestContext } from './lib/http';
 import { storeResponseCookies } from './lib/cookies';
-import { connectStream, disconnectStream, sendWebSocketMessage } from './lib/protocol';
+import { connectStream, disconnectStream, isStreamingRequest, sendWebSocketMessage } from './lib/protocol';
 import { fetchGraphqlSchema } from './lib/graphql';
 import { environmentMap, formatBytes, mockResponse, normalizeHttpMethod, resolveTemplate } from './lib/request';
 import type { WorkspaceCatalogEntry, WorkspaceCatalogSnapshot, WorkspaceRecovery } from './lib/workspaceCatalog';
@@ -578,7 +578,7 @@ function RequestPanel({
   onToggleBulkHeaderEditor,
   onToggleBulkParametersEditor,
 }: RequestPanelProps) {
-  const streamProtocol = request.protocol === 'websocket' || request.protocol === 'socketio' || request.protocol === 'sse';
+  const streamProtocol = isStreamingRequest(request);
   const actionLabel = streamProtocol
     ? streamStatus === 'connected' ? 'Disconnect' : streamStatus === 'reconnecting' ? 'Stop reconnecting' : streamStatus === 'connecting' ? 'Connecting' : 'Connect'
     : request.protocol === 'grpc' ? 'Invoke' : 'Send';
@@ -795,9 +795,9 @@ function ResponsePanel({
   onStreamFrameKindChange,
   onSendStreamMessage,
 }: ResponsePanelProps) {
-  const streaming = protocol === 'websocket' || protocol === 'socketio' || protocol === 'sse';
+  const streaming = isStreamingRequest(mockRequest);
   const canPrettify = Object.entries(response.headers).some(([name, value]) => name.toLowerCase() === 'content-type' && /json/i.test(value));
-  const canExportHttpDiagnostics = protocol === 'http' || protocol === 'graphql';
+  const canExportHttpDiagnostics = !streaming && (protocol === 'http' || protocol === 'graphql');
   const historySections = responseHistorySections(responseHistory);
   const responseHeaders = streaming ? streamSession?.headers ?? {} : response.headers;
   const timelineEntries = streaming ? streamSession?.timeline ?? [{ name: 'Text' as const, value: 'No connection timeline is available for this legacy session.', elapsedMs: 0 }] : response.timeline?.length ? response.timeline : [
@@ -815,7 +815,7 @@ function ResponsePanel({
           <strong className={streaming ? streamStatus === 'connected' ? 'ok' : '' : response.status > 0 && response.status < 400 ? 'ok' : 'bad'}>
             {streaming ? streamStatus === 'connected' ? 'LIVE' : streamStatus === 'connecting' || streamStatus === 'reconnecting' ? '···' : 'OFF' : isSending ? '···' : response.status || 'Error'}
           </strong>
-          <span className={!streaming && response.status > 0 && response.status < 400 ? 'ok' : !streaming ? 'bad' : ''}>{streaming ? protocol === 'websocket' ? 'WebSocket' : protocol === 'socketio' ? 'Socket.IO' : 'Event stream' : response.statusText}</span>
+          <span className={!streaming && response.status > 0 && response.status < 400 ? 'ok' : !streaming ? 'bad' : ''}>{streaming ? protocol === 'websocket' ? 'WebSocket' : protocol === 'socketio' ? 'Socket.IO' : protocol === 'graphql' ? 'GraphQL subscription' : 'Event stream' : response.statusText}</span>
           <span>{streaming ? `${streamMessages.length} events` : `${response.durationMs} ms`}</span>
           {streaming && streamSession?.durationMs !== undefined ? <span>{streamSession.durationMs} ms</span> : null}
           {!streaming ? <span>{formatBytes(response.sizeBytes)}</span> : null}
@@ -979,7 +979,7 @@ function FolderDialog({ collection, folder, environment, cookies, responses, req
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 27, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+    format: 'brunomnia', version: 28, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -1090,6 +1090,7 @@ export default function App() {
   }, [hydrated, workspace]);
 
   const active = useMemo(() => findRequest(workspace), [workspace]);
+  const activeStreaming = active ? isStreamingRequest(active.request) : false;
   const activeCollection = workspace.collections.find((collection) => collection.id === active?.collectionId);
   activeRequestIdRef.current = workspace.activeRequestId;
   const selectedEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
@@ -1266,16 +1267,16 @@ export default function App() {
   const externalSecretResolver = useCallback((input: ExternalSecretInput) => resolveAuthorizedExternalSecret(workspace, input), [workspace]);
 
   useEffect(() => {
-    if (!hydrated || !active || active.request.protocol === 'websocket' || active.request.protocol === 'socketio' || active.request.protocol === 'sse') return;
+    if (!hydrated || !active || activeStreaming) return;
     const latest = activeResponseHistory[0];
     setSelectedResponseId(latest?.id ?? '');
     setResponse(latest ?? mockResponse());
-  }, [hydrated, workspace.activeRequestId, workspace.activeEnvironmentId, workspace.preferences.filterResponsesByEnv]);
+  }, [activeStreaming, hydrated, workspace.activeRequestId, workspace.activeEnvironmentId, workspace.preferences.filterResponsesByEnv]);
 
   useEffect(() => {
     const sessionId = streamSession.current;
     const protocol = streamProtocol.current;
-    if (sessionId && (protocol === 'websocket' || protocol === 'socketio' || protocol === 'sse')) {
+    if (sessionId && protocol) {
       void disconnectStream(protocol, sessionId).catch(() => undefined);
     }
     streamSession.current = undefined;
@@ -1294,7 +1295,7 @@ export default function App() {
     setStreamDraft('');
     setScriptTests([]);
     setScriptLogs([]);
-  }, [activeWorkspaceId, workspace.activeRequestId, workspace.activeEnvironmentId, workspace.preferences.filterResponsesByEnv, active?.request.protocol]);
+  }, [activeStreaming, activeWorkspaceId, workspace.activeRequestId, workspace.activeEnvironmentId, workspace.preferences.filterResponsesByEnv, active?.request.protocol]);
 
   const updateActiveRequest = useCallback((patch: Partial<ApiRequest>) => {
     setWorkspace((current) => ({
@@ -1596,7 +1597,7 @@ export default function App() {
     const configured = applyCollectionConfiguration(collection, active.request, activeEnvironment);
     let request = configured.request;
     const executionEnvironment = configured.environment;
-    if (request.protocol === 'websocket' || request.protocol === 'socketio' || request.protocol === 'sse') {
+    if (isStreamingRequest(request)) {
       if (streamStatus === 'connected' || streamStatus === 'reconnecting') {
         const sessionId = streamSession.current;
         if (!sessionId) return;
@@ -1825,7 +1826,7 @@ export default function App() {
     streamProtocol.current = undefined;
     await Promise.allSettled([
       ...Object.keys(runningMocks).map((serverId) => import('./lib/mock').then(({ stopMockServer }) => stopMockServer(serverId))),
-      ...(sessionId && (protocol === 'websocket' || protocol === 'socketio' || protocol === 'sse') ? [disconnectStream(protocol, sessionId)] : []),
+      ...(sessionId && protocol ? [disconnectStream(protocol, sessionId)] : []),
       ...(activeOAuthFlowId ? [import('./lib/oauth2').then(({ cancelOAuth2Authorization }) => cancelOAuth2Authorization(activeOAuthFlowId))] : []),
     ]);
     setRunningMocks({});

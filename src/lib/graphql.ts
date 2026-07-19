@@ -2,6 +2,7 @@ import type { ApiRequest, Environment, GraphqlField, GraphqlInputValue, GraphqlS
 import { sendRequest, type SendRequestContext } from './http';
 
 export type GraphqlIssue = { severity: 'error' | 'warning'; message: string };
+export type GraphqlOperationType = 'query' | 'mutation' | 'subscription';
 
 const introspectionQuery = `query BrunomniaIntrospection {
   __schema {
@@ -117,6 +118,64 @@ const withoutStringsAndComments = (source: string) => source
   .replace(/"(?:\\.|[^"\\])*"/g, ' ')
   .replace(/#[^\n\r]*/g, ' ');
 
+const definitionSelectionEnd = (tokens: string[], start: number) => {
+  let parentheses = 0;
+  let brackets = 0;
+  for (let index = start; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === '(') parentheses += 1;
+    else if (token === ')') parentheses = Math.max(0, parentheses - 1);
+    else if (token === '[') brackets += 1;
+    else if (token === ']') brackets = Math.max(0, brackets - 1);
+    else if (token === '{' && parentheses === 0 && brackets === 0) {
+      let depth = 1;
+      for (let selectionIndex = index + 1; selectionIndex < tokens.length; selectionIndex += 1) {
+        if (tokens[selectionIndex] === '{') depth += 1;
+        if (tokens[selectionIndex] === '}') depth -= 1;
+        if (depth === 0) return selectionIndex + 1;
+      }
+      return start;
+    }
+  }
+  return start;
+};
+
+export const graphqlOperationType = (query: string, operationName = ''): GraphqlOperationType | undefined => {
+  if (balancedIssue(query)) return undefined;
+  const tokens = withoutStringsAndComments(query).match(/[_A-Za-z][_0-9A-Za-z]*|[()@[\]{}]/g) ?? [];
+  const operations: Array<{ type: GraphqlOperationType; name: string }> = [];
+  for (let index = 0; index < tokens.length;) {
+    const token = tokens[index];
+    if (token === '{') {
+      const end = definitionSelectionEnd(tokens, index);
+      if (end === index) break;
+      operations.push({ type: 'query', name: '' });
+      index = end;
+      continue;
+    }
+    if (token === 'query' || token === 'mutation' || token === 'subscription') {
+      const next = tokens[index + 1] ?? '';
+      const name = /^[_A-Za-z][_0-9A-Za-z]*$/.test(next) ? next : '';
+      const selectionStart = index + 1 + (name ? 1 : 0);
+      const end = definitionSelectionEnd(tokens, selectionStart);
+      if (end <= selectionStart) break;
+      operations.push({ type: token, name });
+      index = end;
+      continue;
+    }
+    if (token === 'fragment') {
+      const selectionStart = index + 1;
+      const end = definitionSelectionEnd(tokens, selectionStart);
+      index = end > selectionStart ? end : selectionStart;
+      continue;
+    }
+    index += 1;
+  }
+  const selectedName = operationName.trim();
+  if (selectedName) return operations.find((operation) => operation.name === selectedName)?.type;
+  return operations.length === 1 ? operations[0].type : undefined;
+};
+
 const balancedIssue = (source: string): string => {
   const pairs: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
   const stack: string[] = [];
@@ -126,6 +185,9 @@ const balancedIssue = (source: string): string => {
   }
   return stack.length ? `Unclosed '${stack.at(-1)}' in GraphQL document.` : '';
 };
+
+export const isGraphqlSubscriptionRequest = (request: ApiRequest) => request.protocol === 'graphql'
+  && graphqlOperationType(request.graphql.query, request.graphql.operationName) === 'subscription';
 
 const rootFieldNames = (source: string) => {
   const cleaned = withoutStringsAndComments(source).replace(/\.\.\.\s*(?:on\s+)?[_A-Za-z][_0-9A-Za-z]*/g, ' ');

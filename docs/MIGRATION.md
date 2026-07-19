@@ -139,7 +139,7 @@ Compatibility bounds remain explicit: HTTP MCP OAuth discovery/redirect handling
 | Workspace migration | Complete | Versions 1–8 migrate to v9 bounded GraphQL schema cache fields and normalized device-local preferences; imports receive safe defaults and project/encrypted-sync reads preserve local preferences |
 | Documentation and evidence | Complete | [GraphQL and preferences guide](GRAPHQL_AND_PREFERENCES.md) and [Milestone 9 verification](QA_MILESTONE_9.md) |
 
-Compatibility bounds remain explicit: validation is structural plus cached root-field checking rather than a complete GraphQL language server; persisted queries, subscriptions, full nested selection/argument/type validation, and introspection-disabled manual schema import remain open. Scheduled stop cancels future runs but does not abort a request already in flight. Preferences do not yet cover every upstream action, accessibility has not received a full assistive-technology audit, and release packaging remains macOS debug-app evidence rather than signed cross-platform distribution.
+Compatibility bounds at Milestone 9 were explicit: validation was structural plus cached root-field checking rather than a complete GraphQL language server, and subscriptions, full nested selection/argument/type validation, and introspection-disabled manual schema import remained open. Milestone 108 now adds pinned `graphql-transport-ws` subscriptions; the later source audit found no pinned persisted-query execution path, so that unsupported requirement was removed. Scheduled stop cancels future runs but does not abort a request already in flight. Preferences do not yet cover every upstream action, accessibility has not received a full assistive-technology audit, and release packaging remains macOS debug-app evidence rather than signed cross-platform distribution.
 
 ## Milestone 10 — resource hierarchy and environments (complete baseline)
 
@@ -1628,7 +1628,23 @@ Compatibility bounds remain explicit: Brunomnia currently exposes six local targ
 
 Compatibility bounds remain explicit: selected local files are persisted as approved bytes rather than reusable template-selected absolute paths; browser-development FormData cannot assign a custom MIME type to text parts without file-shaped Blob semantics; and broader third-party multipart encoding fixtures remain open. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 108 — remaining parity closure and release hardening
+## Milestone 108 — GraphQL subscription transport (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia detects the selected GraphQL `subscription`, converts HTTP(S) to WS(S), negotiates `graphql-transport-ws`, sends `connection_init`, subscribes after `connection_ack`, and closes on protocol `error` or `complete` |
+| Operation selection | Complete baseline | Brunomnia honors operation name, sole anonymous operations, comments, strings, fragments, directives, and object/list variable defaults without routing ordinary queries or mutations away from HTTP |
+| Native protocol lifecycle | Complete | Tauri forces the required subprotocol, sends exact init and UUID subscribe envelopes, preserves the HTTP GraphQL payload shape, types ordered protocol events, and closes on terminal server messages |
+| Request continuity | Complete baseline | Resolved path/query rows, cookies, enabled headers, Basic/Bearer/API-key auth, and an existing OAuth 2 token reach the subscription handshake; advanced signing and WebSocket proxy/client-identity parity remain open |
+| Realtime UI and history | Complete baseline | GraphQL subscriptions use Connect/Disconnect, the realtime summary/console/headers/timeline, finite/zero/unlimited history, environment filtering, historical request restoration, filtering/search, clear-view, delete, and clear |
+| Collection runner | Complete baseline | Operation-aware GraphQL subscriptions use the shared bounded stream sampler instead of being sent as ordinary HTTP |
+| Workspace schema | Complete | Workspace v28 accepts bounded GraphQL stream sessions while retaining the existing validation and local-only history boundary |
+| Executable coverage | Complete | Frontend operation/routing/history/storage tests and a real native `graphql-transport-ws` loopback verify subprotocol, init, ack, subscribe payload, next, complete, close, and session cleanup |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 108 verification](QA_MILESTONE_108.md) |
+
+Compatibility bounds remain explicit: full GraphQL language-service validation/autocomplete, richer schema workflows, streaming plugin hooks, advanced signing, WebSocket proxy/client identity, filesystem-backed event logs, and broad third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 109 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -21,7 +21,11 @@ use tokio::{
 };
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{client::IntoClientRequest, Message},
+    tungstenite::{
+        client::IntoClientRequest,
+        http::{header::SEC_WEBSOCKET_PROTOCOL, HeaderValue},
+        Message,
+    },
     MaybeTlsStream, WebSocketStream,
 };
 use url::Url;
@@ -31,6 +35,8 @@ const MAX_SOCKET_IO_ATTACHMENTS: usize = 100;
 const MAX_SOCKET_IO_EVENT_NAME_CHARS: usize = 500;
 const MAX_SOCKET_IO_PACKET_BYTES: usize = 1_048_576;
 const MAX_SOCKET_IO_LISTENERS: usize = 500;
+const GRAPHQL_TRANSPORT_WS_PROTOCOL: &str = "graphql-transport-ws";
+const MAX_GRAPHQL_SUBSCRIPTION_BYTES: usize = 1_048_576;
 
 type SocketIoWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -147,6 +153,34 @@ fn websocket_command(kind: &str, message: String) -> Result<WebSocketCommand, St
             .map_err(|error| format!("Binary WebSocket frames must be base64: {error}"));
     }
     Ok(WebSocketCommand::Text(message))
+}
+
+fn graphql_subscription_payload(payload: &str) -> Result<String, String> {
+    if payload.len() > MAX_GRAPHQL_SUBSCRIPTION_BYTES {
+        return Err("The GraphQL subscription payload exceeds 1 MB.".into());
+    }
+    let parsed = serde_json::from_str::<Value>(payload)
+        .map_err(|error| format!("Unable to parse the GraphQL subscription: {error}"))?;
+    if !parsed.is_object() {
+        return Err("GraphQL subscription payloads must be JSON objects.".into());
+    }
+    Ok(payload.to_string())
+}
+
+fn graphql_subscribe_message(payload: &str) -> Result<String, String> {
+    let id = serde_json::to_string(&uuid::Uuid::new_v4().to_string())
+        .map_err(|error| format!("Unable to serialize the GraphQL operation ID: {error}"))?;
+    Ok(format!(
+        "{{\"id\":{id},\"type\":\"subscribe\",\"payload\":{payload}}}"
+    ))
+}
+
+fn graphql_message_type(message: &str) -> Option<String> {
+    serde_json::from_str::<Value>(message)
+        .ok()?
+        .get("type")?
+        .as_str()
+        .map(str::to_string)
 }
 
 #[derive(Clone, Default)]
@@ -781,6 +815,11 @@ pub async fn connect_websocket(
         return Err("This WebSocket session is already connected.".into());
     }
 
+    let graphql_payload = input
+        .graphql_subscription
+        .as_ref()
+        .map(|payload| graphql_subscription_payload(payload))
+        .transpose()?;
     let mut request = input
         .url
         .as_str()
@@ -796,6 +835,12 @@ pub async fn connect_websocket(
             .parse::<http::HeaderValue>()
             .map_err(|error| format!("Invalid WebSocket header value: {error}"))?;
         request.headers_mut().insert(name, value);
+    }
+    if graphql_payload.is_some() {
+        request.headers_mut().insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static(GRAPHQL_TRANSPORT_WS_PROTOCOL),
+        );
     }
 
     let started = Instant::now();
@@ -828,6 +873,23 @@ pub async fn connect_websocket(
 
     tokio::spawn(async move {
         let mut socket = socket;
+        if graphql_payload.is_some() {
+            let connection_init = r#"{"type":"connection_init"}"#.to_string();
+            if let Err(error) = socket
+                .send(Message::Text(connection_init.clone().into()))
+                .await
+            {
+                let _ = on_event.send(StreamEvent::system(&session_id, "error", error.to_string()));
+                sessions.lock().await.remove(&session_id);
+                let _ = on_event.send(StreamEvent::system(&session_id, "closed", "Disconnected"));
+                return;
+            }
+            let _ = on_event.send(StreamEvent::outgoing(
+                &session_id,
+                "connection_init",
+                connection_init,
+            ));
+        }
         loop {
             tokio::select! {
                 command = receiver.recv() => {
@@ -860,7 +922,44 @@ pub async fn connect_websocket(
                 message = socket.next() => {
                     match message {
                         Some(Ok(Message::Text(text))) => {
-                            let _ = on_event.send(StreamEvent::incoming(&session_id, "text", text.to_string()));
+                            let text = text.to_string();
+                            let graphql_type = graphql_payload
+                                .as_ref()
+                                .and_then(|_| graphql_message_type(&text));
+                            let _ = on_event.send(StreamEvent::incoming(
+                                &session_id,
+                                graphql_type.as_deref().unwrap_or("text"),
+                                text,
+                            ));
+                            if graphql_type.as_deref() == Some("connection_ack") {
+                                let subscribe = match graphql_subscribe_message(graphql_payload.as_ref().unwrap()) {
+                                    Ok(subscribe) => subscribe,
+                                    Err(error) => {
+                                        let _ = on_event.send(StreamEvent::system(&session_id, "error", error));
+                                        break;
+                                    }
+                                };
+                                match socket.send(Message::Text(subscribe.clone().into())).await {
+                                    Ok(()) => {
+                                        let _ = on_event.send(StreamEvent::outgoing(
+                                            &session_id,
+                                            "subscribe",
+                                            subscribe.clone(),
+                                        ));
+                                    }
+                                    Err(error) => {
+                                        let _ = on_event.send(StreamEvent::system(
+                                            &session_id,
+                                            "error",
+                                            error.to_string(),
+                                        ));
+                                        break;
+                                    }
+                                }
+                            } else if matches!(graphql_type.as_deref(), Some("error" | "complete")) {
+                                let _ = socket.close(None).await;
+                                break;
+                            }
                         }
                         Some(Ok(Message::Binary(bytes))) => {
                             let _ = on_event.send(StreamEvent::incoming(
@@ -1835,6 +1934,149 @@ mod tests {
         assert!(websocket_command("binary", "not base64".into()).is_err());
     }
 
+    #[allow(clippy::result_large_err)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn runs_graphql_transport_ws_subscription_lifecycle() {
+        use std::{sync::mpsc as std_mpsc, time::Duration};
+        use tauri::ipc::InvokeResponseBody;
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::{
+            accept_hdr_async,
+            tungstenite::handshake::server::{Request, Response},
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket =
+                accept_hdr_async(stream, |request: &Request, mut response: Response| {
+                    assert_eq!(request.uri().path(), "/graphql");
+                    assert_eq!(
+                        request
+                            .headers()
+                            .get(SEC_WEBSOCKET_PROTOCOL)
+                            .and_then(|value| value.to_str().ok()),
+                        Some(GRAPHQL_TRANSPORT_WS_PROTOCOL)
+                    );
+                    response.headers_mut().insert(
+                        SEC_WEBSOCKET_PROTOCOL,
+                        HeaderValue::from_static(GRAPHQL_TRANSPORT_WS_PROTOCOL),
+                    );
+                    Ok(response)
+                })
+                .await
+                .unwrap();
+
+            assert_eq!(
+                socket.next().await.unwrap().unwrap().into_text().unwrap(),
+                r#"{"type":"connection_init"}"#
+            );
+            socket
+                .send(Message::Text(r#"{"type":"connection_ack"}"#.into()))
+                .await
+                .unwrap();
+            let subscribe = socket.next().await.unwrap().unwrap().into_text().unwrap();
+            assert!(subscribe.starts_with(r#"{"id":""#));
+            assert!(subscribe.ends_with(
+                r#"","type":"subscribe","payload":{"query":"subscription Orders { orderChanged { id } }","variables":{"teamId":"team-42"},"operationName":"Orders"}}"#
+            ));
+            let subscribe: Value = serde_json::from_str(&subscribe).unwrap();
+            assert_eq!(subscribe["type"], "subscribe");
+            assert!(uuid::Uuid::parse_str(subscribe["id"].as_str().unwrap()).is_ok());
+            assert_eq!(
+                subscribe["payload"]["query"],
+                "subscription Orders { orderChanged { id } }"
+            );
+            assert_eq!(subscribe["payload"]["variables"]["teamId"], "team-42");
+            assert_eq!(subscribe["payload"]["operationName"], "Orders");
+            socket
+                .send(Message::Text(
+                    format!(
+                        "{{\"id\":{},\"type\":\"next\",\"payload\":{{\"data\":{{\"orderChanged\":{{\"id\":42}}}}}}}}",
+                        serde_json::to_string(subscribe["id"].as_str().unwrap()).unwrap()
+                    )
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            socket
+                .send(Message::Text(
+                    format!(
+                        "{{\"id\":{},\"type\":\"complete\"}}",
+                        serde_json::to_string(subscribe["id"].as_str().unwrap()).unwrap()
+                    )
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
+        });
+
+        let (event_sender, event_receiver) = std_mpsc::channel();
+        let channel = Channel::<StreamEvent>::new(move |body| {
+            if let InvokeResponseBody::Json(json) = body {
+                let _ = event_sender.send(serde_json::from_str::<Value>(&json)?);
+            }
+            Ok(())
+        });
+        let state = StreamingState::default();
+        let output = connect_websocket(
+            StreamConnectInput {
+                session_id: "graphql-subscription-session".into(),
+                url: format!("ws://{address}/graphql"),
+                headers: vec![KeyValue {
+                    name: "Sec-WebSocket-Protocol".into(),
+                    value: "legacy-protocol".into(),
+                    enabled: true,
+                }],
+                transport: crate::models::TransportConfig::default(),
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: Some(
+                    r#"{"query":"subscription Orders { orderChanged { id } }","variables":{"teamId":"team-42"},"operationName":"Orders"}"#.into(),
+                ),
+            },
+            channel,
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.status, 101);
+        assert_eq!(
+            output
+                .headers
+                .get("sec-websocket-protocol")
+                .map(String::as_str),
+            Some(GRAPHQL_TRANSPORT_WS_PROTOCOL)
+        );
+
+        let mut events = Vec::new();
+        while !events.iter().any(|event: &Value| event["kind"] == "closed") {
+            events.push(event_receiver.recv_timeout(Duration::from_secs(2)).unwrap());
+        }
+        assert!(events.iter().any(|event| {
+            event["direction"] == "outgoing" && event["kind"] == "connection_init"
+        }));
+        assert!(events.iter().any(|event| {
+            event["direction"] == "incoming" && event["kind"] == "connection_ack"
+        }));
+        assert!(events
+            .iter()
+            .any(|event| event["direction"] == "outgoing" && event["kind"] == "subscribe"));
+        assert!(events
+            .iter()
+            .any(|event| event["direction"] == "incoming" && event["kind"] == "next"));
+        assert!(events
+            .iter()
+            .any(|event| { event["direction"] == "incoming" && event["kind"] == "complete" }));
+        server.await.unwrap();
+        assert!(!state
+            .websocket_sessions
+            .lock()
+            .await
+            .contains_key("graphql-subscription-session"));
+    }
+
     #[test]
     fn builds_socket_io_handshakes_and_namespaced_packets() {
         let target =
@@ -2319,6 +2561,7 @@ mod tests {
                     respect_server_retry: true,
                     send_last_event_id: true,
                 },
+                graphql_subscription: None,
             },
             channel,
             state.clone(),

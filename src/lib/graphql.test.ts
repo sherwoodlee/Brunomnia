@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { graphqlTypeLabel, insertGraphqlRootField, normalizeGraphqlSchema, validateGraphqlDocument } from './graphql';
+import { graphqlOperationType, graphqlTypeLabel, insertGraphqlRootField, isGraphqlSubscriptionRequest, normalizeGraphqlSchema, validateGraphqlDocument } from './graphql';
+import { createBlankRequest } from '../data/seed';
 
 const schema = normalizeGraphqlSchema({
   queryType: { name: 'Query' }, mutationType: { name: 'Mutation' }, subscriptionType: null,
@@ -26,5 +27,36 @@ describe('GraphQL schema tooling', () => {
   it('inserts a root selection with safe scalar child fields', () => {
     const viewer = schema.types.find((type) => type.name === 'Query')!.fields[0];
     expect(insertGraphqlRootField('', 'query', viewer, schema)).toContain('viewer { id name }');
+  });
+});
+
+describe('GraphQL operation selection', () => {
+  it('selects subscriptions by operation name across comments, strings, fragments, and object defaults', () => {
+    const document = `
+      # subscription Fake { ignored }
+      query Viewer { viewer(note: "subscription AlsoFake { no }") { id } }
+      subscription Orders($filter: Filter = { status: OPEN }) @live {
+        orderChanged(filter: $filter) { ...OrderFields }
+      }
+      fragment OrderFields on Order { id }
+    `;
+    expect(graphqlOperationType(document)).toBeUndefined();
+    expect(graphqlOperationType(document, 'Orders')).toBe('subscription');
+    expect(graphqlOperationType(document, 'Viewer')).toBe('query');
+    expect(graphqlOperationType(document, 'Missing')).toBeUndefined();
+  });
+
+  it('recognizes a sole anonymous query and only routes selected subscriptions to streaming', () => {
+    expect(graphqlOperationType('{ viewer { id } }')).toBe('query');
+    const request = createBlankRequest('subscription-operation');
+    request.protocol = 'graphql';
+    request.graphql.query = 'query Viewer { viewer { id } } subscription Events { event { id } }';
+    request.graphql.operationName = 'Events';
+    expect(isGraphqlSubscriptionRequest(request)).toBe(true);
+    request.graphql.operationName = 'Viewer';
+    expect(isGraphqlSubscriptionRequest(request)).toBe(false);
+    expect(graphqlOperationType('subscription @live { event { id } }', 'live')).toBeUndefined();
+    expect(graphqlOperationType('subscription Broken { event { id }')).toBeUndefined();
+    expect(graphqlOperationType('subscription Broken { event { id } } }')).toBeUndefined();
   });
 });

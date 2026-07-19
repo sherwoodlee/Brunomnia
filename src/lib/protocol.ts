@@ -10,18 +10,44 @@ import type {
   StreamMessage,
 } from '../types';
 import { cookieHeaderForUrl } from './cookies';
+import { isGraphqlSubscriptionRequest } from './graphql';
+import { graphqlBody } from './http';
 import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
 import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
 
 const mockTimers = new Map<string, number[]>();
 
+export const isStreamingRequest = (request: ApiRequest) => request.protocol === 'websocket'
+  || request.protocol === 'socketio'
+  || request.protocol === 'sse'
+  || isGraphqlSubscriptionRequest(request);
+
+export const graphqlSubscriptionUrl = (value: string) => {
+  const url = new URL(value);
+  if (url.protocol === 'http:') url.protocol = 'ws:';
+  else if (url.protocol === 'https:') url.protocol = 'wss:';
+  else if (url.protocol !== 'ws:' && url.protocol !== 'wss:') throw new Error('GraphQL subscription URLs must use HTTP(S) or WS(S).');
+  return url.toString();
+};
+
+export const graphqlSubscriptionHeaders = (headers: KeyValue[]): KeyValue[] => [
+  ...headers.filter((header) => header.name.toLowerCase() !== 'sec-websocket-protocol'),
+  { id: 'graphql-transport-ws', name: 'Sec-WebSocket-Protocol', value: 'graphql-transport-ws', enabled: true },
+];
+
 const resolvedHeaders = (request: ApiRequest, environment?: Environment): KeyValue[] => {
   const variables = environmentMap(environment);
-  return buildHeaders(request, variables).map((header) => ({
+  const headers = buildHeaders(request, variables).map((header) => ({
     ...header,
     name: resolveTemplate(header.name, variables),
     value: resolveTemplate(header.value, variables),
   }));
+  if (!request.auth.disabled && request.auth.type === 'oauth2' && request.auth.accessToken) {
+    const token = resolveTemplate(request.auth.accessToken, variables);
+    const prefix = resolveTemplate(request.auth.tokenPrefix, variables) || 'Bearer';
+    headers.push({ id: 'auth-oauth2', name: 'Authorization', value: prefix === 'NO_PREFIX' ? token : `${prefix} ${token}`.trim(), enabled: true });
+  }
+  return headers;
 };
 
 const streamHeaders = (request: ApiRequest, environment: Environment | undefined, url: string, cookies: CookieRecord[]) => {
@@ -78,18 +104,30 @@ export const connectStream = async (
     return connectSocketIo(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies);
   }
   const variables = environmentMap(environment);
-  const url = buildRequestUrl(request, variables);
+  const graphqlSubscription = isGraphqlSubscriptionRequest(request);
+  if (request.protocol === 'graphql' && !graphqlSubscription) throw new Error('Only GraphQL subscription operations use the streaming transport.');
+  let resolvedUrl = buildRequestUrl(request, variables);
+  if (!request.auth.disabled && request.auth.type === 'api-key' && request.auth.apiKeyLocation === 'query' && request.auth.apiKeyName) {
+    const parsedUrl = new URL(resolvedUrl);
+    parsedUrl.searchParams.set(resolveTemplate(request.auth.apiKeyName, variables), resolveTemplate(request.auth.apiKeyValue, variables));
+    resolvedUrl = parsedUrl.toString();
+  }
+  const url = graphqlSubscription ? graphqlSubscriptionUrl(resolvedUrl) : resolvedUrl;
+  const headers = graphqlSubscription
+    ? graphqlSubscriptionHeaders(streamHeaders(request, environment, url, cookies))
+    : streamHeaders(request, environment, url, cookies);
   const input = {
     sessionId,
     url,
-    headers: streamHeaders(request, environment, url, cookies),
+    headers,
     transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, url),
     sse: sseConnectConfig(request),
+    ...(graphqlSubscription ? { graphqlSubscription: graphqlBody(request, variables) } : {}),
   };
   if (isTauri()) {
     const channel = new Channel<StreamMessage>();
     channel.onmessage = onEvent;
-    const command = request.protocol === 'websocket' ? 'connect_websocket' : 'connect_sse';
+    const command = request.protocol === 'websocket' || graphqlSubscription ? 'connect_websocket' : 'connect_sse';
     return invoke<StreamConnectionMetadata>(command, {
       input,
       onEvent: channel,
@@ -98,7 +136,13 @@ export const connectStream = async (
 
   onEvent(event(sessionId, 'system', 'open', request.protocol === 'sse' ? 'Listening · HTTP 200' : 'Connected · HTTP 101'));
   const timers: number[] = [];
-  const samples = request.protocol === 'websocket'
+  const samples = graphqlSubscription
+    ? [
+      ['connection_ack', '{"type":"connection_ack"}'],
+      ['next', '{"id":"browser-simulation","type":"next","payload":{"data":{"event":{"id":"evt_201"}}}}'],
+      ['complete', '{"id":"browser-simulation","type":"complete"}'],
+    ]
+    : request.protocol === 'websocket'
     ? [
       ['order.created', '{"id":"ord_live_201","total":119.97}'],
       ['inventory.updated', '{"productId":"prod_98765","available":42}'],
@@ -127,7 +171,7 @@ export const disconnectStream = async (protocol: ApiRequest['protocol'], session
     return;
   }
   if (isTauri()) {
-    const command = protocol === 'websocket' ? 'disconnect_websocket' : 'disconnect_sse';
+    const command = protocol === 'websocket' || protocol === 'graphql' ? 'disconnect_websocket' : 'disconnect_sse';
     await invoke(command, { sessionId });
   } else {
     mockTimers.get(sessionId)?.forEach((timer) => window.clearTimeout(timer));
@@ -161,7 +205,7 @@ export const runStreamSample = async (
   proxy?: ProxyPreferences,
   cookies: CookieRecord[] = [],
 ): Promise<HttpResponse> => {
-  if (request.protocol !== 'websocket' && request.protocol !== 'socketio' && request.protocol !== 'sse') throw new Error('Stream sampling only supports WebSocket, Socket.IO, and SSE requests.');
+  if (!isStreamingRequest(request)) throw new Error('Stream sampling only supports WebSocket, Socket.IO, SSE, and GraphQL subscription requests.');
   const sessionId = `runner-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   const messages: StreamMessage[] = [];
   let resolveIncoming: (() => void) | undefined;
@@ -169,7 +213,7 @@ export const runStreamSample = async (
   const started = performance.now();
   const onEvent = (message: StreamMessage) => {
     messages.push(message);
-    if (message.direction === 'incoming') resolveIncoming?.();
+    if (message.direction === 'incoming' && (request.protocol !== 'graphql' || message.kind === 'next' || message.kind === 'error' || message.kind === 'complete')) resolveIncoming?.();
   };
   await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies);
   try {
@@ -187,7 +231,7 @@ export const runStreamSample = async (
   const body = JSON.stringify(messages.map(({ direction, kind, text, timestamp }) => ({ direction, kind, text, timestamp })), null, 2);
   return {
     status: request.protocol === 'sse' ? 200 : 101,
-    statusText: request.protocol === 'websocket' ? 'WebSocket sample' : request.protocol === 'socketio' ? 'Socket.IO sample' : 'SSE sample',
+    statusText: request.protocol === 'websocket' ? 'WebSocket sample' : request.protocol === 'socketio' ? 'Socket.IO sample' : request.protocol === 'graphql' ? 'GraphQL subscription sample' : 'SSE sample',
     headers: { 'content-type': 'application/json', 'x-brunomnia-stream-events': String(messages.length) },
     body,
     durationMs: Math.round(performance.now() - started),

@@ -337,7 +337,7 @@ const normalizeStoredStreamSessions = (value: unknown, requestIds: Set<string>):
   if (!source) return [];
   const requestId = stringValue(source.requestId);
   if (!requestIds.has(requestId)) return [];
-  const protocol = source.protocol === 'websocket' || source.protocol === 'sse' ? source.protocol : 'socketio';
+  const protocol = source.protocol === 'graphql' || source.protocol === 'websocket' || source.protocol === 'sse' ? source.protocol : 'socketio';
   const id = stringValue(source.id, `legacy-stream-${index}`);
   const endedAt = stringValue(source.endedAt);
   const requestSnapshot = record(source.requestSnapshot);
@@ -627,7 +627,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 27,
+    version: 28,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

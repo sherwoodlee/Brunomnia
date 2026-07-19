@@ -2,7 +2,7 @@ import type { StoredStreamSession } from '../types';
 import { streamHistorySections } from '../lib/streamHistory';
 import { Icon } from './Icon';
 
-const protocolLabel = (protocol: StoredStreamSession['protocol']) => protocol === 'socketio' ? 'Socket.IO' : protocol === 'websocket' ? 'WebSocket' : 'SSE';
+const protocolLabel = (protocol: StoredStreamSession['protocol']) => protocol === 'socketio' ? 'Socket.IO' : protocol === 'websocket' ? 'WebSocket' : protocol === 'graphql' ? 'GraphQL subscription' : 'SSE';
 
 export function StreamHistoryControls({
   sessions,

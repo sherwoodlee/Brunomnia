@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
 import { previewGrpcSchema } from './grpc';
-import { sseConnectConfig, streamTransportConfig } from './protocol';
+import { graphqlSubscriptionHeaders, graphqlSubscriptionUrl, isStreamingRequest, sseConnectConfig, streamTransportConfig } from './protocol';
 import { socketIoArgs } from './socketIo';
 
 describe('socketIoArgs', () => {
@@ -114,5 +114,34 @@ describe('streamTransportConfig', () => {
     expect(streamTransportConfig(request, 'default', 10, true, 30_000, true, { enabled: false, httpProxy: '', httpsProxy: '', noProxy: '' }).proxyUrl).toBe('http://request-proxy');
     request.transport.proxyMode = 'disabled';
     expect(streamTransportConfig(request, 'default', 10, true, 30_000, true, { enabled: true, httpProxy: 'http://global', httpsProxy: 'http://global', noProxy: '' }).proxyMode).toBe('disabled');
+  });
+});
+
+describe('GraphQL subscription transport routing', () => {
+  it('converts HTTP schemes without changing the endpoint and rejects ambient schemes', () => {
+    expect(graphqlSubscriptionUrl('http://api.example.test/graphql?token=one')).toBe('ws://api.example.test/graphql?token=one');
+    expect(graphqlSubscriptionUrl('https://api.example.test/graphql')).toBe('wss://api.example.test/graphql');
+    expect(graphqlSubscriptionUrl('wss://api.example.test/graphql')).toBe('wss://api.example.test/graphql');
+    expect(() => graphqlSubscriptionUrl('file:///tmp/graphql')).toThrow(/HTTP\(S\)/);
+  });
+
+  it('replaces authored subprotocol rows with the required GraphQL transport protocol', () => {
+    expect(graphqlSubscriptionHeaders([
+      { id: 'auth', name: 'Authorization', value: 'Bearer token', enabled: true },
+      { id: 'old', name: 'sec-websocket-protocol', value: 'graphql-ws', enabled: true },
+    ])).toEqual([
+      { id: 'auth', name: 'Authorization', value: 'Bearer token', enabled: true },
+      { id: 'graphql-transport-ws', name: 'Sec-WebSocket-Protocol', value: 'graphql-transport-ws', enabled: true },
+    ]);
+  });
+
+  it('routes only the selected GraphQL subscription operation as a stream', () => {
+    const request = cloneSeedWorkspace().collections[0].requests[0];
+    request.protocol = 'graphql';
+    request.graphql.query = 'query Viewer { viewer { id } } subscription Events { event { id } }';
+    request.graphql.operationName = 'Events';
+    expect(isStreamingRequest(request)).toBe(true);
+    request.graphql.operationName = 'Viewer';
+    expect(isStreamingRequest(request)).toBe(false);
   });
 });

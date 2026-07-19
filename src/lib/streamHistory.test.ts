@@ -56,6 +56,14 @@ describe('stream session history', () => {
     });
   });
 
+  it('persists GraphQL subscriptions as GraphQL stream sessions', () => {
+    const request = cloneSeedWorkspace().collections[0].requests[0];
+    request.protocol = 'graphql';
+    request.graphql.query = 'subscription Events { event { id } }';
+    const session = createStreamSession(request, 'env-a', 'graphql-stream');
+    expect(session).toMatchObject({ protocol: 'graphql', requestSnapshot: { protocol: 'graphql' } });
+  });
+
   it('filters searchable event categories and clears only the current view', () => {
     const messages = [
       { id: 'open', sessionId: 'stream', direction: 'system' as const, kind: 'open', text: 'Connected', timestamp: '2026-07-18T12:00:00.000Z' },

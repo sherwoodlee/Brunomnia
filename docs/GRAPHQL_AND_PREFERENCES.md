@@ -18,13 +18,13 @@ With a schema loaded, the Body editor provides:
 - deprecation indicators and type signatures; and
 - browsable type and field documentation.
 
-Safe insertion selects up to three child fields that do not require arguments. It does not pretend to be a full GraphQL language server: nested selection/type validation, argument completion, persisted queries, subscriptions, manual schema import, and introspection-disabled workflows remain in the parity ledger.
+Safe insertion selects up to three child fields that do not require arguments. It does not pretend to be a full GraphQL language server: nested selection/type validation, argument completion, manual schema import, and introspection-disabled workflows remain in the parity ledger. Milestone 108 adds operation-aware native `graphql-transport-ws` subscriptions; see [request authoring](REQUEST_AUTHORING.md#graphql-subscriptions) for the lifecycle and compatibility boundary.
 
 GraphQL query text intentionally does not resolve template tags, matching Insomnia's documented boundary. Put template tags in the variables JSON instead.
 
 ## Send scheduling
 
-For HTTP and GraphQL requests, open the arrow beside **Send** to configure an initial delay and repeat interval. Repeats are sequential: Brunomnia waits for each request to finish, then waits for the interval. The main button becomes a stop control while a schedule is active.
+For HTTP and GraphQL query/mutation requests, open the arrow beside **Send** to configure an initial delay and repeat interval. GraphQL subscriptions use Connect/Disconnect instead. Repeats are sequential: Brunomnia waits for each request to finish, then waits for the interval. The main button becomes a stop control while a schedule is active.
 
 Stopping cancels the timer and all future runs. A request already in flight completes normally. One schedule is active at a time and repeat mode stops after 1,000 sends as a local safety bound.
 

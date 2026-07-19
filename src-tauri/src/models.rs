@@ -180,6 +180,8 @@ pub struct StreamConnectInput {
     pub transport: TransportConfig,
     #[serde(default)]
     pub sse: SseConfig,
+    #[serde(default)]
+    pub graphql_subscription: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
