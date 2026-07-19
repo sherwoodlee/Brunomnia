@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { parseAllDocuments } from 'yaml';
+import { parseAllDocuments, stringify } from 'yaml';
 import { cloneSeedWorkspace } from '../../data/seed';
+import { orderedCollectionChildren } from '../resources';
 import { exportArtifact } from './exporters';
 import { importArtifact } from './index';
 
@@ -96,6 +97,55 @@ describe('artifact export adapters', () => {
     expect(imported.format).toBe('har');
     expect(imported.collections[0].requests).toHaveLength(11);
     expect(exported.warnings.filter((warning) => warning.code === 'unsupported-protocol')).toHaveLength(4);
+  });
+
+  it('round-trips arbitrary mixed request and folder sibling order through Insomnia v4 and v5', () => {
+    const workspace = cloneSeedWorkspace();
+    const collection = workspace.collections[0];
+    collection.requests = collection.requests.slice(0, 4);
+    collection.requests[0].name = 'Root first';
+    collection.requests[1].name = 'Folder request';
+    collection.requests[2].name = 'Root last';
+    collection.requests[3].name = 'Nested request';
+    collection.folders = [
+      { id: 'root-folder', name: 'Root folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+      { id: 'nested-folder', name: 'Nested folder', parentId: 'root-folder', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+    ];
+    collection.requests[1].folderId = 'root-folder';
+    collection.requests[3].folderId = 'nested-folder';
+    collection.resourceOrder = [collection.requests[0].id, 'root-folder', collection.requests[2].id, collection.requests[1].id, 'nested-folder', collection.requests[3].id];
+
+    const childNames = (candidate: typeof collection, parentId = '') => orderedCollectionChildren(candidate, parentId).map((resource) => resource.kind === 'folder'
+      ? candidate.folders?.find((folder) => folder.id === resource.id)?.name
+      : candidate.requests.find((request) => request.id === resource.id)?.name);
+
+    for (const format of ['insomnia-v4', 'insomnia-v5'] as const) {
+      const exported = exportArtifact(workspace, { format, scope: 'collection', collectionId: collection.id });
+      const imported = importArtifact(exported.contents, exported.fileName).collections[0];
+      const importedRoot = imported.folders?.find((folder) => folder.name === 'Root folder')!;
+      const importedNested = imported.folders?.find((folder) => folder.name === 'Nested folder')!;
+      expect(childNames(imported)).toEqual(['Root first', 'Root folder', 'Root last']);
+      expect(childNames(imported, importedRoot.id)).toEqual(['Folder request', 'Nested folder']);
+      expect(childNames(imported, importedNested.id)).toEqual(['Nested request']);
+    }
+
+    const v4 = JSON.parse(exportArtifact(workspace, { format: 'insomnia-v4', scope: 'collection', collectionId: collection.id }).contents) as { resources: Array<Record<string, unknown>> };
+    const v4Workspace = v4.resources.find((resource) => resource._type === 'workspace')!;
+    const v4RootResources = v4.resources.filter((resource) => resource.parentId === v4Workspace._id && ['request', 'request_group'].includes(String(resource._type)));
+    expect([...v4RootResources].sort((left, right) => Number(left.metaSortKey) - Number(right.metaSortKey)).map((resource) => resource.name)).toEqual(['Root first', 'Root folder', 'Root last']);
+    const reorderedV4Root = [structuredClone(v4RootResources[2]), structuredClone(v4RootResources[0]), structuredClone(v4RootResources[1])];
+    delete reorderedV4Root[0].metaSortKey;
+    const partialV4 = { ...v4, resources: [...v4.resources.filter((resource) => !v4RootResources.includes(resource)), ...reorderedV4Root] };
+    const partialV4Import = importArtifact(JSON.stringify(partialV4), 'partial-insomnia-v4.json').collections[0];
+    expect(childNames(partialV4Import)).toEqual(['Root last', 'Root first', 'Root folder']);
+
+    const v5 = parseAllDocuments(exportArtifact(workspace, { format: 'insomnia-v5', scope: 'collection', collectionId: collection.id }).contents)[0].toJSON() as { collection: Array<{ name: string; meta: { sortKey?: number } }> };
+    expect(v5.collection.map((resource) => [resource.name, resource.meta.sortKey])).toEqual([['Root first', 0], ['Root folder', 1], ['Root last', 2]]);
+    const partialV5 = structuredClone(v5);
+    partialV5.collection = [partialV5.collection[2], partialV5.collection[0], partialV5.collection[1]];
+    delete partialV5.collection[0].meta.sortKey;
+    const partialV5Import = importArtifact(stringify(partialV5), 'partial-insomnia-v5.yaml').collections[0];
+    expect(childNames(partialV5Import)).toEqual(['Root last', 'Root first', 'Root folder']);
   });
 
   it('round-trips complete gRPC proto trees through Insomnia v4 resources', () => {

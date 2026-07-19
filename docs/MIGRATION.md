@@ -356,7 +356,7 @@ Compatibility bounds remain explicit: configured headers do not include every tr
 | Executable coverage | Complete | Resource tests cover mixed rendering, sibling ordering, reparenting, subtree transfer, cycle rejection, and collection ordering; migration tests cover malformed order metadata |
 | Documentation and evidence | Complete | Updated [resource hierarchy guide](RESOURCE_HIERARCHY.md) and [Milestone 24 verification](QA_MILESTONE_24.md) |
 
-Compatibility bounds at this milestone remain explicit: the sidebar depends on native pointer drag/drop. Milestone 144 later closes keyboard-equivalent reordering; multi-select/bulk resource actions, environment-tree ordering, and compatibility-format guarantees for arbitrary mixed sibling order remain open.
+Compatibility bounds at this milestone remain explicit: the sidebar depends on native pointer drag/drop. Milestone 144 later closes keyboard-equivalent reordering; multi-select/bulk resource actions and environment-tree ordering remain open. Milestone 152 later closes arbitrary mixed sibling order for the supported hierarchical Insomnia v4/v5 adapters without pretending flat formats carry the same tree.
 
 ## Milestone 25 — headless test-name filtering (complete baseline)
 
@@ -2231,7 +2231,21 @@ Compatibility bounds remain explicit: response history remains device-local and 
 
 Compatibility bounds remain explicit: Brunomnia still lacks persisted raw duplicate-header order and libcurl-style redirect/network text. Pinned Insomnia itself excludes SSL bytes, summarizes incoming body chunks, bounds outgoing body text, and offers no byte-exact diagnostic export, so those excluded bytes are not retained as a false parity requirement. Collections remains `Baseline` for broader document-tab coverage; 19 parity rows remain incomplete. No rendered interaction claim is made.
 
-## Milestone 152 — remaining parity closure and release hardening
+## Milestone 152 — mixed compatibility-export ordering (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned ordering contract | Complete | Pinned request/folder models carry `metaSortKey`; v5 maps it to `meta.sortKey`, validates it in request/folder metadata, and restores it during import |
+| Insomnia v4 export | Complete | Brunomnia emits depth-first mixed request/folder resources with sibling `metaSortKey` values while retaining protocol payload/proto side resources outside the collection-order contract |
+| Insomnia v4 import | Complete | Complete sibling sort metadata rebuilds nested `resourceOrder`; legacy/partial sibling metadata falls back to source resource-array order without fabricating incomparable keys |
+| Insomnia v5 export | Complete | Nested collection arrays follow current mixed `resourceOrder`, and every request/folder carries a sibling `meta.sortKey` |
+| Insomnia v5 import | Complete | Each nested sibling array prefers complete finite `meta.sortKey` values, otherwise preserves source array order, then records the resulting depth-first `resourceOrder` |
+| Shared tree correctness | Complete | `orderedCollectionChildren` now requires an actual request match before applying root fallback, preventing nested folder IDs from appearing as blank root requests |
+| Executable evidence | Complete baseline | Focused v4/v5 root and nested mixed-order round trips, raw sort-key assertions, legacy importer suites, resource-helper regressions, strict TypeScript, full release suites, and packaged-app verification cover the milestone |
+
+Compatibility bounds remain explicit: this milestone guarantees arbitrary mixed sibling order for Brunomnia's supported hierarchical Insomnia v4/v5 adapters, not a fictional universal hierarchy in flat HAR, raw OpenAPI, or formats Brunomnia does not export. Existing binary/external-file/script/protocol downgrade warnings remain. Import and export formats stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 153 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

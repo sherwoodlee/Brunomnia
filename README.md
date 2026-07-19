@@ -32,8 +32,8 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Native loopback mock servers with live route editing, response-pane server/route create-or-overwrite selection, route parameters, delays, headers, CORS, request-aware header/query/decoded-path/JSON/form/multipart output templates, ordered repeated query/form/multipart arrays, computed bracket properties, LiquidJS-compatible quoted strings/escapes/comparisons/logic/`elsif` inside bounded `assign`/`if`/`unless`/`raw` controls, structured template-error responses, all 118 currently documented Faker outputs, and dynamic response tokens
 - A headless CLI for OpenAPI lint/generation/export and collection/test execution with regex test-name filtering, the documented Inso reporter names, and JSON/JUnit artifacts
 - File, pasted-text, and HTTP(S) URL imports with format detection and a warning preview
-- Insomnia JSON v4/v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports
-- Scoped Brunomnia JSON, Insomnia v4/v5, HAR, and raw OpenAPI exports
+- Insomnia JSON v4/v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports, including nested mixed request/folder sibling order
+- Scoped Brunomnia JSON, Insomnia v4/v5, HAR, and raw OpenAPI exports, with v4/v5 mixed request/folder order round trips
 - Versioned workspace migrations with collision-safe import history, distinct environment-store interoperability, advanced-auth/cookie-jar mapping, and preserved source metadata
 - Reviewable split-YAML filesystem projects with ordinary Git init/clone/status/push-readiness/actionable-push-errors/aggregate-and-per-file-diff/selected-or-bulk-stage/unstaged-discard/credential-preflighted-commit-and-push/history/local-and-remote-branch/create/delete/fetch/pull/push/clean-tree-merge workflows
 - Three-way text conflict editing, binary ours/theirs resolution, and explicit merge abort without silently discarding local changes

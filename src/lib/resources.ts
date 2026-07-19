@@ -100,7 +100,7 @@ export const orderedCollectionChildren = (collection: Collection, parentId = '')
     const folder = folders.get(id);
     if (folder?.parentId === parentId) return [{ kind: 'folder', id }];
     const request = requests.get(id);
-    if ((request?.folderId ?? '') === parentId) return [{ kind: 'request', id }];
+    if (request && (request.folderId ?? '') === parentId) return [{ kind: 'request', id }];
     return [];
   });
 };

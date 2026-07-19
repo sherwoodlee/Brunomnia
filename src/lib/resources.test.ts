@@ -128,11 +128,12 @@ describe('resource hierarchy', () => {
       folders: [
         { id: 'folder-a', name: 'A', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
         { id: 'folder-b', name: 'B', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+        { id: 'folder-c', name: 'C', parentId: 'folder-a', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
       ],
-      resourceOrder: ['root-request', 'folder-a', 'nested-request', 'folder-b'],
+      resourceOrder: ['root-request', 'folder-a', 'nested-request', 'folder-c', 'folder-b'],
     };
     expect(orderedCollectionChildren(collection).map((resource) => resource.id)).toEqual(['root-request', 'folder-a', 'folder-b']);
-    expect(orderedCollectionChildren(collection, 'folder-a').map((resource) => resource.id)).toEqual(['nested-request']);
+    expect(orderedCollectionChildren(collection, 'folder-a').map((resource) => resource.id)).toEqual(['nested-request', 'folder-c']);
   });
 
   it('reorders and reparents mixed resources without changing their identities', () => {

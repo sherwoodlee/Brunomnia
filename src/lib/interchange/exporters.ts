@@ -2,7 +2,7 @@ import { stringify } from 'yaml';
 import type { ApiRequest, Environment, ImportWarning, Workspace } from '../../types';
 import type { ArtifactExport, ExportFormat, ExportScope } from './types';
 import { normalizeGrpcProtoTree } from '../grpcProto';
-import { publicEnvironments } from '../resources';
+import { orderedCollectionChildren, publicEnvironments } from '../resources';
 
 export type ExportOptions = {
   format: ExportFormat;
@@ -79,9 +79,10 @@ const insomniaBody = (request: ApiRequest, warnings: ImportWarning[]) => {
   return {};
 };
 
-const v4Request = (request: ApiRequest, parentId: string, index: number, warnings: ImportWarning[], prefix: string, protoFileId = '') => {
+const v4Request = (request: ApiRequest, parentId: string, index: number, sortKey: number, warnings: ImportWarning[], prefix: string, protoFileId = '') => {
   const base = {
     _id: `__REQUEST_${prefix}_${index + 1}__`, parentId, modified: Date.now(), created: Date.now(), name: request.name,
+    metaSortKey: sortKey,
     url: request.url, method: request.method,
     pathParameters: request.pathParams.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
     parameters: request.params.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
@@ -150,21 +151,36 @@ const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): Artifac
     resources.push({ _id: baseEnvironmentId, parentId: workspaceId, modified: Date.now(), created: Date.now(), name: 'Base Environment', data: Object.fromEntries((collection.environment ?? []).filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])), _type: 'environment' });
     (collection.subEnvironments ?? []).forEach((environment, environmentIndex) => resources.push({ _id: `__ENVIRONMENT_${collectionIndex + 1}_${environmentIndex + 1}__`, parentId: baseEnvironmentId, modified: Date.now(), created: Date.now(), name: environment.name, data: Object.fromEntries(environment.variables.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])), _type: 'environment' }));
     const folders = collection.folders ?? [];
+    const foldersById = new Map(folders.map((folder) => [folder.id, folder]));
+    const requestsById = new Map(collection.requests.map((request) => [request.id, request]));
     const folderIds = new Map(folders.map((folder, folderIndex) => [folder.id, `__REQUEST_GROUP_${collectionIndex + 1}_${folderIndex + 1}__`]));
-    folders.forEach((folder) => resources.push({
-      _id: folderIds.get(folder.id), parentId: folder.parentId ? folderIds.get(folder.parentId) ?? workspaceId : workspaceId,
-      modified: Date.now(), created: Date.now(), name: folder.name, description: folder.documentation,
-      headers: folder.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })),
-      environment: Object.fromEntries(folder.environment.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])),
-      authentication: folder.auth ? insomniaAuth(folder.auth) : undefined,
-      preRequestScript: folder.preRequestScript, afterResponseScript: folder.tests, _type: 'request_group',
-    }));
-    collection.requests.forEach((request, requestIndex) => {
-      const protoFileId = pushV4ProtoResources(resources, request, workspaceId, collectionIndex, requestIndex);
-      const exported = v4Request(request, request.folderId ? folderIds.get(request.folderId) ?? workspaceId : workspaceId, requestIndex, warnings, String(collectionIndex + 1), protoFileId);
-      resources.push(exported);
-      if (request.protocol === 'socketio') resources.push({ _id: `__SOCKET_IO_PAYLOAD_${collectionIndex + 1}_${requestIndex + 1}__`, parentId: exported._id, modified: Date.now(), created: Date.now(), eventName: request.socketIo.eventName, ack: request.socketIo.ack, args: request.socketIo.args, _type: 'socketio_payload' });
-    });
+    let requestIndex = 0;
+    const appendChildren = (parentId: string, exportedParentId: string) => {
+      orderedCollectionChildren(collection, parentId).forEach((resource, siblingIndex) => {
+        if (resource.kind === 'folder') {
+          const folder = foldersById.get(resource.id);
+          const folderId = folderIds.get(resource.id);
+          if (!folder || !folderId) return;
+          resources.push({
+            _id: folderId, parentId: exportedParentId, modified: Date.now(), created: Date.now(), name: folder.name, description: folder.documentation, metaSortKey: siblingIndex,
+            headers: folder.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })),
+            environment: Object.fromEntries(folder.environment.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])),
+            authentication: folder.auth ? insomniaAuth(folder.auth) : undefined,
+            preRequestScript: folder.preRequestScript, afterResponseScript: folder.tests, _type: 'request_group',
+          });
+          appendChildren(folder.id, folderId);
+          return;
+        }
+        const request = requestsById.get(resource.id);
+        if (!request) return;
+        const currentRequestIndex = requestIndex++;
+        const protoFileId = pushV4ProtoResources(resources, request, workspaceId, collectionIndex, currentRequestIndex);
+        const exported = v4Request(request, exportedParentId, currentRequestIndex, siblingIndex, warnings, String(collectionIndex + 1), protoFileId);
+        resources.push(exported);
+        if (request.protocol === 'socketio') resources.push({ _id: `__SOCKET_IO_PAYLOAD_${collectionIndex + 1}_${currentRequestIndex + 1}__`, parentId: exported._id, modified: Date.now(), created: Date.now(), eventName: request.socketIo.eventName, ack: request.socketIo.ack, args: request.socketIo.args, _type: 'socketio_payload' });
+      });
+    };
+    appendChildren('', workspaceId);
   });
   selectedDesigns(workspace, options).forEach((design, index) => resources.push({ _id: `__API_SPEC_${index + 1}__`, parentId: resources.length ? '__WORKSPACE_1__' : null, name: design.name, contents: design.contents, _type: 'api_spec' }));
   if (options.scope === 'all') workspace.mockServers.forEach((server, index) => resources.push({ _id: `__MOCK_${index + 1}__`, parentId: resources.length ? '__WORKSPACE_1__' : null, name: server.name, url: `http://${server.host}:${server.port}`, routes: server.routes.map((route) => ({ name: route.name, method: route.method, path: route.path, statusCode: route.status, headers: route.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })), body: route.body, delayMs: route.delayMs })), _type: 'mock_server' }));
@@ -190,9 +206,9 @@ const v5CollectionEnvironment = (collection: Workspace['collections'][number], p
   subEnvironments: (collection.subEnvironments ?? []).map((environment, index) => ({ name: environment.name, meta: { id: `${prefix}-environment-${index + 1}` }, data: Object.fromEntries(environment.variables.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])) })),
 });
 
-const v5Request = (request: ApiRequest, index: number, warnings: ImportWarning[], prefix: string) => {
+const v5Request = (request: ApiRequest, index: number, sortKey: number, warnings: ImportWarning[], prefix: string) => {
   const common = {
-    url: request.url, name: request.name, meta: { id: `${prefix}-req_${index + 1}`, description: request.documentation || (request.source ? `Imported from ${request.source.format}` : '') },
+    url: request.url, name: request.name, meta: { id: `${prefix}-req_${index + 1}`, description: request.documentation || (request.source ? `Imported from ${request.source.format}` : ''), sortKey },
     headers: request.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled, description: header.description })),
     disableUserAgentHeader: request.disableUserAgentHeader,
     pathParameters: request.pathParams.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
@@ -223,18 +239,25 @@ const v5Request = (request: ApiRequest, index: number, warnings: ImportWarning[]
 const v5Collection = (collection: Workspace['collections'][number], warnings: ImportWarning[], prefix: string) => {
   let requestIndex = 0;
   const folders = collection.folders ?? [];
-  const children = (parentId: string): unknown[] => [
-    ...folders.filter((folder) => folder.parentId === parentId).map((folder) => ({
-      name: folder.name,
-      meta: { id: `${prefix}-folder-${folder.id}`, description: folder.documentation },
-      headers: folder.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })),
-      authentication: folder.auth ? insomniaAuth(folder.auth) : undefined,
-      environment: Object.fromEntries(folder.environment.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])),
-      scripts: { preRequest: folder.preRequestScript, afterResponse: folder.tests },
-      children: children(folder.id),
-    })),
-    ...collection.requests.filter((request) => (request.folderId ?? '') === parentId).map((request) => v5Request(request, requestIndex++, warnings, prefix)),
-  ];
+  const foldersById = new Map(folders.map((folder) => [folder.id, folder]));
+  const requestsById = new Map(collection.requests.map((request) => [request.id, request]));
+  const children = (parentId: string): unknown[] => orderedCollectionChildren(collection, parentId).flatMap((resource, siblingIndex): unknown[] => {
+    if (resource.kind === 'folder') {
+      const folder = foldersById.get(resource.id);
+      if (!folder) return [];
+      return [{
+        name: folder.name,
+        meta: { id: `${prefix}-folder-${folder.id}`, description: folder.documentation, sortKey: siblingIndex },
+        headers: folder.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })),
+        authentication: folder.auth ? insomniaAuth(folder.auth) : undefined,
+        environment: Object.fromEntries(folder.environment.filter((variable) => variable.enabled && variable.name).map((variable) => [variable.name, variable.value])),
+        scripts: { preRequest: folder.preRequestScript, afterResponse: folder.tests },
+        children: children(folder.id),
+      }];
+    }
+    const request = requestsById.get(resource.id);
+    return request ? [v5Request(request, requestIndex++, siblingIndex, warnings, prefix)] : [];
+  });
   return children('');
 };
 

@@ -39,3 +39,5 @@ Rendered browser QA was not run because this task's standing direction prohibite
 ## Acceptance boundary
 
 This evidence accepts persistent native pointer drag/drop for collections, folders, and requests. It does not claim keyboard-equivalent tree reordering, multi-select or bulk moves, drag behavior while search is active, environment-tree ordering, or lossless arbitrary mixed sibling order in every third-party compatibility format. Other gaps remain in [PARITY.md](PARITY.md).
+
+Milestone 152 later closes mixed nested request/folder order for Brunomnia's supported hierarchical Insomnia v4 and v5 import/export formats through their native sort-key fields. Formats that do not carry the same hierarchy remain bounded by their own schemas rather than a universal cross-format ordering claim.
