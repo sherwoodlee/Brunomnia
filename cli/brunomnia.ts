@@ -889,10 +889,38 @@ Config: --config <path> or discovered .insorc/.json/.yaml/.yml/package.json supp
 Reporters: dot, list, min, progress, spec, tap, json, junit
 `;
 
+const globalHelp = `Global options:
+  -w, --workingDir <path>  Workspace file or managed project directory
+  --config <path>          Explicit .insorc/JSON/YAML/package config
+  --ci                     Disable prompts and use deterministic fallbacks
+  --verbose                Report discovered config details
+  --printOptions           Print merged supported options to stderr
+  -v, --version            Print the bundled CLI version
+  -h, --help               Show command help`;
+
+const cliHelp = (command?: string, subject?: string) => {
+  const key = [command, subject].filter(Boolean).join(' ');
+  const topics: Record<string, string> = {
+    run: `Usage: brunomnia run <command>\n\nExecution utilities\n\nCommands:\n  collection [identifier]  Run a request collection\n  test [identifier]        Run standalone unit test suites\n\n${globalHelp}`,
+    'run test': `Usage: brunomnia run test [identifier] [options]\n\nRun standalone unit test suites selected by suite or API-design name/ID.\n\nOptions:\n  -e, --env <identifier>  -g, --globals <identifier-or-file>\n  -t, --testNamePattern <regex>\n  -n, --iteration-count <count>  -d, --iteration-data <path-or-url>\n  --retries <count>  --script-timeout <milliseconds>\n  -r, --reporter <name>  -b, --bail\n  --keepFile  --requestTimeout <milliseconds>\n  -k, --disableCertValidation\n  --httpProxy <url>  --httpsProxy <url>  --noProxy <hosts>\n  -f, --dataFolders <folders...>  --output <file>\n  --allow-scripts  --allow-script-requests  --allow-script-files\n  --allow-template-files  --allow-external-vaults\n\n${globalHelp}`,
+    'run collection': `Usage: brunomnia run collection [identifier] [options]\n\nRun a request collection selected by name or ID.\n\nOptions:\n  -t, --requestNamePattern <regex>\n  -i, --item <request-or-folder>\n  -e, --env <identifier>  -g, --globals <identifier-or-file>\n  --delay-request <milliseconds>  --requestTimeout <milliseconds>\n  --env-var <key=value>\n  -n, --iteration-count <count>  -d, --iteration-data <path-or-url>\n  --retries <count>  --script-timeout <milliseconds>\n  -r, --reporter <name>  -b, --bail\n  --disableCertValidation\n  --httpProxy <url>  --httpsProxy <url>  --noProxy <hosts>\n  -f, --dataFolders <folders...>\n  --output <file>  --includeFullData <redact|plaintext>  --acceptRisk\n  --allow-scripts  --allow-script-requests  --allow-script-files\n  --allow-template-files  --allow-external-vaults\n\n${globalHelp}`,
+    lint: `Usage: brunomnia lint spec [identifier]\n\nLint a local file or stored API specification.\n\n${globalHelp}`,
+    'lint spec': `Usage: brunomnia lint spec [identifier] [options]\n\nLint an API specification selected by file, name, or ID.\n\nOptions:\n  -r, --ruleset <path>\n  --json\n\n${globalHelp}`,
+    export: `Usage: brunomnia export spec [identifier]\n\nExport a stored API specification.\n\n${globalHelp}`,
+    'export spec': `Usage: brunomnia export spec [identifier] [options]\n\nExport an API specification selected by name or ID.\n\nOptions:\n  -o, --output <path>\n  -s, --skipAnnotations\n\n${globalHelp}`,
+    generate: `Usage: brunomnia generate collection <openapi-file> --output <file>\n\nGenerate a Brunomnia collection from OpenAPI.\n\n${globalHelp}`,
+    'generate collection': `Usage: brunomnia generate collection <openapi-file> --output <file>\n\nGenerate a Brunomnia collection from OpenAPI.\n\nOptions:\n  --output <file>\n\n${globalHelp}`,
+    script: `Usage: brunomnia script <name> [arguments...] [options]\n\nRun a bounded command alias defined in .insorc.\n\n${globalHelp}`,
+  };
+  return topics[key] ?? topics[command ?? ''] ?? usage;
+};
+
 const main = async () => {
   const [command, subject] = args;
   if (hasFlag('--version') || hasFlag('-v')) { console.log(cliVersion); return; }
-  if (!command || hasFlag('--help') || hasFlag('-h')) { console.log(usage); return; }
+  if (command === 'help') { console.log(cliHelp(subject, args[2])); return; }
+  if (!command) { console.log(usage); return; }
+  if (hasFlag('--help') || hasFlag('-h')) { console.log(cliHelp(command, subject?.startsWith('-') ? undefined : subject)); return; }
 
   if (command === 'lint' && subject === 'spec') {
     const positionals = runnerCliPositionalArguments(args.slice(2));

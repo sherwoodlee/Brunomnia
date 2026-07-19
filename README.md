@@ -84,6 +84,8 @@ node bin/brunomnia.cjs --version
 
 Pinned `-v`/`--version` prints the bundled package version and exits without loading projects or configuration. Release wrappers may supply the same `VERSION` environment override used by Inso; an empty or absent override falls back to `package.json`.
 
+Use `brunomnia <command> [subcommand] --help`, `-h`, or `brunomnia help <command> [subcommand]` for scoped syntax, descriptions, local flags, and shared global flags. Help short-circuits before workspace/config loading or prompts. Brunomnia lists its additional trust/report options alongside pinned flags instead of hiding local extensions.
+
 Examples:
 
 ```sh
