@@ -21,6 +21,8 @@
     "@tauri-apps/api": "^2.0.0",
     "@xmldom/xmldom": "0.8.13",
     "date-fns": "3.6.0",
+    "graphql": "16.10.0",
+    "graphql-language-service": "5.5.0",
     "js-md5": "0.8.3",
     "json-bigint": "1.0.0",
     "jsonpath-plus": "10.4.0",

@@ -79,6 +79,18 @@ Insomnia v4/v5 imports and exports preserve body rendering policy, disabled rows
 
 Brunomnia deliberately keeps user-approved file bytes instead of a reusable absolute path, so an environment-templated filesystem body path is not reproduced. Browser development also cannot assign a custom Content-Type to a text `FormData` part without turning it into a file-shaped Blob; the packaged Tauri transport carries the authored text-part MIME type. Broader third-party multipart encoding matrices remain open.
 
+## GraphQL authoring
+
+GraphQL requests have separate operation and JSON-variables editors. The operation dropdown is built from the parsed document, follows the caret into named operations, and requires an explicit selection when a document contains multiple executable operations. The selected operation name is shared by HTTP execution, generated client code, collection runs, the CLI, and `graphql-transport-ws` subscriptions. **Beautify** uses the GraphQL 16.10 AST printer; GraphQL query text remains literal while variables use the shared template renderer.
+
+With a schema loaded, the query editor uses `graphql-language-service` 5.5 for line/column syntax and full nested schema diagnostics, field/argument/directive/type completion, hover documentation, and token-safe completion insertion. Variables must be a JSON object and are coerced against the selected operation's declared GraphQL types, including required values, enums, lists, and input objects. The accessible completion list supports arrows, Enter/Tab, Escape, pointer selection, deprecated styling, and a 200-result bound.
+
+Use **Fetch remote** or **Refresh schema** to run bounded introspection through the request's rendered URL, headers, authentication, environment, template values, TLS/proxy policy, and timeout. Automatic introspection refreshes a remote cache when the request URL or deprecated-input setting changes. **Deprecated inputs** adds the standard input-value deprecation fields to the introspection query. Fetch failures remain visible inside the editor.
+
+**Import JSON** accepts a standard introspection result with a top-level `data` field and a 20 MB limit. Local schemas remain active across URL edits until a remote fetch is requested. Workspace v34 persists complete bounded metadata for directives, interfaces, possible types, input fields, enum values, defaults, deprecations, one-of inputs, and scalar specification URLs; pre-v34 remote caches are marked stale and refreshed rather than presented as complete.
+
+The documentation pane searches types and fields, inserts root selections with safe scalar children, navigates field/input/enum/interface/union relationships, lists directives, and opens scalar specification HTTP(S) links through the same validated external-link boundary as response viewers. All GraphQL authoring and schema workflows are local and available without an account or entitlement check.
+
 ## GraphQL subscriptions
 
 A GraphQL request uses the subscription transport only when the selected executable operation is a `subscription`. Brunomnia honors **Operation name** for documents with multiple operations; a sole unnamed operation is selected automatically. Comments, quoted strings, block strings, fragments, directives, and object/list variable defaults do not create false subscription matches. Queries and mutations continue through the ordinary HTTP GraphQL path.

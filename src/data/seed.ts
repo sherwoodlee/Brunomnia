@@ -52,6 +52,10 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
     operationName: 'GetViewer',
     schemaEndpoint: '',
     schemaFetchedAt: '',
+    schemaSource: 'remote',
+    schemaFileName: '',
+    includeInputValueDeprecation: false,
+    schemaIncludesInputValueDeprecation: false,
   },
   grpc: {
     service: '',
@@ -134,7 +138,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 33,
+  version: 34,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',

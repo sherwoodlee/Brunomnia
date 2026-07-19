@@ -3,9 +3,22 @@ import type {
   ApiRequest,
   BodyMode,
 } from '../types';
-import { graphqlTypeLabel, insertGraphqlRootField, validateGraphqlDocument } from '../lib/graphql';
+import {
+  graphqlCompletions,
+  formatGraphqlDocument,
+  graphqlHover,
+  graphqlOperationAtOffset,
+  graphqlOperationNames,
+  graphqlOperationType,
+  graphqlTypeLabel,
+  importGraphqlSchema,
+  insertGraphqlRootField,
+  searchGraphqlSchema,
+  validateGraphqlDocument,
+  type GraphqlCompletion,
+} from '../lib/graphql';
 import { prettyRequestBody } from '../lib/request';
-import { applyEditorTab } from '../lib/editorText';
+import { applyEditorCompletion, applyEditorTab } from '../lib/editorText';
 import { Icon } from './Icon';
 
 type ChangeRequest = (patch: Partial<ApiRequest>) => void;
@@ -14,11 +27,32 @@ type CodeEditorProps = {
   ariaLabel: string;
   value: string;
   onChange: (value: string) => void;
+  completions?: (value: string, offset: number) => GraphqlCompletion[];
+  onCursorChange?: (offset: number) => void;
 };
 
-export function CodeEditor({ ariaLabel, value, onChange }: CodeEditorProps) {
+export function CodeEditor({ ariaLabel, value, onChange, completions, onCursorChange }: CodeEditorProps) {
   const gutter = useRef<HTMLDivElement>(null);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  const [suggestions, setSuggestions] = useState<GraphqlCompletion[]>([]);
+  const [activeSuggestion, setActiveSuggestion] = useState(0);
   const lines = value.split('\n');
+  const updateSuggestions = (source: string, offset: number) => {
+    const next = completions?.(source, offset) ?? [];
+    setSuggestions(next);
+    setActiveSuggestion(0);
+  };
+  const closeSuggestions = () => setSuggestions([]);
+  const applySuggestion = (target: HTMLTextAreaElement, suggestion: GraphqlCompletion) => {
+    const result = applyEditorCompletion(target.value, target.selectionStart, target.selectionEnd, suggestion.insertText);
+    onChange(result.value);
+    closeSuggestions();
+    requestAnimationFrame(() => {
+      target.focus();
+      target.setSelectionRange(result.selectionStart, result.selectionEnd);
+      onCursorChange?.(result.selectionStart);
+    });
+  };
   return (
     <div className="editable-code-surface">
       <div aria-hidden="true" className="code-gutter" ref={gutter}>
@@ -26,9 +60,44 @@ export function CodeEditor({ ariaLabel, value, onChange }: CodeEditorProps) {
       </div>
       <textarea
         aria-label={ariaLabel}
+        aria-controls={suggestions.length ? `${ariaLabel.replace(/\W+/g, '-').toLowerCase()}-completions` : undefined}
+        aria-expanded={suggestions.length > 0}
+        aria-haspopup={completions ? 'listbox' : undefined}
         className="code-editor"
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => {
+          const source = event.target.value;
+          const offset = event.target.selectionStart;
+          onChange(source);
+          onCursorChange?.(offset);
+          updateSuggestions(source, offset);
+        }}
+        onClick={(event) => { onCursorChange?.(event.currentTarget.selectionStart); closeSuggestions(); }}
         onKeyDown={(event) => {
+          if (completions && event.key === ' ' && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            updateSuggestions(event.currentTarget.value, event.currentTarget.selectionStart);
+            return;
+          }
+          if (suggestions.length && event.key === 'ArrowDown') {
+            event.preventDefault();
+            setActiveSuggestion((current) => (current + 1) % suggestions.length);
+            return;
+          }
+          if (suggestions.length && event.key === 'ArrowUp') {
+            event.preventDefault();
+            setActiveSuggestion((current) => (current - 1 + suggestions.length) % suggestions.length);
+            return;
+          }
+          if (suggestions.length && (event.key === 'Enter' || event.key === 'Tab')) {
+            event.preventDefault();
+            applySuggestion(event.currentTarget, suggestions[activeSuggestion]);
+            return;
+          }
+          if (suggestions.length && event.key === 'Escape') {
+            event.preventDefault();
+            closeSuggestions();
+            return;
+          }
           if (event.key !== 'Tab' || event.metaKey || event.ctrlKey || event.altKey) return;
           event.preventDefault();
           const shell = event.currentTarget.closest<HTMLElement>('.app-shell');
@@ -47,9 +116,28 @@ export function CodeEditor({ ariaLabel, value, onChange }: CodeEditorProps) {
         onScroll={(event) => {
           if (gutter.current) gutter.current.scrollTop = event.currentTarget.scrollTop;
         }}
+        onSelect={(event) => onCursorChange?.(event.currentTarget.selectionStart)}
+        ref={textarea}
         spellCheck={false}
         value={value}
       />
+      {suggestions.length ? (
+        <div className="code-completion-menu" id={`${ariaLabel.replace(/\W+/g, '-').toLowerCase()}-completions`} role="listbox">
+          {suggestions.map((suggestion, index) => (
+            <button
+              aria-selected={index === activeSuggestion}
+              className={`${index === activeSuggestion ? 'active' : ''}${suggestion.deprecated ? ' deprecated' : ''}`}
+              key={`${suggestion.label}-${index}`}
+              onMouseDown={(event) => { event.preventDefault(); if (textarea.current) applySuggestion(textarea.current, suggestion); }}
+              role="option"
+              type="button"
+            >
+              <span><strong>{suggestion.label}</strong><code>{suggestion.detail}</code></span>
+              {suggestion.documentation ? <small>{suggestion.documentation}</small> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -114,35 +202,131 @@ export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onC
   );
 }
 
-export function GraphqlEditor({ request, onChange, schemaLoading, onLoadSchema }: { request: ApiRequest; onChange: ChangeRequest; schemaLoading: boolean; onLoadSchema: () => void }) {
+export function GraphqlEditor({ request, onChange, schemaLoading, schemaError, onLoadSchema }: { request: ApiRequest; onChange: ChangeRequest; schemaLoading: boolean; schemaError: string; onLoadSchema: (includeInputValueDeprecation: boolean) => void }) {
   const graphql = request.graphql;
   const [showSchema, setShowSchema] = useState(true);
   const [filter, setFilter] = useState('');
   const [selectedType, setSelectedType] = useState('');
+  const [queryCursor, setQueryCursor] = useState(0);
+  const [schemaImportError, setSchemaImportError] = useState('');
   const schema = graphql.schema;
-  const issues = useMemo(() => validateGraphqlDocument(graphql.query, graphql.variables, schema), [graphql.query, graphql.variables, schema]);
-  const operation = /^\s*(mutation|subscription)\b/.exec(graphql.query)?.[1] as 'mutation' | 'subscription' | undefined ?? 'query';
+  const operationNames = useMemo(() => graphqlOperationNames(graphql.query), [graphql.query]);
+  const issues = useMemo(() => validateGraphqlDocument(graphql.query, graphql.variables, schema, graphql.operationName), [graphql.operationName, graphql.query, graphql.variables, schema]);
+  const hover = useMemo(() => graphqlHover(graphql.query, queryCursor, schema), [graphql.query, queryCursor, schema]);
+  const operation = graphqlOperationType(graphql.query, graphql.operationName) ?? 'query';
   const rootName = operation === 'mutation' ? schema?.mutationType : operation === 'subscription' ? schema?.subscriptionType : schema?.queryType;
   const root = schema?.types.find((type) => type.name === rootName);
-  const fields = root?.fields.filter((field) => `${field.name} ${field.description}`.toLowerCase().includes(filter.toLowerCase())).slice(0, 500) ?? [];
+  const fields = root?.fields.slice(0, 500) ?? [];
+  const searchResults = useMemo(() => searchGraphqlSchema(schema, filter), [filter, schema]);
   const documented = schema?.types.find((type) => type.name === selectedType) ?? root;
-  const stale = Boolean(schema && graphql.schemaEndpoint !== request.url);
+  const stale = Boolean(schema && graphql.schemaSource !== 'local' && graphql.schemaEndpoint !== request.url);
+  const navigateType = (source: { name: string; ofType?: typeof source } | undefined) => {
+    let type = source;
+    while (type?.ofType) type = type.ofType;
+    if (type?.name) setSelectedType(type.name);
+  };
+  const cursorToken = (() => {
+    const before = graphql.query.slice(0, queryCursor).match(/[_A-Za-z][_0-9A-Za-z]*$/)?.[0] ?? '';
+    const after = graphql.query.slice(queryCursor).match(/^[_0-9A-Za-z]*/)?.[0] ?? '';
+    return `${before}${after}`;
+  })();
+  const cursorType = schema?.types.find((type) => type.name === cursorToken);
+  const changeQuery = (query: string) => {
+    const names = graphqlOperationNames(query);
+    const operationName = names.includes(graphql.operationName) ? graphql.operationName : names[0] ?? '';
+    onChange({ graphql: { ...graphql, query, operationName } });
+  };
+  const importSchema = async (file: File) => {
+    try {
+      if (file.size > 20_000_000) throw new Error('GraphQL schema import exceeds the 20 MB limit.');
+      const imported = importGraphqlSchema(await file.text());
+      setSchemaImportError('');
+      setSelectedType(imported.queryType);
+      onChange({ graphql: { ...graphql, schema: imported, schemaEndpoint: '', schemaFetchedAt: new Date().toISOString(), schemaSource: 'local', schemaFileName: file.name, schemaIncludesInputValueDeprecation: graphql.includeInputValueDeprecation } });
+    } catch (error) {
+      setSchemaImportError(error instanceof Error ? error.message : String(error));
+    }
+  };
   return (
     <div className="graphql-editor">
-      <div className="graphql-schema-bar"><div><strong>Schema</strong><span>{schema ? `${schema.types.length} types${stale ? ' · endpoint changed' : ''}` : 'Not loaded'}</span></div><button disabled={schemaLoading} onClick={onLoadSchema} type="button">{schemaLoading ? 'Introspecting…' : schema ? 'Refresh schema' : 'Fetch schema'}</button><button disabled={!schema} onClick={() => setShowSchema((value) => !value)} type="button">{showSchema ? 'Hide docs' : 'Show docs'}</button></div>
+      <div className="graphql-schema-bar">
+        <div>
+          <strong>Schema</strong>
+          <span>{schema ? `${schema.types.length} types · ${graphql.schemaSource === 'local' ? graphql.schemaFileName || 'local JSON' : 'remote'}${stale ? ' · endpoint changed' : ''}` : 'Not loaded'}</span>
+        </div>
+        <label className="graphql-schema-toggle"><input checked={graphql.includeInputValueDeprecation} onChange={(event) => onChange({ graphql: { ...graphql, includeInputValueDeprecation: event.target.checked } })} type="checkbox" /> Deprecated inputs</label>
+        <button disabled={schemaLoading} onClick={() => onLoadSchema(graphql.includeInputValueDeprecation)} type="button">{schemaLoading ? 'Introspecting…' : schema && graphql.schemaSource !== 'local' ? 'Refresh schema' : 'Fetch remote'}</button>
+        <label className="graphql-schema-import">Import JSON<input accept="application/json,.json" type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importSchema(file); event.target.value = ''; }} /></label>
+        <button disabled={!schema} onClick={() => setShowSchema((value) => !value)} type="button">{showSchema ? 'Hide docs' : 'Show docs'}</button>
+      </div>
+      {schemaImportError || schemaError ? <div className="graphql-schema-error" role="alert">{schemaImportError || schemaError}</div> : null}
       <div className={`graphql-workspace${showSchema && schema ? ' with-schema' : ''}`}>
         <div className="graphql-compose">
           <section>
-            <header><strong>Operation</strong><input aria-label="GraphQL operation name" value={graphql.operationName} onChange={(event) => onChange({ graphql: { ...graphql, operationName: event.target.value } })} placeholder="Operation name" /></header>
-            <CodeEditor ariaLabel="GraphQL query" value={graphql.query} onChange={(query) => onChange({ graphql: { ...graphql, query } })} />
+            <header>
+              <strong>Operation</strong>
+              <div>
+                <select aria-label="GraphQL operation name" value={graphql.operationName} onChange={(event) => onChange({ graphql: { ...graphql, operationName: event.target.value } })}>
+                  <option value="">{operationNames.length ? 'Select operation' : 'Operations'}</option>
+                  {operationNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+                <button onClick={() => { try { changeQuery(formatGraphqlDocument(graphql.query)); setSchemaImportError(''); } catch (error) { setSchemaImportError(error instanceof Error ? error.message : String(error)); } }} type="button">Beautify</button>
+              </div>
+            </header>
+            <CodeEditor
+              ariaLabel="GraphQL query"
+              completions={(query, offset) => graphqlCompletions(query, offset, schema)}
+              onChange={changeQuery}
+              onCursorChange={(offset) => {
+                setQueryCursor(offset);
+                const selected = graphqlOperationAtOffset(graphql.query, offset);
+                if (selected && selected !== graphql.operationName) onChange({ graphql: { ...graphql, operationName: selected } });
+              }}
+              value={graphql.query}
+            />
+            {hover || cursorType ? <div className="graphql-language-info">{hover ? <pre>{hover}</pre> : null}{cursorType ? <button onClick={() => setSelectedType(cursorType.name)} type="button">Open {cursorType.name} documentation</button> : null}</div> : null}
           </section>
           <section>
-            <header><strong>Variables</strong><small>JSON</small></header>
+            <header><strong>Variables</strong><small>JSON · schema-coerced</small></header>
             <CodeEditor ariaLabel="GraphQL variables" value={graphql.variables} onChange={(variables) => onChange({ graphql: { ...graphql, variables } })} />
           </section>
-          <div className="graphql-issues" aria-live="polite">{issues.map((issue, index) => <span className={issue.severity} key={`${issue.message}-${index}`}><Icon name={issue.severity === 'error' ? 'x' : 'spark'} size={12} />{issue.message}</span>)}{!issues.length ? <span className="valid"><Icon name="check" size={12} />Document is structurally valid against cached root fields.</span> : null}</div>
+          <div className="graphql-issues" aria-live="polite">
+            {issues.map((issue, index) => <span className={issue.severity} key={`${issue.message}-${index}`}><Icon name={issue.severity === 'error' ? 'x' : 'spark'} size={12} />{issue.line ? `${issue.line}:${issue.column} · ` : ''}{issue.message}</span>)}
+            {!issues.length ? <span className="valid"><Icon name="check" size={12} />Document and variables pass GraphQL 16.10 language-service validation.</span> : null}
+          </div>
         </div>
-        {showSchema && schema ? <aside className="graphql-explorer"><header><div><small>{operation} root</small><strong>{rootName || 'Unavailable'}</strong></div><input aria-label="Filter GraphQL fields" placeholder="Filter fields…" value={filter} onChange={(event) => setFilter(event.target.value)} /></header><div className="graphql-field-list">{fields.map((field) => <article className={field.isDeprecated ? 'deprecated' : ''} key={field.name}><button aria-label={`Insert ${field.name}`} onClick={() => onChange({ graphql: { ...graphql, query: insertGraphqlRootField(graphql.query, operation, field, schema) } })} type="button"><Icon name="plus" size={12} /></button><button onClick={() => { let type = field.type; while (type.ofType) type = type.ofType; setSelectedType(type.name); }} type="button"><strong>{field.name}</strong><code>{graphqlTypeLabel(field.type)}</code><small>{field.description || field.deprecationReason || 'No description'}</small></button></article>)}{!fields.length ? <p>No matching root fields.</p> : null}</div>{documented ? <div className="graphql-type-doc"><header><small>{documented.kind}</small><strong>{documented.name}</strong></header><p>{documented.description || 'No type description.'}</p>{documented.fields.slice(0, 200).map((field) => <button key={field.name} onClick={() => { let type = field.type; while (type.ofType) type = type.ofType; setSelectedType(type.name); }} type="button"><span>{field.name}</span><code>{graphqlTypeLabel(field.type)}</code>{field.args.length ? <small>({field.args.map((argument) => `${argument.name}: ${graphqlTypeLabel(argument.type)}`).join(', ')})</small> : null}</button>)}</div> : null}</aside> : null}
+        {showSchema && schema ? (
+          <aside className="graphql-explorer">
+            <header>
+              <div><small>{operation} root</small><strong>{rootName || 'Unavailable'}</strong></div>
+              <input aria-label="Search GraphQL schema" placeholder="Search schema…" value={filter} onChange={(event) => setFilter(event.target.value)} />
+            </header>
+            {filter ? (
+              <div className="graphql-schema-search">
+                {searchResults.map((result, index) => <button key={`${result.kind}-${result.owner}-${result.label}-${index}`} onClick={() => setSelectedType(result.kind === 'type' ? result.typeName : result.owner)} type="button"><span><small>{result.owner}</small><strong>{result.label}</strong></span><code>{result.detail}</code><em>{result.description || 'No description'}</em></button>)}
+                {!searchResults.length ? <p>No matching schema definitions.</p> : null}
+              </div>
+            ) : (
+              <div className="graphql-field-list">
+                {fields.map((field) => <article className={field.isDeprecated ? 'deprecated' : ''} key={field.name}><button aria-label={`Insert ${field.name}`} onClick={() => onChange({ graphql: { ...graphql, query: insertGraphqlRootField(graphql.query, operation, field, schema) } })} type="button"><Icon name="plus" size={12} /></button><button onClick={() => navigateType(field.type)} type="button"><strong>{field.name}</strong><code>{graphqlTypeLabel(field.type)}</code><small>{field.description || field.deprecationReason || 'No description'}</small></button></article>)}
+                {!fields.length ? <p>This schema has no {operation} root fields.</p> : null}
+              </div>
+            )}
+            {documented ? (
+              <div className="graphql-type-doc">
+                <header><small>{documented.kind}</small><strong>{documented.name}</strong>{selectedType ? <button onClick={() => setSelectedType('')} type="button">Root</button> : null}</header>
+                <p>{documented.description || 'No type description.'}</p>
+                {documented.interfaces.length ? <section><small>Implements</small>{documented.interfaces.map((type) => <button key={type.name} onClick={() => navigateType(type)} type="button"><span>{type.name}</span></button>)}</section> : null}
+                {documented.possibleTypes.length ? <section><small>Possible types</small>{documented.possibleTypes.map((type) => <button key={type.name} onClick={() => navigateType(type)} type="button"><span>{type.name}</span></button>)}</section> : null}
+                {documented.fields.length ? <section><small>Fields</small>{documented.fields.slice(0, 500).map((field) => <button className={field.isDeprecated ? 'deprecated' : ''} key={field.name} onClick={() => navigateType(field.type)} type="button"><span>{field.name}</span><code>{graphqlTypeLabel(field.type)}</code>{field.args.length ? <em>({field.args.map((argument) => `${argument.name}: ${graphqlTypeLabel(argument.type)}`).join(', ')})</em> : null}<small>{field.description || field.deprecationReason}</small></button>)}</section> : null}
+                {documented.inputFields.length ? <section><small>Input fields</small>{documented.inputFields.slice(0, 500).map((field) => <button className={field.isDeprecated ? 'deprecated' : ''} key={field.name} onClick={() => navigateType(field.type)} type="button"><span>{field.name}</span><code>{graphqlTypeLabel(field.type)}</code><small>{field.description || field.deprecationReason}</small></button>)}</section> : null}
+                {documented.enumValues.length ? <section><small>Enum values</small>{documented.enumValues.slice(0, 500).map((value) => <div className={value.isDeprecated ? 'deprecated' : ''} key={value.name}><span>{value.name}</span><small>{value.description || value.deprecationReason}</small></div>)}</section> : null}
+                {documented.specifiedByUrl ? <button className="graphql-specification-link" onClick={() => { void import('../lib/responseLinks').then(({ openResponseLink }) => openResponseLink(documented.specifiedByUrl)).catch((error) => setSchemaImportError(error instanceof Error ? error.message : String(error))); }} type="button">Open scalar specification</button> : null}
+              </div>
+            ) : null}
+            {schema.directives.length ? <details className="graphql-directives"><summary>{schema.directives.length} directives</summary>{schema.directives.map((directive) => <div key={directive.name}><strong>@{directive.name}</strong><code>{directive.locations.join(' · ')}</code><small>{directive.description}</small></div>)}</details> : null}
+          </aside>
+        ) : null}
       </div>
     </div>
   );

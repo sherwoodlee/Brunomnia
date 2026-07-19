@@ -105,6 +105,10 @@ export type GraphqlConfig = {
   schema?: GraphqlSchema;
   schemaEndpoint: string;
   schemaFetchedAt: string;
+  schemaSource: 'remote' | 'local';
+  schemaFileName: string;
+  includeInputValueDeprecation: boolean;
+  schemaIncludesInputValueDeprecation: boolean;
 };
 
 export type GraphqlTypeRef = {
@@ -117,6 +121,8 @@ export type GraphqlInputValue = {
   name: string;
   description: string;
   defaultValue: string;
+  isDeprecated: boolean;
+  deprecationReason: string;
   type: GraphqlTypeRef;
 };
 
@@ -133,10 +139,21 @@ export type GraphqlSchemaType = {
   kind: string;
   name: string;
   description: string;
+  specifiedByUrl: string;
+  isOneOf: boolean;
   fields: GraphqlField[];
   inputFields: GraphqlInputValue[];
+  interfaces: GraphqlTypeRef[];
   enumValues: Array<{ name: string; description: string; isDeprecated: boolean; deprecationReason: string }>;
   possibleTypes: GraphqlTypeRef[];
+};
+
+export type GraphqlDirective = {
+  name: string;
+  description: string;
+  isRepeatable: boolean;
+  locations: string[];
+  args: GraphqlInputValue[];
 };
 
 export type GraphqlSchema = {
@@ -144,6 +161,7 @@ export type GraphqlSchema = {
   mutationType: string;
   subscriptionType: string;
   types: GraphqlSchemaType[];
+  directives: GraphqlDirective[];
 };
 
 export type GrpcProtoFile = {
@@ -378,7 +396,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 33;
+  version: 34;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

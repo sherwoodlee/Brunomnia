@@ -418,6 +418,7 @@ kbd {
   grid-template-columns: 48px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 .code-gutter {
   border-right: 1px solid var(--border-soft);
@@ -444,6 +445,14 @@ kbd {
   white-space: pre;
 }
 .app-shell[data-editor-line-wrapping="true"] .code-editor { overflow-wrap: anywhere; white-space: pre-wrap; }
+.code-completion-menu { background: var(--panel-raised); border: 1px solid var(--border); box-shadow: 0 12px 35px rgb(0 0 0 / .45); display: flex; flex-direction: column; left: 58px; max-height: min(260px, 70%); min-width: 260px; overflow: auto; position: absolute; top: 48px; width: min(420px, calc(100% - 72px)); z-index: 12; }
+.code-completion-menu button { background: transparent; border: 0; border-bottom: 1px solid var(--border-soft); color: var(--text-soft); display: grid; gap: 3px; padding: 7px 9px; text-align: left; }
+.code-completion-menu button.active { background: color-mix(in srgb, var(--accent) 12%, var(--panel-raised)); }
+.code-completion-menu button.deprecated { opacity: .55; text-decoration: line-through; }
+.code-completion-menu button > span { align-items: baseline; display: flex; gap: 10px; justify-content: space-between; }
+.code-completion-menu strong { color: var(--text); font: 10px var(--font-mono); }
+.code-completion-menu code { color: #ef8dd1; font: 8px var(--font-mono); }
+.code-completion-menu small { color: var(--muted); font-size: 8px; line-height: 1.35; max-width: 56ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .panel-footer { align-items: center; border-top: 1px solid var(--border); color: var(--muted); display: flex; font: 10px var(--font-mono); justify-content: space-between; padding: 0 15px; }
 
@@ -540,49 +549,80 @@ kbd {
 .binary-dropzone span { font: 10px var(--font-mono); text-align: center; }
 .binary-dropzone label { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 4px; color: var(--text-soft); cursor: pointer; font-size: 11px; margin-top: 7px; padding: 8px 14px; }
 
-.graphql-editor { display: grid; grid-template-rows: 49px minmax(0, 1fr); height: 100%; min-width: 700px; }
-.graphql-schema-bar { align-items: center; border-bottom: 1px solid var(--border); display: flex; gap: 7px; padding: 0 12px; }
+.graphql-editor { display: flex; flex-direction: column; height: 100%; min-width: 700px; }
+.graphql-schema-bar { align-items: center; border-bottom: 1px solid var(--border); display: flex; flex: 0 0 auto; gap: 7px; min-height: 49px; padding: 7px 12px; }
 .graphql-schema-bar > div { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
 .graphql-schema-bar strong { color: var(--text-soft); font-size: 10px; }
 .graphql-schema-bar span { color: var(--faint); font: 8px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.graphql-schema-bar button, .graphql-explorer button { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font-size: 9px; min-height: 29px; padding: 0 9px; }
+.graphql-schema-bar button, .graphql-schema-import, .graphql-explorer button { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font-size: 9px; min-height: 29px; padding: 0 9px; }
 .graphql-schema-bar button:disabled { cursor: default; opacity: .45; }
-.graphql-workspace { display: grid; min-height: 0; min-width: 0; }
+.graphql-schema-toggle { align-items: center; color: var(--muted); display: flex; font-size: 8px; gap: 5px; white-space: nowrap; }
+.graphql-schema-toggle input { accent-color: var(--accent); }
+.graphql-schema-import { align-items: center; cursor: pointer; display: flex; }
+.graphql-schema-import input { display: none; }
+.graphql-schema-error { background: color-mix(in srgb, var(--red) 8%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--red) 35%, var(--border)); color: var(--red); flex: 0 0 auto; font-size: 9px; padding: 7px 12px; }
+.graphql-workspace { display: grid; flex: 1; min-height: 0; min-width: 0; }
 .graphql-workspace.with-schema { grid-template-columns: minmax(400px, 1fr) minmax(280px, .55fr); }
 .graphql-compose { display: grid; grid-template-rows: minmax(220px, 1.35fr) minmax(140px, .75fr) auto; min-height: 0; min-width: 0; }
-.graphql-compose > section { display: grid; grid-template-rows: 42px minmax(0, 1fr); min-height: 0; min-width: 0; }
+.graphql-compose > section { display: grid; grid-template-rows: 42px minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
 .graphql-compose > section + section { border-top: 1px solid var(--border); }
 .graphql-compose section > header, .graphql-explorer > header { align-items: center; border-bottom: 1px solid var(--border-soft); display: flex; gap: 10px; justify-content: space-between; padding: 0 12px; }
 .graphql-compose header strong, .graphql-explorer header strong { color: var(--text-soft); font-size: 10px; font-weight: 550; }
 .graphql-compose header small, .graphql-explorer header small { color: var(--muted); font: 8px var(--font-mono); }
-.graphql-compose header input, .graphql-explorer header input { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font: 9px var(--font-mono); height: 27px; min-width: 110px; padding: 0 8px; }
+.graphql-compose header > div { display: flex; gap: 5px; }
+.graphql-compose header :is(input, select), .graphql-explorer header input { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font: 9px var(--font-mono); height: 27px; min-width: 110px; padding: 0 8px; }
+.graphql-compose header button { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font-size: 8px; padding: 0 8px; }
+.graphql-language-info { align-items: flex-start; background: var(--panel-soft); border-top: 1px solid var(--border-soft); display: flex; gap: 8px; max-height: 100px; overflow: auto; padding: 6px 10px; }
+.graphql-language-info pre { color: var(--muted); flex: 1; font: 8px/1.45 var(--font-mono); margin: 0; white-space: pre-wrap; }
+.graphql-language-info button { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 3px; color: var(--accent); font-size: 8px; padding: 5px 7px; white-space: nowrap; }
 .graphql-issues { border-top: 1px solid var(--border-soft); display: flex; flex-wrap: wrap; gap: 6px; max-height: 88px; overflow: auto; padding: 8px 10px; }
 .graphql-issues span { align-items: center; background: color-mix(in srgb, var(--amber) 8%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 32%, var(--border)); color: var(--amber); display: flex; font-size: 8px; gap: 5px; padding: 5px 7px; }
 .graphql-issues span.error { background: color-mix(in srgb, var(--red) 8%, transparent); border-color: color-mix(in srgb, var(--red) 35%, var(--border)); color: var(--red); }
 .graphql-issues span.valid { background: color-mix(in srgb, var(--mint) 8%, transparent); border-color: color-mix(in srgb, var(--mint) 32%, var(--border)); color: var(--mint); }
-.graphql-explorer { border-left: 1px solid var(--border); display: grid; grid-template-rows: 64px minmax(150px, .85fr) minmax(180px, 1fr); min-height: 0; min-width: 0; }
+.graphql-explorer { border-left: 1px solid var(--border); display: grid; grid-template-rows: 64px minmax(140px, .8fr) minmax(180px, 1fr) auto; min-height: 0; min-width: 0; }
 .graphql-explorer > header { align-items: flex-start; flex-direction: column; gap: 5px; justify-content: center; }
 .graphql-explorer > header > div { align-items: baseline; display: flex; gap: 7px; }
 .graphql-explorer > header input { width: 100%; }
-.graphql-field-list, .graphql-type-doc { min-height: 0; overflow: auto; }
+.graphql-field-list, .graphql-schema-search, .graphql-type-doc { min-height: 0; overflow: auto; }
 .graphql-field-list { border-bottom: 1px solid var(--border); padding: 7px; }
 .graphql-field-list article { display: grid; gap: 4px; grid-template-columns: 25px minmax(0, 1fr); margin-bottom: 3px; }
 .graphql-field-list article > button:first-child { color: var(--accent); min-height: 25px; padding: 0; }
 .graphql-field-list article > button:last-child { align-items: baseline; background: transparent; border-color: transparent; display: grid; gap: 3px 7px; grid-template-columns: minmax(70px, 1fr) auto; height: auto; padding: 5px 6px; text-align: left; }
 .graphql-field-list article > button:last-child:hover { background: var(--panel-raised); border-color: var(--border-soft); }
 .graphql-field-list strong { font: 9px var(--font-mono); overflow: hidden; text-overflow: ellipsis; }
-.graphql-field-list code, .graphql-type-doc code { color: #ef8dd1; font: 8px var(--font-mono); }
+.graphql-field-list code, .graphql-schema-search code, .graphql-type-doc code { color: #ef8dd1; font: 8px var(--font-mono); }
 .graphql-field-list small { color: var(--faint); font-size: 8px; grid-column: 1 / -1; line-height: 1.35; }
 .graphql-field-list article.deprecated { opacity: .55; text-decoration: line-through; }
 .graphql-field-list p { color: var(--muted); font-size: 9px; padding: 8px; }
+.graphql-schema-search { border-bottom: 1px solid var(--border); padding: 7px; }
+.graphql-schema-search > button { align-items: baseline; background: transparent; border-color: transparent; display: grid; gap: 3px 7px; grid-template-columns: minmax(90px, 1fr) auto; height: auto; margin-bottom: 3px; padding: 6px; text-align: left; width: 100%; }
+.graphql-schema-search > button:hover { background: var(--panel-raised); border-color: var(--border-soft); }
+.graphql-schema-search > button span { display: flex; gap: 6px; min-width: 0; }
+.graphql-schema-search > button span small { color: var(--accent); font: 7px var(--font-mono); }
+.graphql-schema-search > button span strong { font: 9px var(--font-mono); overflow: hidden; text-overflow: ellipsis; }
+.graphql-schema-search > button em { color: var(--faint); font-size: 8px; font-style: normal; grid-column: 1 / -1; }
+.graphql-schema-search > p { color: var(--muted); font-size: 9px; padding: 8px; }
 .graphql-type-doc { padding: 10px; }
 .graphql-type-doc > header { align-items: baseline; display: flex; gap: 7px; }
 .graphql-type-doc > header small { color: var(--accent); font-size: 7px; }
 .graphql-type-doc > header strong { font: 11px var(--font-mono); }
+.graphql-type-doc > header button { margin-left: auto; min-height: 23px; }
 .graphql-type-doc > p { color: var(--muted); font-size: 8px; line-height: 1.5; }
-.graphql-type-doc > button { align-items: baseline; background: transparent; border: 0; border-top: 1px solid var(--border-soft); display: grid; gap: 4px 7px; grid-template-columns: minmax(70px, 1fr) auto; height: auto; padding: 7px 2px; text-align: left; width: 100%; }
-.graphql-type-doc > button span { font: 8px var(--font-mono); }
-.graphql-type-doc > button small { color: var(--faint); font: 7px var(--font-mono); grid-column: 1 / -1; overflow-wrap: anywhere; }
+.graphql-type-doc > section { display: flex; flex-direction: column; margin-top: 10px; }
+.graphql-type-doc > section > small { color: var(--accent); font: 7px var(--font-mono); letter-spacing: .08em; padding: 4px 2px; text-transform: uppercase; }
+.graphql-type-doc > section > :is(button, div) { align-items: baseline; background: transparent; border: 0; border-top: 1px solid var(--border-soft); color: var(--text-soft); display: grid; gap: 4px 7px; grid-template-columns: minmax(70px, 1fr) auto; height: auto; padding: 7px 2px; text-align: left; width: 100%; }
+.graphql-type-doc > section > button:hover { background: var(--panel-raised); }
+.graphql-type-doc > section span { font: 8px var(--font-mono); }
+.graphql-type-doc > section em { color: var(--muted); font: 7px var(--font-mono); font-style: normal; grid-column: 1 / -1; }
+.graphql-type-doc > section small { color: var(--faint); font: 7px var(--font-mono); grid-column: 1 / -1; overflow-wrap: anywhere; }
+.graphql-type-doc .deprecated { opacity: .55; text-decoration: line-through; }
+.graphql-type-doc > .graphql-specification-link { color: var(--accent); display: inline-block; font-size: 8px; margin-top: 10px; }
+.graphql-directives { border-top: 1px solid var(--border); max-height: 150px; overflow: auto; padding: 7px 10px; }
+.graphql-directives summary { color: var(--muted); cursor: pointer; font-size: 8px; }
+.graphql-directives div { display: grid; gap: 3px; grid-template-columns: auto minmax(0, 1fr); padding: 6px 0; }
+.graphql-directives strong { color: var(--accent); font: 8px var(--font-mono); }
+.graphql-directives code { color: var(--muted); font: 7px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.graphql-directives small { color: var(--faint); font-size: 7px; grid-column: 1 / -1; }
 
 .protocol-glyph { align-items: center; border: 1px solid currentColor; border-radius: 5px; display: flex; font: 700 11px var(--font-mono); height: 38px; justify-content: center; width: 48px; }
 .protocol-glyph.websocket { color: var(--blue); }

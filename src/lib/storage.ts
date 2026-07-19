@@ -1,7 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
 import type { AiSettings, ApiRequest, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ShortcutAction, StoredResponse, StoredStreamSession, StreamMessage, Workspace } from '../types';
-import { normalizeGraphqlSchema } from './graphql';
+import { normalizeGraphqlSchema } from './graphqlSchema';
 import { normalizeGrpcProtoTree } from './grpcProto';
 import { normalizeCertificatePassphrase, normalizeCertificatePfxBase64, normalizeWorkspaceCertificates } from './certificates';
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
@@ -482,6 +482,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     version?: number;
     collections: Array<{ requests: Array<Partial<Workspace['collections'][number]['requests'][number]>> } & Omit<Workspace['collections'][number], 'requests'>>;
   };
+  const completeGraphqlSchemaModel = (workspace.version ?? 0) >= 34;
   const defaults = requestDefaults();
   const importedCollections = workspace.collections.map((collection) => ({
     ...collection,
@@ -561,8 +562,12 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           ...defaults.graphql,
           ...request.graphql,
           schema: normalizeGraphqlSchema(graphql?.schema),
-          schemaEndpoint: stringValue(graphql?.schemaEndpoint),
+          schemaEndpoint: completeGraphqlSchemaModel ? stringValue(graphql?.schemaEndpoint) : '',
           schemaFetchedAt: stringValue(graphql?.schemaFetchedAt),
+          schemaSource: completeGraphqlSchemaModel && graphql?.schemaSource === 'local' ? 'local' : 'remote',
+          schemaFileName: completeGraphqlSchemaModel ? stringValue(graphql?.schemaFileName).slice(0, 1_000) : '',
+          includeInputValueDeprecation: graphql?.includeInputValueDeprecation === true,
+          schemaIncludesInputValueDeprecation: completeGraphqlSchemaModel && graphql?.schemaIncludesInputValueDeprecation === true,
         },
         grpc: {
           ...defaults.grpc,
@@ -651,7 +656,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 33,
+    version: 34,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

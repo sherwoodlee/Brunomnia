@@ -1,24 +1,29 @@
 # GraphQL productivity and desktop preferences
 
-Milestone 9 adds local GraphQL schema tooling, request scheduling, and device-local desktop preferences without introducing an account, hosted dependency, telemetry requirement, or paid entitlement.
+Milestone 9 introduced local GraphQL schema tooling, request scheduling, and device-local desktop preferences. Milestone 135 completes the pinned GraphQL authoring workflow with GraphQL 16.10 parsing/coercion, language-service diagnostics/autocomplete/hover, operation-aware editing, local schema import, richer schema documentation, and complete normalized introspection metadata. None of these capabilities introduces an account, hosted dependency, telemetry requirement, or paid entitlement.
 
 ## GraphQL schemas
 
-Open a GraphQL request and choose **Body**. Brunomnia can fetch the endpoint's introspection schema explicitly, or automatically after a request is selected or its URL changes when **Automatically introspect GraphQL schemas** is enabled in Preferences.
+Open a GraphQL request and choose **Body**. Brunomnia can fetch the endpoint's introspection schema explicitly, refresh a previously fetched remote schema, or import a standard introspection JSON file whose top level contains `data`. When **Automatically introspect GraphQL schemas** is enabled in Preferences, remote schemas refresh after a request is selected, its URL changes, or the deprecated-input option changes. A locally imported schema remains selected until **Fetch remote** is chosen.
 
 Introspection uses the request's URL, headers, authentication, environment, local-vault values, approved external-vault values, TLS/proxy settings, and timeout. It forces POST, disables redirects and cookie storage, removes request scripts/tests, caps the deadline to 1–120 seconds, rejects non-success responses, and accepts at most 20 MB of parsed response text. The shared transport buffers the response before that parsed-text check, so a pre-allocation network limit is not claimed.
 
-Normalized caches are bounded to 5,000 types, 1,000 fields per type, 100 arguments per field, and finite type-reference depth. Workspace migration applies the same bounds to imported caches.
+Enable **Deprecated inputs** before fetching when the server should return deprecated field arguments and input-object fields through `includeDeprecated: true`. The selected choice and whether the current remote cache includes that metadata are persisted separately, so automatic refresh does not present a stale cache as complete.
+
+Normalized caches retain query/mutation/subscription roots, descriptions, complete type references, directives, scalar specification URLs, one-of input markers, implemented interfaces, union/interface possible types, field arguments, input fields, enum values, defaults, and deprecation metadata. They are bounded to 5,000 types, 1,000 fields per type, 500 input values per type, 100 arguments per field or directive, 5,000 enum values per type, 1,000 interfaces/possible types per type, 500 directives, and twelve nested type-reference levels. Remote responses and local imports accept at most 20 MB of parsed UTF-8 JSON. Workspace v34 applies the same normalization to loaded data and marks older partial remote caches stale so they refresh rather than silently omitting the added metadata.
+
+The operation editor parses the GraphQL document rather than searching its text. Its dropdown lists named operations, keeps the selected name valid as the document changes, selects a named operation when the caret enters it, and requires an explicit choice when more than one executable operation exists. **Beautify** uses the GraphQL AST printer and reports invalid input without replacing the document.
 
 With a schema loaded, the Body editor provides:
 
-- structural delimiter and variables-object checks;
-- cached query/mutation/subscription root-field validation;
-- root-field filtering and safe insertion;
-- deprecation indicators and type signatures; and
-- browsable type and field documentation.
+- GraphQL 16.10 syntax and executable-document diagnostics with line and column positions;
+- nested field, fragment, argument, directive, operation, and type validation through `graphql-language-service` 5.5;
+- JSON-object validation plus selected-operation variable coercion against non-null, input-object, enum, list, and scalar types;
+- schema-aware completions, keyboard navigation, token replacement, hover signatures/descriptions, and direct documentation navigation;
+- schema-wide type/field/description search plus query/mutation/subscription root-field insertion with up to three safe child selections; and
+- browsable object/interface/union/input/enum/directive documentation with signatures, arguments, defaults, deprecations, implementations, possible types, and securely opened HTTP(S) scalar specification links.
 
-Safe insertion selects up to three child fields that do not require arguments. It does not pretend to be a full GraphQL language server: nested selection/type validation, argument completion, manual schema import, and introspection-disabled workflows remain in the parity ledger. Milestone 108 adds operation-aware native `graphql-transport-ws` subscriptions; see [request authoring](REQUEST_AUTHORING.md#graphql-subscriptions) for the lifecycle and compatibility boundary.
+Diagnostics and completion lists are capped at 200 entries per pass and schema search returns at most 500 matches. These are local presentation/resource bounds, not server-side feature gates. Schema fetch/import failures stay in the GraphQL editor instead of replacing the request's response pane. Milestone 108 adds operation-aware native `graphql-transport-ws` subscriptions; see [request authoring](REQUEST_AUTHORING.md#graphql-subscriptions) for the lifecycle and compatibility boundary.
 
 GraphQL query text intentionally does not resolve template tags, matching Insomnia's documented boundary. Put template tags in the variables JSON instead.
 

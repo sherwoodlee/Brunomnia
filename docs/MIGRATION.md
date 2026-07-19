@@ -2003,7 +2003,22 @@ Compatibility bounds remain explicit: desktop File tags retain approved-root med
 
 Compatibility bounds remain explicit: the CLI is still a `Baseline` capability. Interactive prompt tags, desktop-local `vault.*` state, plugin-provided tags, per-request insecure TLS, custom CA/client-certificate transport, streaming protocols, standalone unit-test-suite identity, remaining Inso commands/configuration flags, signed containers, and stronger portable script isolation remain open. External providers require the corresponding installed official CLI and ambient credential chain; no real provider credentials are used in automated tests. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 135 — remaining parity closure and release hardening
+## Milestone 135 — complete GraphQL authoring parity (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned upstream audit | Complete | Pinned Insomnia uses GraphQL 16.10, CodeMirror GraphQL language tooling, parsed operation selection, typed variables, remote/automatic introspection, an input-value deprecation toggle, local introspection JSON import, and searchable navigable schema documentation |
+| Exact language engines | Complete | GraphQL 16.10 and `graphql-language-service` 5.5 provide AST formatting/selection, line-column diagnostics, nested schema validation, completion, hover, and selected-operation variable coercion rather than handwritten approximations |
+| Operation and editor workflow | Complete | Parsed named-operation choices follow document edits and cursor position; multi-operation documents require a selection, completion replaces only the active token with keyboard/pointer control, and query template syntax remains literal |
+| Schema acquisition | Complete | Rendered authenticated remote fetch/refresh, automatic URL/deprecation refresh, standard 20 MB introspection JSON import, local-schema persistence, input-value deprecation queries, and in-editor acquisition failures cover the pinned workflows |
+| Complete normalized model | Complete | Bounded caches retain roots, directives, descriptions, full type references, interfaces, possible types, input/enum/default/deprecation/one-of metadata, and scalar specification URLs; workspace v34 marks older partial remote caches stale |
+| Documentation explorer | Complete | Root insertion, schema-wide type/field search, object/interface/union/input/enum navigation, argument signatures, deprecation display, directive listing, and validated external scalar links remain local and account-free |
+| Executable coverage | Complete | GraphQL tests cover complete introspection reconstruction, nested diagnostics, typed variables, completion/hover/search, import/query toggles, formatting, operation parsing/cursor selection, insertion, subscription routing, and pure completion insertion |
+| Documentation and evidence | Complete | Updated [GraphQL/preferences](GRAPHQL_AND_PREFERENCES.md), [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 135 verification](QA_MILESTONE_135.md); the GraphQL row is Complete |
+
+Compatibility bounds remain explicit: introspection/imports and normalized schema collections have documented local resource ceilings, remote introspection deliberately disables redirects and cookie storage, and GraphQL query text remains literal while variables support templates. These safeguards do not remove a pinned authoring workflow or introduce an entitlement. The GraphQL ledger row is Complete; 23 rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 136 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

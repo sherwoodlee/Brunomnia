@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
+import { normalizeGraphqlSchema } from './graphql';
 import { migrateWorkspace, parseWorkspaceImport } from './storage';
 import { createBlankWorkspace, createCatalogWorkspace, createWorkspaceDuplicate, deleteCatalogWorkspace, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, openCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
 
@@ -148,10 +149,11 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(33);
+    expect(migrated.version).toBe(34);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
+    expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaSource: 'remote', schemaFileName: '', includeInputValueDeprecation: false, schemaIncludesInputValueDeprecation: false });
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
     expect(migrated.collections[0].requests[0].sse).toEqual({
       autoReconnect: true,
@@ -196,12 +198,46 @@ describe('workspace migrations', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(33);
+    expect(migrated.version).toBe(34);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
       expect.objectContaining({ id: 'legacy', multiline: false, contentType: '', fileName: '' }),
     ]);
+  });
+
+  it('preserves v34 GraphQL schema origin and complete normalized metadata', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.collections[0].requests[0].graphql = {
+      ...workspace.collections[0].requests[0].graphql,
+      schema: normalizeGraphqlSchema({
+        queryType: { name: 'Query' }, mutationType: null, subscriptionType: null,
+        directives: [{ name: 'live', description: 'Live query', isRepeatable: true, locations: ['QUERY'], args: [] }],
+        types: [
+          { kind: 'OBJECT', name: 'Query', fields: [{ name: 'viewer', args: [], type: { kind: 'SCALAR', name: 'String' } }], interfaces: [] },
+          { kind: 'SCALAR', name: 'String', specifiedByURL: 'https://spec.example/string' },
+        ],
+      }),
+      schemaEndpoint: '',
+      schemaFetchedAt: '2026-07-19T12:00:00.000Z',
+      schemaSource: 'local',
+      schemaFileName: 'schema.json',
+      includeInputValueDeprecation: true,
+      schemaIncludesInputValueDeprecation: true,
+    };
+    const graphql = migrateWorkspace(workspace).collections[0].requests[0].graphql;
+    expect(graphql).toMatchObject({ schemaSource: 'local', schemaFileName: 'schema.json', includeInputValueDeprecation: true, schemaIncludesInputValueDeprecation: true });
+    expect(graphql.schema).toMatchObject({ queryType: 'Query', directives: [{ name: 'live', isRepeatable: true }], types: expect.arrayContaining([expect.objectContaining({ name: 'String', specifiedByUrl: 'https://spec.example/string' })]) });
+  });
+
+  it('marks pre-v34 GraphQL caches stale so complete metadata is refreshed', () => {
+    const workspace = cloneSeedWorkspace() as unknown as { version: number; collections: Array<{ requests: Array<{ graphql: Record<string, unknown> }> }> };
+    workspace.version = 33;
+    workspace.collections[0].requests[0].graphql.schemaEndpoint = 'https://api.example/graphql';
+    workspace.collections[0].requests[0].graphql.schemaSource = 'local';
+    workspace.collections[0].requests[0].graphql.schemaFileName = 'legacy.json';
+    workspace.collections[0].requests[0].graphql.schemaIncludesInputValueDeprecation = true;
+    expect(migrateWorkspace(workspace).collections[0].requests[0].graphql).toMatchObject({ schemaEndpoint: '', schemaSource: 'remote', schemaFileName: '', schemaIncludesInputValueDeprecation: false });
   });
 
   it('migrates legacy gRPC text into a bounded persisted proto tree', () => {
@@ -217,7 +253,7 @@ describe('workspace migrations', () => {
     };
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(33);
+    expect(migrated.version).toBe(34);
     expect(migrated.collections[0].requests[0].grpc).toMatchObject({
       protoText: 'syntax = "proto3"; service Legacy {}',
       protoEntryPath: 'schema.proto',
@@ -242,7 +278,7 @@ describe('workspace migrations', () => {
 
     const migrated = migrateWorkspace(workspace);
     const grpc = migrated.collections[0].requests[0].grpc;
-    expect(migrated.version).toBe(33);
+    expect(migrated.version).toBe(34);
     expect(grpc.descriptorSource).toBe('buf');
     expect(grpc.reflectionApiUrl).toHaveLength(8_192);
     expect(grpc.reflectionApiKey).toHaveLength(65_536);
@@ -259,7 +295,7 @@ describe('workspace migrations', () => {
       clients: [null, { id: 'client', host: 'api.example.test:8443', enabled: true, certificatePem: 'cert-pem', keyPem: 'key-pem' }, { id: 'pfx', host: '*.internal.test', enabled: true, pfxBase64: 'cGZ4', passphrase: 'secret' }],
     };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(33);
+    expect(migrated.version).toBe(34);
     expect(migrated.certificates).toEqual({
       ca: { enabled: true, pem: 'ca-pem' },
       clients: [
@@ -343,7 +379,7 @@ describe('workspace migrations', () => {
     collection.subEnvironments = [{ id: 'staging', name: 'Staging', variables: [{ name: 'host', value: 'staging.example', enabled: true }] }, null];
     collection.activeSubEnvironmentId = 'missing';
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(33);
+    expect(migrated.version).toBe(34);
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });

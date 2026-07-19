@@ -4,6 +4,15 @@ export type EditorTabResult = {
   selectionEnd: number;
 };
 
+export const applyEditorCompletion = (value: string, selectionStart: number, selectionEnd: number, insertText: string): EditorTabResult => {
+  const cursor = Math.min(value.length, Math.max(0, selectionStart));
+  const end = Math.min(value.length, Math.max(cursor, selectionEnd));
+  const prefix = value.slice(0, cursor).match(/[_A-Za-z][_0-9A-Za-z]*$/)?.[0] ?? '';
+  const start = cursor - prefix.length;
+  const selection = start + insertText.length;
+  return { value: `${value.slice(0, start)}${insertText}${value.slice(end)}`, selectionStart: selection, selectionEnd: selection };
+};
+
 const boundedIndentSize = (value: number) => Math.min(16, Math.max(1, Math.trunc(value) || 2));
 
 export const applyEditorTab = (

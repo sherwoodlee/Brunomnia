@@ -1,104 +1,118 @@
-import type { ApiRequest, Environment, GraphqlField, GraphqlInputValue, GraphqlSchema, GraphqlSchemaType, GraphqlTypeRef } from '../types';
+import {
+  buildClientSchema,
+  getIntrospectionQuery,
+  getVariableValues,
+  Kind,
+  parse,
+  print,
+  type GraphQLSchema as ClientGraphqlSchema,
+  type IntrospectionQuery,
+  type OperationDefinitionNode,
+} from 'graphql';
+import { getAutocompleteSuggestions, getDiagnostics, getHoverInformation, offsetToPosition } from 'graphql-language-service/esm/index.js';
+import type { ApiRequest, Environment, GraphqlField, GraphqlInputValue, GraphqlSchema, GraphqlTypeRef } from '../types';
 import { sendRequest, type SendRequestContext } from './http';
+import { graphqlTypeLabel, normalizeGraphqlSchema } from './graphqlSchema';
 
-export type GraphqlIssue = { severity: 'error' | 'warning'; message: string };
+export { graphqlTypeLabel, normalizeGraphqlSchema } from './graphqlSchema';
+
+export type GraphqlIssue = { severity: 'error' | 'warning'; message: string; line?: number; column?: number };
 export type GraphqlOperationType = 'query' | 'mutation' | 'subscription';
+export type GraphqlCompletion = { label: string; detail: string; documentation: string; insertText: string; deprecated: boolean };
+export type GraphqlSchemaSearchResult = { kind: 'type' | 'field'; label: string; owner: string; detail: string; description: string; typeName: string };
 
-const introspectionQuery = `query BrunomniaIntrospection {
-  __schema {
-    queryType { name }
-    mutationType { name }
-    subscriptionType { name }
-    types {
-      kind
-      name
-      description
-      fields(includeDeprecated: true) {
-        name
-        description
-        isDeprecated
-        deprecationReason
-        args { name description defaultValue type { ...TypeRef } }
-        type { ...TypeRef }
-      }
-      inputFields { name description defaultValue type { ...TypeRef } }
-      enumValues(includeDeprecated: true) { name description isDeprecated deprecationReason }
-      possibleTypes { ...TypeRef }
-    }
-  }
-}
-
-fragment TypeRef on __Type {
-  kind
-  name
-  ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } } }
-}`;
+export const graphqlIntrospectionQuery = (includeInputValueDeprecation = false) => getIntrospectionQuery({ inputValueDeprecation: includeInputValueDeprecation });
+const introspectionQuery = graphqlIntrospectionQuery();
 
 const record = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-const text = (value: unknown) => typeof value === 'string' ? value : '';
 
-const normalizeTypeRef = (value: unknown, depth = 0): GraphqlTypeRef => {
-  const source = record(value);
-  const ofType = depth < 12 && source?.ofType ? normalizeTypeRef(source.ofType, depth + 1) : undefined;
-  return { kind: text(source?.kind), name: text(source?.name), ...(ofType?.kind || ofType?.name ? { ofType } : {}) };
+const introspectionTypeRef = (type: GraphqlTypeRef | undefined): Record<string, unknown> => ({
+  kind: type?.kind || 'SCALAR',
+  name: type?.name || null,
+  ofType: type?.ofType ? introspectionTypeRef(type.ofType) : null,
+});
+
+const introspectionInputValue = (value: GraphqlInputValue) => ({
+  name: value.name,
+  description: value.description || null,
+  defaultValue: value.defaultValue || null,
+  isDeprecated: value.isDeprecated,
+  deprecationReason: value.deprecationReason || null,
+  type: introspectionTypeRef(value.type),
+});
+
+const clientSchemas = new WeakMap<GraphqlSchema, ClientGraphqlSchema | null>();
+
+export const graphqlClientSchema = (schema: GraphqlSchema | undefined): ClientGraphqlSchema | undefined => {
+  if (!schema) return undefined;
+  const cached = clientSchemas.get(schema);
+  if (cached !== undefined) return cached ?? undefined;
+  if (!schema.queryType) { clientSchemas.set(schema, null); return undefined; }
+  try {
+    const introspection = { __schema: {
+      queryType: { name: schema.queryType, kind: 'OBJECT' },
+      mutationType: schema.mutationType ? { name: schema.mutationType, kind: 'OBJECT' } : null,
+      subscriptionType: schema.subscriptionType ? { name: schema.subscriptionType, kind: 'OBJECT' } : null,
+      types: schema.types.map((type) => ({
+        kind: type.kind as never,
+        name: type.name,
+        description: type.description || null,
+        specifiedByURL: type.specifiedByUrl || null,
+        isOneOf: type.isOneOf,
+        fields: type.kind === 'OBJECT' || type.kind === 'INTERFACE' ? type.fields.map((field) => ({
+          name: field.name,
+          description: field.description || null,
+          args: field.args.map(introspectionInputValue),
+          type: introspectionTypeRef(field.type),
+          isDeprecated: field.isDeprecated,
+          deprecationReason: field.deprecationReason || null,
+        })) : null,
+        inputFields: type.kind === 'INPUT_OBJECT' ? type.inputFields.map(introspectionInputValue) : null,
+        interfaces: type.kind === 'OBJECT' || type.kind === 'INTERFACE' ? type.interfaces.map(introspectionTypeRef) : null,
+        enumValues: type.kind === 'ENUM' ? type.enumValues.map((value) => ({ ...value, description: value.description || null, deprecationReason: value.deprecationReason || null })) : null,
+        possibleTypes: type.kind === 'UNION' || type.kind === 'INTERFACE' ? type.possibleTypes.map(introspectionTypeRef) : null,
+      })),
+      directives: schema.directives.map((directive) => ({
+        name: directive.name,
+        description: directive.description || null,
+        isRepeatable: directive.isRepeatable,
+        locations: directive.locations as never,
+        args: directive.args.map(introspectionInputValue),
+      })),
+    } } as unknown as IntrospectionQuery;
+    const built = buildClientSchema(introspection);
+    clientSchemas.set(schema, built);
+    return built;
+  } catch {
+    clientSchemas.set(schema, null);
+    return undefined;
+  }
 };
 
-const normalizeInputValues = (value: unknown): GraphqlInputValue[] => !Array.isArray(value) ? [] : value.flatMap((item): GraphqlInputValue[] => {
-  const source = record(item);
-  const name = text(source?.name);
-  return source && name ? [{ name, description: text(source.description), defaultValue: text(source.defaultValue), type: normalizeTypeRef(source.type) }] : [];
-}).slice(0, 500);
-
-export const normalizeGraphqlSchema = (value: unknown): GraphqlSchema | undefined => {
-  const source = record(value);
-  const rawTypes = Array.isArray(source?.types) ? source.types : [];
-  const types = rawTypes.flatMap((item): GraphqlSchemaType[] => {
-    const type = record(item);
-    const name = text(type?.name);
-    if (!type || !name) return [];
-    const fields = !Array.isArray(type.fields) ? [] : type.fields.flatMap((item): GraphqlField[] => {
-      const field = record(item);
-      const fieldName = text(field?.name);
-      return field && fieldName ? [{
-        name: fieldName,
-        description: text(field.description),
-        isDeprecated: field.isDeprecated === true,
-        deprecationReason: text(field.deprecationReason),
-        args: normalizeInputValues(field.args).slice(0, 100),
-        type: normalizeTypeRef(field.type),
-      }] : [];
-    }).slice(0, 1_000);
-    const enumValues = !Array.isArray(type.enumValues) ? [] : type.enumValues.flatMap((item) => {
-      const entry = record(item);
-      const entryName = text(entry?.name);
-      return entry && entryName ? [{ name: entryName, description: text(entry.description), isDeprecated: entry.isDeprecated === true, deprecationReason: text(entry.deprecationReason) }] : [];
-    }).slice(0, 5_000);
-    const possibleTypes = !Array.isArray(type.possibleTypes) ? [] : type.possibleTypes.map((entry) => normalizeTypeRef(entry)).filter((entry) => entry.name).slice(0, 1_000);
-    return [{ kind: text(type.kind), name, description: text(type.description), fields, inputFields: normalizeInputValues(type.inputFields), enumValues, possibleTypes }];
-  }).slice(0, 5_000);
-  if (!types.length) return undefined;
-  return {
-    queryType: text(record(source?.queryType)?.name),
-    mutationType: text(record(source?.mutationType)?.name),
-    subscriptionType: text(record(source?.subscriptionType)?.name),
-    types,
-  };
+const schemaFromIntrospectionData = (value: unknown) => {
+  const data = record(value);
+  const normalized = normalizeGraphqlSchema(data?.__schema);
+  if (!normalized || !graphqlClientSchema(normalized)) throw new Error('The GraphQL introspection data does not describe a usable schema.');
+  return normalized;
 };
 
-export const graphqlTypeLabel = (type: GraphqlTypeRef | undefined): string => {
-  if (!type) return '';
-  if (type.kind === 'NON_NULL') return `${graphqlTypeLabel(type.ofType)}!`;
-  if (type.kind === 'LIST') return `[${graphqlTypeLabel(type.ofType)}]`;
-  return type.name || type.kind;
+export const importGraphqlSchema = (source: string) => {
+  if (new TextEncoder().encode(source).byteLength > 20_000_000) throw new Error('GraphQL schema import exceeds the 20 MB limit.');
+  let payload: unknown;
+  try { payload = JSON.parse(source) as unknown; }
+  catch (error) { throw new Error(`GraphQL schema import is not valid JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  const data = record(record(payload)?.data);
+  if (!data) throw new Error('GraphQL schema JSON must contain a data field with introspection results.');
+  return schemaFromIntrospectionData(data);
 };
 
-export const fetchGraphqlSchema = async (request: ApiRequest, environment: Environment | undefined, context: SendRequestContext) => {
+export const fetchGraphqlSchema = async (request: ApiRequest, environment: Environment | undefined, context: SendRequestContext, includeInputValueDeprecation = false) => {
   if (request.protocol !== 'graphql') throw new Error('Schema introspection requires a GraphQL request.');
   const schemaRequest = structuredClone(request);
   schemaRequest.id = `graphql-schema-${crypto.randomUUID()}`;
   schemaRequest.name = `${request.name} · schema introspection`;
   schemaRequest.method = 'POST';
-  schemaRequest.graphql = { ...schemaRequest.graphql, query: introspectionQuery, variables: '{}', operationName: 'BrunomniaIntrospection' };
+  schemaRequest.graphql = { ...schemaRequest.graphql, query: graphqlIntrospectionQuery(includeInputValueDeprecation), variables: '{}', operationName: 'IntrospectionQuery' };
   schemaRequest.preRequestScript = '';
   schemaRequest.tests = '';
   schemaRequest.transport = { ...schemaRequest.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMode: 'custom', timeoutMs: Math.min(120_000, Math.max(1_000, schemaRequest.transport.timeoutMs)), storeCookies: false };
@@ -108,130 +122,136 @@ export const fetchGraphqlSchema = async (request: ApiRequest, environment: Envir
   const payload: unknown = JSON.parse(response.body);
   const errors = record(payload)?.errors;
   if (Array.isArray(errors) && errors.length) throw new Error(`GraphQL introspection returned errors: ${JSON.stringify(errors).slice(0, 2_000)}`);
-  const schema = normalizeGraphqlSchema(record(record(payload)?.data)?.__schema);
-  if (!schema) throw new Error('The GraphQL endpoint did not return a usable introspection schema. Introspection may be disabled.');
-  return schema;
+  try { return schemaFromIntrospectionData(record(payload)?.data); }
+  catch { throw new Error('The GraphQL endpoint did not return a usable introspection schema. Introspection may be disabled.'); }
 };
 
-const withoutStringsAndComments = (source: string) => source
-  .replace(/"""[\s\S]*?"""/g, ' ')
-  .replace(/"(?:\\.|[^"\\])*"/g, ' ')
-  .replace(/#[^\n\r]*/g, ' ');
-
-const definitionSelectionEnd = (tokens: string[], start: number) => {
-  let parentheses = 0;
-  let brackets = 0;
-  for (let index = start; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token === '(') parentheses += 1;
-    else if (token === ')') parentheses = Math.max(0, parentheses - 1);
-    else if (token === '[') brackets += 1;
-    else if (token === ']') brackets = Math.max(0, brackets - 1);
-    else if (token === '{' && parentheses === 0 && brackets === 0) {
-      let depth = 1;
-      for (let selectionIndex = index + 1; selectionIndex < tokens.length; selectionIndex += 1) {
-        if (tokens[selectionIndex] === '{') depth += 1;
-        if (tokens[selectionIndex] === '}') depth -= 1;
-        if (depth === 0) return selectionIndex + 1;
-      }
-      return start;
-    }
-  }
-  return start;
+const parsedOperations = (query: string): OperationDefinitionNode[] => {
+  try { return parse(query).definitions.filter((definition): definition is OperationDefinitionNode => definition.kind === Kind.OPERATION_DEFINITION); }
+  catch { return []; }
 };
+
+export const graphqlOperationNames = (query: string) => parsedOperations(query).flatMap((operation) => operation.name?.value ? [operation.name.value] : []);
 
 export const graphqlOperationType = (query: string, operationName = ''): GraphqlOperationType | undefined => {
-  if (balancedIssue(query)) return undefined;
-  const tokens = withoutStringsAndComments(query).match(/[_A-Za-z][_0-9A-Za-z]*|[()@[\]{}]/g) ?? [];
-  const operations: Array<{ type: GraphqlOperationType; name: string }> = [];
-  for (let index = 0; index < tokens.length;) {
-    const token = tokens[index];
-    if (token === '{') {
-      const end = definitionSelectionEnd(tokens, index);
-      if (end === index) break;
-      operations.push({ type: 'query', name: '' });
-      index = end;
-      continue;
-    }
-    if (token === 'query' || token === 'mutation' || token === 'subscription') {
-      const next = tokens[index + 1] ?? '';
-      const name = /^[_A-Za-z][_0-9A-Za-z]*$/.test(next) ? next : '';
-      const selectionStart = index + 1 + (name ? 1 : 0);
-      const end = definitionSelectionEnd(tokens, selectionStart);
-      if (end <= selectionStart) break;
-      operations.push({ type: token, name });
-      index = end;
-      continue;
-    }
-    if (token === 'fragment') {
-      const selectionStart = index + 1;
-      const end = definitionSelectionEnd(tokens, selectionStart);
-      index = end > selectionStart ? end : selectionStart;
-      continue;
-    }
-    index += 1;
-  }
+  const operations = parsedOperations(query);
+  if (!operations.length) return undefined;
   const selectedName = operationName.trim();
-  if (selectedName) return operations.find((operation) => operation.name === selectedName)?.type;
-  return operations.length === 1 ? operations[0].type : undefined;
+  const selected = selectedName ? operations.find((operation) => operation.name?.value === selectedName) : operations.length === 1 ? operations[0] : undefined;
+  return selected?.operation;
 };
 
-const balancedIssue = (source: string): string => {
-  const pairs: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
-  const stack: string[] = [];
-  for (const character of withoutStringsAndComments(source)) {
-    if ('([{'.includes(character)) stack.push(character);
-    if (')]}'.includes(character) && stack.pop() !== pairs[character]) return `Unexpected '${character}' in GraphQL document.`;
-  }
-  return stack.length ? `Unclosed '${stack.at(-1)}' in GraphQL document.` : '';
+export const graphqlOperationAtOffset = (query: string, offset: number) => {
+  const bounded = Math.max(0, Math.min(query.length, offset));
+  return parsedOperations(query).find((operation) => operation.name && operation.loc && operation.loc.start <= bounded && operation.loc.end >= bounded)?.name?.value ?? '';
+};
+
+export const graphqlVariableNames = (query: string, operationName = '') => {
+  const operations = parsedOperations(query);
+  const operation = operationName ? operations.find((candidate) => candidate.name?.value === operationName) : operations.length === 1 ? operations[0] : undefined;
+  return operation?.variableDefinitions?.map((definition) => definition.variable.name.value) ?? [];
+};
+
+export const formatGraphqlDocument = (query: string) => {
+  try { return `${print(parse(query)).trim()}\n`; }
+  catch (error) { throw new Error(`Cannot format invalid GraphQL: ${error instanceof Error ? error.message : String(error)}`); }
 };
 
 export const isGraphqlSubscriptionRequest = (request: ApiRequest) => request.protocol === 'graphql'
   && graphqlOperationType(request.graphql.query, request.graphql.operationName) === 'subscription';
 
-const rootFieldNames = (source: string) => {
-  const cleaned = withoutStringsAndComments(source).replace(/\.\.\.\s*(?:on\s+)?[_A-Za-z][_0-9A-Za-z]*/g, ' ');
-  const tokens: string[] = cleaned.match(/[_A-Za-z][_0-9A-Za-z]*|[{}():!@$,]/g) ?? [];
-  const open = tokens.indexOf('{');
-  if (open < 0) return [];
-  const fields: string[] = [];
-  let depth = 0;
-  let parentheses = 0;
-  for (let index = open; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token === '{') { depth += 1; continue; }
-    if (token === '}') { depth -= 1; continue; }
-    if (token === '(') { parentheses += 1; continue; }
-    if (token === ')') { parentheses -= 1; continue; }
-    if (depth !== 1 || parentheses || !/^[_A-Za-z]/.test(token)) continue;
-    if (tokens[index + 1] === ':') continue;
-    if (tokens[index - 1] === '@' || tokens[index - 1] === '$') continue;
-    fields.push(token);
-  }
-  return [...new Set(fields)];
+const positionAt = (source: string, offset: number) => offsetToPosition(source, Math.max(0, Math.min(source.length, offset)));
+
+const namedType = (type: GraphqlTypeRef | undefined) => {
+  let current = type;
+  while (current?.ofType) current = current.ofType;
+  return current?.name ?? '';
 };
 
-export const validateGraphqlDocument = (query: string, variables: string, schema?: GraphqlSchema): GraphqlIssue[] => {
+export const graphqlCompletions = (query: string, offset: number, schema: GraphqlSchema | undefined): GraphqlCompletion[] => {
+  const clientSchema = graphqlClientSchema(schema);
+  if (!clientSchema) return [];
+  try {
+    return getAutocompleteSuggestions(clientSchema, query, positionAt(query, offset)).slice(0, 200).map((suggestion) => ({
+      label: suggestion.label,
+      detail: suggestion.detail ?? (suggestion.type ? String(suggestion.type) : ''),
+      documentation: suggestion.documentation ?? suggestion.deprecationReason ?? '',
+      insertText: suggestion.insertText ?? suggestion.rawInsert ?? suggestion.label,
+      deprecated: suggestion.isDeprecated === true,
+    }));
+  } catch { return []; }
+};
+
+export const graphqlHover = (query: string, offset: number, schema: GraphqlSchema | undefined) => {
+  const clientSchema = graphqlClientSchema(schema);
+  if (!clientSchema) return '';
+  try {
+    const value = getHoverInformation(clientSchema, query, positionAt(query, offset), undefined, { useMarkdown: true });
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.map((entry) => typeof entry === 'string' ? entry : entry.value).join('\n\n');
+    return value && typeof value === 'object' && 'value' in value ? String(value.value) : '';
+  } catch { return ''; }
+};
+
+export const searchGraphqlSchema = (schema: GraphqlSchema | undefined, filter: string): GraphqlSchemaSearchResult[] => {
+  const term = filter.trim().toLowerCase();
+  if (!schema || !term) return [];
+  const results: GraphqlSchemaSearchResult[] = [];
+  schema.types.forEach((type) => {
+    if (`${type.name} ${type.description}`.toLowerCase().includes(term)) results.push({ kind: 'type', label: type.name, owner: type.kind, detail: type.kind, description: type.description, typeName: type.name });
+    type.fields.forEach((field) => {
+      if (`${field.name} ${field.description} ${type.name}`.toLowerCase().includes(term)) results.push({ kind: 'field', label: field.name, owner: type.name, detail: graphqlTypeLabel(field.type), description: field.description || field.deprecationReason, typeName: namedType(field.type) });
+    });
+    type.inputFields.forEach((field) => {
+      if (`${field.name} ${field.description} ${type.name}`.toLowerCase().includes(term)) results.push({ kind: 'field', label: field.name, owner: type.name, detail: graphqlTypeLabel(field.type), description: field.description || field.deprecationReason, typeName: namedType(field.type) });
+    });
+  });
+  return results.slice(0, 500);
+};
+
+const dedupeIssues = (issues: GraphqlIssue[]) => {
+  const seen = new Set<string>();
+  return issues.filter((issue) => {
+    const key = `${issue.severity}:${issue.line ?? 0}:${issue.column ?? 0}:${issue.message}`;
+    return !seen.has(key) && Boolean(seen.add(key));
+  }).slice(0, 200);
+};
+
+export const validateGraphqlDocument = (query: string, variables: string, schema?: GraphqlSchema, operationName = ''): GraphqlIssue[] => {
   const issues: GraphqlIssue[] = [];
   if (!query.trim()) issues.push({ severity: 'error', message: 'GraphQL query is required.' });
   if (query.includes('{{')) issues.push({ severity: 'warning', message: 'Template tags are literal in GraphQL query text; use them in variables instead.' });
-  const balance = balancedIssue(query);
-  if (balance) issues.push({ severity: 'error', message: balance });
+  if (query.trim()) {
+    const clientSchema = graphqlClientSchema(schema);
+    try {
+      getDiagnostics(query, clientSchema).forEach((diagnostic) => issues.push({
+        severity: diagnostic.severity === 1 ? 'error' : 'warning',
+        message: typeof diagnostic.message === 'string' ? diagnostic.message : diagnostic.message.value,
+        line: diagnostic.range.start.line + 1,
+        column: diagnostic.range.start.character + 1,
+      }));
+    } catch (error) {
+      issues.push({ severity: 'error', message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  let variableValues: Record<string, unknown> | undefined;
   try {
     const value: unknown = variables.trim() ? JSON.parse(variables) : {};
     if (!value || typeof value !== 'object' || Array.isArray(value)) issues.push({ severity: 'error', message: 'GraphQL variables must be a JSON object.' });
+    else variableValues = value as Record<string, unknown>;
   } catch { issues.push({ severity: 'error', message: 'GraphQL variables are not valid JSON.' }); }
-  if (!schema || balance) return issues;
-  const operation = /^\s*(mutation|subscription)\b/.exec(withoutStringsAndComments(query))?.[1] ?? 'query';
-  const rootName = operation === 'mutation' ? schema.mutationType : operation === 'subscription' ? schema.subscriptionType : schema.queryType;
-  const root = schema.types.find((type) => type.name === rootName);
-  if (!root) {
-    issues.push({ severity: 'error', message: `The schema has no ${operation} root type.` });
-    return issues;
+
+  const operations = parsedOperations(query);
+  const selected = operationName ? operations.find((operation) => operation.name?.value === operationName) : operations.length === 1 ? operations[0] : undefined;
+  if (operationName && !selected && operations.length) issues.push({ severity: 'error', message: `GraphQL operation '${operationName}' does not exist in this document.` });
+  if (!operationName && operations.length > 1) issues.push({ severity: 'error', message: 'Choose an operation before sending a document with multiple operations.' });
+  const clientSchema = graphqlClientSchema(schema);
+  if (selected && variableValues && clientSchema) {
+    const result = getVariableValues(clientSchema, selected.variableDefinitions ?? [], variableValues, { maxErrors: 50 });
+    result.errors?.forEach((error) => issues.push({ severity: 'error', message: error.message }));
   }
-  const allowed = new Set(root.fields.map((field) => field.name));
-  rootFieldNames(query).filter((name) => !allowed.has(name)).forEach((name) => issues.push({ severity: 'error', message: `Unknown ${operation} field '${name}'.` }));
-  return issues;
+  return dedupeIssues(issues);
 };
 
 const selectionForField = (field: GraphqlField, schema: GraphqlSchema) => {

@@ -553,13 +553,14 @@ type RequestPanelProps = {
   grpcSchema?: GrpcSchema;
   grpcSchemaLoading: boolean;
   graphqlSchemaLoading: boolean;
+  graphqlSchemaError: string;
   onTabChange: (tab: RequestTab) => void;
   onChange: (patch: Partial<ApiRequest>) => void;
   onSend: () => void;
   onCancelScheduled: () => void;
   onOpenSendOptions: () => void;
   onLoadGrpcSchema: () => void;
-  onLoadGraphqlSchema: () => void;
+  onLoadGraphqlSchema: (includeInputValueDeprecation: boolean) => void;
   onSocketIoListenerToggle: (eventName: string, enabled: boolean) => void;
   onAddRequest: () => void;
   onGenerateCode: () => void;
@@ -578,6 +579,7 @@ function RequestPanel({
   grpcSchema,
   grpcSchemaLoading,
   graphqlSchemaLoading,
+  graphqlSchemaError,
   onTabChange,
   onChange,
   onSend,
@@ -702,7 +704,7 @@ function RequestPanel({
         ) : null}
         {activeTab === 'auth' ? <div className="folder-auth-editor"><label><input checked={request.inheritFolderAuth === true} disabled={!request.folderId || !folderAncestors(collection, request.folderId).some((folder) => folder.auth)} onChange={(event) => onChange({ inheritFolderAuth: event.target.checked })} type="checkbox" /> Inherit authentication from closest configured folder</label><Suspense fallback={<div className="dialog-loading">Loading authentication…</div>}><AuthEditor cookies={workspaceCookies} environment={environment} request={request} requestContext={requestContext} responses={storedResponses} showPasswords={showPasswords} onChange={onChange} /></Suspense></div> : null}
         {activeTab === 'body' && request.protocol === 'http' ? <HttpBodyEditor onChange={onChange} request={request} /> : null}
-        {activeTab === 'body' && request.protocol === 'graphql' ? <GraphqlEditor onChange={onChange} onLoadSchema={onLoadGraphqlSchema} request={request} schemaLoading={graphqlSchemaLoading} /> : null}
+        {activeTab === 'body' && request.protocol === 'graphql' ? <GraphqlEditor onChange={onChange} onLoadSchema={onLoadGraphqlSchema} request={request} schemaError={graphqlSchemaError} schemaLoading={graphqlSchemaLoading} /> : null}
         {activeTab === 'body' && (request.protocol === 'websocket' || request.protocol === 'sse') ? <StreamSetup onChange={onChange} request={request} /> : null}
         {activeTab === 'body' && request.protocol === 'socketio' ? <Suspense fallback={<div className="dialog-loading">Loading Socket.IO editor…</div>}><SocketIoEditor onChange={onChange} onListenerToggle={onSocketIoListenerToggle} request={request} /></Suspense> : null}
         {activeTab === 'body' && request.protocol === 'grpc' ? <Suspense fallback={<div className="dialog-loading">Loading gRPC editor…</div>}><GrpcEditor environment={environment} onChange={onChange} onLoadSchema={onLoadGrpcSchema} request={request} requestContext={requestContext} schema={grpcSchema} schemaLoading={grpcSchemaLoading} /></Suspense> : null}
@@ -1010,7 +1012,7 @@ function FolderDialog({ collection, folder, environment, cookies, responses, req
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 33, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+    format: 'brunomnia', version: 34, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -1047,6 +1049,7 @@ export default function App() {
   const [grpcSchemas, setGrpcSchemas] = useState<Record<string, GrpcSchema>>({});
   const [grpcSchemaLoading, setGrpcSchemaLoading] = useState(false);
   const [graphqlSchemaLoading, setGraphqlSchemaLoading] = useState(false);
+  const [graphqlSchemaError, setGraphqlSchemaError] = useState<{ requestId: string; message: string }>();
   const [workbenchSection, setWorkbenchSection] = useState<WorkbenchSection>('requests');
   const [scriptTests, setScriptTests] = useState<Array<{ name: string; passed: boolean; error?: string }>>([]);
   const [scriptLogs, setScriptLogs] = useState<string[]>([]);
@@ -1553,21 +1556,19 @@ export default function App() {
     }
   };
 
-  const loadActiveGraphqlSchema = async () => {
+  const loadActiveGraphqlSchema = async (includeInputValueDeprecation = active?.request.graphql.includeInputValueDeprecation ?? false) => {
     if (!active || !activeEnvironment || active.request.protocol !== 'graphql' || graphqlSchemaLoading) return;
     const collection = workspace.collections.find((candidate) => candidate.id === active.collectionId);
     if (!collection) return;
     const targetRequest = applyCollectionConfiguration(collection, active.request, activeEnvironment).request;
+    setGraphqlSchemaError(undefined);
     setGraphqlSchemaLoading(true);
     try {
-      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: [...workspace.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, targetRequest), resolveResponse: templateResponseResolver.current, pluginRuntime: createPersistentTemplatePluginRuntime(activeEnvironment) });
-      setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => ({ ...collection, requests: collection.requests.map((request) => request.id === targetRequest.id ? { ...request, graphql: { ...request.graphql, schema, schemaEndpoint: targetRequest.url, schemaFetchedAt: new Date().toISOString() } } : request) })) }));
+      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: [...workspace.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, targetRequest), resolveResponse: templateResponseResolver.current, pluginRuntime: createPersistentTemplatePluginRuntime(activeEnvironment) }, includeInputValueDeprecation);
+      setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => ({ ...collection, requests: collection.requests.map((request) => request.id === targetRequest.id ? { ...request, graphql: { ...request.graphql, schema, schemaEndpoint: targetRequest.url, schemaFetchedAt: new Date().toISOString(), schemaSource: 'remote', schemaFileName: '', includeInputValueDeprecation, schemaIncludesInputValueDeprecation: includeInputValueDeprecation } } : request) })) }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (activeRequestIdRef.current === targetRequest.id) {
-        setResponse({ status: 0, statusText: 'Schema failed', headers: {}, body: message, durationMs: 0, sizeBytes: message.length });
-        setResponseTab('preview');
-      }
+      setGraphqlSchemaError({ requestId: targetRequest.id, message });
     } finally {
       setGraphqlSchemaLoading(false);
     }
@@ -1575,10 +1576,11 @@ export default function App() {
 
   useEffect(() => {
     if (!hydrated || !workspace.preferences.autoFetchGraphqlSchema || active?.request.protocol !== 'graphql' || !activeEnvironment || graphqlSchemaLoading) return;
-    if (!active.request.url.trim() || active.request.graphql.schemaEndpoint === active.request.url) return;
+    if (!active.request.url.trim() || active.request.graphql.schemaSource === 'local') return;
+    if (active.request.graphql.schemaEndpoint === active.request.url && active.request.graphql.schemaIncludesInputValueDeprecation === active.request.graphql.includeInputValueDeprecation) return;
     const timeout = window.setTimeout(() => void loadActiveGraphqlSchema(), 800);
     return () => window.clearTimeout(timeout);
-  }, [active?.request.id, active?.request.protocol, active?.request.url, active?.request.graphql.schemaEndpoint, activeEnvironment?.id, graphqlSchemaLoading, hydrated, workspace.preferences.autoFetchGraphqlSchema]);
+  }, [active?.request.id, active?.request.protocol, active?.request.url, active?.request.graphql.schemaEndpoint, active?.request.graphql.schemaSource, active?.request.graphql.includeInputValueDeprecation, active?.request.graphql.schemaIncludesInputValueDeprecation, activeEnvironment?.id, graphqlSchemaLoading, hydrated, workspace.preferences.autoFetchGraphqlSchema]);
 
   const onStreamEvent = (message: StreamMessage) => {
     const sessionId = message.sessionId ?? streamSession.current;
@@ -2436,6 +2438,7 @@ export default function App() {
             collection={activeCollection}
             environment={activeEnvironment}
             grpcSchema={grpcSchemas[active.request.id]}
+            graphqlSchemaError={graphqlSchemaError?.requestId === active.request.id ? graphqlSchemaError.message : ''}
             graphqlSchemaLoading={graphqlSchemaLoading}
             grpcSchemaLoading={grpcSchemaLoading}
             isSending={isSending}
@@ -2445,7 +2448,7 @@ export default function App() {
             onGenerateCode={() => setShowCodeGeneration(true)}
             onToggleBulkHeaderEditor={() => setWorkspace((current) => ({ ...current, preferences: { ...current.preferences, useBulkHeaderEditor: !current.preferences.useBulkHeaderEditor } }))}
             onToggleBulkParametersEditor={() => setWorkspace((current) => ({ ...current, preferences: { ...current.preferences, useBulkParametersEditor: !current.preferences.useBulkParametersEditor } }))}
-            onLoadGraphqlSchema={() => void loadActiveGraphqlSchema()}
+            onLoadGraphqlSchema={(includeInputValueDeprecation) => void loadActiveGraphqlSchema(includeInputValueDeprecation)}
             onLoadGrpcSchema={() => void loadActiveGrpcSchema()}
             onOpenSendOptions={() => setShowSendOptions(true)}
             onSend={() => void executeRequest()}
