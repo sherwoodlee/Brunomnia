@@ -83,6 +83,8 @@ For direct CLI use, an `--item` value may also be a folder ID. The folder recurs
 
 Pinned `--requestTimeout <milliseconds>` applies to both `run collection` and `run test`. It replaces the workspace request-timeout default for primary, dependent, and saved suite sends, while a request's explicit custom timeout remains higher precedence. `0` disables the inherited deadline; negative values clamp to zero, oversized values clamp to the desktop maximum, integer prefixes match pinned `parseInt` behavior, and invalid values fail before transport. `--request-timeout` is an additional Brunomnia alias.
 
+Pinned `--httpProxy`, `--httpsProxy`, and `--noProxy` override matching ambient `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` values for both collection and test runs. Rendered request-level Custom/Direct policy remains higher precedence. Pinned `--disableCertValidation` (and test short form `-k`) forces target TLS validation off without changing process-global Node state; otherwise request Never/Always policy applies. Matching workspace/request CA and PEM/PFX client identity material is installed only on that request dispatcher. Proxy TLS keeps normal certificate validation.
+
 Pinned `--iteration-data`/`-d` accepts either a local path or an explicit HTTP(S) URL. Both inputs use the desktop Runner's 5 MB UTF-8 text bound before JSON/CSV parsing. Remote loads require a successful HTTP response, stream-cancel on overflow, and use a 30-second acquisition deadline; non-HTTP URL schemes remain local path text rather than gaining a new protocol handler. Environment overrides still merge after parsing.
 
 ## CLI reporters

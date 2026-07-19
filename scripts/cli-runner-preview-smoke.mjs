@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stringify } from 'yaml';
@@ -13,7 +15,7 @@ const run = (args) => new Promise((resolve, reject) => {
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
   child.on('error', reject);
-  child.on('close', (code) => code === 0 ? resolve(stdout) : reject(new Error(`CLI exited ${code}: ${stderr || stdout}`)));
+  child.on('close', (code) => code === 0 ? resolve(stdout) : reject(new Error(`CLI exited ${code}: ${stderr}${stdout}`)));
 });
 
 const runFailure = (args) => new Promise((resolve, reject) => {
@@ -34,6 +36,16 @@ const listen = (server) => new Promise((resolve, reject) => {
 const close = (server) => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 const temporary = await mkdtemp(join(tmpdir(), 'brunomnia-cli-runner-'));
 const arrivals = [];
+const secureArrivals = [];
+const mutualArrivals = [];
+const proxyArrivals = [];
+const proxyConnects = [];
+const tlsKey = await readFile(join(process.cwd(), 'src-tauri', 'tests', 'fixtures', 'tls', 'server.key.pem'));
+const tlsCertificate = await readFile(join(process.cwd(), 'src-tauri', 'tests', 'fixtures', 'tls', 'server.cert.pem'));
+const tlsCa = await readFile(join(process.cwd(), 'src-tauri', 'tests', 'fixtures', 'tls', 'ca.cert.pem'), 'utf8');
+const clientCertificate = await readFile(join(process.cwd(), 'src-tauri', 'tests', 'fixtures', 'tls', 'client.cert.pem'), 'utf8');
+const clientKey = await readFile(join(process.cwd(), 'src-tauri', 'tests', 'fixtures', 'tls', 'client.key.pem'), 'utf8');
+const clientPfxBase64 = (await readFile(join(process.cwd(), 'src-tauri', 'tests', 'fixtures', 'tls', 'client.openssl-modern.p12.b64'), 'utf8')).trim();
 const server = http.createServer((request, response) => {
   if (request.url === '/iterations.csv') {
     response.writeHead(200, { 'Content-Type': 'text/csv' });
@@ -49,10 +61,42 @@ const server = http.createServer((request, response) => {
   if (request.url?.startsWith('/slow')) setTimeout(finish, 120);
   else finish();
 });
+const secureServer = https.createServer({ key: tlsKey, cert: tlsCertificate }, (request, response) => {
+  secureArrivals.push(request.url);
+  response.writeHead(200, { 'Content-Type': 'application/json' });
+  response.end('{"secure":true}');
+});
+const mutualServer = https.createServer({ key: tlsKey, cert: tlsCertificate, ca: tlsCa, requestCert: true, rejectUnauthorized: true }, (request, response) => {
+  mutualArrivals.push({ path: request.url, authorized: request.socket.authorized });
+  response.writeHead(200, { 'Content-Type': 'application/json' });
+  response.end('{"mutual":true}');
+});
+const proxyServer = http.createServer((request, response) => {
+  proxyArrivals.push(request.url);
+  response.writeHead(200, { 'Content-Type': 'application/json' });
+  response.end('{"proxy":true}');
+});
+proxyServer.on('connect', (request, clientSocket, head) => {
+  proxyConnects.push(request.url);
+  const [host, rawPort] = String(request.url).split(':');
+  const upstream = net.connect(Number(rawPort) || 443, host, () => {
+    clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    if (head.length) upstream.write(head);
+    upstream.pipe(clientSocket);
+    clientSocket.pipe(upstream);
+  });
+  upstream.on('error', () => clientSocket.destroy());
+});
 
 try {
   const address = await listen(server);
+  const secureAddress = await listen(secureServer);
+  const mutualAddress = await listen(mutualServer);
+  const proxyAddress = await listen(proxyServer);
   assert.equal(typeof address, 'object');
+  assert.equal(typeof secureAddress, 'object');
+  assert.equal(typeof mutualAddress, 'object');
+  assert.equal(typeof proxyAddress, 'object');
   const source = JSON.parse(await readFile(join(process.cwd(), 'examples', 'cli-workspace.json'), 'utf8'));
   const baseRequest = source.collections[0].requests[0];
   const request = (id, name, path) => ({
@@ -67,6 +111,14 @@ try {
   scripted.tests = "await insomnia.test.skip('production only', () => { throw new Error('skipped callback executed'); }); await insomnia.test('status is 200', () => insomnia.expect(insomnia.response.status).to.equal(200));";
   const second = request('request-second', 'Second', 'second');
   const slow = request('request-slow', 'Slow', 'slow');
+  const secure = request('request-secure', 'Secure', 'secure');
+  secure.url = `https://127.0.0.1:${secureAddress.port}/secure?row={{ row }}&region={{ region }}`;
+  const mutual = request('request-mutual', 'Mutual TLS', 'mutual');
+  mutual.url = `https://127.0.0.1:${mutualAddress.port}/mutual?row={{ row }}&region={{ region }}`;
+  const customProxy = request('request-custom-proxy', 'Custom proxy', 'custom-proxy');
+  customProxy.transport = { ...customProxy.transport, proxyMode: 'custom', proxyUrl: `http://127.0.0.1:${proxyAddress.port}`, proxyExclusions: '' };
+  const direct = request('request-direct', 'Direct', 'direct');
+  direct.transport = { ...direct.transport, proxyMode: 'disabled' };
   second.folderId = 'folder-selected';
   scripted.folderId = 'folder-nested';
   slow.transport = { ...slow.transport, timeoutMode: 'global', timeoutMs: 0 };
@@ -82,13 +134,17 @@ try {
       second,
       scripted,
       slow,
+      secure,
+      mutual,
+      customProxy,
+      direct,
     ],
     folders: [
       { id: 'folder-selected', name: 'Selected folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
       { id: 'folder-nested', name: 'Nested folder', parentId: 'folder-selected', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
       { id: 'folder-empty', name: 'Empty folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
     ],
-    resourceOrder: ['request-first', 'folder-selected', 'request-second', 'folder-nested', 'request-third', 'request-slow', 'folder-empty'],
+    resourceOrder: ['request-first', 'folder-selected', 'request-second', 'folder-nested', 'request-third', 'request-slow', 'request-secure', 'request-mutual', 'request-custom-proxy', 'request-direct', 'folder-empty'],
   };
   const environment = { id: 'preview-environment', name: 'Preview environment', variables: [{ id: 'preview-global-default-row', name: 'globalChoice', value: 'default', enabled: true }] };
   const selectedGlobals = { id: 'preview-selected-globals', name: 'Selected globals', variables: [{ id: 'preview-global-selected-row', name: 'globalChoice', value: 'selected', enabled: true }] };
@@ -98,9 +154,11 @@ try {
   await mkdir(join(temporary, '.brunomnia'), { recursive: true });
   await mkdir(join(temporary, 'collections'));
   await mkdir(join(temporary, 'environments'));
-  await writeFile(join(temporary, '.brunomnia', 'project.yaml'), stringify({
+  const metadataPath = join(temporary, '.brunomnia', 'project.yaml');
+  const metadata = {
     format: 'brunomnia', version: 37, name: 'CLI preview project', activeRequestId: 'request-first', activeEnvironmentId: environment.id,
-  }));
+  };
+  await writeFile(metadataPath, stringify(metadata));
   await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
   await writeFile(join(temporary, 'environments', 'preview.yaml'), stringify(environment));
   await writeFile(join(temporary, 'environments', 'selected.yaml'), stringify(selectedGlobals));
@@ -181,6 +239,72 @@ try {
   const rejectedEnvironment = await runFailure(['run', 'collection', collection.id, '-w', temporary, '--env', 'missing', '--item', 'request-first']);
   assert.equal(rejectedEnvironment.code, 1);
   assert.match(rejectedEnvironment.stderr, /No collection environment found/);
+  const proxyOutput = JSON.parse(await run([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-first',
+    '--httpProxy', `http://127.0.0.1:${proxyAddress.port}`, '--env-var', 'row=proxy', '--env-var', 'region=proxy', '--reporter', 'json',
+  ]));
+  assert.deepEqual(proxyOutput.report.results.map((result) => [result.requestId, result.status]), [['request-first', 200]]);
+  assert.equal(proxyArrivals.length, 1);
+  assert.match(proxyArrivals[0], new RegExp(`^http://127\\.0\\.0\\.1:${address.port}/first`));
+  const bypassOutput = JSON.parse(await run([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-first',
+    '--httpProxy', `http://127.0.0.1:${proxyAddress.port}`, '--noProxy', '127.0.0.1', '--env-var', 'row=bypass', '--env-var', 'region=bypass', '--reporter', 'json',
+  ]));
+  assert.deepEqual(bypassOutput.report.results.map((result) => [result.requestId, result.status]), [['request-first', 200]]);
+  assert.equal(proxyArrivals.length, 1);
+  assert.equal(arrivals.at(-1).path, '/first?row=bypass&region=bypass&global=default&collection=selected');
+  const customProxyOutput = JSON.parse(await run([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-custom-proxy',
+    '--env-var', 'row=custom', '--env-var', 'region=custom', '--reporter', 'json',
+  ]));
+  assert.deepEqual(customProxyOutput.report.results.map((result) => [result.requestId, result.status]), [['request-custom-proxy', 200]]);
+  assert.equal(proxyArrivals.length, 2);
+  const directOutput = JSON.parse(await run([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-direct',
+    '--httpProxy', `http://127.0.0.1:${proxyAddress.port}`, '--env-var', 'row=direct', '--env-var', 'region=direct', '--reporter', 'json',
+  ]));
+  assert.deepEqual(directOutput.report.results.map((result) => [result.requestId, result.status]), [['request-direct', 200]]);
+  assert.equal(proxyArrivals.length, 2);
+  assert.equal(arrivals.at(-1).path, '/direct?row=direct&region=direct&global=default&collection=selected');
+  const rejectedTls = await runFailure([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-secure',
+    '--env-var', 'row=tls', '--env-var', 'region=tls', '--reporter', 'json',
+  ]);
+  assert.equal(rejectedTls.code, 1);
+  assert.deepEqual(JSON.parse(rejectedTls.stdout).report.results.map((result) => [result.requestId, result.status, result.passed]), [['request-secure', 0, false]]);
+  const insecureTls = JSON.parse(await run([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-secure', '--disableCertValidation',
+    '--env-var', 'row=tls', '--env-var', 'region=tls', '--reporter', 'json',
+  ]));
+  assert.deepEqual(insecureTls.report.results.map((result) => [result.requestId, result.status]), [['request-secure', 200]]);
+  assert.deepEqual(secureArrivals, ['/secure?row=tls&region=tls']);
+  const proxiedTls = JSON.parse(await run([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-secure', '-k',
+    '--httpsProxy', `http://127.0.0.1:${proxyAddress.port}`, '--env-var', 'row=tls-proxy', '--env-var', 'region=tls-proxy', '--reporter', 'json',
+  ]));
+  assert.deepEqual(proxiedTls.report.results.map((result) => [result.requestId, result.status]), [['request-secure', 200]]);
+  assert.equal(proxyConnects.length, 1);
+  assert.equal(proxyConnects[0], `127.0.0.1:${secureAddress.port}`);
+  assert.deepEqual(secureArrivals.at(-1), '/secure?row=tls-proxy&region=tls-proxy');
+  metadata.certificates = {
+    ca: { enabled: true, pem: tlsCa },
+    clients: [{ id: 'cli-client', host: '127.0.0.1', enabled: true, certificatePem: clientCertificate, keyPem: clientKey, pfxBase64: '', passphrase: '' }],
+  };
+  await writeFile(metadataPath, stringify(metadata));
+  const mutualTls = JSON.parse(await run([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-mutual',
+    '--env-var', 'row=mutual', '--env-var', 'region=mutual', '--reporter', 'json',
+  ]));
+  assert.deepEqual(mutualTls.report.results.map((result) => [result.requestId, result.status]), [['request-mutual', 200]]);
+  assert.deepEqual(mutualArrivals, [{ path: '/mutual?row=mutual&region=mutual', authorized: true }]);
+  metadata.certificates.clients = [{ id: 'cli-client-pfx', host: '127.0.0.1', enabled: true, certificatePem: '', keyPem: '', pfxBase64: clientPfxBase64, passphrase: 'openssl-secret' }];
+  await writeFile(metadataPath, stringify(metadata));
+  const mutualPfx = JSON.parse(await run([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-mutual',
+    '--env-var', 'row=pfx', '--env-var', 'region=pfx', '--reporter', 'json',
+  ]));
+  assert.deepEqual(mutualPfx.report.results.map((result) => [result.requestId, result.status]), [['request-mutual', 200]]);
+  assert.deepEqual(mutualArrivals.at(-1), { path: '/mutual?row=pfx&region=pfx', authorized: true });
   const rejected = await runFailure(['run', 'test', join(process.cwd(), 'examples', 'cli-workspace.json'), 'CLI Health', '--env-var', 'region=override']);
   assert.equal(rejected.code, 1);
   assert.match(rejected.stderr, /--env-var is only available for run collection/);
@@ -239,8 +363,11 @@ try {
   const missingScript = await runFailure(['script', '--config', join(temporary, '.insorc'), 'missing']);
   assert.equal(missingScript.code, 1);
   assert.match(missingScript.stderr, /Available scripts: preview, invalid/);
-  console.log('CLI runner preview smoke passed: global and collection environment selection, standalone global files, config scripts, config, CI fallback, working directory, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  console.log('CLI runner preview smoke passed: HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, working directory, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
+  await close(secureServer).catch(() => undefined);
+  await close(mutualServer).catch(() => undefined);
+  await close(proxyServer).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });
 }

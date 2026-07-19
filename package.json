@@ -30,6 +30,7 @@
     "jsonpath-plus": "10.4.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "undici": "8.7.0",
     "xpath": "0.0.34",
     "yaml": "^2.9.0"
   },

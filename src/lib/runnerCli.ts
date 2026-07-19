@@ -19,14 +19,14 @@ const runnerCliValueOptions = new Set([
   '--env', '-e', '--globals', '-g', '--requestNamePattern', '--request-name-pattern', '--testNamePattern', '--test-name-pattern', '-t',
   '--item', '--request', '-i', '--requestTimeout', '--request-timeout', '--env-var', '--iteration-count', '--iterations', '-n',
   '--retries', '--delay-request', '--delay', '--iteration-data', '--data', '-d', '--script-timeout', '--reporter', '-r',
-  '--output', '-o', '--workingDir', '--working-dir', '-w', '--config',
+  '--output', '-o', '--workingDir', '--working-dir', '-w', '--config', '--httpProxy', '--http-proxy', '--httpsProxy', '--https-proxy', '--noProxy', '--no-proxy',
 ]);
 
 const runnerCliVariadicValueOptions = new Set(['--dataFolders', '--data-folders', '-f']);
 
 const runnerCliBooleanOptions = new Set([
   '--bail', '-b', '--allow-scripts', '--allow-script-requests', '--allow-script-files', '--allow-template-files',
-  '--allow-external-vaults', '--ci', '--verbose', '--printOptions', '--print-options', '--help', '-h',
+  '--allow-external-vaults', '--disableCertValidation', '--disable-cert-validation', '-k', '--ci', '--verbose', '--printOptions', '--print-options', '--help', '-h',
 ]);
 
 export const runnerCliPositionalArguments = (values: string[]) => {

@@ -2,7 +2,9 @@ import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { rootCertificates } from 'node:tls';
 import vm from 'node:vm';
+import { Agent, EnvHttpProxyAgent, fetch as undiciFetch } from 'undici';
 import { parse as parseYaml, parseAllDocuments } from 'yaml';
 import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openapi';
 import { createBlankRequest } from '../src/data/seed';
@@ -670,25 +672,33 @@ const executeHttp = async (
   headers = applyDefaultUserAgentHeader(applyDefaultAcceptHeader(headers), request.disableUserAgentHeader);
   const started = performance.now();
   const timeoutMs = resolveRequestTimeout(request.transport, requestTimeoutMs);
-  if (resolveProxyTransport(request.transport, url, proxyPreferences).proxyMode === 'custom') {
-    throw new Error('The CLI cannot use a manual proxy because Node Fetch does not expose per-request proxy configuration. Use the native desktop transport or configure a supported runner-level proxy.');
+  const requestTls = {
+    rejectUnauthorized: validateCertificates && resolveCertificateValidation(request.transport, true),
+    ...(request.transport.caCertificatePem ? { ca: [...rootCertificates, request.transport.caCertificatePem] } : {}),
+    ...(request.transport.clientCertificatePem ? { cert: request.transport.clientCertificatePem } : {}),
+    ...(request.transport.clientKeyPem ? { key: request.transport.clientKeyPem } : {}),
+    ...(request.transport.clientCertificatePfxBase64 ? { pfx: Buffer.from(request.transport.clientCertificatePfxBase64, 'base64') } : {}),
+    ...(request.transport.clientCertificatePassphrase ? { passphrase: request.transport.clientCertificatePassphrase } : {}),
+  };
+  const resolvedProxy = resolveProxyTransport(request.transport, url, proxyPreferences);
+  const dispatcher = resolvedProxy.proxyMode === 'custom'
+    ? new EnvHttpProxyAgent({ httpProxy: resolvedProxy.proxyUrl, httpsProxy: resolvedProxy.proxyUrl, noProxy: resolvedProxy.proxyExclusions, connect: requestTls, requestTls })
+    : new Agent({ connect: requestTls });
+  try {
+    const response = await undiciFetch(url, {
+      method: request.method,
+      headers: Object.fromEntries(headers.filter((header) => header.enabled && header.name).map((header) => [header.name, header.value])),
+      body: request.method === 'GET' || request.method === 'HEAD' ? undefined : body,
+      redirect: request.transport.followRedirects ? 'follow' : 'manual',
+      signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
+      dispatcher,
+    });
+    const responseBody = await response.text();
+    const getSetCookie = response.headers.getSetCookie;
+    return { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url, setCookies: getSetCookie.call(response.headers) };
+  } finally {
+    await dispatcher.close();
   }
-  if (request.transport.caCertificatePem || request.transport.clientCertificatePem || request.transport.clientKeyPem || request.transport.clientCertificatePfxBase64) {
-    throw new Error('The CLI cannot attach custom CA or client-certificate material because Node Fetch does not expose per-request TLS configuration. Use the native desktop transport for workspace CA, PEM, or PFX/PKCS#12 identities.');
-  }
-  if (!resolveCertificateValidation(request.transport, validateCertificates)) {
-    throw new Error('The CLI cannot disable TLS certificate validation because Node Fetch does not expose that authority. Use the native desktop transport for explicitly untrusted development certificates.');
-  }
-  const response = await fetch(url, {
-    method: request.method,
-    headers: Object.fromEntries(headers.filter((header) => header.enabled && header.name).map((header) => [header.name, header.value])),
-    body: request.method === 'GET' || request.method === 'HEAD' ? undefined : body,
-    redirect: request.transport.followRedirects ? 'follow' : 'manual',
-    signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
-  });
-  const responseBody = await response.text();
-  const getSetCookie = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
-  return { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url, setCookies: getSetCookie?.call(response.headers) ?? [] };
 };
 
 const usage = `Brunomnia CLI
@@ -696,8 +706,8 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [-f, --dataFolders <folder...>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
-  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [-f, --dataFolders <folder...>] [same options except --item/--env-var/--delay-request]
+  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [-f, --dataFolders <folder...>] [--httpProxy URL] [--httpsProxy URL] [--noProxy HOSTS] [--disableCertValidation] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
+  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [-f, --dataFolders <folder...>] [-k, --disableCertValidation] [same transport/trust options]
   brunomnia script <name> [arguments...] [--config <path>]
 
 Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the collection, suite, or API-spec identifier positionally.
@@ -819,12 +829,11 @@ const main = async () => {
     const externalSecret = hasFlag('--allow-external-vaults')
       ? createCliExternalSecretResolver(workspace.governance.policy.externalVaultAllowlist)
       : async () => { throw new Error('External vault access is disabled. Re-run trusted workspaces with --allow-external-vaults.'); };
-    const proxyPreferences = {
-        enabled: workspace.preferences.proxyEnabled,
-        httpProxy: workspace.preferences.httpProxy,
-        httpsProxy: workspace.preferences.httpsProxy,
-        noProxy: workspace.preferences.noProxy,
-      };
+    const httpProxy = firstFlag('--httpProxy', '--http-proxy') ?? process.env.HTTP_PROXY ?? process.env.http_proxy ?? '';
+    const httpsProxy = firstFlag('--httpsProxy', '--https-proxy') ?? process.env.HTTPS_PROXY ?? process.env.https_proxy ?? '';
+    const noProxy = firstFlag('--noProxy', '--no-proxy') ?? process.env.NO_PROXY ?? process.env.no_proxy ?? '';
+    const proxyPreferences = { enabled: Boolean(httpProxy || httpsProxy), httpProxy, httpsProxy, noProxy };
+    const validateCertificates = !hasFlag('--disableCertValidation') && !hasFlag('--disable-cert-validation') && !hasFlag('-k');
     let resolveResponse: NonNullable<CliRequestContext['resolveResponse']>;
     const executeAndStore = async (
       request: ApiRequest,
@@ -835,7 +844,7 @@ const main = async () => {
       responses: StoredResponse[] = cliResponses,
       collectionEnvironmentId = collection.activeSubEnvironmentId ?? '',
     ): Promise<{ result: HttpResponse; stored: StoredResponse }> => {
-      const result = await executeHttp(request, variables, requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, {
+      const result = await executeHttp(request, variables, requestTimeoutMs, validateCertificates, proxyPreferences, {
         environmentId,
         cookies,
         responses,
