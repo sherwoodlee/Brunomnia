@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import type { Workspace } from '../types';
-import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, buildRunnerItemKey, discardRunnerDraftEntries, parseRunnerData, resolveRunnerTarget, runCollection, runnerDraftKey, validateTestNamePattern } from './runner';
+import type { RunnerItemResult, Workspace } from '../types';
+import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, discardRunnerDraftEntries, parseRunnerData, resolveRunnerTarget, runCollection, runnerDraftKey, validateTestNamePattern } from './runner';
+import { formatResponseTimeline } from './timeline';
 
 describe('collection runner', () => {
   it('resolves workspace and nested folder runner targets', () => {
@@ -18,7 +19,7 @@ describe('collection runner', () => {
   });
 
   it('keys Runner drafts by workspace and clears only closed documents', () => {
-    const draft = { collectionId: 'collection', environmentId: 'environment', iterations: 2, retries: 1, bail: true, delayMs: 25, streamWindowMs: 500, data: '[{}]', requestPlan: [{ id: 'request', enabled: false }] };
+    const draft = { collectionId: 'collection', environmentId: 'environment', iterations: 2, retries: 1, bail: true, keepLog: true, delayMs: 25, streamWindowMs: 500, data: '[{}]', requestPlan: [{ id: 'request', enabled: false }] };
     const drafts = {
       [runnerDraftKey('workspace-a', 'runner_one')]: draft,
       [runnerDraftKey('workspace-a', 'runner_two')]: { ...draft, iterations: 3 },
@@ -450,7 +451,7 @@ describe('collection runner', () => {
       { id: 'collection', name: 'Collection', expanded: true, requests },
       { id: 'env', name: 'Env', variables: [] },
       { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
-      async () => ({ status: 200, statusText: 'OK', headers, body, durationMs: 1, sizeBytes: new TextEncoder().encode(body).byteLength }),
+      async () => ({ status: 200, statusText: 'OK', headers, body, durationMs: 1, sizeBytes: new TextEncoder().encode(body).byteLength, timeline: [{ name: 'DataOut', value: body, elapsedMs: 0 }] }),
       async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
     );
 
@@ -468,6 +469,91 @@ describe('collection runner', () => {
     expect(requestSnapshots.reduce((total, snapshot) => total + snapshot.storedBytes, 0)).toBeLessThanOrEqual(RUNNER_REQUEST_REPORT_BYTES);
     expect(requestSnapshots.at(-1)?.headersTruncated).toBe(true);
     expect(requestSnapshots.at(-1)?.storedBytes).toBe(0);
+    const timelines = report.results.flatMap((result) => result.timeline ?? []);
+    expect(timelines).toHaveLength(70);
+    expect(timelines.every((timeline) => timeline.storedBytes <= RUNNER_TIMELINE_PER_RESULT_BYTES)).toBe(true);
+    expect(timelines.reduce((total, timeline) => total + timeline.storedBytes, 0)).toBeLessThanOrEqual(RUNNER_TIMELINE_REPORT_BYTES);
+    expect(timelines.some((timeline) => timeline.truncated)).toBe(true);
+    expect(timelines.at(-1)?.storedBytes).toBe(0);
+  });
+
+  it('retains timeline evidence by default and omits it when log retention is disabled', async () => {
+    const request = createBlankRequest('timeline');
+    const execute = async () => ({
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      body: '{}',
+      durationMs: 4,
+      sizeBytes: 2,
+      timeline: [
+        { name: 'Text' as const, value: 'Preparing GET request to https://example.test/orders?access_token=secret&view=full', elapsedMs: 0 },
+        { name: 'HeaderOut' as const, value: 'Authorization: Bearer secret\nAccept: application/json', elapsedMs: 0 },
+        { name: 'DataIn' as const, value: 'Received 2 B chunk', elapsedMs: Number.NaN, hidden: true },
+      ],
+    });
+    const run = (keepLog?: boolean) => runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], keepLog },
+      execute,
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    );
+
+    const retained = await run();
+    expect(retained.keepLog).toBe(true);
+    expect(retained.results[0].timeline).toMatchObject({
+      truncated: false,
+      entries: [
+        { name: 'Text', value: 'Preparing GET request to https://example.test/orders?access_token=%5Bredacted%5D&view=full' },
+        { name: 'HeaderOut', value: 'Authorization: [redacted]\nAccept: application/json' },
+        { name: 'DataIn', value: 'Received 2 B chunk', elapsedMs: 0, hidden: true },
+      ],
+    });
+    const disabled = await run(false);
+    expect(disabled.keepLog).toBe(false);
+    expect(disabled.results[0].timeline).toBeUndefined();
+  });
+
+  it('aggregates retry timelines and errors in execution order with pinned prefixes', () => {
+    const result = (id: string, attempt: number, patch: Partial<RunnerItemResult>): RunnerItemResult => ({
+      id,
+      key: 'item',
+      requestId: 'request',
+      requestName: attempt < 3 ? 'Retry request' : 'Failed request',
+      iteration: 1,
+      attempt,
+      status: 0,
+      durationMs: attempt,
+      passed: false,
+      tests: [],
+      ...patch,
+    });
+    const timeline = aggregateRunnerTimeline([
+      result('first', 1, { timeline: { entries: [{ name: 'HeaderOut', value: 'GET /one', elapsedMs: 0 }, { name: 'DataOut', value: 'one', elapsedMs: 0 }], truncated: false, storedBytes: 11 } }),
+      result('second', 2, { timeline: { entries: [{ name: 'HeaderIn', value: 'HTTP/1.1 200 OK', elapsedMs: 2 }, { name: 'SslDataIn', value: 'ignored category evidence', elapsedMs: 2 }], truncated: false, storedBytes: 40 } }),
+      result('error', 3, { error: 'connection refused' }),
+    ], 'runner flow failed');
+
+    expect(timeline.map((entry) => entry.value)).toEqual([
+      '------ Start of request (Retry request) ------',
+      'GET /one',
+      'one',
+      '------ Start of request (Retry request) ------',
+      'HTTP/1.1 200 OK',
+      'ignored category evidence',
+      '------ Start of request (Failed request) ------',
+      'connection refused',
+      'runner flow failed',
+    ]);
+    const formatted = formatResponseTimeline(timeline);
+    expect(formatted).toContain('* ------ Start of request (Retry request) ------');
+    expect(formatted).toContain('> GET /one');
+    expect(formatted).toContain('| one');
+    expect(formatted).toContain('< HTTP/1.1 200 OK');
+    expect(formatted).toContain('<< ignored category evidence');
+    expect(formatted.indexOf('> GET /one')).toBeLessThan(formatted.indexOf('< HTTP/1.1 200 OK'));
+    expect(formatted).toContain('* connection refused\n* runner flow failed');
   });
 
   it('records resolved request metadata while redacting named secrets and omitting body content', async () => {

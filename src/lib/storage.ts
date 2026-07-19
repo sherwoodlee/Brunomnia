@@ -300,10 +300,11 @@ const normalizePreferences = (value: unknown): AppPreferences => {
   };
 };
 
+const responseTimelineNames = new Set<ResponseTimelineEntry['name']>(['HeaderIn', 'DataIn', 'SslDataIn', 'HeaderOut', 'DataOut', 'SslDataOut', 'Text']);
 const normalizeResponseTimeline = (value: unknown): ResponseTimelineEntry[] => !Array.isArray(value) ? [] : value.slice(0, 1_000).flatMap((entry): ResponseTimelineEntry[] => {
   const source = record(entry);
   if (!source) return [];
-  const name = source.name === 'DataOut' ? 'DataOut' : 'Text';
+  const name = responseTimelineNames.has(source.name as ResponseTimelineEntry['name']) ? source.name as ResponseTimelineEntry['name'] : 'Text';
   const elapsedMs = Number(source.elapsedMs);
   return [{
     name,

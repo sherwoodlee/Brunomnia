@@ -1148,10 +1148,14 @@ kbd {
 .runner-config label.runner-toggle { align-items: center; flex-direction: row; font-size: 9px; letter-spacing: 0; text-transform: none; }
 .runner-number-grid { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
 .runner-config p { color: var(--faint); font-size: 9px; line-height: 1.45; }
-.runner-results { display: grid; grid-template-rows: 106px minmax(0, 1fr) auto; min-height: 0; }
+.runner-results { display: grid; grid-template-rows: 126px minmax(0, 1fr) auto; min-height: 0; }
 .runner-results > header { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 18px 22px; }
 .runner-results > header small { color: var(--muted); font-size: 9px; }
 .runner-results > header h2 { font-size: 19px; font-weight: 550; margin: 3px 0 0; }
+.runner-heading { min-width: 0; }
+.runner-view-tabs { display: flex; gap: 3px; margin-top: 10px; }
+.runner-view-tabs button { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font-size: 9px; padding: 3px 7px 5px; }
+.runner-view-tabs button[aria-pressed="true"] { border-bottom-color: var(--accent); color: var(--text); }
 .runner-stats { align-items: baseline; display: grid; gap: 2px 11px; grid-template-columns: repeat(5, auto); text-align: right; }
 .runner-stats strong { font: 21px var(--font-mono); }
 .runner-stats strong.active { color: var(--accent); }
@@ -1198,6 +1202,9 @@ kbd {
 .runner-response-content summary { color: var(--muted); cursor: pointer; font-size: 9px; }
 .runner-response-content pre { color: var(--text-soft); font: 9px/1.5 var(--font-mono); margin: 7px 0 0; max-height: 115px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
 .runner-body-preview { min-width: 0; }
+.runner-console { min-height: 0; overflow: auto; padding: 16px 18px; }
+.runner-console pre { color: var(--text-soft); font: 9px/1.55 var(--font-mono); margin: 0; white-space: pre-wrap; word-break: break-word; }
+.runner-console > p { color: var(--amber); font-size: 9px; margin: 14px 0 0; }
 
 .mock-content { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
 .mock-grid { display: grid; flex: 1; grid-template-columns: 260px minmax(500px, 1fr) 250px; min-height: 0; min-width: 960px; overflow: auto; }

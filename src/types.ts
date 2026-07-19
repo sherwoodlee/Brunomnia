@@ -310,7 +310,7 @@ export type StreamConnectionMetadata = {
 };
 
 export type ResponseTimelineEntry = {
-  name: 'Text' | 'DataOut';
+  name: 'HeaderIn' | 'DataIn' | 'SslDataIn' | 'HeaderOut' | 'DataOut' | 'SslDataOut' | 'Text';
   value: string;
   elapsedMs: number;
   hidden?: boolean;
@@ -818,6 +818,13 @@ export type RunnerItemResult = {
   tests: ScriptTestResult[];
   request?: RunnerRequestSnapshot;
   response?: RunnerResponseSnapshot;
+  timeline?: RunnerTimelineSnapshot;
+};
+
+export type RunnerTimelineSnapshot = {
+  entries: ResponseTimelineEntry[];
+  truncated: boolean;
+  storedBytes: number;
 };
 
 export type RunnerRequestSnapshot = {
@@ -854,6 +861,7 @@ export type RunnerReport = {
   finishedAt: string;
   iterations: number;
   retries: number;
+  keepLog?: boolean;
   testNamePattern?: string;
   matchedTests?: number;
   total: number;

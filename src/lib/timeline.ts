@@ -14,6 +14,21 @@ export const describeTimelineBytes = (bytes: number) => {
   return `${(bytes / 1_048_576).toFixed(bytes < 10_485_760 ? 1 : 0)} MiB`;
 };
 
+const timelinePrefix: Record<ResponseTimelineEntry['name'], string> = {
+  HeaderIn: '< ',
+  DataIn: '| ',
+  SslDataIn: '<< ',
+  HeaderOut: '> ',
+  DataOut: '| ',
+  SslDataOut: '>> ',
+  Text: '* ',
+};
+
+export const formatResponseTimeline = (timeline: ResponseTimelineEntry[]) => timeline.map((entry, index, all) => {
+  const lines = String(entry.value).replace(/\n$/, '').split('\n').filter((line) => !/^\s*$/.test(line)).map((line) => `${timelinePrefix[entry.name] ?? '* '}${line}`);
+  return `${index > 0 && all[index - 1].name !== entry.name ? '\n' : ''}${lines.join('\n')}`;
+}).join('\n').trim();
+
 type TimelinePayload = { bytes: number; value: string; binary?: boolean; approximate?: boolean };
 
 const requestPayload = (request: ApiRequest, graphqlPayload?: string): TimelinePayload | undefined => {

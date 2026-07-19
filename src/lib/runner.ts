@@ -8,6 +8,8 @@ import type {
   RunnerReport,
   RunnerRequestSnapshot,
   RunnerResponseSnapshot,
+  RunnerTimelineSnapshot,
+  ResponseTimelineEntry,
   ScriptRunResult,
   Workspace,
 } from '../types';
@@ -39,6 +41,7 @@ export type RunnerOptions = {
   requestIds?: string[];
   testNamePattern?: string;
   bail?: boolean;
+  keepLog?: boolean;
   flowStepLimit?: number;
   shouldCancel?: () => boolean;
   shouldSkip?: (key: string) => boolean;
@@ -55,6 +58,7 @@ export type RunnerWorkbenchDraft = {
   iterations: number;
   retries: number;
   bail: boolean;
+  keepLog: boolean;
   delayMs: number;
   streamWindowMs: number;
   data: string;
@@ -113,8 +117,11 @@ export const RUNNER_RESPONSE_PER_RESULT_BYTES = 32_000;
 export const RUNNER_RESPONSE_REPORT_BYTES = 1_000_000;
 export const RUNNER_REQUEST_PER_RESULT_BYTES = 16_000;
 export const RUNNER_REQUEST_REPORT_BYTES = 500_000;
+export const RUNNER_TIMELINE_PER_RESULT_BYTES = 64_000;
+export const RUNNER_TIMELINE_REPORT_BYTES = 1_000_000;
 const RUNNER_RESPONSE_BODY_BYTES = 16_000;
 const RUNNER_RESPONSE_HEADERS = 64;
+const RUNNER_TIMELINE_ENTRIES = 1_000;
 
 export const buildRunnerItemKey = (iteration: number, index: number, requestId: string) => `${iteration}-${index}-${requestId}`;
 
@@ -184,6 +191,46 @@ const redactSensitiveQuery = (value: string) => {
 const base64Bytes = (value: string) => {
   const source = value.replace(/\s/g, '');
   return Math.max(0, Math.floor((source.length * 3) / 4) - (source.endsWith('==') ? 2 : source.endsWith('=') ? 1 : 0));
+};
+
+const redactTimelineValue = (entry: ResponseTimelineEntry) => {
+  if (entry.name === 'Text') return entry.value.replace(/https?:\/\/[^\s]+/gi, (url) => redactSensitiveQuery(url));
+  if (entry.name !== 'HeaderIn' && entry.name !== 'HeaderOut') return entry.value;
+  return entry.value.split('\n').map((line) => {
+    const separator = line.indexOf(':');
+    if (separator <= 0 || !sensitiveName(line.slice(0, separator).trim())) return line;
+    return `${line.slice(0, separator)}: [redacted]`;
+  }).join('\n');
+};
+
+export const captureRunnerTimeline = (timeline: ResponseTimelineEntry[], budget: ResponseSnapshotBudget): RunnerTimelineSnapshot => {
+  let remaining = Math.min(RUNNER_TIMELINE_PER_RESULT_BYTES, Math.max(0, budget.remaining));
+  let storedBytes = 0;
+  let truncated = timeline.length > RUNNER_TIMELINE_ENTRIES;
+  const entries: ResponseTimelineEntry[] = [];
+  for (const entry of timeline.slice(0, RUNNER_TIMELINE_ENTRIES)) {
+    if (remaining <= 0) { truncated = true; break; }
+    const value = takeUtf8(redactTimelineValue(entry), remaining);
+    remaining -= value.bytes;
+    budget.remaining -= value.bytes;
+    storedBytes += value.bytes;
+    truncated ||= value.truncated;
+    entries.push({ ...entry, value: value.value, elapsedMs: Number.isFinite(entry.elapsedMs) ? Math.max(0, entry.elapsedMs) : 0 });
+    if (value.truncated) break;
+  }
+  return { entries, truncated, storedBytes };
+};
+
+export const aggregateRunnerTimeline = (results: RunnerItemResult[], flowError?: string): ResponseTimelineEntry[] => {
+  const entries: ResponseTimelineEntry[] = [];
+  results.forEach((result) => {
+    if (!result.timeline?.entries.length && !result.error) return;
+    entries.push({ name: 'Text', value: `------ Start of request (${result.requestName}) ------`, elapsedMs: 0 });
+    if (result.timeline?.entries.length) entries.push(...result.timeline.entries);
+    if (result.error) entries.push({ name: 'Text', value: result.error, elapsedMs: result.durationMs });
+  });
+  if (flowError && !results.some((result) => result.error === flowError)) entries.push({ name: 'Text', value: flowError, elapsedMs: 0 });
+  return entries;
 };
 const requestBodyMetadata = (request: ApiRequest, variables: Record<string, string>) => {
   if (request.protocol === 'graphql') {
@@ -265,6 +312,8 @@ export const runCollection = async (
   let flowError: string | undefined;
   const responseSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_RESPONSE_REPORT_BYTES };
   const requestSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_REQUEST_REPORT_BYTES };
+  const timelineSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_TIMELINE_REPORT_BYTES };
+  const keepLog = options.keepLog !== false;
   const iterations = boundedInteger(options.iterations, 1, 1000);
   const retries = boundedInteger(options.retries, 0, 10);
   const testNamePattern = validateTestNamePattern(options.testNamePattern);
@@ -507,6 +556,7 @@ export const runCollection = async (
             tests,
             request: retainResult ? captureRunnerRequest(request, requestVariables, response?.requestUrl, requestSnapshotBudget) : undefined,
             response: retainResult && response ? captureRunnerResponse(response, responseSnapshotBudget) : undefined,
+            timeline: retainResult && keepLog && response?.timeline?.length ? captureRunnerTimeline(response.timeline, timelineSnapshotBudget) : undefined,
           };
           if (retainResult) {
             results.push(result);
@@ -578,6 +628,7 @@ export const runCollection = async (
     finishedAt: new Date().toISOString(),
     iterations,
     retries,
+    keepLog,
     testNamePattern,
     matchedTests: results.reduce((total, result) => total + result.tests.length, 0),
     total: results.length,

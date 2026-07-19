@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { HttpResponse } from '../types';
-import { buildResponseTimeline, describeTimelineBytes } from './timeline';
+import { buildResponseTimeline, describeTimelineBytes, formatResponseTimeline } from './timeline';
 
 const response: HttpResponse = {
   status: 201,
@@ -69,5 +69,17 @@ describe('response timeline evidence', () => {
     expect(describeTimelineBytes(1_024)).toBe('1.0 KiB');
     expect(describeTimelineBytes(10_240)).toBe('10 KiB');
     expect(describeTimelineBytes(1_048_576)).toBe('1.0 MiB');
+  });
+
+  it('formats every pinned timeline category and prefixes each nonblank line', () => {
+    expect(formatResponseTimeline([
+      { name: 'HeaderIn', value: 'HTTP/1.1 200 OK\nContent-Type: text/plain\n', elapsedMs: 1 },
+      { name: 'DataIn', value: 'Received 2 B chunk', elapsedMs: 2 },
+      { name: 'SslDataIn', value: 'incoming TLS', elapsedMs: 2 },
+      { name: 'HeaderOut', value: 'GET / HTTP/1.1', elapsedMs: 0 },
+      { name: 'DataOut', value: 'one\n\ntwo', elapsedMs: 0 },
+      { name: 'SslDataOut', value: 'outgoing TLS', elapsedMs: 0 },
+      { name: 'Text', value: 'Connected', elapsedMs: 1 },
+    ])).toBe('< HTTP/1.1 200 OK\n< Content-Type: text/plain\n\n| Received 2 B chunk\n\n<< incoming TLS\n\n> GET / HTTP/1.1\n\n| one\n| two\n\n>> outgoing TLS\n\n* Connected');
   });
 });
