@@ -1,4 +1,5 @@
 import type { RunnerItemResult, RunnerReport } from '../types';
+import { runnerReportDurationMs } from './runnerHistory';
 import { scriptTestFailed } from './scriptTests';
 
 export const runnerReporters = ['dot', 'list', 'min', 'progress', 'spec', 'tap', 'json', 'junit'] as const;
@@ -25,10 +26,7 @@ const seconds = (milliseconds: number) => (Math.max(0, milliseconds) / 1000).toF
 const resultLabel = (result: RunnerItemResult) => `${result.requestName} (iteration ${result.iteration}, attempt ${result.attempt})`;
 const controlItems = (report: RunnerReport) => (report.liveItems ?? []).filter((item) => item.status === 'skipped' || item.status === 'canceled');
 const controlLabel = (item: ReturnType<typeof controlItems>[number]) => `${item.requestName} (iteration ${item.iteration})`;
-const runDuration = (report: RunnerReport) => {
-  const duration = Date.parse(report.finishedAt) - Date.parse(report.startedAt);
-  return Number.isFinite(duration) && duration >= 0 ? duration : report.results.reduce((total, result) => total + Math.max(0, result.durationMs), 0);
-};
+const runDuration = runnerReportDurationMs;
 
 const failureDetails = (result: RunnerItemResult) => {
   if (result.error) return result.error;

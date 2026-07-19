@@ -9,6 +9,7 @@ const report = (patch: Partial<RunnerReport> = {}): RunnerReport => ({
   environmentId: 'environment',
   startedAt: '2026-07-19T18:00:00.000Z',
   finishedAt: '2026-07-19T18:01:01.234Z',
+  durationMs: 50,
   iterations: 1,
   retries: 0,
   total: 2,
@@ -24,7 +25,7 @@ const report = (patch: Partial<RunnerReport> = {}): RunnerReport => ({
 
 describe('Runner history presentation', () => {
   it('counts retained assertions rather than request attempts', () => {
-    expect(summarizeRunnerHistory(report())).toEqual({ durationMs: 61_234, duration: '1.02 m', total: 4, passed: 2, failed: 1, skipped: 1 });
+    expect(summarizeRunnerHistory(report())).toEqual({ durationMs: 50, duration: '50 ms', total: 4, passed: 2, failed: 1, skipped: 1 });
   });
 
   it('marks the Results badge green only when every retained assertion passed', () => {
@@ -43,12 +44,16 @@ describe('Runner history presentation', () => {
   });
 
   it('falls back to summed nonnegative attempt durations for invalid timestamps', () => {
-    const invalid = report({ startedAt: 'invalid', finishedAt: 'invalid', results: [
+    const invalid = report({ durationMs: undefined, startedAt: 'invalid', finishedAt: 'invalid', results: [
       { id: 'one', requestId: 'one', requestName: 'One', iteration: 1, attempt: 1, status: 0, durationMs: -5, passed: false, tests: [] },
       { id: 'two', requestId: 'two', requestName: 'Two', iteration: 1, attempt: 1, status: 200, durationMs: 12.5, passed: true, tests: [] },
     ] });
 
     expect(runnerReportDurationMs(invalid)).toBe(12.5);
     expect(summarizeRunnerHistory(invalid)).toMatchObject({ duration: '12.5 ms', total: 0, passed: 0, failed: 0, skipped: 0 });
+  });
+
+  it('retains the legacy wall-clock fallback when an older report has no explicit duration', () => {
+    expect(runnerReportDurationMs(report({ durationMs: undefined }))).toBe(61_234);
   });
 });

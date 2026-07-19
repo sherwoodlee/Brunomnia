@@ -107,6 +107,7 @@ describe('collection runner', () => {
     expect(report.results.map((result) => result.status)).toEqual([500, 200]);
     expect(report.passed).toBe(1);
     expect(report.failed).toBe(1);
+    expect(report.durationMs).toBe(2);
   });
 
   it('applies the configured delay before every request attempt', async () => {

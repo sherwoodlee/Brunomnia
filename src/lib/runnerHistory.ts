@@ -2,6 +2,7 @@ import type { RunnerItemResult, RunnerReport } from '../types';
 import { scriptTestStatus } from './scriptTests';
 
 export const runnerReportDurationMs = (report: RunnerReport) => {
+  if (typeof report.durationMs === 'number' && Number.isFinite(report.durationMs) && report.durationMs >= 0) return report.durationMs;
   const duration = Date.parse(report.finishedAt) - Date.parse(report.startedAt);
   return Number.isFinite(duration) && duration >= 0 ? duration : report.results.reduce((total, result) => total + Math.max(0, result.durationMs), 0);
 };

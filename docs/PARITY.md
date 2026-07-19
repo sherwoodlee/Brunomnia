@@ -1054,6 +1054,14 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Updated account-free live Runner documentation: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
 - Exact verification record: [`docs/QA_MILESTONE_191.md`](QA_MILESTONE_191.md)
 
+## Milestone 192 acceptance evidence
+
+- Pinned saved `testCtx.duration` accumulation, History source, and completed-versus-failed request audit: [`docs/QA_MILESTONE_192.md`](QA_MILESTONE_192.md)
+- Explicit bounded completed-response duration accumulation in desktop and shared CLI Runner reports: [`src/types.ts`](../src/types.ts), [`src/lib/runner.ts`](../src/lib/runner.ts), and [`bin/brunomnia.cjs`](../bin/brunomnia.cjs)
+- Shared History/text/JSON/JUnit duration selection with legacy wall-clock/attempt fallback regressions: [`src/lib/runnerHistory.ts`](../src/lib/runnerHistory.ts), [`src/lib/runnerHistory.test.ts`](../src/lib/runnerHistory.test.ts), [`src/lib/runnerReport.ts`](../src/lib/runnerReport.ts), and [`src/lib/runnerReport.test.ts`](../src/lib/runnerReport.test.ts)
+- Corrected historical boundary and account-free documentation: [`docs/QA_MILESTONE_183.md`](QA_MILESTONE_183.md) and [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
+- Exact verification record: [`docs/QA_MILESTONE_192.md`](QA_MILESTONE_192.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).

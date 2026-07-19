@@ -376,6 +376,7 @@ export const runCollection = async (
   let cancelled = false;
   let bailed = false;
   let flowError: string | undefined;
+  let responseDurationMs = 0;
   const responseSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_RESPONSE_REPORT_BYTES };
   const requestSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_REQUEST_REPORT_BYTES };
   const timelineSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_TIMELINE_REPORT_BYTES };
@@ -631,6 +632,7 @@ export const runCollection = async (
             failureDurationMs = Number.isFinite(caughtDuration) ? Math.max(0, caughtDuration) : undefined;
             error = (caught instanceof Error ? caught.message : String(caught)).replace(/https?:\/\/[^\s]+/gi, (url) => redactSensitiveQuery(url));
           }
+          if (!error && response && response.status > 0 && Number.isFinite(response.durationMs)) responseDurationMs = Math.min(Number.MAX_SAFE_INTEGER, responseDurationMs + Math.max(0, response.durationMs));
           const passed = !error && response !== undefined && response.status > 0 && response.status < 400 && tests.every((test) => !scriptTestFailed(test));
           const retainResult = testNamePattern === undefined || tests.length > 0 || !passed;
           const result: RunnerItemResult = {
@@ -699,6 +701,7 @@ export const runCollection = async (
     environmentId: environment.id,
     startedAt,
     finishedAt: new Date().toISOString(),
+    durationMs: responseDurationMs,
     iterations,
     retries,
     keepLog,

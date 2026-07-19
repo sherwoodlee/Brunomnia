@@ -868,6 +868,7 @@ export type RunnerReport = {
   environmentId: string;
   startedAt: string;
   finishedAt: string;
+  durationMs?: number;
   iterations: number;
   retries: number;
   keepLog?: boolean;

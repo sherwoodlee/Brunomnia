@@ -9,6 +9,7 @@ const report: RunnerReport = {
   environmentId: 'environment',
   startedAt: '2026-07-17T12:00:00.000Z',
   finishedAt: '2026-07-17T12:00:01.250Z',
+  durationMs: 500,
   iterations: 1,
   retries: 1,
   total: 3,
@@ -27,13 +28,14 @@ describe('runner report artifacts', () => {
     const artifact = createRunnerReportArtifact(report, 'json');
     expect(artifact.fileName).toBe('orders-billing-run-20260717T120000Z.json');
     expect(artifact.mimeType).toBe('application/json');
-    expect(JSON.parse(artifact.contents)).toMatchObject({ format: 'brunomnia-run-report', version: 1, report: { id: report.id, failed: 2 } });
+    expect(JSON.parse(artifact.contents)).toMatchObject({ format: 'brunomnia-run-report', version: 1, report: { id: report.id, durationMs: 500, failed: 2 } });
   });
 
   it('creates XML-safe JUnit with separate failures and runner errors', () => {
     const artifact = createRunnerReportArtifact(report, 'junit');
     expect(artifact.fileName).toMatch(/\.junit\.xml$/);
     expect(artifact.contents).toContain('tests="3" failures="1" errors="1"');
+    expect(artifact.contents).toContain('errors="1" time="0.500"');
     expect(artifact.contents).toContain('Create &lt;order&gt;');
     expect(artifact.contents).toContain('<failure type="assertion"');
     expect(artifact.contents).toContain('<error type="runner" message="connect&#10;refused"');
@@ -47,7 +49,7 @@ describe('runner report artifacts', () => {
     const spec = createRunnerReportArtifact(report, 'spec').contents;
     expect(spec).toContain('✖ Read & validate (iteration 1, attempt 1)');
     expect(spec).toContain('body <shape>: expected <one> & "two"���');
-    expect(spec).toContain('1 passed, 2 failed, 3 total (1250 ms)');
+    expect(spec).toContain('1 passed, 2 failed, 3 total (500 ms)');
 
     const tap = createRunnerReportArtifact(report, 'tap').contents;
     expect(tap).toContain('TAP version 13\n1..3');
@@ -58,15 +60,15 @@ describe('runner report artifacts', () => {
 
   it('supports every documented Inso reporter name plus JSON and JUnit', () => {
     expect(runnerReporters).toEqual(['dot', 'list', 'min', 'progress', 'spec', 'tap', 'json', 'junit']);
-    expect(createRunnerReportArtifact(report, 'dot').contents).toBe('.!!\n1 passed, 2 failed, 3 total (1250 ms)\n');
+    expect(createRunnerReportArtifact(report, 'dot').contents).toBe('.!!\n1 passed, 2 failed, 3 total (500 ms)\n');
     expect(createRunnerReportArtifact(report, 'list').contents).toContain('FAIL Read & validate');
-    expect(createRunnerReportArtifact(report, 'min').contents).toBe('1 passed, 2 failed, 3 total (1250 ms)\n');
+    expect(createRunnerReportArtifact(report, 'min').contents).toBe('1 passed, 2 failed, 3 total (500 ms)\n');
     expect(createRunnerReportArtifact(report, 'progress').contents).toContain('[=======-------------]');
   });
 
   it('reports the applied test-name pattern match count', () => {
     const filtered = { ...report, testNamePattern: '^body', matchedTests: 1 };
-    expect(createRunnerReportArtifact(filtered, 'min').contents).toBe('1 passed, 2 failed, 3 total, 1 matched tests (1250 ms)\n');
+    expect(createRunnerReportArtifact(filtered, 'min').contents).toBe('1 passed, 2 failed, 3 total, 1 matched tests (500 ms)\n');
     expect(JSON.parse(createRunnerReportArtifact(filtered, 'json').contents).report).toMatchObject({ testNamePattern: '^body', matchedTests: 1 });
   });
 

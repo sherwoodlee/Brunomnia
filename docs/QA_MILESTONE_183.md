@@ -46,3 +46,5 @@ The in-app Browser remains unavailable for local app navigation under the standi
 ## Acceptance boundary
 
 Milestone 183 accepts pinned History assertion totals, assertion-failure success state, duration unit/precision behavior, and active `Cancel all` wording. Brunomnia continues to retain every retry attempt and therefore counts its assertions rather than collapsing additive evidence; raw request-attempt aggregates remain in reports/exports and the Runner header, not the pinned-shaped History columns. Exact probabilistic chardet identity, lower-level libcurl wire diagnostics, remaining Runner/result edge semantics, and broader Inso work remain. Collection runner stays `Baseline`; exactly 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Remaining closure and release hardening move to Milestone 184.
+
+M192 supersedes M183's duration-source adaptation for newly created reports: new History/export duration now uses the pinned summed completed-response duration, while the M183 wall-clock rule remains only as a compatibility fallback for legacy reports without that explicit field.
