@@ -9,11 +9,12 @@ type CommandPaletteProps = {
   onExport: () => void;
   onDesign: () => void;
   onRunner: () => void;
+  onUnitTests: () => void;
   onMocks: () => void;
   onPreferences: () => void;
 };
 
-export function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment, onImport, onExport, onDesign, onRunner, onMocks, onPreferences }: CommandPaletteProps) {
+export function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvironment, onImport, onExport, onDesign, onRunner, onUnitTests, onMocks, onPreferences }: CommandPaletteProps) {
   const actions = [
     { icon: 'plus' as const, label: 'Create request', shortcut: 'N', action: onAddRequest },
     { icon: 'folder' as const, label: 'Create collection', shortcut: '⇧ N', action: onAddCollection },
@@ -22,6 +23,7 @@ export function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvir
     { icon: 'download' as const, label: 'Export artifact', shortcut: 'X', action: onExport },
     { icon: 'grid' as const, label: 'Open API design', shortcut: 'D', action: onDesign },
     { icon: 'database' as const, label: 'Open collection runner', shortcut: 'R', action: onRunner },
+    { icon: 'check' as const, label: 'Open unit tests', shortcut: 'T', action: onUnitTests },
     { icon: 'spark' as const, label: 'Open local mocks', shortcut: 'M', action: onMocks },
     { icon: 'settings' as const, label: 'Open preferences', shortcut: ',', action: onPreferences },
   ];

@@ -169,4 +169,10 @@ describe('request document tabs', () => {
     expect(parseRequestTabState(JSON.stringify(state)).tabs).toEqual([{ requestId: 'collection_one', type: 'collection', temporary: true }]);
     expect(reopenClosedDocumentTab(closeRequestTab(state, 'collection_one'), [{ id: 'collection_one', type: 'collection' }]).tabs).toEqual([{ requestId: 'collection_one', type: 'collection', temporary: false }]);
   });
+
+  it('persists standalone test suites in the shared document lifecycle', () => {
+    const state = openDocumentTab(emptyRequestTabState(), 'suite_one', 'testSuite');
+    expect(parseRequestTabState(JSON.stringify(state)).tabs).toEqual([{ requestId: 'suite_one', type: 'testSuite', temporary: true }]);
+    expect(reopenClosedDocumentTab(closeRequestTab(state, 'suite_one'), [{ id: 'suite_one', type: 'testSuite' }]).tabs).toEqual([{ requestId: 'suite_one', type: 'testSuite', temporary: false }]);
+  });
 });

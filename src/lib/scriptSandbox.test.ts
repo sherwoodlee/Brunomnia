@@ -42,6 +42,8 @@ describe('script sandbox source validation', () => {
     expect(() => new Function(buildScriptWorkerSource("insomnia.test('chai', () => expect(insomnia.response.status).to.be.above(199)); insomnia.request.setHeader('X-Test', 'yes'); insomnia.request.url.addQueryParams([{ name: 'page', value: 2 }]);"))).not.toThrow();
     expect(() => new Function(buildScriptWorkerSource("insomnia.request.url.addQueryParams('k1=v1&k1=v2'); insomnia.request.auth.update({ type: 'basic', basic: [{ key: 'username', value: 'Ada' }] }, 'basic'); const folder = insomnia.parentFolders.get('Orders'); insomnia.test('async chai', async () => insomnia.expect({ a: 1 }).to.be.an('object').that.has.all.keys('a'));"))).not.toThrow();
     expect(buildScriptWorkerSource("await insomnia.sendRequest('https://example.com');")).toContain('secondary-request limit');
+    expect(buildScriptWorkerSource("const response = await insomnia.send();")).toContain("mode: 'request-id'");
+    expect(buildScriptWorkerSource("const response = await insomnia.send('request-one');")).toContain('statusMessage: response.statusText');
     expect(buildScriptWorkerSource("insomnia.vault.get('token');")).toContain('Script vault access is disabled');
     const boundary = buildScriptWorkerSource("console.log('bounded');");
     expect(boundary).toContain('const state = undefined');

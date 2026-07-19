@@ -29,12 +29,23 @@ const scopedWorkspace = (workspace: Workspace, options: ExportOptions): Workspac
   if (options.scope === 'all') return { ...workspace, environments, activeEnvironmentId };
   const collections = selectedCollections(workspace, options);
   const designs = selectedDesigns(workspace, options);
+  const requestIds = new Set(collections.flatMap((collection) => collection.requests.map((request) => request.id)));
+  const testSuites = workspace.testSuites.flatMap((suite) => {
+    const tests = suite.tests.filter((test) => test.requestId === null || requestIds.has(test.requestId));
+    return tests.length ? [{ ...suite, tests }] : [];
+  });
+  const testIdsBySuite = new Map(testSuites.map((suite) => [suite.id, new Set(suite.tests.map((test) => test.id))]));
   return {
     ...workspace,
     activeRequestId: collections.flatMap((collection) => collection.requests)[0]?.id ?? '',
     collections,
     apiDesigns: designs,
     mockServers: [],
+    testSuites,
+    unitTestResults: workspace.unitTestResults.flatMap((result) => {
+      const testIds = testIdsBySuite.get(result.suiteId);
+      return testIds ? [{ ...result, tests: result.tests.filter((test) => testIds.has(test.testId)) }] : [];
+    }),
     environments,
     activeEnvironmentId,
     runnerReports: workspace.runnerReports.filter((report) => collections.some((collection) => collection.id === report.collectionId)),

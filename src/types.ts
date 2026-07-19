@@ -402,7 +402,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 34;
+  version: 35;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -411,6 +411,8 @@ export type Workspace = {
   history: HistoryEntry[];
   apiDesigns: ApiDesign[];
   mockServers: MockServer[];
+  testSuites: UnitTestSuite[];
+  unitTestResults: UnitTestRunResult[];
   runnerReports: RunnerReport[];
   imports: ImportRecord[];
   cookies: CookieRecord[];
@@ -697,6 +699,39 @@ export type MockServer = {
   port: number;
   routes: MockRoute[];
   source?: SourceMetadata;
+};
+
+export type UnitTest = {
+  id: string;
+  name: string;
+  code: string;
+  requestId: string | null;
+  sortKey: number;
+};
+
+export type UnitTestSuite = {
+  id: string;
+  name: string;
+  sortKey: number;
+  tests: UnitTest[];
+};
+
+export type UnitTestCaseResult = {
+  testId: string;
+  name: string;
+  requestId: string | null;
+  passed: boolean;
+  durationMs: number;
+  error?: string;
+  logs: string[];
+};
+
+export type UnitTestRunResult = {
+  id: string;
+  suiteId: string;
+  startedAt: string;
+  finishedAt: string;
+  tests: UnitTestCaseResult[];
 };
 
 export type ImportFormat = 'brunomnia' | 'insomnia-v4' | 'insomnia-v5' | 'postman-2' | 'postman-environment' | 'har' | 'openapi-3' | 'swagger-2' | 'wsdl' | 'curl';

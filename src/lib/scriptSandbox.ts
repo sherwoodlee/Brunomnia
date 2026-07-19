@@ -30,6 +30,7 @@ export type ScriptRunOptions = {
   folders?: ScriptFolderState[];
   vault?: Record<string, string>;
   sendRequest?: (request: ApiRequest, variables: Record<string, string>) => Promise<HttpResponse>;
+  sendRequestById?: (requestId?: string) => Promise<HttpResponse>;
   maxSubrequests?: number;
   maxSubrequestBytes?: number;
   readFile?: (path: string) => Promise<FilePayload>;
@@ -59,7 +60,9 @@ type WorkerOutput = {
 type WorkerSubrequest = {
   type: 'subrequest';
   id: string;
-  input: unknown;
+  input?: unknown;
+  requestId?: string;
+  mode?: 'request-id';
   variables: Record<string, string>;
 };
 
@@ -560,6 +563,21 @@ self.onmessage = async ({ data }) => {
     if (typeof callback === 'function') { Promise.resolve().then(run).then((response) => callback(null, response), (error) => callback(error)); return undefined; }
     return Promise.resolve().then(run);
   };
+  const send = (requestId) => {
+    if (!state.permissions.sendById) throw new Error('Standalone test request execution is unavailable.');
+    if (subrequestCount >= state.permissions.maxSubrequests) throw new Error('Script exceeded the secondary-request limit.');
+    subrequestCount += 1;
+    const id = 'subrequest-' + subrequestCount + '-' + Date.now();
+    const promise = new Promise((resolve, reject) => pendingSubrequests.set(id, { resolve, reject }));
+    hostPostMessage({ type: 'subrequest', id, mode: 'request-id', requestId: requestId === undefined || requestId === null ? undefined : String(requestId), variables: mergedVariables() });
+    return promise.then((response) => ({
+      status: response.status,
+      statusMessage: response.statusText,
+      data: response.body,
+      headers: Object.fromEntries(Object.entries(response.headers || {}).map(([name, value]) => [name.toLowerCase(), value])),
+      responseTime: response.durationMs,
+    }));
+  };
   const baseGlobalApi = variableApi(state.baseGlobals, state.baseGlobalDisabled);
   const globalApi = variableApi(state.environment, state.globalsAreBase ? state.baseGlobalDisabled : state.globalDisabled);
   const baseEnvironmentApi = variableApi(state.baseEnvironment, state.baseEnvironmentDisabled);
@@ -602,6 +620,7 @@ self.onmessage = async ({ data }) => {
     parentFolders,
     request: state.request,
     response: responseFacade(state.response),
+    send,
     sendRequest,
     replaceIn,
     vault: { get: (name) => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); return state.vault[String(name)]; } },
@@ -743,6 +762,17 @@ export const runBrowserScript = async (
           resolve(message);
           return;
         }
+        if (message.mode === 'request-id') {
+          if (!options.sendRequestById) {
+            worker.postMessage({ type: 'subresponse', id: message.id, error: 'Standalone test request execution is unavailable.' });
+            return;
+          }
+          void options.sendRequestById(message.requestId).then((subresponse) => {
+            if (new Blob([subresponse.body]).size > maxSubrequestBytes) throw new Error(`Script response exceeds the ${Math.round(maxSubrequestBytes / 1_000_000)} MB bridge limit.`);
+            worker.postMessage({ type: 'subresponse', id: message.id, response: subresponse });
+          }).catch((error) => worker.postMessage({ type: 'subresponse', id: message.id, error: error instanceof Error ? error.message : String(error) }));
+          return;
+        }
         if (!options.sendRequest) {
           worker.postMessage({ type: 'subresponse', id: message.id, error: 'Script-initiated requests are disabled. Enable them in Preferences.' });
           return;
@@ -776,7 +806,7 @@ export const runBrowserScript = async (
           iterationData,
           testNamePattern: options.testNamePattern,
           vault: options.vault ?? {},
-          permissions: { network: Boolean(options.sendRequest), files: Boolean(options.readFile), vault: Boolean(options.vault), maxSubrequests },
+          permissions: { network: Boolean(options.sendRequest), sendById: Boolean(options.sendRequestById), files: Boolean(options.readFile), vault: Boolean(options.vault), maxSubrequests },
         },
       });
     });

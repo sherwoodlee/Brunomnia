@@ -189,11 +189,21 @@ describe('artifact export adapters', () => {
     const workspace = cloneSeedWorkspace();
     workspace.certificates.clients = [{ id: 'pfx', host: 'api.example.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }];
     const collection = workspace.collections[1];
+    workspace.testSuites = [{ id: 'suite', name: 'Scoped suite', sortKey: 0, tests: [
+      { id: 'included', name: 'Included', code: '', requestId: collection.requests[0].id, sortKey: 0 },
+      { id: 'excluded', name: 'Excluded', code: '', requestId: workspace.collections[0].requests[0].id, sortKey: 1 },
+    ] }];
+    workspace.unitTestResults = [{ id: 'run', suiteId: 'suite', startedAt: '2026-07-19T00:00:00.000Z', finishedAt: '2026-07-19T00:00:01.000Z', tests: [
+      { testId: 'included', name: 'Included', requestId: collection.requests[0].id, passed: true, durationMs: 1, logs: [] },
+      { testId: 'excluded', name: 'Excluded', requestId: workspace.collections[0].requests[0].id, passed: true, durationMs: 1, logs: [] },
+    ] }];
     const scoped = exportArtifact(workspace, { format: 'brunomnia', scope: 'collection', collectionId: collection.id });
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(34);
+    expect(parsed.version).toBe(35);
+    expect(parsed.testSuites).toEqual([expect.objectContaining({ id: 'suite', tests: [expect.objectContaining({ id: 'included' })] })]);
+    expect(parsed.unitTestResults).toEqual([expect.objectContaining({ id: 'run', suiteId: 'suite', tests: [expect.objectContaining({ testId: 'included' })] })]);
     expect(parsed.certificates.clients[0]).toMatchObject({ pfxBase64: 'cGZ4', passphrase: 'secret' });
 
     const design = workspace.apiDesigns[0];

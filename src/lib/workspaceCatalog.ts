@@ -82,6 +82,8 @@ export const createBlankWorkspace = (name: string, preferences: AppPreferences):
     history: [],
     apiDesigns: [],
     mockServers: [],
+    testSuites: [],
+    unitTestResults: [],
     runnerReports: [],
     imports: [],
     cookies: [],

@@ -149,7 +149,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(34);
+    expect(migrated.version).toBe(35);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
@@ -198,12 +198,34 @@ describe('workspace migrations', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(34);
+    expect(migrated.version).toBe(35);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
       expect.objectContaining({ id: 'legacy', multiline: false, contentType: '', fileName: '' }),
     ]);
+  });
+
+  it('normalizes bounded standalone test suites and their saved results', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    const requestId = cloneSeedWorkspace().activeRequestId;
+    workspace.testSuites = [{
+      id: 'suite-one', name: 'Contract tests', sortKey: -10,
+      tests: [
+        { id: 'test-one', name: 'Returns 200', code: 'const response = await insomnia.send();', requestId, sortKey: 2 },
+        { id: 'test-two', name: 'Missing request', code: '', requestId: 'deleted', sortKey: 1 },
+      ],
+    }, { id: 'suite-one', name: 'Duplicate', tests: [] }, null];
+    workspace.unitTestResults = [{
+      id: 'result-one', suiteId: 'suite-one', startedAt: '2026-07-19T00:00:00.000Z', finishedAt: '2026-07-19T00:00:01.000Z',
+      tests: [{ testId: 'test-one', name: 'Returns 200', requestId, passed: true, durationMs: 12.8, logs: ['sent'] }],
+    }, { id: 'orphan', suiteId: 'missing', tests: [] }];
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.version).toBe(35);
+    expect(migrated.testSuites).toHaveLength(1);
+    expect(migrated.testSuites[0].tests.map((test) => [test.id, test.requestId])).toEqual([['test-two', null], ['test-one', requestId]]);
+    expect(migrated.unitTestResults).toEqual([expect.objectContaining({ id: 'result-one', suiteId: 'suite-one', tests: [expect.objectContaining({ passed: true, durationMs: 12, logs: ['sent'] })] })]);
   });
 
   it('preserves v34 GraphQL schema origin and complete normalized metadata', () => {
@@ -253,7 +275,7 @@ describe('workspace migrations', () => {
     };
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(34);
+    expect(migrated.version).toBe(35);
     expect(migrated.collections[0].requests[0].grpc).toMatchObject({
       protoText: 'syntax = "proto3"; service Legacy {}',
       protoEntryPath: 'schema.proto',
@@ -278,7 +300,7 @@ describe('workspace migrations', () => {
 
     const migrated = migrateWorkspace(workspace);
     const grpc = migrated.collections[0].requests[0].grpc;
-    expect(migrated.version).toBe(34);
+    expect(migrated.version).toBe(35);
     expect(grpc.descriptorSource).toBe('buf');
     expect(grpc.reflectionApiUrl).toHaveLength(8_192);
     expect(grpc.reflectionApiKey).toHaveLength(65_536);
@@ -295,7 +317,7 @@ describe('workspace migrations', () => {
       clients: [null, { id: 'client', host: 'api.example.test:8443', enabled: true, certificatePem: 'cert-pem', keyPem: 'key-pem' }, { id: 'pfx', host: '*.internal.test', enabled: true, pfxBase64: 'cGZ4', passphrase: 'secret' }],
     };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(34);
+    expect(migrated.version).toBe(35);
     expect(migrated.certificates).toEqual({
       ca: { enabled: true, pem: 'ca-pem' },
       clients: [
@@ -379,7 +401,7 @@ describe('workspace migrations', () => {
     collection.subEnvironments = [{ id: 'staging', name: 'Staging', variables: [{ name: 'host', value: 'staging.example', enabled: true }] }, null];
     collection.activeSubEnvironmentId = 'missing';
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(34);
+    expect(migrated.version).toBe(35);
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });

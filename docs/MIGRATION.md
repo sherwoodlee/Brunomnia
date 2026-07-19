@@ -2363,9 +2363,24 @@ Compatibility bounds remain explicit: this milestone changes mock navigation, no
 | Request continuity | Complete | Collection request/folder resources remain independent tabs and sidebar targets; generated collections still open their first generated request, preserving M159's source-to-request handoff |
 | Executable evidence | Complete baseline | Focused typed-tab/resource regressions, strict React/TypeScript compilation, full frontend/native suites, CLI/audit gates, and a rebuilt macOS app verify the milestone without rendered Browser QA |
 
-Compatibility bounds remain explicit: pinned ordinary workspaces contain the request tree itself, while Brunomnia's collection document intentionally exposes collection-level configuration and keeps request/folder editors as separate resources in the same strip. Standalone test-suite documents and raw-JSON environment editing remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+Compatibility bounds remain explicit: pinned ordinary workspaces contain the request tree itself, while Brunomnia's collection document intentionally exposes collection-level configuration and keeps request/folder editors as separate resources in the same strip. Milestone 162 closes standalone test-suite documents; raw-JSON environment editing remains. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 162 — remaining parity closure and release hardening
+## Milestone 162 — standalone unit-test-suite documents (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned model audit | Complete | Pinned `UnitTestSuite` stores name/sort key, `UnitTest` stores name/code/request ID/sort key, the document tab type is `testSuite`, and the UI supports suite/test CRUD, ordering, request selection, JavaScript editing, individual/all execution, and results |
+| Persisted model | Complete baseline | Workspace v35 stores bounded ordered suites/tests plus bounded local run history; malformed IDs, names, scripts, sort keys, request references, logs, durations, and orphaned results normalize safely |
+| Shared document lifecycle | Complete | Every suite ID is a typed `testSuite` document with temporary replacement/promotion, history, cycling, drag order, middle/final/all/other close, reopen, dashboard recovery, and deletion reconciliation |
+| Suite workbench | Complete baseline | A source-styled three-pane document provides suite create/open/rename/delete/order, test create/rename/delete/order, HTTP/GraphQL request selection, collapsible JavaScript editors, run-one/run-all controls, and saved result selection |
+| Execution bridge | Complete baseline | Disposable Workers wrap each test as one async assertion and expose bounded default/ID-targeted `insomnia.send()` with pinned-shaped status/statusMessage/data/lowercase headers/responseTime output alongside the existing Chai surface |
+| Request continuity | Complete baseline | Named sends use the active global plus selected collection/folder configuration, complete renderer, OAuth, enabled plugins, cookies, dependent responses, history retention, and optional script file/vault/secondary-request grants; deleting a request clears live test references without rewriting historical results |
+| Entry paths | Complete | Activity rail, command palette, project-dashboard resources, suite list, and new-suite actions all open the same shared document; edits, reordering, and execution promote a temporary suite |
+| Executable evidence | Complete baseline | Focused model/tab/sandbox/storage regressions, 66-file frontend suite, strict production build, native/CLI/audit gates, and a rebuilt arm64 macOS app verify the milestone without rendered Browser QA |
+
+Compatibility bounds remain explicit: pinned v4/v5 standalone-suite interchange and CLI suite identity/selection remain open, while realtime/gRPC requests are not offered in the pinned HTTP-request selector contract. Raw-JSON environment editing and broader ledger gaps also remain. Collections, Collection runner, Headless CLI, and Import/export stay `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 163 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
