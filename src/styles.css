@@ -349,6 +349,7 @@ kbd {
 .request-folder-title span { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .request-folder-title small { color: var(--faint); font: 8px var(--font-mono); text-align: center; }
 .request-folder-title:hover { background: rgba(255, 255, 255, .025); }
+.request-folder-title.selected { background: #20292e; box-shadow: inset 2px 0 var(--accent); color: var(--text); }
 
 .method { font-family: var(--font-mono); font-size: 10px; font-style: normal; font-weight: 700; letter-spacing: -.02em; }
 .method-get { color: var(--mint) !important; }
@@ -397,6 +398,17 @@ kbd {
 .project-dashboard-grid strong { color: var(--text-soft); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-dashboard-grid small { color: var(--muted); font: 9px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-dashboard-grid > .empty-state { border: 1px dashed var(--border); grid-column: 1 / -1; min-height: 180px; }
+.folder-document-panel { background: var(--bg); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.folder-document-panel > .document-tabs { flex: 0 0 60px; }
+.folder-document-panel > header { align-items: center; border-bottom: 1px solid var(--border); display: flex; flex: 0 0 auto; justify-content: space-between; min-height: 68px; padding: 12px 22px; }
+.folder-document-panel > header small { color: var(--accent); font-size: 8px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.folder-document-panel > header h2 { font-size: 17px; margin: 4px 0 0; }
+.folder-document-panel > header button { align-items: center; display: flex; font-size: 9px; gap: 6px; padding: 8px 10px; }
+.folder-document-panel > .folder-identity { padding-top: 12px; }
+.folder-document-panel > .interchange-tabs { flex: 0 0 auto; }
+.folder-document-panel > .folder-modal-content { flex: 1 1 auto; }
+.folder-document-panel .folder-script-grid { min-height: 100%; }
+.folder-document-panel .folder-modal-content > .request-docs-editor { height: 100%; min-height: 360px; }
 .app-shell[data-force-vertical-layout="true"] .workbench { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(520px, 1fr) minmax(430px, .85fr); overflow: auto; }
 .app-shell[data-force-vertical-layout="true"] .request-panel { border-bottom: 1px solid var(--border); border-right: 0; min-height: 520px; }
 .app-shell[data-force-vertical-layout="true"] .response-panel { min-height: 430px; }
@@ -1729,6 +1741,7 @@ kbd {
   .collection-sidebar { display: none; }
   .workbench { grid-column: 2; }
   .project-dashboard { grid-column: 2; padding: 24px 16px; }
+  .folder-document-panel { grid-column: 2; }
   .project-dashboard > header { align-items: flex-start; flex-direction: column; }
   .project-dashboard-actions { justify-content: flex-start; }
   .project-dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 24px 0; }

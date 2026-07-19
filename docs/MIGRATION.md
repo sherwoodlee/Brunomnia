@@ -2270,7 +2270,20 @@ Compatibility bounds remain explicit: pinned Close All empties the tab list and 
 
 Compatibility bounds remain explicit: this dashboard adapts pinned project-file navigation to Brunomnia's local project model and supported collection/design/mock resources. Folder/environment/mock/spec/runner resources still do not participate in the shared document-tab strip. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 155 — remaining parity closure and release hardening
+## Milestone 155 — shared request and folder document tabs (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned document audit | Complete | Pinned `BaseTab` includes `request` and `folder`; request-group route navigation creates or reuses the same temporary/permanent tab state and the shared tab component closes either type identically |
+| Legacy-safe tab model | Complete | Existing request-only per-project JSON parses as typed request tabs, while new folder tabs persist their type; one bounded temporary slot, active history, drag order, close/reopen, Close All/Others, and dashboard state are shared |
+| Folder navigation | Complete baseline | Folder-name selection opens a temporary tab, Command/Ctrl-click or middle/double-click opens permanently, selected styling follows the active document route, and the separate chevron still controls expansion |
+| Folder pane | Complete baseline | The document workbench edits Variables, Headers, Auth, pre/after scripts, Docs, name, and parent while preserving the existing settings modal for duplicate/delete actions; edits promote temporary tabs |
+| Request continuity | Complete | Request inline rename/pin/folder controls and response workbench remain unchanged behind the extracted strip; hidden request send/edit/generate shortcuts remain suppressed while a folder is active |
+| Executable evidence | Complete baseline | Focused mixed-type lifecycle tests, strict React/TypeScript compilation, full frontend/native suites, CLI/audit gates, and a rebuilt macOS app verify the milestone without rendered Browser QA |
+
+Compatibility bounds remain explicit: environment, collection/design, mock-server/route, runner, and test-suite resources still do not participate in the shared strip. Folder pane field labels adapt Brunomnia's existing `Variables` name where pinned currently says `Environment`, but the same inherited key/value scope is edited. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 156 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
