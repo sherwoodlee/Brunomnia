@@ -29,12 +29,14 @@ docker run --rm --network none \
 
 Provide a separate writable mount for `--output`. Networked collection runs require the container network and must receive only the hostnames, proxy settings, certificates, data folders, and trusted-script flags they actually need.
 
+Mounted JS/CJS/MJS/TS Inso configuration is data until the invocation explicitly adds `--allow-config-code`. That grant still runs the file in Brunomnia's resource-limited config worker; it does not grant the container or config access to Node modules, environment state, files, or the network.
+
 ## Published image
 
 Every push to `main` publishes the multi-architecture `ghcr.io/sherwoodlee/brunomnia-cli:edge` image. A `v*` tag additionally publishes that tag and `latest`. The workflow:
 
 1. Rebuilds the CLI and refuses a stale committed bundle.
-2. Executes a no-network suite and an explicitly granted stored-plugin tag from read-only mounted workspaces.
+2. Executes a no-network suite plus explicitly granted TypeScript config and stored-plugin tags from read-only mounted workspaces.
 3. Publishes Linux AMD64 and ARM64 manifests with BuildKit provenance and an SBOM.
 4. Signs the immutable manifest digest through GitHub Actions OIDC and Sigstore Cosign.
 

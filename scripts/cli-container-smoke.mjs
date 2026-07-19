@@ -40,9 +40,12 @@ workspace.plugins = [{
 }];
 workspace.pluginData = { 'container-plugin': { value: 'container' } };
 const workspacePath = join(temporary, 'workspace.json');
+const configPath = join(temporary, 'inso.config.ts');
 await writeFile(workspacePath, JSON.stringify(workspace));
+await writeFile(configPath, `type InsoConfig = { options: { ci: boolean } }; export default { options: { ci: true } } satisfies InsoConfig;`);
 await chmod(temporary, 0o755);
 await chmod(workspacePath, 0o644);
+await chmod(configPath, 0o644);
 
 try {
   await run('docker', [
@@ -68,11 +71,12 @@ try {
     'run', '--rm', '--network', 'none',
     '--volume', `${temporary}:/workspace:ro`,
     image, 'run', 'collection', 'container-plugin-collection', '--workingDir', '/workspace/workspace.json',
-    '--ci', '--allow-plugins', '--reporter', 'json',
+    '--allow-config-code', '--allow-plugins', '--printOptions', '--reporter', 'json',
   ]);
   const pluginArtifact = JSON.parse(pluginRun.stdout);
   assert.deepEqual(pluginArtifact.report.results.map(result => [result.requestId, result.status]), [['container-plugin-request', 200]]);
-  console.log('CLI container smoke passed: pinned image, non-root runtime, exact version, read-only workspace, no network, standalone suite execution, and explicit-grant plugin tags.');
+  assert.match(pluginRun.stderr, /Loaded options.*"ci":true.*"allowConfigCode":true/);
+  console.log('CLI container smoke passed: pinned image, non-root runtime, exact version, read-only workspace, no network, standalone suite execution, and explicit-grant TypeScript config/plugin tags.');
 } finally {
   await run('docker', ['image', 'rm', '--force', image]).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });

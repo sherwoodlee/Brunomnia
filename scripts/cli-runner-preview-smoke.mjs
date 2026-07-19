@@ -46,6 +46,7 @@ assert.match(testHelp, /--testNamePattern/);
 assert.match(testHelp, /--iteration-data/);
 assert.match(testHelp, /--script-timeout/);
 assert.match(testHelp, /--allow-plugins/);
+assert.match(testHelp, /--allow-config-code/);
 assert.match(testHelp, /Global options:/);
 const collectionHelp = await run(['help', 'run', 'collection'], baseEnvironment);
 assert.match(collectionHelp, /^Usage: brunomnia run collection \[identifier\] \[options\]/);
@@ -262,6 +263,12 @@ paths:
       invalid: 'echo unsafe',
     },
   }));
+  const executableConfigPath = join(temporary, 'inso.config.ts');
+  await writeFile(executableConfigPath, `
+    type InsoConfig = { options: { workingDir: string; ci: boolean; verbose: boolean } };
+    const config: InsoConfig = { options: { workingDir: ${JSON.stringify(temporary)}, ci: true, verbose: false } };
+    export default config satisfies InsoConfig;
+  `);
 
   const legacyExport = await run(['export', 'spec', temporary, apiDesign.name]);
   assert.match(legacyExport, /x-kong-name: hidden-root/);
@@ -293,6 +300,24 @@ paths:
     assert.match(diagnosed.stderr, /Found config file at .*\.insorc/);
     assert.match(diagnosed.stderr, /Loaded options.*"printOptions":true/);
   }
+  arrivals.length = 0;
+
+  const arrivalsBeforeExecutableConfig = arrivals.length;
+  const deniedExecutableConfig = await runFailure([
+    'run', 'collection', collection.id, '--config', executableConfigPath, '--item', 'request-first',
+    '--env-var', 'row=config-denied', '--env-var', 'region=config-denied', '--reporter', 'json',
+  ]);
+  assert.equal(deniedExecutableConfig.code, 1);
+  assert.match(deniedExecutableConfig.stderr, /Executable Inso config .* is disabled.*--allow-config-code/);
+  assert.equal(arrivals.length, arrivalsBeforeExecutableConfig, 'executable config denial happened after transport');
+  const executableConfig = await runFailure([
+    'run', 'collection', collection.id, '--config', executableConfigPath, '--allow-config-code', '--printOptions', '--item', 'request-first',
+    '--env-var', 'row=config', '--env-var', 'region=config', '--reporter', 'json',
+  ]);
+  assert.equal(executableConfig.code, 0);
+  assert.match(executableConfig.stderr, /Loaded options.*"ci":true.*"allowConfigCode":true/);
+  assert.deepEqual(JSON.parse(executableConfig.stdout).report.results.map(result => [result.requestId, result.status]), [['request-first', 200]]);
+  assert.equal(arrivals.at(-1).path, '/first?row=config&region=config&global=default&collection=selected');
   arrivals.length = 0;
 
   const output = await run([
@@ -606,7 +631,7 @@ paths:
   assert.equal(rejectedNonInteractiveEnvironment.code, 1);
   assert.match(rejectedNonInteractiveEnvironment.stderr, /Collection environment selection requires an interactive terminal.*--env <identifier> or --ci/);
   assert.equal(arrivals.length, arrivalsBeforeEnvironmentRefusals, 'environment refusal happened after transport');
-console.log('CLI runner preview smoke passed: prefix IDs, deterministic non-interactive resource/environment selection and refusal, pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, cross-command global-option diagnostics, explicit-grant plugin template tags, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+console.log('CLI runner preview smoke passed: prefix IDs, deterministic non-interactive resource/environment selection and refusal, pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, cross-command global-option diagnostics, explicit-grant TypeScript config and plugin template tags, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await close(secureServer).catch(() => undefined);

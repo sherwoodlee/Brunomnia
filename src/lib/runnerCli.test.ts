@@ -105,7 +105,7 @@ describe('Runner CLI command preview', () => {
     expect(runnerCliPositionalArguments(['collection', '--workingDir=/tmp/project', '--includeFullData=plaintext', '--acceptRisk'])).toEqual(['collection']);
     expect(runnerCliPositionalArguments(['design', '--workingDir', '/tmp/project', '--skipAnnotations', '--output', 'clean.yaml'])).toEqual(['design']);
     expect(runnerCliPositionalArguments(['design', '-w', '/tmp/project', '--ruleset', 'rules.yaml', '--json'])).toEqual(['design']);
-    expect(runnerCliPositionalArguments(['--config', '/tmp/.insorc', '--ci', '--workingDir', '/tmp/project', '--allow-scripts', '--allow-plugins', '--keepFile', '--version', 'suite'])).toEqual(['suite']);
+    expect(runnerCliPositionalArguments(['--config', '/tmp/.insorc', '--ci', '--workingDir', '/tmp/project', '--allow-scripts', '--allow-plugins', '--allow-config-code', '--keepFile', '--version', 'suite'])).toEqual(['suite']);
     expect(runnerCliPositionalArguments(['suite', '-f', '/tmp/first', '/tmp/second', '--reporter', 'json'])).toEqual(['suite']);
     expect(runnerCliVariadicOptionValues(['suite', '-f', '/tmp/first', '/tmp/second', '--reporter', 'json', '--dataFolders', '/tmp/third'], '--dataFolders', '--data-folders', '-f')).toEqual(['/tmp/first', '/tmp/second', '/tmp/third']);
   });

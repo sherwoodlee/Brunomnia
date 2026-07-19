@@ -30,6 +30,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { generateUnitTestCliArtifact, orderedTestSuites, orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
+import { evaluateRunnerConfigCode } from './configCode';
 import { createCliPluginTemplateRuntime } from './pluginRuntime';
 import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, selectRunnerResource, type RunnerInsoConfig } from '../src/lib/runnerCli';
 
@@ -221,51 +222,58 @@ const loadRunnerGlobalEnvironments = async (path: string): Promise<Environment[]
 };
 
 type LoadedRunnerInsoConfig = RunnerInsoConfig & { filePath?: string };
-const runnerConfigNames = ['.insorc', '.insorc.json', '.insorc.yaml', '.insorc.yml'];
-const readRunnerConfigFile = async (path: string, packageProperty = false): Promise<LoadedRunnerInsoConfig> => {
+const runnerConfigSearchPlaces = [
+  'package.json',
+  '.insorc', '.insorc.json', '.insorc.yaml', '.insorc.yml', '.insorc.js', '.insorc.ts', '.insorc.cjs', '.insorc.mjs',
+  '.config/insorc', '.config/insorc.json', '.config/insorc.yaml', '.config/insorc.yml', '.config/insorc.js', '.config/insorc.ts', '.config/insorc.cjs', '.config/insorc.mjs',
+  'inso.config.js', 'inso.config.ts', 'inso.config.cjs', 'inso.config.mjs',
+];
+const runnerConfigCodeExtensions = new Set(['.js', '.ts', '.cjs', '.mjs']);
+const readRunnerConfigFile = async (path: string, packageProperty = false, allowConfigCode = false): Promise<LoadedRunnerInsoConfig> => {
   const bytes = await readFile(path);
   if (bytes.byteLength > 1_000_000) throw new Error(`Inso config '${path}' exceeds the 1 MB limit.`);
-  const parsed = parseYaml(bytes.toString('utf8')) as unknown;
+  const source = bytes.toString('utf8');
+  const isCode = runnerConfigCodeExtensions.has(extname(path).toLowerCase());
+  if (isCode && !allowConfigCode) throw new Error(`Executable Inso config '${path}' is disabled. Re-run trusted workspaces with --allow-config-code.`);
+  const parsed = isCode ? await evaluateRunnerConfigCode(source, path) : parseYaml(source) as unknown;
   const value = packageProperty && parsed && typeof parsed === 'object' && !Array.isArray(parsed)
     ? (parsed as Record<string, unknown>).inso
     : parsed;
   return { ...normalizeRunnerInsoConfig(value), filePath: resolve(path) };
 };
-const findRunnerConfig = async (start: string): Promise<LoadedRunnerInsoConfig> => {
+const findRunnerConfig = async (start: string, allowConfigCode = false): Promise<LoadedRunnerInsoConfig> => {
   const absoluteStart = resolve(start);
   const startStat = await stat(absoluteStart).catch(() => undefined);
   let directory = startStat?.isFile() ? dirname(absoluteStart) : absoluteStart;
   while (true) {
-    for (const name of runnerConfigNames) {
+    for (const name of runnerConfigSearchPlaces) {
       const candidate = join(directory, name);
-      if ((await stat(candidate).catch(() => undefined))?.isFile()) return readRunnerConfigFile(candidate);
-    }
-    const packagePath = join(directory, 'package.json');
-    if ((await stat(packagePath).catch(() => undefined))?.isFile()) {
-      const config = await readRunnerConfigFile(packagePath, true);
-      if (Object.keys(config.options).length || Object.keys(config.scripts).length) return config;
+      if (!(await stat(candidate).catch(() => undefined))?.isFile()) continue;
+      const config = await readRunnerConfigFile(candidate, name === 'package.json', allowConfigCode);
+      if (name !== 'package.json' || Object.keys(config.options).length || Object.keys(config.scripts).length) return config;
     }
     const parent = dirname(directory);
     if (parent === directory) return { options: {}, scripts: {} };
     directory = parent;
   }
 };
-const loadRunnerConfig = async (configPath: string | undefined, searchStart: string | undefined): Promise<LoadedRunnerInsoConfig> => {
+const loadRunnerConfig = async (configPath: string | undefined, searchStart: string | undefined, allowConfigCode = false): Promise<LoadedRunnerInsoConfig> => {
   if (configPath) {
     const absolutePath = resolve(configPath);
     if (!(await stat(absolutePath).catch(() => undefined))?.isFile()) throw new Error(`Could not find config file at ${configPath}.`);
-    return readRunnerConfigFile(absolutePath, basename(absolutePath) === 'package.json');
+    return readRunnerConfigFile(absolutePath, basename(absolutePath) === 'package.json', allowConfigCode);
   }
-  return findRunnerConfig(searchStart ?? process.cwd());
+  return findRunnerConfig(searchStart ?? process.cwd(), allowConfigCode);
 };
 const resolveRunnerGlobalOptions = async (cliWorkingDir?: string) => {
-  const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
+  const allowConfigCode = hasFlag('--allow-config-code');
+  const config = await loadRunnerConfig(flag('--config'), cliWorkingDir, allowConfigCode);
   const workingDir = cliWorkingDir ?? config.options.workingDir;
   const ci = hasFlag('--ci') || config.options.ci === true;
   const verbose = hasFlag('--verbose') || config.options.verbose === true;
   const printOptions = hasFlag('--printOptions') || hasFlag('--print-options') || config.options.printOptions === true;
   if (verbose && config.filePath) console.error(`Found config file at ${config.filePath}.`);
-  if (printOptions) console.error('Loaded options', JSON.stringify({ workingDir: workingDir ?? '', ci, verbose, printOptions, config: config.filePath ?? '' }));
+  if (printOptions) console.error('Loaded options', JSON.stringify({ workingDir: workingDir ?? '', ci, verbose, printOptions, config: config.filePath ?? '', allowConfigCode }));
   return { config, workingDir, ci, verbose, printOptions };
 };
 const runCliChild = (childArgs: string[]) => new Promise<number>((resolveChild, rejectChild) => {
@@ -897,7 +905,7 @@ const usage = `Brunomnia CLI
   brunomnia script <name> [arguments...] [--config <path>]
 
 Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the optional collection, suite, or API-spec identifier positionally. Omission prompts in a terminal; use --ci for deterministic non-interactive fallback. Use --env or --ci when collection sub-environments exist.
-Config: --config <path> or discovered .insorc/.json/.yaml/.yml/package.json supports workingDir, ci, verbose, printOptions, and bounded script definitions.
+Config: --config <path> or discovered Cosmiconfig-compatible package/.insorc/.config/inso.config files support workingDir, ci, verbose, printOptions, and bounded script definitions. Executable JS/CJS/MJS/TS needs --allow-config-code.
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
 `;
@@ -908,6 +916,7 @@ const globalHelp = `Global options:
   --ci                     Disable prompts and use deterministic fallbacks
   --verbose                Report discovered config details
   --printOptions           Print merged supported options to stderr
+  --allow-config-code      Execute bounded JS/CJS/MJS/TS config
   -v, --version            Print the bundled CLI version
   -h, --help               Show command help`;
 
