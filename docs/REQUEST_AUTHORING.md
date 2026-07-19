@@ -83,6 +83,8 @@ Choose **Reflection** for ordinary reflection against the request's gRPC endpoin
 
 Registry loading resolves workspace CA and host/port-scoped PEM or PFX/PKCS#12 identity against the registry URL rather than the eventual gRPC service URL. Request timeout, certificate-validation override, redirect policy, proxy selection, and request-local identity material remain in force. An invalid API key and an inaccessible or missing module receive the same focused guidance as the pinned implementation. No Brunomnia account, plan, or entitlement is checked.
 
+Ordinary server reflection first requests the stable `grpc.reflection.v1` service. If the server explicitly returns `UNIMPLEMENTED`, Brunomnia retries the same operation through `grpc.reflection.v1alpha`, which is the RPC version used by Insomnia's pinned `grpc-reflection-js` dependency and by many older servers. Metadata, timeout, TLS validation, CA, and client identity stay on one channel across negotiation. Other v1 errors are returned directly instead of being hidden by an unrelated fallback.
+
 Choose **Proto source**, then import one or more `.proto` files or a complete folder. Folder import removes the selected root folder once, preserves every nested relative path, and lets imports such as `types/messages.proto` resolve from the temporary compilation root. Import replaces the request's previous tree; use **Editing** to switch the visible file and **Compile entry** to choose the file whose service graph should be opened.
 
 Proto trees accept at most 500 files, 1 MiB per file, 10 MiB total, and 512 characters per relative path. Absolute paths, parent traversal, non-proto files, and case-insensitive duplicate paths are rejected in both the renderer and native command. Native compilation recreates only the validated tree in an isolated temporary directory, includes imported descriptors/source information, and never reads source paths directly from the user's filesystem.
@@ -99,7 +101,7 @@ Choose **Use stub** beside the selected method to replace the editor with a desc
 
 Schema loading and live calls recognize the same focused connection failures as pinned Insomnia. The response or call console explains an invalid local root, an untrusted/self-signed server certificate, a required client certificate, TLS sent to a plaintext endpoint, unsupported server reflection, server cancellation, or an unimplemented method. Native Tonic/Rustls spellings such as `UnknownIssuer` and `CertificateRequired` map to the same guidance; the original error always remains visible, and unrecognized errors are never relabeled.
 
-Pinned Insomnia also keeps gRPC request/response messages transient, so persisted gRPC call history is not tracked as a parity gap. Its `@grpc/grpc-js` channel construction has no separate HTTP/HTTPS proxy agent, so a custom gRPC proxy is likewise not required. Broader third-party fixtures remain open.
+Pinned Insomnia also keeps gRPC request/response messages transient, so persisted gRPC call history is not tracked as a parity gap. Its `@grpc/grpc-js` channel construction has no separate HTTP/HTTPS proxy agent, so a custom gRPC proxy is likewise not required. A live external third-party server matrix remains open.
 
 ## Socket.IO sessions
 

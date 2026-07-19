@@ -908,30 +908,95 @@ async fn reflect_schema(
     metadata: &[KeyValue],
     transport: &TransportConfig,
 ) -> Result<(DescriptorPool, Vec<u8>), String> {
+    let channel = connect_channel(endpoint, transport).await?;
+    let descriptor_bytes = match reflect_schema_v1(channel.clone(), metadata).await {
+        Ok(descriptors) => descriptors,
+        Err(error) if error.unimplemented => reflect_schema_v1alpha(channel, metadata)
+            .await
+            .map_err(|error| error.message)?,
+        Err(error) => return Err(error.message),
+    };
+    decode_reflected_descriptors(descriptor_bytes)
+}
+
+struct ReflectionLoadError {
+    message: String,
+    unimplemented: bool,
+}
+
+impl ReflectionLoadError {
+    fn status(status: Status) -> Self {
+        Self {
+            unimplemented: status.code() == tonic::Code::Unimplemented,
+            message: format_status(status),
+        }
+    }
+
+    fn message(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            unimplemented: false,
+        }
+    }
+
+    fn reflection(code: i32, message: String) -> Self {
+        Self {
+            message: format!("gRPC reflection error {code}: {message}"),
+            unimplemented: code == tonic::Code::Unimplemented as i32,
+        }
+    }
+}
+
+fn add_reflected_descriptor(
+    bytes: Vec<u8>,
+    descriptors: &mut Vec<Vec<u8>>,
+    seen: &mut HashSet<Vec<u8>>,
+    total_bytes: &mut usize,
+) -> Result<(), ReflectionLoadError> {
+    if !seen.insert(bytes.clone()) {
+        return Ok(());
+    }
+    *total_bytes = total_bytes
+        .checked_add(bytes.len())
+        .ok_or_else(|| ReflectionLoadError::message("Reflected descriptor size overflowed."))?;
+    if *total_bytes > MAX_GRPC_DESCRIPTOR_BYTES {
+        return Err(ReflectionLoadError::message(
+            "The gRPC reflected descriptor set exceeds 10 MiB.",
+        ));
+    }
+    descriptors.push(bytes);
+    Ok(())
+}
+
+async fn reflect_schema_v1(
+    channel: Channel,
+    metadata: &[KeyValue],
+) -> Result<Vec<Vec<u8>>, ReflectionLoadError> {
     use tonic_reflection::pb::v1::{
         server_reflection_client::ServerReflectionClient,
         server_reflection_request::MessageRequest, server_reflection_response::MessageResponse,
         ServerReflectionRequest,
     };
 
-    let channel = connect_channel(endpoint, transport).await?;
     let mut client = ServerReflectionClient::new(channel.clone());
     let list_request = ServerReflectionRequest {
         host: String::new(),
         message_request: Some(MessageRequest::ListServices(String::new())),
     };
     let mut request = Request::new(tokio_stream::iter([list_request]));
-    apply_metadata(&mut request, metadata)?;
+    apply_metadata(&mut request, metadata).map_err(ReflectionLoadError::message)?;
     let mut responses = client
         .server_reflection_info(request)
         .await
-        .map_err(format_status)?
+        .map_err(ReflectionLoadError::status)?
         .into_inner();
     let response = responses
         .message()
         .await
-        .map_err(format_status)?
-        .ok_or_else(|| "The gRPC reflection server returned no services.".to_string())?;
+        .map_err(ReflectionLoadError::status)?
+        .ok_or_else(|| {
+            ReflectionLoadError::message("The gRPC reflection server returned no services.")
+        })?;
     let services = match response.message_response {
         Some(MessageResponse::ListServicesResponse(list)) => list
             .service
@@ -940,42 +1005,168 @@ async fn reflect_schema(
             .filter(|name| !name.starts_with("grpc.reflection."))
             .collect::<Vec<_>>(),
         Some(MessageResponse::ErrorResponse(error)) => {
-            return Err(format!(
-                "gRPC reflection error {}: {}",
-                error.error_code, error.error_message
+            return Err(ReflectionLoadError::reflection(
+                error.error_code,
+                error.error_message,
             ));
         }
-        _ => return Err("The gRPC reflection server returned an unexpected response.".into()),
+        _ => {
+            return Err(ReflectionLoadError::message(
+                "The gRPC reflection server returned an unexpected response.",
+            ));
+        }
     };
 
     let mut descriptor_bytes = Vec::new();
     let mut seen = HashSet::new();
+    let mut total_bytes = 0usize;
     for service in services {
         let request = ServerReflectionRequest {
             host: String::new(),
             message_request: Some(MessageRequest::FileContainingSymbol(service)),
         };
         let mut request = Request::new(tokio_stream::iter([request]));
-        apply_metadata(&mut request, metadata)?;
+        apply_metadata(&mut request, metadata).map_err(ReflectionLoadError::message)?;
         let mut response_stream = ServerReflectionClient::new(channel.clone())
             .server_reflection_info(request)
             .await
-            .map_err(format_status)?
+            .map_err(ReflectionLoadError::status)?
             .into_inner();
-        if let Some(response) = response_stream.message().await.map_err(format_status)? {
-            if let Some(MessageResponse::FileDescriptorResponse(files)) = response.message_response
-            {
-                for bytes in files.file_descriptor_proto {
-                    if seen.insert(bytes.clone()) {
-                        descriptor_bytes.push(bytes);
+        if let Some(response) = response_stream
+            .message()
+            .await
+            .map_err(ReflectionLoadError::status)?
+        {
+            match response.message_response {
+                Some(MessageResponse::FileDescriptorResponse(files)) => {
+                    for bytes in files.file_descriptor_proto {
+                        add_reflected_descriptor(
+                            bytes,
+                            &mut descriptor_bytes,
+                            &mut seen,
+                            &mut total_bytes,
+                        )?;
                     }
                 }
+                Some(MessageResponse::ErrorResponse(error)) => {
+                    return Err(ReflectionLoadError::reflection(
+                        error.error_code,
+                        error.error_message,
+                    ));
+                }
+                _ => {}
             }
         }
     }
     if descriptor_bytes.is_empty() {
-        return Err("The gRPC reflection server returned no descriptors.".into());
+        return Err(ReflectionLoadError::message(
+            "The gRPC reflection server returned no descriptors.",
+        ));
     }
+    Ok(descriptor_bytes)
+}
+
+async fn reflect_schema_v1alpha(
+    channel: Channel,
+    metadata: &[KeyValue],
+) -> Result<Vec<Vec<u8>>, ReflectionLoadError> {
+    use tonic_reflection::pb::v1alpha::{
+        server_reflection_client::ServerReflectionClient,
+        server_reflection_request::MessageRequest, server_reflection_response::MessageResponse,
+        ServerReflectionRequest,
+    };
+
+    let mut client = ServerReflectionClient::new(channel.clone());
+    let list_request = ServerReflectionRequest {
+        host: String::new(),
+        message_request: Some(MessageRequest::ListServices(String::new())),
+    };
+    let mut request = Request::new(tokio_stream::iter([list_request]));
+    apply_metadata(&mut request, metadata).map_err(ReflectionLoadError::message)?;
+    let mut responses = client
+        .server_reflection_info(request)
+        .await
+        .map_err(ReflectionLoadError::status)?
+        .into_inner();
+    let response = responses
+        .message()
+        .await
+        .map_err(ReflectionLoadError::status)?
+        .ok_or_else(|| {
+            ReflectionLoadError::message("The gRPC reflection server returned no services.")
+        })?;
+    let services = match response.message_response {
+        Some(MessageResponse::ListServicesResponse(list)) => list
+            .service
+            .into_iter()
+            .map(|service| service.name)
+            .filter(|name| !name.starts_with("grpc.reflection."))
+            .collect::<Vec<_>>(),
+        Some(MessageResponse::ErrorResponse(error)) => {
+            return Err(ReflectionLoadError::reflection(
+                error.error_code,
+                error.error_message,
+            ));
+        }
+        _ => {
+            return Err(ReflectionLoadError::message(
+                "The gRPC reflection server returned an unexpected response.",
+            ));
+        }
+    };
+
+    let mut descriptor_bytes = Vec::new();
+    let mut seen = HashSet::new();
+    let mut total_bytes = 0usize;
+    for service in services {
+        let request = ServerReflectionRequest {
+            host: String::new(),
+            message_request: Some(MessageRequest::FileContainingSymbol(service)),
+        };
+        let mut request = Request::new(tokio_stream::iter([request]));
+        apply_metadata(&mut request, metadata).map_err(ReflectionLoadError::message)?;
+        let mut response_stream = ServerReflectionClient::new(channel.clone())
+            .server_reflection_info(request)
+            .await
+            .map_err(ReflectionLoadError::status)?
+            .into_inner();
+        if let Some(response) = response_stream
+            .message()
+            .await
+            .map_err(ReflectionLoadError::status)?
+        {
+            match response.message_response {
+                Some(MessageResponse::FileDescriptorResponse(files)) => {
+                    for bytes in files.file_descriptor_proto {
+                        add_reflected_descriptor(
+                            bytes,
+                            &mut descriptor_bytes,
+                            &mut seen,
+                            &mut total_bytes,
+                        )?;
+                    }
+                }
+                Some(MessageResponse::ErrorResponse(error)) => {
+                    return Err(ReflectionLoadError::reflection(
+                        error.error_code,
+                        error.error_message,
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    if descriptor_bytes.is_empty() {
+        return Err(ReflectionLoadError::message(
+            "The gRPC reflection server returned no descriptors.",
+        ));
+    }
+    Ok(descriptor_bytes)
+}
+
+fn decode_reflected_descriptors(
+    descriptor_bytes: Vec<Vec<u8>>,
+) -> Result<(DescriptorPool, Vec<u8>), String> {
     let files = descriptor_bytes
         .into_iter()
         .map(|bytes| {
@@ -984,6 +1175,9 @@ async fn reflect_schema(
         .collect::<Result<Vec<_>, _>>()?;
     let descriptor_set = FileDescriptorSet { file: files };
     let encoded = descriptor_set.encode_to_vec();
+    if encoded.len() > MAX_GRPC_DESCRIPTOR_BYTES {
+        return Err("The gRPC reflected descriptor set exceeds 10 MiB.".into());
+    }
     let pool = DescriptorPool::from_file_descriptor_set(descriptor_set)
         .map_err(|error| format!("Invalid reflected descriptor set: {error}"))?;
     Ok((pool, encoded))
@@ -1564,6 +1758,43 @@ mod tests {
         (address, shutdown, task)
     }
 
+    async fn start_reflection_server(
+        descriptor_set: FileDescriptorSet,
+        v1alpha_only: bool,
+    ) -> (std::net::SocketAddr, oneshot::Sender<()>, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (shutdown, shutdown_receiver) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            if v1alpha_only {
+                let service = tonic_reflection::server::Builder::configure()
+                    .register_file_descriptor_set(descriptor_set)
+                    .build_v1alpha()
+                    .unwrap();
+                Server::builder()
+                    .add_service(service)
+                    .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
+                        let _ = shutdown_receiver.await;
+                    })
+                    .await
+                    .unwrap();
+            } else {
+                let service = tonic_reflection::server::Builder::configure()
+                    .register_file_descriptor_set(descriptor_set)
+                    .build_v1()
+                    .unwrap();
+                Server::builder()
+                    .add_service(service)
+                    .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
+                        let _ = shutdown_receiver.await;
+                    })
+                    .await
+                    .unwrap();
+            }
+        });
+        (address, shutdown, task)
+    }
+
     async fn start_buf_reflection_server(
         descriptor_set: FileDescriptorSet,
     ) -> (
@@ -1779,6 +2010,30 @@ mod tests {
         assert!(first_request.symbols.is_empty());
         drop(captures);
         server.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn loads_modern_and_v1alpha_only_reflection_servers() {
+        let (_, descriptor_bytes) = compile_proto(TEST_PROTO, &[], "").unwrap();
+        let descriptor_set = FileDescriptorSet::decode(descriptor_bytes.as_slice()).unwrap();
+        for v1alpha_only in [false, true] {
+            let (address, shutdown, server) =
+                start_reflection_server(descriptor_set.clone(), v1alpha_only).await;
+            let (pool, encoded) = reflect_schema(
+                &format!("http://{address}"),
+                &[],
+                &TransportConfig {
+                    timeout_ms: 5_000,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            assert!(pool.get_service_by_name("brunomnia.test.Greeter").is_some());
+            assert!(!encoded.is_empty());
+            let _ = shutdown.send(());
+            server.await.unwrap();
+        }
     }
 
     #[test]

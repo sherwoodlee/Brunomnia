@@ -1815,7 +1815,20 @@ Compatibility bounds remain explicit: richer gRPC connection-error guidance and 
 
 Compatibility bounds remain explicit: broader third-party gRPC fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 122 — remaining parity closure and release hardening
+## Milestone 122 — gRPC reflection version compatibility (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Insomnia's lockfile pins `Kong/grpc-reflection-js` commit `f806b5a0dc2092b7a6fb54dfb66c38fb58231774`; its generated RPC path is explicitly `grpc.reflection.v1alpha` |
+| Version negotiation | Complete | Ordinary reflection tries stable v1 first and falls back to v1alpha only when the transport status or protocol error response is code 12/`UNIMPLEMENTED` |
+| Policy continuity | Complete | Both versions reuse one endpoint/channel, metadata, timeout, validation, CA, and domain-scoped PEM/PFX identity configuration |
+| Descriptor continuity | Complete | Service filtering, per-symbol requests, duplicate file suppression, response validation, descriptor decoding, request stubs, and size limits are version-independent |
+| Executable coverage | Complete | Real v1 and v1alpha-only Tonic servers advertise the same descriptor set; both load the expected service and return reusable encoded descriptors |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 122 verification](QA_MILESTONE_122.md) |
+
+Compatibility bounds remain explicit: a live external third-party gRPC server matrix remains open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 123 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
