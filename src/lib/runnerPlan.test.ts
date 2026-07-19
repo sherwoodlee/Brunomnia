@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeRunnerResultPane, clampRunnerPaneSize, parseRunnerNumberDraft, reorderRunnerPlan, runnerDraggedRequestIds, runnerHistoryDeleteDecision, runnerLayoutDirection, runnerPaneSizeFromKey, runnerPaneSizeFromPointer, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from './runnerPlan';
+import { activeRunnerResultPane, clampRunnerHistoryColumnSize, clampRunnerPaneSize, parseRunnerNumberDraft, reorderRunnerPlan, runnerDraggedRequestIds, runnerHistoryColumnSizeFromKey, runnerHistoryDeleteDecision, runnerLayoutDirection, runnerPaneSizeFromKey, runnerPaneSizeFromPointer, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from './runnerPlan';
 
 describe('Runner request-plan selection', () => {
   it('distinguishes empty, none, partial, and complete selection', () => {
@@ -75,6 +75,17 @@ describe('Runner request-plan selection', () => {
     expect(runnerHistoryDeleteDecision('', 'run-one')).toEqual({ confirmed: false, pendingId: 'run-one' });
     expect(runnerHistoryDeleteDecision('run-one', 'run-two')).toEqual({ confirmed: false, pendingId: 'run-two' });
     expect(runnerHistoryDeleteDecision('run-one', 'run-one')).toEqual({ confirmed: true, pendingId: '' });
+  });
+
+  it('bounds Runner History columns and supports horizontal keyboard resizing', () => {
+    expect(clampRunnerHistoryColumnSize(Number.NaN, 58, 160)).toBe(58);
+    expect(clampRunnerHistoryColumnSize(20, 58, 160)).toBe(58);
+    expect(clampRunnerHistoryColumnSize(200, 58, 160)).toBe(160);
+    expect(runnerHistoryColumnSizeFromKey(100, 'ArrowLeft', 58, 160)).toBe(92);
+    expect(runnerHistoryColumnSizeFromKey(100, 'ArrowRight', 58, 160, 24)).toBe(124);
+    expect(runnerHistoryColumnSizeFromKey(100, 'Home', 58, 160)).toBe(58);
+    expect(runnerHistoryColumnSizeFromKey(100, 'End', 58, 160)).toBe(160);
+    expect(runnerHistoryColumnSizeFromKey(100, 'ArrowUp', 58, 160)).toBe(100);
   });
 
   it('bounds pointer-derived Runner pane sizes in either direction', () => {

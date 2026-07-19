@@ -1090,6 +1090,13 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Dedicated accessible drag handle, midpoint placement, active locking, and retained up/down controls: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx) and [`src/styles.css`](../src/styles.css)
 - Corrected M186 boundary, updated account-free Request Order documentation, and exact verification record: [`docs/QA_MILESTONE_186.md`](QA_MILESTONE_186.md), [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md), and [`docs/QA_MILESTONE_196.md`](QA_MILESTONE_196.md)
 
+## Milestone 197 acceptance evidence
+
+- Pinned Source/Iterations-only ColumnResizer and transient table-state audit: [`docs/QA_MILESTONE_197.md`](QA_MILESTONE_197.md)
+- Pure bounded keyboard sizing with focused regressions: [`src/lib/runnerPlan.ts`](../src/lib/runnerPlan.ts) and [`src/lib/runnerPlan.test.ts`](../src/lib/runnerPlan.test.ts)
+- Pointer-captured focusable ARIA separator and static-render regression: [`src/components/RunnerHistoryColumnResizer.tsx`](../src/components/RunnerHistoryColumnResizer.tsx) and [`src/components/RunnerHistoryColumnResizer.test.tsx`](../src/components/RunnerHistoryColumnResizer.test.tsx)
+- CSS-grid width integration, horizontal overflow, account-free documentation, and exact verification record: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx), [`src/styles.css`](../src/styles.css), [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md), and [`docs/QA_MILESTONE_197.md`](QA_MILESTONE_197.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).

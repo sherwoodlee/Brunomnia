@@ -58,6 +58,23 @@ export const activeRunnerResultPane = (selectedPane: RunnerResultPane, isRunning
 export const runnerHistoryDeleteDecision = (pendingId: string, clickedId: string): RunnerHistoryDeleteDecision =>
   pendingId === clickedId ? { confirmed: true, pendingId: '' } : { confirmed: false, pendingId: clickedId };
 
+export const clampRunnerHistoryColumnSize = (size: number, minimum: number, maximum: number) =>
+  Math.max(minimum, Math.min(maximum, Number.isFinite(size) ? size : minimum));
+
+export const runnerHistoryColumnSizeFromKey = (
+  size: number,
+  key: string,
+  minimum: number,
+  maximum: number,
+  step = 8,
+) => {
+  if (key === 'Home') return minimum;
+  if (key === 'End') return maximum;
+  if (key === 'ArrowLeft') return clampRunnerHistoryColumnSize(size - step, minimum, maximum);
+  if (key === 'ArrowRight') return clampRunnerHistoryColumnSize(size + step, minimum, maximum);
+  return clampRunnerHistoryColumnSize(size, minimum, maximum);
+};
+
 export const clampRunnerPaneSize = (size: number) => Math.max(35, Math.min(90, Number.isFinite(size) ? size : 35));
 
 export const runnerPaneSizeFromPointer = (
