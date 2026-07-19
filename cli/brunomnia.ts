@@ -546,6 +546,7 @@ const main = async () => {
       requestChain: string[] = [],
       cookies: CookieRecord[] = cliCookies,
       responses: StoredResponse[] = cliResponses,
+      collectionEnvironmentId = collection.activeSubEnvironmentId ?? '',
     ): Promise<{ result: HttpResponse; stored: StoredResponse }> => {
       const result = await executeHttp(request, variables, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, {
         environmentId,
@@ -563,7 +564,21 @@ const main = async () => {
         const updatedCookies = storeResponseCookies(cookies, requestUrl, result.setCookies ?? []);
         cookies.splice(0, cookies.length, ...updatedCookies);
       }
-      const stored: StoredResponse = { ...result, id: `cli-response-${crypto.randomUUID()}`, requestId: request.id, requestName: request.name, requestUrl, environmentId, receivedAt: new Date().toISOString(), requestSnapshot: createRequestSnapshot(request) };
+      const stored: StoredResponse = {
+        ...result,
+        id: `cli-response-${crypto.randomUUID()}`,
+        requestId: request.id,
+        requestName: request.name,
+        requestUrl,
+        environmentId,
+        globalEnvironmentId: selectedEnvironment.id,
+        collectionEnvironmentId,
+        receivedAt: new Date().toISOString(),
+        requestSnapshot: createRequestSnapshot(request),
+        requestTestResults: [],
+        settingSendCookies: request.transport.sendCookies,
+        settingStoreCookies: request.transport.storeCookies,
+      };
       const updatedResponses = retainResponseHistory(responses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
       responses.splice(0, responses.length, ...updatedResponses);
       cliCookies = cookies;
@@ -575,7 +590,7 @@ const main = async () => {
       const dependency = dependencyCollection?.requests.find((request) => request.id === requestId || request.name === requestId);
       if (!dependencyCollection || !dependency) throw new Error(`Could not find request ${requestId}`);
       const configured = applyCollectionConfiguration(dependencyCollection, dependency, environment);
-      const { stored } = await executeAndStore(configured.request, environmentMap(configured.environment), configured.environment.id, [...new Set([...requestChain, dependency.id])], cookies, responses);
+      const { stored } = await executeAndStore(configured.request, environmentMap(configured.environment), configured.environment.id, [...new Set([...requestChain, dependency.id])], cookies, responses, dependencyCollection.activeSubEnvironmentId ?? '');
       return stored;
     };
     const executeWorkspaceHttp = async (request: ApiRequest, variables: Record<string, string>) => (await executeAndStore(request, variables, environment.id)).result;
@@ -585,6 +600,12 @@ const main = async () => {
       scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(flag('--script-timeout') ?? 10_000))),
       environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
       dataRows: dataPath ? parseRunnerData(await loadText(dataPath)) : [],
+      onResult: (result) => {
+        const responseIndex = cliResponses.findIndex((response) => response.requestId === result.requestId);
+        if (responseIndex < 0) return;
+        const requestTestResults = result.tests.slice(0, 1_000).map((test) => ({ ...test, name: test.name.slice(0, 2_000), ...(test.error ? { error: test.error.slice(0, 20_000) } : {}) }));
+        cliResponses[responseIndex] = { ...cliResponses[responseIndex], requestTestResults };
+      },
     }, executeWorkspaceHttp, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => {
       if (source.trim() && !hasFlag('--allow-scripts')) throw new Error('CLI script execution is disabled. Re-run trusted workspaces with --allow-scripts.');
       return runNodeScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {

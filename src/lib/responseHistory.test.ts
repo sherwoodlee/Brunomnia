@@ -99,11 +99,15 @@ describe('response history preferences', () => {
   it('restores a matching historical request without moving its current tree position', () => {
     const current = createBlankRequest('request-a');
     current.name = 'Current';
+    current.documentation = 'Current docs';
     current.folderId = 'current-folder';
+    current.source = { format: 'konnect-route', sourceId: 'current-source' };
     const historical = createBlankRequest('request-a');
     historical.name = 'Historical';
+    historical.documentation = 'Historical docs';
     historical.url = 'https://example.test/historical';
     historical.folderId = 'old-folder';
+    historical.source = { format: 'insomnia-v5', sourceId: 'historical-source' };
     const legacySnapshot = createRequestSnapshot(historical) as unknown as Record<string, unknown>;
     delete legacySnapshot.renderBodyTemplates;
     delete legacySnapshot.disableUserAgentHeader;
@@ -111,7 +115,7 @@ describe('response history preferences', () => {
     const saved = { ...response('saved', 'request-a', 'dev', '2026-07-17T01:00:00.000Z'), requestSnapshot: legacySnapshot as unknown as ApiRequest };
 
     const restored = restoreRequestSnapshot(saved, current);
-    expect(restored).toMatchObject({ id: 'request-a', name: 'Historical', url: 'https://example.test/historical', folderId: 'current-folder', renderBodyTemplates: true, disableUserAgentHeader: true });
+    expect(restored).toMatchObject({ id: 'request-a', name: 'Current', documentation: 'Current docs', source: current.source, url: 'https://example.test/historical', folderId: 'current-folder', renderBodyTemplates: true, disableUserAgentHeader: true });
     expect(restored.grpc).not.toHaveProperty('disableUserAgentHeader');
   });
 

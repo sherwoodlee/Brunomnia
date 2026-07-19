@@ -38,6 +38,27 @@ describe('collection runner', () => {
     expect(report.total).toBe(1);
   });
 
+  it('retains pre-request and after-response assertions together', async () => {
+    const request = createBlankRequest('one');
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
+      async () => ({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }),
+      async (_script, activeRequest, environment, response) => ({
+        request: activeRequest,
+        environment,
+        logs: [],
+        tests: [{ name: response ? 'after response' : 'before request', passed: true }],
+      }),
+    );
+
+    expect(report.results[0].tests).toEqual([
+      { name: 'before request', passed: true },
+      { name: 'after response', passed: true },
+    ]);
+  });
+
   it('validates test-name regexes before execution', async () => {
     const request = createBlankRequest('one');
     let calls = 0;

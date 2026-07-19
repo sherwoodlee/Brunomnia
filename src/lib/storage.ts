@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
-import type { AiSettings, ApiRequest, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ShortcutAction, StoredResponse, StoredStreamSession, StreamMessage, Workspace } from '../types';
+import type { AiSettings, ApiRequest, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ScriptTestResult, ShortcutAction, StoredResponse, StoredStreamSession, StreamMessage, Workspace } from '../types';
 import { normalizeGraphqlSchema } from './graphqlSchema';
 import { normalizeGrpcProtoTree } from './grpcProto';
 import { normalizeCertificatePassphrase, normalizeCertificatePfxBase64, normalizeWorkspaceCertificates } from './certificates';
@@ -311,6 +311,13 @@ const normalizeResponseTimeline = (value: unknown): ResponseTimelineEntry[] => !
   }];
 });
 
+const normalizeResponseTestResults = (value: unknown): ScriptTestResult[] => !Array.isArray(value) ? [] : value.slice(0, 1_000).flatMap((entry): ScriptTestResult[] => {
+  const source = record(entry);
+  if (!source) return [];
+  const error = stringValue(source.error).slice(0, 20_000);
+  return [{ name: stringValue(source.name, 'Unnamed test').slice(0, 2_000), passed: source.passed === true, ...(error ? { error } : {}) }];
+});
+
 const normalizeStoredResponses = (value: unknown): StoredResponse[] => Array.isArray(value) ? value.flatMap((entry, index) => {
   const source = record(entry);
   if (!source) return [];
@@ -327,6 +334,11 @@ const normalizeStoredResponses = (value: unknown): StoredResponse[] => Array.isA
     body: stringValue(source.body),
     ...(bodyBase64 ? { bodyBase64 } : {}),
     timeline: normalizeResponseTimeline(source.timeline),
+    requestTestResults: normalizeResponseTestResults(source.requestTestResults),
+    ...(typeof source.settingSendCookies === 'boolean' ? { settingSendCookies: source.settingSendCookies } : {}),
+    ...(typeof source.settingStoreCookies === 'boolean' ? { settingStoreCookies: source.settingStoreCookies } : {}),
+    ...(typeof source.globalEnvironmentId === 'string' ? { globalEnvironmentId: source.globalEnvironmentId.slice(0, 500) } : {}),
+    ...(typeof source.collectionEnvironmentId === 'string' ? { collectionEnvironmentId: source.collectionEnvironmentId.slice(0, 500) } : {}),
   } as StoredResponse];
 }) : [];
 

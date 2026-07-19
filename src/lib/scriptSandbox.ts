@@ -72,10 +72,26 @@ export const applyScriptSubresponse = (
   environmentId = '',
   maxHistoryResponses = 20,
   filterResponsesByEnv = false,
+  globalEnvironmentId = environmentId,
+  collectionEnvironmentId = '',
 ): { cookies: CookieRecord[]; responses: StoredResponse[] } => {
   const requestUrl = response.requestUrl ?? request.url;
   const nextCookies = request.transport.storeCookies ? storeResponseCookies(cookies, requestUrl, response.setCookies ?? []) : cookies;
-  const stored: StoredResponse = { ...response, id: crypto.randomUUID(), requestId: request.id, requestName: request.name, requestUrl, environmentId, receivedAt, requestSnapshot: createRequestSnapshot(request) };
+  const stored: StoredResponse = {
+    ...response,
+    id: crypto.randomUUID(),
+    requestId: request.id,
+    requestName: request.name,
+    requestUrl,
+    environmentId,
+    globalEnvironmentId,
+    collectionEnvironmentId,
+    receivedAt,
+    requestSnapshot: createRequestSnapshot(request),
+    requestTestResults: [],
+    settingSendCookies: request.transport.sendCookies,
+    settingStoreCookies: request.transport.storeCookies,
+  };
   return { cookies: nextCookies, responses: retainResponseHistory(responses, stored, maxHistoryResponses, filterResponsesByEnv) };
 };
 

@@ -319,8 +319,8 @@ describe('script sandbox source validation', () => {
       sizeBytes: 15,
       setCookies: ['session=abc; Path=/; Secure'],
       requestUrl: request.url,
-    }, '2026-07-16T00:00:00.000Z');
+    }, '2026-07-16T00:00:00.000Z', 'environment-a', 20, true, 'global-a', 'collection-a');
     expect(state.cookies[0]).toMatchObject({ name: 'session', value: 'abc', domain: 'api.example.com', secure: true });
-    expect(state.responses[0]).toMatchObject({ requestId: 'script-secondary', requestName: 'secondary', requestUrl: request.url, receivedAt: '2026-07-16T00:00:00.000Z', requestSnapshot: { id: 'script-secondary', name: 'secondary' } });
+    expect(state.responses[0]).toMatchObject({ requestId: 'script-secondary', requestName: 'secondary', requestUrl: request.url, environmentId: 'environment-a', globalEnvironmentId: 'global-a', collectionEnvironmentId: 'collection-a', receivedAt: '2026-07-16T00:00:00.000Z', requestSnapshot: { id: 'script-secondary', name: 'secondary' }, requestTestResults: [], settingSendCookies: true, settingStoreCookies: true });
   });
 });

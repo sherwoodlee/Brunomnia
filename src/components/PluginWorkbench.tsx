@@ -120,7 +120,21 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }
       resolveResponse,
     });
     const requestUrl = result.requestUrl ?? configured.request.url;
-    const stored = { ...result, id: `response-${crypto.randomUUID()}`, requestId: dependency.id, requestName: dependency.name, requestUrl, environmentId: configured.environment.id, receivedAt: new Date().toISOString(), requestSnapshot: createRequestSnapshot(dependency) };
+    const stored = {
+      ...result,
+      id: `response-${crypto.randomUUID()}`,
+      requestId: dependency.id,
+      requestName: dependency.name,
+      requestUrl,
+      environmentId: configured.environment.id,
+      globalEnvironmentId: environment.id,
+      collectionEnvironmentId: dependencyCollection.activeSubEnvironmentId ?? '',
+      receivedAt: new Date().toISOString(),
+      requestSnapshot: createRequestSnapshot(dependency),
+      requestTestResults: [],
+      settingSendCookies: configured.request.transport.sendCookies,
+      settingStoreCookies: configured.request.transport.storeCookies,
+    };
     if (configured.request.transport.storeCookies) {
       const updatedCookies = storeResponseCookies(cookies, requestUrl, result.setCookies ?? []);
       cookies.splice(0, cookies.length, ...updatedCookies);

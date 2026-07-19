@@ -272,6 +272,11 @@ export type StoredResponse = HttpResponse & {
   environmentId: string;
   receivedAt: string;
   requestSnapshot?: ApiRequest;
+  requestTestResults?: ScriptTestResult[];
+  settingSendCookies?: boolean;
+  settingStoreCookies?: boolean;
+  globalEnvironmentId?: string;
+  collectionEnvironmentId?: string;
 };
 
 export type StoredStreamSession = {

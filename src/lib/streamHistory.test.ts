@@ -50,7 +50,7 @@ describe('stream session history', () => {
     expect(session.requestSnapshot?.url).toBe('wss://example.test/original');
     expect(restoreRequestSnapshot(session, request)).toMatchObject({
       id: request.id,
-      name: session.requestSnapshot?.name,
+      name: 'Current name',
       url: 'wss://example.test/original',
       folderId: 'current-folder',
     });

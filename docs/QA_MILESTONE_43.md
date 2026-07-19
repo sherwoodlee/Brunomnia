@@ -44,3 +44,5 @@ Rendered browser QA was not run because this task's standing direction prohibite
 ## Acceptance boundary
 
 Legacy response entries cannot reconstruct request versions they never stored. Restoration deliberately preserves current collection/folder placement and does not time-travel the selected environment, cookies, plugin state, local vault session, or project branch. Response comparison/export/search and persistent WebSocket/SSE histories remain open.
+
+Milestone 150 later aligns restoration with the pinned ignore list by also preserving the current request name, documentation/description, and source linkage. It also records the response's bounded pre/post-script assertions, cookie policy, and environment identities. The legacy response-only behavior above remains intentional pinned compatibility, not a reconstruction gap.

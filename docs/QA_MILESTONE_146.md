@@ -43,4 +43,4 @@ Rendered interaction and assistive-technology QA are omitted by standing directi
 
 ## Acceptance boundary
 
-Milestone 146 accepts pinned-compatible sub-environment ordering and duplication. Multi-select/bulk actions, request pinning/new-tab state, richer collected data, legacy history reconstruction, byte-exact wire diagnostics, and arbitrary mixed-order third-party exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 147.
+Milestone 146 accepts pinned-compatible sub-environment ordering and duplication. Multi-select/bulk actions, request pinning/new-tab state, richer collected data, explicit legacy response-only labeling, byte-exact wire diagnostics, and arbitrary mixed-order third-party exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Broad closure and release hardening move to Milestone 147.

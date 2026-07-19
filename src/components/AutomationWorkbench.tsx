@@ -298,7 +298,21 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           const updatedCookies = storeResponseCookies(cookies, requestUrl, result.setCookies ?? []);
           cookies.splice(0, cookies.length, ...updatedCookies);
         }
-        const stored = { ...result, id: uid('response'), requestId: dependency.id, requestName: dependency.name, requestUrl, environmentId: configured.environment.id, receivedAt: new Date().toISOString(), requestSnapshot: createRequestSnapshot(dependency) };
+        const stored = {
+          ...result,
+          id: uid('response'),
+          requestId: dependency.id,
+          requestName: dependency.name,
+          requestUrl,
+          environmentId: configured.environment.id,
+          globalEnvironmentId: selectedEnvironment.id,
+          collectionEnvironmentId: dependencyCollection.activeSubEnvironmentId ?? '',
+          receivedAt: new Date().toISOString(),
+          requestSnapshot: createRequestSnapshot(dependency),
+          requestTestResults: [],
+          settingSendCookies: configured.request.transport.sendCookies,
+          settingStoreCookies: configured.request.transport.storeCookies,
+        };
         const updatedResponses = retainResponseHistory(responses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
         responses.splice(0, responses.length, ...updatedResponses);
         runnerCookies = cookies;
@@ -313,10 +327,20 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
         writeClipboard: (value) => navigator.clipboard.writeText(value),
       };
       const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
+      let latestRunnerResponseId = '';
       const report = await runCollection(collection, environment, {
         iterations, retries, bail, requestIds, delayMs, scriptTimeoutMs: workspace.preferences.scriptTimeoutMs, environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id), dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current,
-        onResult: (result) => { setResults((current) => [...current, result]); setSelectedResultId((current) => current || result.id); },
+        onResult: (result) => {
+          if (latestRunnerResponseId) {
+            const requestTestResults = result.tests.slice(0, 1_000).map((test) => ({ ...test, name: test.name.slice(0, 2_000), ...(test.error ? { error: test.error.slice(0, 20_000) } : {}) }));
+            runnerResponses = runnerResponses.map((response) => response.id === latestRunnerResponseId ? { ...response, requestTestResults } : response);
+            latestRunnerResponseId = '';
+          }
+          setResults((current) => [...current, result]);
+          setSelectedResultId((current) => current || result.id);
+        },
       }, async (request, variables) => {
+        latestRunnerResponseId = '';
         const requestEnvironment = {
           id: environment.id, name: environment.name,
           variables: Object.entries(variables).map(([name, value]) => ({ id: `runner-${name}`, name, value, enabled: true })),
@@ -339,8 +363,23 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input), authorizeOAuth2, resolveResponse, onOAuth2Token: (updated) => onChangeWorkspace((current) => ({ ...current, collections: current.collections.map((candidate) => candidate.id === collection.id ? persistEffectiveAuthentication(candidate, request.id, updated.auth) : candidate) })) });
         const requestUrl = result.requestUrl ?? request.url;
         if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
-        const stored = { ...result, id: uid('response'), requestId: request.id, requestName: request.name, requestUrl, environmentId: environment.id, receivedAt: new Date().toISOString(), requestSnapshot: createRequestSnapshot(request) };
+        const stored = {
+          ...result,
+          id: uid('response'),
+          requestId: request.id,
+          requestName: request.name,
+          requestUrl,
+          environmentId: environment.id,
+          globalEnvironmentId: selectedEnvironment.id,
+          collectionEnvironmentId: collection.activeSubEnvironmentId ?? '',
+          receivedAt: new Date().toISOString(),
+          requestSnapshot: createRequestSnapshot(request),
+          requestTestResults: [],
+          settingSendCookies: request.transport.sendCookies,
+          settingStoreCookies: request.transport.storeCookies,
+        };
         runnerResponses = retainResponseHistory(runnerResponses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
+        latestRunnerResponseId = stored.id;
         return result;
       }, (source, request, variables, response, timeoutMs, localVariables, iterationData, scriptOptions) => runBrowserScript(source, request, variables, response, timeoutMs, localVariables, iterationData, {
         ...scriptOptions,
@@ -368,7 +407,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
             authorizeOAuth2,
             resolveResponse,
           });
-          const state = applyScriptSubresponse(runnerCookies, runnerResponses, subrequest, subresponse, undefined, environment.id, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
+          const state = applyScriptSubresponse(runnerCookies, runnerResponses, subrequest, subresponse, undefined, environment.id, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv, selectedEnvironment.id, collection.activeSubEnvironmentId ?? '');
           runnerCookies = state.cookies;
           runnerResponses = state.responses;
           return subresponse;

@@ -303,7 +303,7 @@ export const runCollection = async (
           baseEnvironmentDisabled = afterResponse.baseEnvironmentDisabled ?? baseEnvironmentDisabled;
           collectionDisabled = afterResponse.collectionDisabled ?? collectionDisabled;
           afterResponse.folders?.forEach((folder) => { folderVariables.set(folder.id, folder.environment); folderDisabled.set(folder.id, new Set(folder.disabled ?? [])); });
-          tests = afterResponse.tests;
+          tests = [...preRequest.tests, ...afterResponse.tests];
         } catch (caught) {
           error = caught instanceof Error ? caught.message : String(caught);
         }

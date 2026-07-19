@@ -916,6 +916,7 @@ function ResponsePanel({
   const canPrettify = Object.entries(response.headers).some(([name, value]) => name.toLowerCase() === 'content-type' && /json/i.test(value));
   const canExportHttpDiagnostics = !streaming && (protocol === 'http' || protocol === 'graphql');
   const historySections = responseHistorySections(responseHistory);
+  const selectedHistoryResponse = responseHistory.find((saved) => saved.id === selectedResponseId);
   const responseHeaders = streaming ? streamSession?.headers ?? {} : response.headers;
   const timelineEntries = streaming ? streamSession?.timeline ?? [{ name: 'Text' as const, value: 'No connection timeline is available for this legacy session.', elapsedMs: 0 }] : response.timeline?.length ? response.timeline : [
     { name: 'Text' as const, value: 'Request started', elapsedMs: 0 },
@@ -938,7 +939,7 @@ function ResponsePanel({
           {!streaming ? <span>{formatBytes(response.sizeBytes)}</span> : null}
           {(streaming ? streamSession?.httpVersion : response.httpVersion) ? <span>{streaming ? streamSession?.httpVersion : response.httpVersion}</span> : null}
         </div>
-        {streaming && streamHistory.length ? <Suspense fallback={<div className="dialog-loading">Loading stream history…</div>}><StreamHistoryControls activeEnvironmentCount={activeEnvironmentStreamHistoryCount} onClear={onClearStreamHistory} onDelete={onDeleteStreamSession} onSelect={onSelectStreamSession} selectedSessionId={selectedStreamSessionId} sessions={streamHistory} /></Suspense> : !streaming && responseHistory.length ? <div className="response-history-controls"><label className="response-history-picker"><Icon name="history" size={15} /><select aria-label="Saved response" onChange={(event) => onSelectResponse(event.target.value)} value={selectedResponseId}>{selectedResponseId ? null : <option value="">Live response</option>}{historySections.map((section) => <optgroup key={section.label} label={section.label}>{section.responses.map((saved) => <option key={saved.id} value={saved.id}>{new Date(saved.receivedAt).toLocaleTimeString()} · {saved.status || 'ERR'} · {saved.requestSnapshot?.method ?? ''} {saved.requestUrl} · {saved.durationMs} ms · {formatBytes(saved.sizeBytes)}</option>)}</optgroup>)}</select></label><button aria-label="Delete saved response" disabled={!selectedResponseId} onClick={onDeleteResponse} type="button"><Icon name="trash" size={14} /></button><button aria-label="Clear environment history" disabled={!activeEnvironmentHistoryCount} onClick={onClearHistory} type="button">Clear {activeEnvironmentHistoryCount}</button></div> : <button aria-label="Response source" className="icon-button subtle" disabled type="button"><Icon name="globe" size={18} /></button>}
+          {streaming && streamHistory.length ? <Suspense fallback={<div className="dialog-loading">Loading stream history…</div>}><StreamHistoryControls activeEnvironmentCount={activeEnvironmentStreamHistoryCount} onClear={onClearStreamHistory} onDelete={onDeleteStreamSession} onSelect={onSelectStreamSession} selectedSessionId={selectedStreamSessionId} sessions={streamHistory} /></Suspense> : !streaming && responseHistory.length ? <div className="response-history-controls"><label className="response-history-picker"><Icon name="history" size={15} /><select aria-label="Saved response" onChange={(event) => onSelectResponse(event.target.value)} value={selectedResponseId}>{selectedResponseId ? null : <option value="">Live response</option>}{historySections.map((section) => <optgroup key={section.label} label={section.label}>{section.responses.map((saved) => <option key={saved.id} value={saved.id}>{new Date(saved.receivedAt).toLocaleTimeString()} · {saved.status || 'ERR'} · {saved.requestSnapshot?.method ?? ''} {saved.requestUrl} · {saved.durationMs} ms · {formatBytes(saved.sizeBytes)}{saved.requestTestResults?.length ? ` · ${saved.requestTestResults.filter((test) => test.passed).length}/${saved.requestTestResults.length} tests` : ''}{saved.requestSnapshot ? '' : ' · legacy request not restorable'}</option>)}</optgroup>)}</select></label><button aria-label="Delete saved response" disabled={!selectedResponseId} onClick={onDeleteResponse} type="button"><Icon name="trash" size={14} /></button><button aria-label="Clear environment history" disabled={!activeEnvironmentHistoryCount} onClick={onClearHistory} type="button">Clear {activeEnvironmentHistoryCount}</button></div> : <button aria-label="Response source" className="icon-button subtle" disabled type="button"><Icon name="globe" size={18} /></button>}
       </div>
       <nav className="tab-strip response-tabs" aria-label="Response details">
         {responseTabs.map((tab) => <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => onTabChange(tab)} type="button">{titleCase(tab)}{tab === 'tests' && scriptTests.length ? <small>{scriptTests.filter((test) => test.passed).length}/{scriptTests.length}</small> : tab === 'cookies' && cookies.length ? <small>{cookies.length}</small> : null}</button>)}
@@ -953,7 +954,7 @@ function ResponsePanel({
         {activeTab === 'headers' ? (
           <div className="response-table">{Object.entries(responseHeaders).map(([name, value]) => <div key={name}><strong>{name}</strong><span>{value}</span></div>)}{!Object.keys(responseHeaders).length ? <div><strong>Headers</strong><span>No handshake headers are available.</span></div> : null}</div>
         ) : null}
-        {activeTab === 'cookies' ? <Suspense fallback={<div className="dialog-loading">Loading cookies…</div>}><CookieEditor cookies={cookies} requestUrl={requestUrl} onChange={onChangeCookies} /></Suspense> : null}
+        {activeTab === 'cookies' ? <><div className="response-table"><div><strong>Request cookie policy</strong><span>{selectedHistoryResponse && selectedHistoryResponse.settingSendCookies !== undefined ? `${selectedHistoryResponse.settingSendCookies ? 'Sent matching cookies' : 'Did not send cookies'} · ${selectedHistoryResponse.settingStoreCookies ? 'Stored response cookies' : 'Did not store response cookies'}` : 'No saved request cookie policy is available for this response.'}</span></div></div><Suspense fallback={<div className="dialog-loading">Loading cookies…</div>}><CookieEditor cookies={cookies} requestUrl={requestUrl} onChange={onChangeCookies} /></Suspense></> : null}
         {activeTab === 'timeline' ? (
           <div className="timeline">
             {timelineEntries.map((entry, index) => <div className={`timeline-entry${entry.hidden ? ' hidden' : ''}`} key={`${entry.name}-${entry.elapsedMs}-${index}`}><span className={`timeline-dot${index === timelineEntries.length - 1 ? ' ok' : ''}`} /><div><strong>{entry.name}</strong><pre>{entry.value || ' '}</pre></div><time>{entry.elapsedMs} ms</time></div>)}
@@ -1397,6 +1398,8 @@ export default function App() {
     )[0];
     setSelectedResponseId(latest?.id ?? '');
     setResponse(latest ?? mockResponse());
+    setScriptTests(latest?.requestTestResults ?? []);
+    setScriptLogs([]);
     if (latest && restoreRequest) restoreSavedRequestVersion(latest);
   };
   const deleteSelectedSavedResponse = () => {
@@ -1414,6 +1417,8 @@ export default function App() {
   const selectSavedResponse = (saved: StoredResponse) => {
     setSelectedResponseId(saved.id);
     setResponse(saved);
+    setScriptTests(saved.requestTestResults ?? []);
+    setScriptLogs([]);
     restoreSavedRequestVersion(saved);
   };
   const showLatestStreamSession = (sessions: StoredStreamSession[], restoreRequest = false) => {
@@ -1555,8 +1560,13 @@ export default function App() {
       requestName: sourceRequest.name,
       requestUrl: result.requestUrl ?? configured.request.url,
       environmentId: configured.environment.id,
+      globalEnvironmentId: activeEnvironment.id,
+      collectionEnvironmentId: collection.activeSubEnvironmentId ?? '',
       receivedAt,
       requestSnapshot: createRequestSnapshot(sourceRequest),
+      requestTestResults: [],
+      settingSendCookies: configured.request.transport.sendCookies,
+      settingStoreCookies: configured.request.transport.storeCookies,
     };
     if (configured.request.transport.storeCookies) {
       const updatedCookies = storeResponseCookies(cookies, storedResponse.requestUrl, result.setCookies ?? []);
@@ -1577,6 +1587,8 @@ export default function App() {
     const latest = activeResponseHistory[0];
     setSelectedResponseId(latest?.id ?? '');
     setResponse(latest ?? mockResponse());
+    setScriptTests(latest?.requestTestResults ?? []);
+    setScriptLogs([]);
   }, [activeStreaming, hydrated, workspace.activeRequestId, workspace.activeEnvironmentId, workspace.preferences.filterResponsesByEnv]);
 
   useEffect(() => {
@@ -2171,7 +2183,7 @@ export default function App() {
             vault: workspace.preferences.enableVaultInScripts ? unlockedVault : {},
             authorizeOAuth2: authorizeOAuth2WithStatus,
           });
-          const state = applyScriptSubresponse(scriptCookies, scriptResponses, subrequest, subresponse, undefined, executionEnvironment.id, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
+          const state = applyScriptSubresponse(scriptCookies, scriptResponses, subrequest, subresponse, undefined, executionEnvironment.id, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv, activeEnvironment.id, collection.activeSubEnvironmentId ?? '');
           scriptCookies = state.cookies;
           scriptResponses = state.responses;
           return subresponse;
@@ -2225,7 +2237,8 @@ export default function App() {
         }, { cookies: scriptCookies, responses: scriptResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, onOAuth2Token: (updated) => persistOAuth2Auth(collection.id, request.id, updated.auth), authorizeOAuth2: authorizeOAuth2WithStatus });
       }
       const afterResponse = await runScript(executableRequest.tests, executableRequest, result, preRequest.localVariables, preRequest);
-      setScriptTests(afterResponse.tests);
+      const requestTestResults = [...preRequest.tests, ...afterResponse.tests];
+      setScriptTests(requestTestResults);
       setScriptLogs((current) => [...current, ...afterResponse.logs, ...pluginState.notifications.map((notification) => `[plugin] ${notification.title}: ${notification.message}`)]);
       persistScriptState(collection.id, afterResponse);
       setResponse(result);
@@ -2241,8 +2254,13 @@ export default function App() {
         requestName: active.request.name,
         requestUrl: result.requestUrl ?? executableRequest.url,
         environmentId: executionEnvironment.id,
+        globalEnvironmentId: activeEnvironment.id,
+        collectionEnvironmentId: collection.activeSubEnvironmentId ?? '',
         receivedAt,
         requestSnapshot: createRequestSnapshot(active.request),
+        requestTestResults: requestTestResults.slice(0, 1_000).map((test) => ({ ...test, name: test.name.slice(0, 2_000), ...(test.error ? { error: test.error.slice(0, 20_000) } : {}) })),
+        settingSendCookies: executableRequest.transport.sendCookies,
+        settingStoreCookies: executableRequest.transport.storeCookies,
       };
       setSelectedResponseId(workspace.preferences.maxHistoryResponses === 0 ? '' : storedResponse.id);
       setWorkspace((current) => ({

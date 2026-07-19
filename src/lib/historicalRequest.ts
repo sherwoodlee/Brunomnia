@@ -31,7 +31,16 @@ export const restoreRequestSnapshot = (owner: RequestSnapshotOwner, current: Api
     ? snapshot.disableUserAgentHeader
     : restoredGrpc.disableUserAgentHeader === true;
   delete restoredGrpc.disableUserAgentHeader;
-  return { ...restored, id: current.id, folderId: current.folderId, renderBodyTemplates: snapshot.renderBodyTemplates !== false, socketIo: record(snapshot.socketIo) ? restored.socketIo : current.socketIo };
+  return {
+    ...restored,
+    id: current.id,
+    name: current.name,
+    folderId: current.folderId,
+    documentation: current.documentation,
+    source: current.source,
+    renderBodyTemplates: snapshot.renderBodyTemplates !== false,
+    socketIo: record(snapshot.socketIo) ? restored.socketIo : current.socketIo,
+  };
 };
 
 export const restoreWorkspaceRequestSnapshot = (owner: RequestSnapshotOwner, workspace: Workspace): Workspace => {
