@@ -115,3 +115,13 @@ export const getRunnerStatusTag = (item: Pick<RunnerLiveItem, 'status' | 'status
   const tone = code >= 200 && code < 300 ? 'http-success' : code >= 300 && code < 400 ? 'http-warning' : 'http-error';
   return { label, tone };
 };
+
+export const isRunnerItemFinished = (status: RunnerLiveItem['status']) => status === 'completed' || status === 'failed' || status === 'canceled' || status === 'skipped';
+
+export const summarizeRunnerLiveProgress = (items: RunnerLiveItem[], isRunning: boolean) => {
+  const total = items.length;
+  const skipped = items.filter((item) => item.status === 'skipped').length;
+  const canceled = items.filter((item) => item.status === 'canceled').length;
+  const finished = items.filter((item) => isRunnerItemFinished(item.status)).length - skipped - canceled;
+  return { total, finished, skipped, canceled, label: `${isRunning ? 'Running' : 'Finished'} ${finished} / ${total} requests (${skipped} skipped, ${canceled} canceled)` };
+};

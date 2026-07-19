@@ -14,6 +14,7 @@ import type {
   Workspace,
 } from '../types';
 import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
+import { isRunnerItemFinished } from './runnerFeedback';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, type ScriptEnvironmentScopes } from './resources';
 import type { ScriptRunOptions } from './scriptSandbox';
 import { scriptTestFailed } from './scriptTests';
@@ -191,8 +192,6 @@ const RUNNER_RESPONSE_HEADERS = 64;
 const RUNNER_TIMELINE_ENTRIES = 1_000;
 
 export const buildRunnerItemKey = (iteration: number, index: number, requestId: string) => `${iteration}-${index}-${requestId}`;
-
-const runnerItemFinished = (status: RunnerLiveItem['status']) => status === 'completed' || status === 'failed' || status === 'canceled' || status === 'skipped';
 
 type ResponseSnapshotBudget = { remaining: number };
 
@@ -403,14 +402,14 @@ export const runCollection = async (
     const index = liveItems.findIndex((item) => item.key === key);
     if (index < 0) return;
     const current = liveItems[index];
-    const status = patch.status && !runnerItemFinished(current.status) ? patch.status : current.status;
+    const status = patch.status && !isRunnerItemFinished(current.status) ? patch.status : current.status;
     liveItems[index] = { ...current, ...patch, status };
     publishLiveItems();
   };
   const finishUnfinished = (status: 'canceled' | 'skipped', errorMessage: string) => {
     let changed = false;
     liveItems.forEach((item, index) => {
-      if (runnerItemFinished(item.status)) return;
+      if (isRunnerItemFinished(item.status)) return;
       liveItems[index] = { ...item, status, errorMessage };
       changed = true;
     });

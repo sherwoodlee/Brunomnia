@@ -1173,6 +1173,10 @@ kbd {
 .runner-stats strong.active { color: var(--accent); }
 .runner-stats span { color: var(--muted); font-size: 8px; grid-row: 2; white-space: nowrap; }
 .runner-attempt-list { min-height: 0; overflow: auto; }
+.runner-live-progress { align-items: center; background: var(--panel); border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; min-height: 42px; padding: 5px 18px; position: sticky; top: 0; z-index: 2; }
+.runner-live-progress span { color: var(--text-soft); font-size: 9px; }
+.runner-live-progress button { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font-size: 8px; padding: 5px 9px; }
+.runner-live-progress button:hover { border-color: var(--red); color: var(--red); }
 .runner-result-filters { align-items: center; background: var(--panel); border-bottom: 1px solid var(--border-soft); display: flex; gap: 10px; min-height: 42px; padding: 5px 18px; position: sticky; top: 0; z-index: 2; }
 .runner-result-filters nav { display: flex; gap: 3px; }
 .runner-result-filters button { background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--muted); font-size: 8px; padding: 4px 7px; }
@@ -2033,6 +2037,7 @@ kbd {
   .runner-results { min-height: 430px; }
   .runner-results > header { align-items: flex-start; flex-direction: column; gap: 12px; }
   .runner-stats { text-align: left; }
+  .runner-live-progress { position: static; }
   .runner-result-filters { align-items: stretch; flex-direction: column; position: static; }
   .runner-result-filters input { margin-left: 0; width: 100%; }
   .runner-iteration-group { padding: 0 8px 8px; }

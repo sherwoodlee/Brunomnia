@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatRunnerResponseStats, formatRunnerStatusLabel, getRunnerStatusTag } from './runnerFeedback';
+import { formatRunnerResponseStats, formatRunnerStatusLabel, getRunnerStatusTag, isRunnerItemFinished, summarizeRunnerLiveProgress } from './runnerFeedback';
 
 describe('Runner feedback formatting', () => {
   it('combines status codes and messages with standard reason fallback', () => {
@@ -29,5 +29,20 @@ describe('Runner feedback formatting', () => {
     expect(getRunnerStatusTag({ status: 'completed', statusCode: 302 })).toEqual({ label: '302 Found', tone: 'http-warning' });
     expect(getRunnerStatusTag({ status: 'completed', statusCode: 500 })).toEqual({ label: '500 Internal Server Error', tone: 'http-error' });
     expect(getRunnerStatusTag({ status: 'failed' })).toEqual({ label: 'ERROR', tone: 'http-error' });
+  });
+
+  it('summarizes active and canceled live progress without counting skipped or canceled requests as finished', () => {
+    const items = [
+      { key: 'completed', iteration: 1, requestId: 'completed', requestName: 'Completed', requestUrl: '', status: 'completed' as const },
+      { key: 'failed', iteration: 1, requestId: 'failed', requestName: 'Failed', requestUrl: '', status: 'failed' as const },
+      { key: 'skipped', iteration: 1, requestId: 'skipped', requestName: 'Skipped', requestUrl: '', status: 'skipped' as const },
+      { key: 'canceled', iteration: 1, requestId: 'canceled', requestName: 'Canceled', requestUrl: '', status: 'canceled' as const },
+      { key: 'running', iteration: 1, requestId: 'running', requestName: 'Running', requestUrl: '', status: 'running' as const },
+    ];
+
+    expect(isRunnerItemFinished('completed')).toBe(true);
+    expect(isRunnerItemFinished('running')).toBe(false);
+    expect(summarizeRunnerLiveProgress(items, true)).toEqual({ total: 5, finished: 2, skipped: 1, canceled: 1, label: 'Running 2 / 5 requests (1 skipped, 1 canceled)' });
+    expect(summarizeRunnerLiveProgress(items, false).label).toBe('Finished 2 / 5 requests (1 skipped, 1 canceled)');
   });
 });
