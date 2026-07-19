@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
-import type { StoredResponse } from '../types';
+import type { ApiRequest, StoredResponse } from '../types';
 import { restoreRequestSnapshot, restoreWorkspaceRequestSnapshot } from './historicalRequest';
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './responseHistory';
 
@@ -104,9 +104,11 @@ describe('response history preferences', () => {
     historical.name = 'Historical';
     historical.url = 'https://example.test/historical';
     historical.folderId = 'old-folder';
-    const saved = { ...response('saved', 'request-a', 'dev', '2026-07-17T01:00:00.000Z'), requestSnapshot: createRequestSnapshot(historical) };
+    const legacySnapshot = createRequestSnapshot(historical) as unknown as Record<string, unknown>;
+    delete legacySnapshot.renderBodyTemplates;
+    const saved = { ...response('saved', 'request-a', 'dev', '2026-07-17T01:00:00.000Z'), requestSnapshot: legacySnapshot as unknown as ApiRequest };
 
-    expect(restoreRequestSnapshot(saved, current)).toMatchObject({ id: 'request-a', name: 'Historical', url: 'https://example.test/historical', folderId: 'current-folder' });
+    expect(restoreRequestSnapshot(saved, current)).toMatchObject({ id: 'request-a', name: 'Historical', url: 'https://example.test/historical', folderId: 'current-folder', renderBodyTemplates: true });
   });
 
   it('ignores missing, mismatched, and malformed request versions', () => {

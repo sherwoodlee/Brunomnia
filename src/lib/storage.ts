@@ -23,7 +23,7 @@ const stringValue = (value: unknown, fallback = '') => typeof value === 'string'
 const normalizeRows = (value: unknown, prefix: string): KeyValue[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
   const row = record(item);
   if (!row) return [];
-  return [{ id: stringValue(row.id, `${prefix}-${index}`), name: stringValue(row.name), value: stringValue(row.value), enabled: row.enabled !== false, description: stringValue(row.description).slice(0, 20_000) }];
+  return [{ id: stringValue(row.id, `${prefix}-${index}`), name: stringValue(row.name), value: stringValue(row.value), enabled: row.enabled !== false, description: stringValue(row.description).slice(0, 20_000), ...(row.multiline === true ? { multiline: true } : {}) }];
 }).slice(0, 1_000);
 
 const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
@@ -536,6 +536,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         params: normalizeRows(request.params, `${requestId}-query`),
         headers: normalizeRows(request.headers, `${requestId}-header`),
         bodyMode: request.bodyMode ?? (method === 'GET' || method === 'HEAD' ? 'none' : 'json'),
+        renderBodyTemplates: request.renderBodyTemplates !== false,
         auth: {
           ...defaults.auth,
           ...request.auth,
@@ -598,7 +599,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           }).slice(0, 500),
         },
         formBody: normalizeRows(request.formBody, `${requestId}-form`),
-        multipartBody: (request.multipartBody ?? []).map((part) => ({ ...part, contentType: part.contentType ?? part.file?.mimeType ?? '', fileName: part.fileName ?? part.file?.fileName ?? '' })),
+        multipartBody: (request.multipartBody ?? []).map((part) => ({ ...part, multiline: part.multiline === true, contentType: part.contentType ?? part.file?.mimeType ?? '', fileName: part.fileName ?? part.file?.fileName ?? '' })),
       };
     }),
   }));
@@ -626,7 +627,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 26,
+    version: 27,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

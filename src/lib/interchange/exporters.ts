@@ -61,8 +61,16 @@ const insomniaBody = (request: ApiRequest, warnings: ImportWarning[]) => {
   if (request.protocol === 'graphql') return { mimeType: 'application/graphql', text: request.graphql.query };
   if (request.bodyMode === 'json') return { mimeType: 'application/json', text: request.body };
   if (request.bodyMode === 'text') return { mimeType: request.headers.find((header) => header.name.toLowerCase() === 'content-type')?.value || 'text/plain', text: request.body };
-  if (request.bodyMode === 'form-urlencoded') return { mimeType: 'application/x-www-form-urlencoded', params: request.formBody.map((part) => ({ name: part.name, value: part.value, disabled: !part.enabled })) };
-  if (request.bodyMode === 'multipart') return { mimeType: 'multipart/form-data', params: request.multipartBody.map((part) => ({ name: part.name, value: part.kind === 'text' ? part.value : undefined, fileName: part.fileName || part.file?.fileName, contentType: part.contentType || part.file?.mimeType, disabled: !part.enabled })) };
+  if (request.bodyMode === 'form-urlencoded') return { mimeType: 'application/x-www-form-urlencoded', params: request.formBody.map((part) => ({ name: part.name, value: part.value, multiline: part.multiline || undefined, description: part.description, disabled: !part.enabled })) };
+  if (request.bodyMode === 'multipart') return { mimeType: 'multipart/form-data', params: request.multipartBody.map((part) => ({
+    name: part.name,
+    value: part.kind === 'text' ? part.value : undefined,
+    fileName: part.fileName || part.file?.fileName,
+    multiline: part.kind === 'text' && part.contentType ? part.contentType : part.kind === 'text' && part.multiline ? true : undefined,
+    contentType: part.kind === 'file' ? part.contentType || part.file?.mimeType : undefined,
+    description: part.description,
+    disabled: !part.enabled,
+  })) };
   if (request.bodyMode === 'binary') {
     warnings.push({ code: 'binary-export', message: 'Binary payload bytes are not embedded in Insomnia compatibility exports.', resource: request.name });
     return { mimeType: request.binaryBody?.mimeType ?? 'application/octet-stream', fileName: request.binaryBody?.fileName ?? '' };
@@ -79,6 +87,7 @@ const v4Request = (request: ApiRequest, parentId: string, index: number, warning
     headers: request.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled, description: header.description })),
     authentication: insomniaAuth(request.auth), preRequestScript: request.preRequestScript, afterResponseScript: request.tests, description: request.documentation ?? '',
     settingFollowRedirects: request.transport.followRedirectsMode,
+    settingDisableRenderRequestBody: !request.renderBodyTemplates,
   };
   if (request.protocol === 'websocket') return { ...base, _type: 'websocket_request' };
   if (request.protocol === 'socketio') return {
@@ -168,7 +177,7 @@ const v5Request = (request: ApiRequest, index: number, warnings: ImportWarning[]
     method: request.method,
     body: insomniaBody(request, warnings),
     scripts: { preRequest: request.preRequestScript, afterResponse: request.tests },
-    settings: { renderRequestBody: true, encodeUrl: true, followRedirects: request.transport.followRedirectsMode, cookies: { send: true, store: true }, rebuildPath: true },
+    settings: { renderRequestBody: request.renderBodyTemplates, encodeUrl: true, followRedirects: request.transport.followRedirectsMode, cookies: { send: true, store: true }, rebuildPath: true },
   };
 };
 

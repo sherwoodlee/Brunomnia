@@ -136,6 +136,7 @@ describe('workspace migrations', () => {
     (first.auth as Record<string, unknown>).expiresAt = 'invalid';
     delete first.protocol;
     delete first.bodyMode;
+    delete first.renderBodyTemplates;
     delete first.pathParams;
     delete first.graphql;
     delete first.grpc;
@@ -147,8 +148,9 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(26);
+    expect(migrated.version).toBe(27);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
+    expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
     expect(migrated.collections[0].requests[0].transport.timeoutMs).toBe(60000);
     expect(migrated.collections[0].requests[0].sse).toEqual({
@@ -181,6 +183,25 @@ describe('workspace migrations', () => {
     expect(migrated.preferences.shortcuts['generate-code']).toBe('Mod+Shift+G');
     expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaEndpoint: '', schemaFetchedAt: '' });
     expect(migrated.collections[0].requests[0].auth.expiresAt).toBe(0);
+  });
+
+  it('preserves body rendering policy and normalizes multipart editor modes', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.version = 26;
+    const request = ((workspace.collections as Array<{ requests: Array<Record<string, unknown>> }>)[0].requests[0]);
+    request.renderBodyTemplates = false;
+    request.multipartBody = [
+      { id: 'multiline', name: 'payload', value: 'one\ntwo', enabled: true, kind: 'text', multiline: true },
+      { id: 'legacy', name: 'legacy', value: 'value', enabled: true, kind: 'text', multiline: 'invalid' },
+    ];
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.version).toBe(27);
+    expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
+    expect(migrated.collections[0].requests[0].multipartBody).toEqual([
+      expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
+      expect.objectContaining({ id: 'legacy', multiline: false, contentType: '', fileName: '' }),
+    ]);
   });
 
   it('repairs minimal exports with usable collections, environments, and active IDs', () => {
@@ -257,7 +278,7 @@ describe('workspace migrations', () => {
     collection.subEnvironments = [{ id: 'staging', name: 'Staging', variables: [{ name: 'host', value: 'staging.example', enabled: true }] }, null];
     collection.activeSubEnvironmentId = 'missing';
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(26);
+    expect(migrated.version).toBe(27);
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });

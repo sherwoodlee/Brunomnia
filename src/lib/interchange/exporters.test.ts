@@ -14,6 +14,15 @@ describe('artifact export adapters', () => {
     workspace.collections[0].requests[0].url = 'https://api.acme.dev/v1/orders/{orderId}';
     workspace.collections[0].requests[0].pathParams = [{ id: 'order-id', name: 'orderId', value: 'ord/one', enabled: true, description: 'Order identifier' }];
     workspace.collections[0].requests[0].headers[0].description = 'Payload type';
+    workspace.collections[0].requests[0].renderBodyTemplates = false;
+    workspace.collections[0].requests[0].bodyMode = 'multipart';
+    workspace.collections[0].requests[0].multipartBody = [
+      { id: 'multiline', name: 'payload', value: '{\n  "ok": true\n}', enabled: true, description: 'JSON document', kind: 'text', multiline: true, contentType: 'application/json' },
+      { id: 'disabled', name: 'optional', value: 'off', enabled: false, description: 'Disabled field', kind: 'text', multiline: false, contentType: '' },
+    ];
+    workspace.collections[0].requests[1].name = 'Form controls';
+    workspace.collections[0].requests[1].bodyMode = 'form-urlencoded';
+    workspace.collections[0].requests[1].formBody = [{ id: 'form-value', name: 'notes', value: 'one\ntwo', enabled: false, description: 'Multiline notes', multiline: true }];
     workspace.collections[0].folders = [{ id: 'orders-folder', name: 'Secured orders', parentId: '', expanded: true, headers: [{ id: 'folder-header', name: 'X-Team', value: 'orders', enabled: true }], environment: [{ id: 'folder-variable', name: 'scope', value: 'orders', enabled: true }], auth: { ...workspace.collections[0].requests[0].auth, type: 'bearer', token: '{{ vault.orders }}' }, preRequestScript: 'folderPre();', tests: 'folderAfter();', documentation: 'Folder docs' }];
     workspace.collections[0].environment = [{ id: 'collection-base', name: 'region', value: 'base', enabled: true }];
     workspace.collections[0].subEnvironments = [{ id: 'collection-staging', name: 'Staging', variables: [{ id: 'collection-selected', name: 'region', value: 'staging', enabled: true }] }];
@@ -32,6 +41,12 @@ describe('artifact export adapters', () => {
     expect(v4Import.collections[0].requests[0]).toMatchObject({ method: 'PROPFIND', url: 'https://api.acme.dev/v1/orders/{orderId}' });
     expect(v4Import.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'orderId', value: 'ord/one', description: 'Order identifier' });
     expect(v4Import.collections[0].requests[0].headers[0].description).toBe('Payload type');
+    expect(v4Import.collections[0].requests[0].renderBodyTemplates).toBe(false);
+    expect(v4Import.collections[0].requests[0].multipartBody).toEqual([
+      expect.objectContaining({ name: 'payload', multiline: true, contentType: 'application/json', description: 'JSON document', enabled: true }),
+      expect.objectContaining({ name: 'optional', multiline: false, description: 'Disabled field', enabled: false }),
+    ]);
+    expect(v4Import.collections[0].requests.find((request) => request.name === 'Form controls')?.formBody[0]).toMatchObject({ name: 'notes', value: 'one\ntwo', enabled: false, description: 'Multiline notes', multiline: true });
     expect(v4Import.collections[0].folders?.[0]).toMatchObject({ name: 'Secured orders', documentation: 'Folder docs' });
     expect(v4Import.collections[0].requests[0].folderId).toBe(v4Import.collections[0].folders?.[0].id);
     expect(v4Import.cookies[0]).toMatchObject({ name: 'session', sameSite: 'lax' });
@@ -51,6 +66,9 @@ describe('artifact export adapters', () => {
     expect(v5Import.collections[0].requests[0].documentation).toBe('Request docs');
     expect(v5Import.collections[0].requests[0].transport.followRedirectsMode).toBe('off');
     expect(v5Import.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'orderId', value: 'ord/one', description: 'Order identifier' });
+    expect(v5Import.collections[0].requests[0].renderBodyTemplates).toBe(false);
+    expect(v5Import.collections[0].requests[0].multipartBody[0]).toMatchObject({ multiline: true, contentType: 'application/json', description: 'JSON document' });
+    expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.name === 'Form controls')?.formBody[0]).toMatchObject({ enabled: false, description: 'Multiline notes', multiline: true });
     expect(v5Import.collections[0].folders?.[0]).toMatchObject({ name: 'Secured orders', documentation: 'Folder docs' });
     expect(v5Import.collections[0].requests[0].folderId).toBe(v5Import.collections[0].folders?.[0].id);
     expect(v5Import.cookies[0]).toMatchObject({ name: 'session', sameSite: 'lax' });
@@ -76,7 +94,7 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(26);
+    expect(parsed.version).toBe(27);
 
     const design = workspace.apiDesigns[0];
     const spec = exportArtifact(workspace, { format: 'openapi', scope: 'design', designId: design.id });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createBlankRequest } from '../data/seed';
+import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
 import type { StoredResponse } from '../types';
 import { fetchOAuth2Token, graphqlBody, sendRequest } from './http';
 
@@ -30,6 +30,47 @@ describe('GraphQL request serialization', () => {
 });
 
 describe('native HTTP transport preferences', () => {
+  it('applies or bypasses body template rendering across multipart metadata', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
+    const request = createBlankRequest('body-rendering');
+    request.method = 'POST';
+    request.url = 'https://example.test/upload';
+    request.bodyMode = 'multipart';
+    request.multipartBody = [{ id: 'part', name: '{{ field }}', value: '{{ value }}', enabled: true, kind: 'text', multiline: true, contentType: '{{ mime }}', fileName: '{{ filename }}' }];
+    const environment = cloneSeedWorkspace().environments[0];
+    environment.variables = [
+      { id: 'field', name: 'field', value: 'payload', enabled: true },
+      { id: 'value', name: 'value', value: 'resolved', enabled: true },
+      { id: 'mime', name: 'mime', value: 'text/custom', enabled: true },
+      { id: 'filename', name: 'filename', value: 'resolved.txt', enabled: true },
+    ];
+
+    request.renderBodyTemplates = false;
+    await sendRequest(request, environment);
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ multipartBody: [expect.objectContaining({ name: '{{ field }}', value: '{{ value }}', contentType: '{{ mime }}', fileName: '{{ filename }}' })] }) }));
+
+    request.renderBodyTemplates = true;
+    await sendRequest(request, environment);
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ multipartBody: [expect.objectContaining({ name: 'payload', value: 'resolved', contentType: 'text/custom', fileName: 'resolved.txt' })] }) }));
+  });
+
+  it('adds a saved binary MIME type without overriding an explicit header', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
+    const request = createBlankRequest('binary-content-type');
+    request.method = 'POST';
+    request.url = 'https://example.test/upload';
+    request.bodyMode = 'binary';
+    request.binaryBody = { fileName: 'archive.bin', mimeType: 'application/x-archive', dataBase64: 'AAE=' };
+    request.headers = [];
+
+    await sendRequest(request, undefined);
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ headers: [expect.objectContaining({ name: 'Content-Type', value: 'application/x-archive' })] }) }));
+
+    request.headers = [{ id: 'content-type', name: 'content-type', value: 'application/custom', enabled: true }];
+    await sendRequest(request, undefined);
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ headers: [expect.objectContaining({ value: 'application/custom' })] }) }));
+  });
+
   it('decodes native response bytes with the declared charset before hooks and previews', async () => {
     tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: { 'content-type': 'text/plain; charset=windows-1252' }, body: 'caf�', bodyBase64: 'Y2Fm6Q==', durationMs: 1, sizeBytes: 4, setCookies: [], httpVersion: 'HTTP/1.1' });
     const request = createBlankRequest('native-response-charset');

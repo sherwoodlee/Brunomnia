@@ -368,24 +368,28 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
   if (request.protocol !== 'http' && request.protocol !== 'graphql') throw new Error(`CLI collection execution does not yet support ${request.protocol}.`);
   const url = buildRequestUrl(request, variables);
   const headers = buildHeaders(request, variables);
+  const renderBody = (value: string) => request.renderBodyTemplates !== false ? resolveTemplate(value, variables) : value;
   let body: BodyInit | undefined;
   if (request.protocol === 'graphql') {
-    body = JSON.stringify({ query: resolveTemplate(request.graphql.query, variables), variables: JSON.parse(resolveTemplate(request.graphql.variables || '{}', variables)), operationName: request.graphql.operationName || undefined });
+    body = JSON.stringify({ query: request.graphql.query, variables: JSON.parse(renderBody(request.graphql.variables || '{}')), operationName: request.graphql.operationName || undefined });
     if (!headers.some((header) => header.name.toLowerCase() === 'content-type')) headers.push({ id: 'cli-graphql', name: 'Content-Type', value: 'application/json', enabled: true });
-  } else if (request.bodyMode === 'json' || request.bodyMode === 'text') body = resolveTemplate(request.body, variables);
-  else if (request.bodyMode === 'form-urlencoded') body = new URLSearchParams(Object.fromEntries(request.formBody.filter((row) => row.enabled).map((row) => [row.name, resolveTemplate(row.value, variables)])));
+  } else if (request.bodyMode === 'json' || request.bodyMode === 'text') body = renderBody(request.body);
+  else if (request.bodyMode === 'form-urlencoded') body = new URLSearchParams(request.formBody.filter((row) => row.enabled).map((row) => [renderBody(row.name), renderBody(row.value)]));
   else if (request.bodyMode === 'multipart') {
     const form = new FormData();
     request.multipartBody.filter((part) => part.enabled && part.name).forEach((part) => {
       if (part.kind === 'file' && part.file) {
-        form.append(part.name, new Blob([Buffer.from(part.file.dataBase64, 'base64')], { type: part.contentType || part.file.mimeType }), part.fileName || part.file.fileName);
+        form.append(renderBody(part.name), new Blob([Buffer.from(part.file.dataBase64, 'base64')], { type: renderBody(part.contentType || part.file.mimeType) }), renderBody(part.fileName || part.file.fileName));
       } else {
-        form.append(part.name, resolveTemplate(part.value, variables));
+        form.append(renderBody(part.name), renderBody(part.value));
       }
     });
     body = form;
   }
-  else if (request.bodyMode === 'binary' && request.binaryBody) body = Buffer.from(request.binaryBody.dataBase64, 'base64');
+  else if (request.bodyMode === 'binary' && request.binaryBody) {
+    body = Buffer.from(request.binaryBody.dataBase64, 'base64');
+    if (!headers.some((header) => header.enabled && header.name.toLowerCase() === 'content-type')) headers.push({ id: 'cli-binary', name: 'Content-Type', value: request.binaryBody.mimeType, enabled: true });
+  }
   const started = performance.now();
   const timeoutMs = resolveRequestTimeout(request.transport, requestTimeoutMs);
   if (resolveProxyTransport(request.transport, url, proxyPreferences).proxyMode === 'custom') {

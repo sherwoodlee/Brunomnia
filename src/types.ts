@@ -15,6 +15,7 @@ export type KeyValue = {
   value: string;
   enabled: boolean;
   description?: string;
+  multiline?: boolean;
 };
 
 export type AuthConfig = {
@@ -91,6 +92,7 @@ export type FilePayload = {
 
 export type MultipartPart = KeyValue & {
   kind: 'text' | 'file';
+  multiline?: boolean;
   file?: FilePayload;
   contentType?: string;
   fileName?: string;
@@ -270,6 +272,7 @@ export type ApiRequest = {
   params: KeyValue[];
   headers: KeyValue[];
   bodyMode: BodyMode;
+  renderBodyTemplates: boolean;
   body: string;
   formBody: KeyValue[];
   multipartBody: MultipartPart[];
@@ -344,7 +347,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 26;
+  version: 27;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

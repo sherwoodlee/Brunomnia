@@ -55,6 +55,16 @@ Runtime OAuth codes, PKCE verifiers, access/identity/refresh tokens, and expiry 
 
 For JSON or text bodies, choose **Beautify** in the body toolbar. Valid JSON receives two-space indentation. XML-looking text, or text with an XML content type, receives conservative structural indentation. Invalid JSON and unrecognized plain text are left unchanged; the formatter does not send content anywhere.
 
+URL-encoded and multipart bodies retain their visible authored order. Each row can be enabled or disabled, moved up or down, described, and edited as one-line or multiline text. Multipart rows can instead select a local file and edit the transmitted filename and content type. Disabled rows remain saved but are omitted from native, browser-development, runner, CLI, and generated-code payloads. The multipart/form editors are lazy-loaded so these controls do not increase the startup JavaScript chunk.
+
+**Render body templates** is enabled by default. Turn it off when literal `{{ value }}` syntax must reach the server unchanged. The switch applies only to request-body text: raw JSON/text, GraphQL variables, URL-encoded names/values, and multipart names/values/filenames/content types. URL, query, headers, authentication, transport settings, and scripts keep their normal rendering behavior. Direct sends, browser development, collection runs, CLI execution, and generated snippets share the policy. Historical request restoration defaults pre-v27 snapshots to rendering enabled.
+
+Selecting a standalone binary file retains its exact approved bytes in the local workspace. When the request has no explicit Content-Type, desktop and CLI execution use the saved file MIME type; an authored header always wins. Native multipart execution emits enabled rows, multiline UTF-8 values, edited filenames, per-part content types, and exact binary bytes. A real loopback fixture inspects that wire body rather than inferring behavior from the editor model.
+
+Insomnia v4/v5 imports and exports preserve body rendering policy, disabled rows, descriptions, multiline state/content type, and order. Workspace v27 adds the rendering switch and normalizes legacy multiline flags. The pinned Insomnia body-parameter model has no arbitrary per-part-header collection, so that is not treated as a parity requirement.
+
+Brunomnia deliberately keeps user-approved file bytes instead of a reusable absolute path, so an environment-templated filesystem body path is not reproduced. Browser development also cannot assign a custom Content-Type to a text `FormData` part without turning it into a file-shaped Blob; the packaged Tauri transport carries the authored text-part MIME type. Broader third-party multipart encoding matrices remain open.
+
 ## Socket.IO sessions
 
 Choose **Socket.IO** as the request protocol, enter the server URL, and use the Engine.IO path field when the server does not use `/socket.io`. A URL path becomes the Socket.IO namespace, while query rows remain handshake query parameters. Enabled headers are templated in order; the cookie jar contributes a `Cookie` header when request cookie sending is enabled. Active Bearer authentication is sent as the Socket.IO namespace-connect `auth.token` value rather than duplicated as an HTTP authorization header.

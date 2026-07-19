@@ -1,10 +1,8 @@
-import { useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useMemo, useRef, useState } from 'react';
 import type {
   ApiRequest,
   BodyMode,
-  FilePayload,
   GrpcSchema,
-  MultipartPart,
 } from '../types';
 import { graphqlTypeLabel, insertGraphqlRootField, validateGraphqlDocument } from '../lib/graphql';
 import { prettyRequestBody } from '../lib/request';
@@ -57,17 +55,6 @@ export function CodeEditor({ ariaLabel, value, onChange }: CodeEditorProps) {
   );
 }
 
-const filePayload = async (file: File): Promise<FilePayload> => ({
-  fileName: file.name,
-  mimeType: file.type || 'application/octet-stream',
-  dataBase64: await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
-    reader.readAsDataURL(file);
-  }),
-});
-
 const modes: { value: BodyMode; label: string }[] = [
   { value: 'none', label: 'None' },
   { value: 'json', label: 'JSON' },
@@ -77,13 +64,10 @@ const modes: { value: BodyMode; label: string }[] = [
   { value: 'binary', label: 'Binary' },
 ];
 
-const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+const MultipartEditor = lazy(() => import('./MultipartEditor'));
+const FormBodyEditor = lazy(() => import('./MultipartEditor').then((module) => ({ default: module.FormBodyEditor })));
 
 export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onChange: ChangeRequest }) {
-  const updateMultipart = (id: string, patch: Partial<MultipartPart>) => onChange({
-    multipartBody: request.multipartBody.map((part) => part.id === id ? { ...part, ...patch } : part),
-  });
-
   return (
     <div className="editor-stack body-editor">
       <div className="editor-toolbar body-mode-toolbar">
@@ -102,6 +86,7 @@ export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onC
           ))}
         </div>
         <div className="body-toolbar-actions">
+          <label className="inline-toggle"><input checked={request.renderBodyTemplates !== false} onChange={(event) => onChange({ renderBodyTemplates: event.target.checked })} type="checkbox" /> Render body templates</label>
           {request.bodyMode === 'json' || request.bodyMode === 'text' ? <button onClick={() => onChange({ body: prettyRequestBody(request) })} type="button">Beautify</button> : null}
           <small>{request.bodyMode === 'none' ? 'No payload' : 'Native request body'}</small>
         </div>
@@ -113,61 +98,19 @@ export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onC
         <CodeEditor ariaLabel="Request body" onChange={(body) => onChange({ body })} value={request.body} />
       ) : null}
       {request.bodyMode === 'form-urlencoded' ? (
-        <SimpleRows
-          name="Field"
-          rows={request.formBody}
-          onChange={(formBody) => onChange({ formBody })}
-        />
+        <Suspense fallback={<div className="dialog-loading">Loading form editor…</div>}><FormBodyEditor onChange={(formBody) => onChange({ formBody })} rows={request.formBody} /></Suspense>
       ) : null}
       {request.bodyMode === 'multipart' ? (
-        <div className="multipart-editor">
-          <div className="multipart-header"><span>Type</span><span>Name</span><span>Value / file</span><span>Part metadata</span><span /></div>
-          {request.multipartBody.map((part) => (
-            <div className="multipart-row" key={part.id}>
-              <select value={part.kind} onChange={(event) => updateMultipart(part.id, { kind: event.target.value as MultipartPart['kind'], file: undefined })}>
-                <option value="text">Text</option><option value="file">File</option>
-              </select>
-              <input aria-label="Multipart field name" value={part.name} onChange={(event) => updateMultipart(part.id, { name: event.target.value })} placeholder="field" />
-              {part.kind === 'file' ? (
-                <label className="file-picker"><Icon name="import" size={14} /><span>{part.file?.fileName ?? 'Choose file'}</span><input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void filePayload(file).then((payload) => updateMultipart(part.id, { file: payload, fileName: payload.fileName, contentType: payload.mimeType })); }} /></label>
-              ) : <input aria-label="Multipart field value" value={part.value} onChange={(event) => updateMultipart(part.id, { value: event.target.value })} placeholder="value" />}
-              <div className="multipart-metadata">
-                {part.kind === 'file' ? <input aria-label="Multipart file name" value={part.fileName ?? part.file?.fileName ?? ''} onChange={(event) => updateMultipart(part.id, { fileName: event.target.value })} placeholder="filename" /> : null}
-                <input aria-label="Multipart content type" value={part.contentType ?? part.file?.mimeType ?? ''} onChange={(event) => updateMultipart(part.id, { contentType: event.target.value })} placeholder={part.kind === 'file' ? 'application/octet-stream' : 'text/plain; charset=utf-8'} />
-              </div>
-              <button aria-label="Remove multipart field" className="icon-button subtle" onClick={() => onChange({ multipartBody: request.multipartBody.filter((candidate) => candidate.id !== part.id) })} type="button"><Icon name="trash" size={14} /></button>
-            </div>
-          ))}
-          <button className="add-row" onClick={() => onChange({ multipartBody: [...request.multipartBody, { id: uid('part'), name: '', value: '', enabled: true, kind: 'text', contentType: '', fileName: '' }] })} type="button"><Icon name="plus" size={14} /> Add part</button>
-        </div>
+        <Suspense fallback={<div className="dialog-loading">Loading multipart editor…</div>}><MultipartEditor onChange={(multipartBody) => onChange({ multipartBody })} parts={request.multipartBody} /></Suspense>
       ) : null}
       {request.bodyMode === 'binary' ? (
         <div className="binary-dropzone">
           <Icon name="import" size={25} />
           <strong>{request.binaryBody?.fileName ?? 'Choose a binary payload'}</strong>
           <span>{request.binaryBody ? `${request.binaryBody.mimeType} · ${Math.round(request.binaryBody.dataBase64.length * .75)} bytes` : 'The selected file remains in this local workspace.'}</span>
-          <label>Choose file<input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void filePayload(file).then((binaryBody) => onChange({ binaryBody })); }} /></label>
+          <label>Choose file<input type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void import('./MultipartEditor').then(({ filePayload }) => filePayload(file)).then((binaryBody) => onChange({ binaryBody })); }} /></label>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-type Row = ApiRequest['formBody'][number];
-
-function SimpleRows({ rows, onChange, name }: { rows: Row[]; onChange: (rows: Row[]) => void; name: string }) {
-  const update = (id: string, patch: Partial<Row>) => onChange(rows.map((row) => row.id === id ? { ...row, ...patch } : row));
-  return (
-    <div className="simple-rows">
-      {rows.map((row) => (
-        <div key={row.id}>
-          <input aria-label={`Enable ${name}`} type="checkbox" checked={row.enabled} onChange={(event) => update(row.id, { enabled: event.target.checked })} />
-          <input aria-label={`${name} name`} placeholder={name} value={row.name} onChange={(event) => update(row.id, { name: event.target.value })} />
-          <input aria-label={`${name} value`} placeholder="Value" value={row.value} onChange={(event) => update(row.id, { value: event.target.value })} />
-          <button aria-label={`Remove ${name}`} className="icon-button subtle" onClick={() => onChange(rows.filter((candidate) => candidate.id !== row.id))} type="button"><Icon name="trash" size={14} /></button>
-        </div>
-      ))}
-      <button className="add-row" onClick={() => onChange([...rows, { id: uid('row'), name: '', value: '', enabled: true }])} type="button"><Icon name="plus" size={14} /> Add field</button>
     </div>
   );
 }

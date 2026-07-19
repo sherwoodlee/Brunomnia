@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the one-hundredth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the one-hundred-seventh runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -14,7 +14,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Long-running Server-Sent Events sessions with incremental parsing, bounded or unlimited automatic reconnects, server retry hints, `Last-Event-ID` resume, and real reconnect/cancellation loopback coverage
 - Persistent chronologically grouped WebSocket, Socket.IO, and SSE session history with finite/zero/unlimited retention, active-environment filtering, incremental event persistence, handshake status/headers/version/duration, lifecycle timelines, type filtering, text search, non-destructive clear-view cutoffs, historical request-version restoration, prior-session selection, and delete/clear actions
 - gRPC reflection, pasted `.proto` compilation, dynamic JSON messages, and unary/client/server/bidirectional streaming calls
-- JSON, text, URL-encoded, multipart file/part-metadata, and binary request bodies
+- JSON, text, ordered URL-encoded and multipart rows with enablement/descriptions/multiline editing, multipart file/part metadata, binary bodies, and a per-request body-template switch
 - Standard or custom HTTP methods, explicit encoded path parameters, repeated query keys, regular or device-persistent bulk query/header editing, row descriptions, multiline values, and local JSON/XML body beautification
 - Local client-code generation for cURL, JavaScript Fetch, Python Requests, Go `net/http`, Java `HttpClient`, and C# `HttpClient`, including self-contained multipart and binary bytes
 - Device-local redirect, request-timeout, API/authentication certificate-validation, and system/manual proxy defaults; per-request inheritance/overrides; `0`-disabled deadlines; a finite or unlimited native redirect ceiling; no-proxy lists; and domain-scoped client-certificate controls

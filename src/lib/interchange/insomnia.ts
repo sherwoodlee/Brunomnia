@@ -71,12 +71,23 @@ const applyInsomniaBody = (request: ApiRequest, rawValue: unknown, format: strin
       const item = asRecord(entry);
       if (!item) return [];
       const fileName = asString(item.fileName);
+      const multiline = typeof item.multiline === 'string' || item.multiline === true;
       if (fileName) warnings.push({ code: 'external-file', message: `Insomnia file '${fileName}' requires re-selecting the local payload.`, resource: request.name });
-      return [{ id: `${request.id}-part-${index}`, name: asString(item.name), value: asString(item.value), enabled: !asBoolean(item.disabled), kind: fileName ? 'file' as const : 'text' as const, fileName, contentType: asString(item.contentType ?? item.mimeType) }];
+      return [{
+        id: `${request.id}-part-${index}`,
+        name: asString(item.name),
+        value: asString(item.value),
+        enabled: !asBoolean(item.disabled),
+        description: asString(item.description),
+        kind: fileName ? 'file' as const : 'text' as const,
+        multiline,
+        fileName,
+        contentType: typeof item.multiline === 'string' ? item.multiline : asString(item.contentType ?? item.mimeType),
+      }];
     });
   } else if (params.length || mime.includes('application/x-www-form-urlencoded')) {
     request.bodyMode = 'form-urlencoded';
-    request.formBody = keyValues(params, `${request.id}-form`);
+    request.formBody = keyValues(params, `${request.id}-form`).map((row, index) => ({ ...row, multiline: asRecord(params[index])?.multiline === true || typeof asRecord(params[index])?.multiline === 'string' }));
   } else if (body.fileName) {
     request.bodyMode = 'binary';
     request.source = sourceMetadata(format, request.source?.sourceId, { fileName: body.fileName });
@@ -165,6 +176,8 @@ const mapInsomniaRequest = (
   request.preRequestScript = joinScripts(inherited.preRequestScript, raw.preRequestScript, scripts?.preRequest);
   request.tests = joinScripts(inherited.tests, raw.afterResponseScript, scripts?.afterResponse);
   const settings = asRecord(raw.settings);
+  if (raw.settingDisableRenderRequestBody !== undefined) request.renderBodyTemplates = !asBoolean(raw.settingDisableRenderRequestBody);
+  else if (settings?.renderRequestBody !== undefined) request.renderBodyTemplates = asBoolean(settings.renderRequestBody, true);
   const cookieSettings = asRecord(settings?.cookies);
   if (raw.settingSendCookies !== undefined || cookieSettings?.send !== undefined) request.transport.sendCookies = asBoolean(raw.settingSendCookies ?? cookieSettings?.send, true);
   if (raw.settingStoreCookies !== undefined || cookieSettings?.store !== undefined) request.transport.storeCookies = asBoolean(raw.settingStoreCookies ?? cookieSettings?.store, true);

@@ -132,7 +132,7 @@ const applyPostmanBody = (request: ApiRequest, rawBody: unknown, warnings: Impor
       if (!item) return [];
       const file = item.type === 'file';
       if (file) warnings.push({ code: 'external-file', message: 'Postman file references require re-selecting the local file.', resource: request.name });
-      return [{ id: `${request.id}-part-${index}`, name: asString(item.key), value: asString(item.value), enabled: !asBoolean(item.disabled), kind: file ? 'file' as const : 'text' as const, fileName: asString(item.src), contentType: asString(item.contentType) }];
+      return [{ id: `${request.id}-part-${index}`, name: asString(item.key), value: asString(item.value), enabled: !asBoolean(item.disabled), description: asString(item.description), kind: file ? 'file' as const : 'text' as const, multiline: asString(item.value).includes('\n'), fileName: asString(item.src), contentType: asString(item.contentType) }];
     });
     addContentType(request, 'multipart/form-data');
   } else if (mode === 'graphql') {

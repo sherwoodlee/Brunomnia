@@ -116,10 +116,11 @@ type EncodedMultipartPart = {
 
 const materializeMultipart = (request: ApiRequest, variables: Record<string, string>, warnings: string[]) => {
   const parts: EncodedMultipartPart[] = [];
+  const render = (value: string) => request.renderBodyTemplates !== false ? resolveTemplate(value, variables) : value;
   request.multipartBody.filter((part) => part.enabled).forEach((part) => {
-    const name = safeMultipartHeaderValue(resolveTemplate(part.name, variables).trim(), 'Multipart field name', warnings);
+    const name = safeMultipartHeaderValue(render(part.name).trim(), 'Multipart field name', warnings);
     if (!name) return;
-    const contentType = safeMultipartHeaderValue(resolveTemplate(part.contentType ?? '', variables).trim(), `Multipart field '${name}' content type`, warnings);
+    const contentType = safeMultipartHeaderValue(render(part.contentType ?? '').trim(), `Multipart field '${name}' content type`, warnings);
     if (part.kind === 'file') {
       if (!part.file) {
         warnings.push(`Multipart file field '${name}' was omitted because no file is attached.`);
@@ -132,12 +133,12 @@ const materializeMultipart = (request: ApiRequest, variables: Record<string, str
         warnings.push(`Multipart file field '${name}' was omitted because its saved bytes are not valid Base64.`);
         return;
       }
-      const fileName = safeMultipartHeaderValue(resolveTemplate(part.fileName || part.file.fileName || 'file', variables), `Multipart field '${name}' filename`, warnings);
+      const fileName = safeMultipartHeaderValue(render(part.fileName || part.file.fileName || 'file'), `Multipart field '${name}' filename`, warnings);
       const effectiveContentType = safeMultipartHeaderValue(contentType || part.file.mimeType || 'application/octet-stream', `Multipart field '${name}' content type`, warnings);
       parts.push({ contentType: effectiveContentType, data, fileName, name });
       return;
     }
-    parts.push({ contentType, data: encoder.encode(resolveTemplate(part.value, variables)), name });
+    parts.push({ contentType, data: encoder.encode(render(part.value)), name });
   });
 
   const collisionInputs = parts.flatMap((part) => [
@@ -163,10 +164,11 @@ const materializeMultipart = (request: ApiRequest, variables: Record<string, str
 };
 
 const materializeBody = (request: ApiRequest, variables: Record<string, string>, warnings: string[]): MaterializedBody | undefined => {
+  const render = (value: string) => request.renderBodyTemplates !== false ? resolveTemplate(value, variables) : value;
   if (request.method === 'GET' || request.method === 'HEAD') return undefined;
   if (request.protocol === 'graphql') {
     let graphqlVariables: unknown = request.graphql.variables;
-    try { graphqlVariables = JSON.parse(resolveTemplate(request.graphql.variables || '{}', variables)); } catch { warnings.push('GraphQL variables were emitted as text because they are not valid JSON.'); }
+    try { graphqlVariables = JSON.parse(render(request.graphql.variables || '{}')); } catch { warnings.push('GraphQL variables were emitted as text because they are not valid JSON.'); }
     return { kind: 'text', value: JSON.stringify({
       query: request.graphql.query,
       variables: graphqlVariables,
@@ -174,10 +176,10 @@ const materializeBody = (request: ApiRequest, variables: Record<string, string>,
     }) };
   }
   if (request.bodyMode === 'none') return undefined;
-  if (request.bodyMode === 'json' || request.bodyMode === 'text') return { kind: 'text', value: resolveTemplate(request.body, variables) };
+  if (request.bodyMode === 'json' || request.bodyMode === 'text') return { kind: 'text', value: render(request.body) };
   if (request.bodyMode === 'form-urlencoded') {
     const body = new URLSearchParams();
-    request.formBody.filter((row) => row.enabled && row.name).forEach((row) => body.append(resolveTemplate(row.name, variables), resolveTemplate(row.value, variables)));
+    request.formBody.filter((row) => row.enabled && row.name).forEach((row) => body.append(render(row.name), render(row.value)));
     return { kind: 'text', value: body.toString() };
   }
   if (request.bodyMode === 'multipart') {

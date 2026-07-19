@@ -1613,7 +1613,22 @@ Compatibility bounds remain explicit: Event Stream logs/timelines remain bounded
 
 Compatibility bounds remain explicit: Brunomnia currently exposes six local targets rather than Insomnia's full HTTPSnippet matrix, and it does not install target dependencies, reproduce runtime-only advanced auth signing, validate every emitted language, or execute snippets. Inline byte payloads make previews self-contained but can be large. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 107 — remaining parity closure and release hardening
+## Milestone 107 — request-body controls and native wire fidelity (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia's request body model contains MIME/text/file/parameter modes; body parameters expose name, value, description, disabled, multiline/content-type, filename, and type fields plus one request-level disable-render switch, but no arbitrary per-part-header collection |
+| Lazy row editors | Complete baseline | URL-encoded and multipart rows support enablement, Text/Multiline/File modes where applicable, descriptions, explicit up/down ordering, removal, and add; both editors live in one lazy chunk instead of growing the near-threshold startup bundle |
+| Body rendering policy | Complete | Workspace v27 adds a default-on per-request switch shared by direct/browser/runner/CLI/codegen paths for raw body text, GraphQL variables, URL-encoded names/values, and multipart names/values/filenames/content types |
+| Binary MIME defaults | Complete | Desktop native and CLI sends add the saved binary MIME type only when no enabled Content-Type exists; explicit authored headers remain authoritative |
+| Interchange | Complete baseline | Insomnia v4 `settingDisableRenderRequestBody`, v5 `settings.renderRequestBody`, URL-encoded/multipart descriptions, disabled state, multiline/content type, and ordering round-trip through the supported adapters; Postman form descriptions/multiline values are retained |
+| Native wire evidence | Complete | A real loopback request asserts multipart Content-Type/boundary, multiline JSON text, edited filename/MIME, disabled omission, exact `00 ff 0a 0d` file bytes, and successful response handling; request construction separately proves binary MIME default/override behavior |
+| Historical compatibility | Complete | Pre-v27 requests and historical snapshots default body rendering on; stored multipart mode flags normalize to booleans without losing values or metadata |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 107 verification](QA_MILESTONE_107.md) |
+
+Compatibility bounds remain explicit: selected local files are persisted as approved bytes rather than reusable template-selected absolute paths; browser-development FormData cannot assign a custom MIME type to text parts without file-shaped Blob semantics; and broader third-party multipart encoding fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 108 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

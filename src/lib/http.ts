@@ -32,10 +32,9 @@ export type SendRequestContext = {
   };
 };
 
-export const graphqlBody = (request: ApiRequest, variables: Record<string, string>) => {
+const serializeGraphqlBody = (request: ApiRequest, variablesSource: string) => {
   let parsedVariables: unknown = {};
-  const resolvedVariables = resolveTemplate(request.graphql.variables, variables).trim();
-  if (resolvedVariables) parsedVariables = JSON.parse(resolvedVariables);
+  if (variablesSource.trim()) parsedVariables = JSON.parse(variablesSource.trim());
   return JSON.stringify({
     query: request.graphql.query,
     variables: parsedVariables,
@@ -43,13 +42,18 @@ export const graphqlBody = (request: ApiRequest, variables: Record<string, strin
   });
 };
 
-const browserBody = (request: ApiRequest, variables: Record<string, string>): BodyInit | undefined => {
+export const graphqlBody = (request: ApiRequest, variables: Record<string, string>) => serializeGraphqlBody(
+  request,
+  request.renderBodyTemplates !== false ? resolveTemplate(request.graphql.variables, variables) : request.graphql.variables,
+);
+
+const browserBody = (request: ApiRequest): BodyInit | undefined => {
   if (request.method === 'GET' || request.method === 'HEAD' || request.bodyMode === 'none') return undefined;
-  if (request.protocol === 'graphql') return graphqlBody(request, variables);
+  if (request.protocol === 'graphql') return serializeGraphqlBody(request, request.graphql.variables);
   if (request.bodyMode === 'form-urlencoded') {
     return new URLSearchParams(request.formBody
       .filter((row) => row.enabled && row.name)
-      .map((row) => [resolveTemplate(row.name, variables), resolveTemplate(row.value, variables)]));
+      .map((row) => [row.name, row.value]));
   }
   if (request.bodyMode === 'multipart') {
     const body = new FormData();
@@ -58,7 +62,7 @@ const browserBody = (request: ApiRequest, variables: Record<string, string>): Bo
         const bytes = Uint8Array.from(atob(part.file.dataBase64), (character) => character.charCodeAt(0));
         body.append(part.name, new Blob([bytes], { type: part.contentType || part.file.mimeType }), part.fileName || part.file.fileName);
       } else {
-        body.append(part.name, resolveTemplate(part.value, variables));
+        body.append(part.name, part.value);
       }
     });
     return body;
@@ -66,7 +70,7 @@ const browserBody = (request: ApiRequest, variables: Record<string, string>): Bo
   if (request.bodyMode === 'binary' && request.binaryBody) {
     return Uint8Array.from(atob(request.binaryBody.dataBase64), (character) => character.charCodeAt(0));
   }
-  return resolveTemplate(request.body, variables);
+  return request.body;
 };
 
 const renderRows = async (rows: ApiRequest['headers'], render: (value: string) => Promise<string>) => Promise.all(rows.map(async (row) => ({
@@ -85,6 +89,7 @@ const renderRequest = async (request: ApiRequest, variables: Record<string, stri
     externalSecret: context.externalSecret,
   };
   const render = (value: string) => renderTemplate(value, templateContext);
+  const renderBody = request.renderBodyTemplates !== false ? render : async (value: string) => value;
   const authEntries = await Promise.all(Object.entries(request.auth).map(async ([key, value]) => [key, typeof value === 'string' ? await render(value) : value]));
   return {
     ...request,
@@ -93,11 +98,17 @@ const renderRequest = async (request: ApiRequest, variables: Record<string, stri
     pathParams: await renderRows(request.pathParams, render),
     params: await renderRows(request.params, render),
     headers: await renderRows(request.headers, render),
-    body: await render(request.body),
-    formBody: await renderRows(request.formBody, render),
-    multipartBody: await Promise.all(request.multipartBody.map(async (part) => ({ ...part, name: await render(part.name), value: await render(part.value) }))),
+    body: await renderBody(request.body),
+    formBody: await renderRows(request.formBody, renderBody),
+    multipartBody: await Promise.all(request.multipartBody.map(async (part) => ({
+      ...part,
+      name: await renderBody(part.name),
+      value: await renderBody(part.value),
+      contentType: await renderBody(part.contentType ?? ''),
+      fileName: await renderBody(part.fileName ?? ''),
+    }))),
     auth: Object.fromEntries(authEntries) as ApiRequest['auth'],
-    graphql: { ...request.graphql, query: request.graphql.query, variables: await render(request.graphql.variables), operationName: request.graphql.operationName },
+    graphql: { ...request.graphql, query: request.graphql.query, variables: await renderBody(request.graphql.variables), operationName: request.graphql.operationName },
     grpc: { ...request.grpc, service: await render(request.grpc.service), method: await render(request.grpc.method), protoText: await render(request.grpc.protoText), input: await render(request.grpc.input), metadata: await renderRows(request.grpc.metadata, render) },
     transport: {
       ...request.transport,
@@ -148,6 +159,9 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
   }
   if (prepared.protocol === 'http' && (prepared.bodyMode === 'multipart' || prepared.bodyMode === 'form-urlencoded')) {
     headers = headers.filter((header) => !contentType(header.name));
+  }
+  if (prepared.protocol === 'http' && prepared.bodyMode === 'binary' && prepared.binaryBody?.mimeType && !headers.some((header) => header.enabled && contentType(header.name))) {
+    headers = [...headers, { id: 'binary-content-type', name: 'Content-Type', value: prepared.binaryBody.mimeType, enabled: true }];
   }
 
   if (!prepared.auth.disabled && prepared.auth.type === 'api-key' && prepared.auth.apiKeyLocation === 'query' && prepared.auth.apiKeyName) {
@@ -221,7 +235,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
   const response = await fetch(url, {
     method: prepared.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled).map((header) => [header.name, header.value])),
-    body: browserBody(prepared, variables),
+    body: browserBody(prepared),
     redirect: followRedirects ? 'follow' : 'manual',
     signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
     credentials: prepared.transport.sendCookies ? 'include' : 'omit',

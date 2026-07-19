@@ -11,6 +11,7 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
   params: [],
   headers: [{ id: `${id}-content-type`, name: 'Content-Type', value: 'application/json', enabled: method !== 'GET' }],
   bodyMode: method === 'GET' ? 'none' : 'json',
+  renderBodyTemplates: true,
   body: '',
   formBody: [],
   multipartBody: [],
@@ -121,7 +122,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 26,
+  version: 27,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',

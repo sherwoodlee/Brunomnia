@@ -26,7 +26,7 @@ export const restoreRequestSnapshot = (owner: RequestSnapshotOwner, current: Api
     || !record(snapshot.transport)
     || !record(snapshot.sse)) return current;
   const restored = structuredClone(snapshot) as ApiRequest;
-  return { ...restored, id: current.id, folderId: current.folderId, socketIo: record(snapshot.socketIo) ? restored.socketIo : current.socketIo };
+  return { ...restored, id: current.id, folderId: current.folderId, renderBodyTemplates: snapshot.renderBodyTemplates !== false, socketIo: record(snapshot.socketIo) ? restored.socketIo : current.socketIo };
 };
 
 export const restoreWorkspaceRequestSnapshot = (owner: RequestSnapshotOwner, workspace: Workspace): Workspace => {

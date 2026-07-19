@@ -7679,6 +7679,7 @@ var createRequest = (id, name, method, url) => ({
   params: [],
   headers: [{ id: `${id}-content-type`, name: "Content-Type", value: "application/json", enabled: method !== "GET" }],
   bodyMode: method === "GET" ? "none" : "json",
+  renderBodyTemplates: true,
   body: "",
   formBody: [],
   multipartBody: [],
@@ -7833,7 +7834,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 26,
+  version: 27,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -11184,7 +11185,7 @@ var stringValue2 = (value, fallback = "") => typeof value === "string" ? value :
 var normalizeRows = (value, prefix) => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
   const row = record4(item);
   if (!row) return [];
-  return [{ id: stringValue2(row.id, `${prefix}-${index}`), name: stringValue2(row.name), value: stringValue2(row.value), enabled: row.enabled !== false, description: stringValue2(row.description).slice(0, 2e4) }];
+  return [{ id: stringValue2(row.id, `${prefix}-${index}`), name: stringValue2(row.name), value: stringValue2(row.value), enabled: row.enabled !== false, description: stringValue2(row.description).slice(0, 2e4), ...row.multiline === true ? { multiline: true } : {} }];
 }).slice(0, 1e3);
 var normalizePlugins = (value) => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
   if (!item || typeof item !== "object") return [];
@@ -11624,6 +11625,7 @@ var migrateWorkspace = (value) => {
         params: normalizeRows(request.params, `${requestId}-query`),
         headers: normalizeRows(request.headers, `${requestId}-header`),
         bodyMode: request.bodyMode ?? (method === "GET" || method === "HEAD" ? "none" : "json"),
+        renderBodyTemplates: request.renderBodyTemplates !== false,
         auth: {
           ...defaults.auth,
           ...request.auth,
@@ -11682,7 +11684,7 @@ var migrateWorkspace = (value) => {
           }).slice(0, 500)
         },
         formBody: normalizeRows(request.formBody, `${requestId}-form`),
-        multipartBody: (request.multipartBody ?? []).map((part) => ({ ...part, contentType: part.contentType ?? part.file?.mimeType ?? "", fileName: part.fileName ?? part.file?.fileName ?? "" }))
+        multipartBody: (request.multipartBody ?? []).map((part) => ({ ...part, multiline: part.multiline === true, contentType: part.contentType ?? part.file?.mimeType ?? "", fileName: part.fileName ?? part.file?.fileName ?? "" }))
       };
     })
   }));
@@ -11710,7 +11712,7 @@ var migrateWorkspace = (value) => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 26,
+    version: 27,
     name: workspace.name || "Imported Workspace",
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? "",
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
@@ -12226,23 +12228,27 @@ var executeHttp = async (request, variables, requestTimeoutMs = 3e4, proxyPrefer
   if (request.protocol !== "http" && request.protocol !== "graphql") throw new Error(`CLI collection execution does not yet support ${request.protocol}.`);
   const url = buildRequestUrl(request, variables);
   const headers = buildHeaders(request, variables);
+  const renderBody = (value) => request.renderBodyTemplates !== false ? resolveTemplate(value, variables) : value;
   let body;
   if (request.protocol === "graphql") {
-    body = JSON.stringify({ query: resolveTemplate(request.graphql.query, variables), variables: JSON.parse(resolveTemplate(request.graphql.variables || "{}", variables)), operationName: request.graphql.operationName || void 0 });
+    body = JSON.stringify({ query: request.graphql.query, variables: JSON.parse(renderBody(request.graphql.variables || "{}")), operationName: request.graphql.operationName || void 0 });
     if (!headers.some((header) => header.name.toLowerCase() === "content-type")) headers.push({ id: "cli-graphql", name: "Content-Type", value: "application/json", enabled: true });
-  } else if (request.bodyMode === "json" || request.bodyMode === "text") body = resolveTemplate(request.body, variables);
-  else if (request.bodyMode === "form-urlencoded") body = new URLSearchParams(Object.fromEntries(request.formBody.filter((row) => row.enabled).map((row) => [row.name, resolveTemplate(row.value, variables)])));
+  } else if (request.bodyMode === "json" || request.bodyMode === "text") body = renderBody(request.body);
+  else if (request.bodyMode === "form-urlencoded") body = new URLSearchParams(request.formBody.filter((row) => row.enabled).map((row) => [renderBody(row.name), renderBody(row.value)]));
   else if (request.bodyMode === "multipart") {
     const form = new FormData();
     request.multipartBody.filter((part) => part.enabled && part.name).forEach((part) => {
       if (part.kind === "file" && part.file) {
-        form.append(part.name, new Blob([Buffer.from(part.file.dataBase64, "base64")], { type: part.contentType || part.file.mimeType }), part.fileName || part.file.fileName);
+        form.append(renderBody(part.name), new Blob([Buffer.from(part.file.dataBase64, "base64")], { type: renderBody(part.contentType || part.file.mimeType) }), renderBody(part.fileName || part.file.fileName));
       } else {
-        form.append(part.name, resolveTemplate(part.value, variables));
+        form.append(renderBody(part.name), renderBody(part.value));
       }
     });
     body = form;
-  } else if (request.bodyMode === "binary" && request.binaryBody) body = Buffer.from(request.binaryBody.dataBase64, "base64");
+  } else if (request.bodyMode === "binary" && request.binaryBody) {
+    body = Buffer.from(request.binaryBody.dataBase64, "base64");
+    if (!headers.some((header) => header.enabled && header.name.toLowerCase() === "content-type")) headers.push({ id: "cli-binary", name: "Content-Type", value: request.binaryBody.mimeType, enabled: true });
+  }
   const started = performance.now();
   const timeoutMs = resolveRequestTimeout(request.transport, requestTimeoutMs);
   if (resolveProxyTransport(request.transport, url, proxyPreferences).proxyMode === "custom") {

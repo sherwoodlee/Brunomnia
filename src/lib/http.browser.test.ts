@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createBlankRequest } from '../data/seed';
+import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
 import { sendRequest } from './http';
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -10,6 +10,26 @@ vi.mock('@tauri-apps/api/core', () => ({
 afterEach(() => vi.unstubAllGlobals());
 
 describe('browser HTTP response bytes', () => {
+  it('honors the request body rendering switch in browser development', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const request = createBlankRequest('browser-body-rendering');
+    request.method = 'POST';
+    request.url = 'https://example.test/body';
+    request.bodyMode = 'text';
+    request.body = '{{ value }}';
+    const environment = cloneSeedWorkspace().environments[0];
+    environment.variables = [{ id: 'value', name: 'value', value: 'resolved', enabled: true }];
+
+    request.renderBodyTemplates = false;
+    await sendRequest(request, environment, { requestTimeoutMs: 0 });
+    expect(fetchMock).toHaveBeenLastCalledWith(request.url, expect.objectContaining({ body: '{{ value }}' }));
+
+    request.renderBodyTemplates = true;
+    await sendRequest(request, environment, { requestTimeoutMs: 0 });
+    expect(fetchMock).toHaveBeenLastCalledWith(request.url, expect.objectContaining({ body: 'resolved' }));
+  });
+
   it('preserves exact bytes when UTF-8 display decoding is lossy', async () => {
     const bytes = Uint8Array.from([0x66, 0x80, 0x6f, 0x00]);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(bytes.buffer as ArrayBuffer, {

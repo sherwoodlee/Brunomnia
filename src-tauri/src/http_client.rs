@@ -2,7 +2,7 @@ use crate::models::{HttpRequestInput, HttpResponseOutput, TransportConfig};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use digest_auth::{AuthContext, HttpMethod as DigestMethod};
 use reqwest::{
-    header::{HeaderMap, AUTHORIZATION, SET_COOKIE, WWW_AUTHENTICATE},
+    header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE},
     multipart, Client, Method, RequestBuilder, Response, Version,
 };
 use std::{collections::BTreeMap, time::Instant};
@@ -247,6 +247,13 @@ fn build_request(
             let bytes = STANDARD
                 .decode(&file.data_base64)
                 .map_err(|error| format!("Invalid base64 file payload: {error}"))?;
+            if !file.mime_type.is_empty()
+                && !input.headers.iter().any(|header| {
+                    header.enabled && header.name.eq_ignore_ascii_case(CONTENT_TYPE.as_str())
+                })
+            {
+                request = request.header(CONTENT_TYPE, &file.mime_type);
+            }
             request.body(bytes)
         }
         mode => return Err(format!("Unsupported body mode: {mode}")),
@@ -537,6 +544,60 @@ pub(crate) fn flatten_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{FilePayload, KeyValue, MultipartPart, NativeAuthConfig};
+
+    fn body_test_input(body_mode: &str) -> HttpRequestInput {
+        HttpRequestInput {
+            method: "POST".into(),
+            url: "http://127.0.0.1/".into(),
+            headers: Vec::new(),
+            body_mode: body_mode.into(),
+            body: String::new(),
+            form_body: Vec::new(),
+            multipart_body: Vec::new(),
+            binary_body: None,
+            auth: NativeAuthConfig {
+                disabled: true,
+                ..Default::default()
+            },
+            transport: TransportConfig {
+                preferred_http_version: "http1.1".into(),
+                ..Default::default()
+            },
+        }
+    }
+
+    async fn read_loopback_request(stream: &mut tokio::net::TcpStream) -> (String, Vec<u8>) {
+        use tokio::io::AsyncReadExt;
+
+        let mut bytes = Vec::new();
+        let header_end = loop {
+            if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                break index + 4;
+            }
+            let mut chunk = [0_u8; 4096];
+            let read = stream.read(&mut chunk).await.unwrap();
+            assert!(read > 0, "request ended before its headers");
+            bytes.extend_from_slice(&chunk[..read]);
+        };
+        let headers = String::from_utf8(bytes[..header_end].to_vec()).unwrap();
+        let content_length = headers
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            .unwrap();
+        while bytes.len() < header_end + content_length {
+            let mut chunk = [0_u8; 4096];
+            let read = stream.read(&mut chunk).await.unwrap();
+            assert!(read > 0, "request ended before its body");
+            bytes.extend_from_slice(&chunk[..read]);
+        }
+        (
+            headers,
+            bytes[header_end..header_end + content_length].to_vec(),
+        )
+    }
 
     #[test]
     fn parses_matching_and_default_netrc_credentials() {
@@ -634,5 +695,123 @@ mod tests {
             response_body_fields(&[0x66, 0x80, 0x6f, 0x00]),
             ("f�o\0".into(), Some("ZoBvAA==".into()))
         );
+    }
+
+    #[test]
+    fn defaults_binary_content_type_without_overriding_an_explicit_header() {
+        let client = build_client(&TransportConfig::default(), Some("http://127.0.0.1/")).unwrap();
+        let mut input = body_test_input("binary");
+        input.binary_body = Some(FilePayload {
+            file_name: "archive.bin".into(),
+            mime_type: "application/x-archive".into(),
+            data_base64: "AAH/".into(),
+        });
+
+        let request = build_request(
+            &client,
+            &input,
+            url::Url::parse("http://127.0.0.1/").unwrap(),
+            None,
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        assert_eq!(request.headers()[CONTENT_TYPE], "application/x-archive");
+        assert_eq!(
+            request.body().and_then(reqwest::Body::as_bytes),
+            Some(&[0, 1, 255][..])
+        );
+
+        input.headers = vec![KeyValue {
+            name: "content-type".into(),
+            value: "application/custom".into(),
+            enabled: true,
+        }];
+        let request = build_request(
+            &client,
+            &input,
+            url::Url::parse("http://127.0.0.1/").unwrap(),
+            None,
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        assert_eq!(request.headers()[CONTENT_TYPE], "application/custom");
+    }
+
+    #[tokio::test]
+    async fn sends_enabled_multipart_metadata_and_exact_file_bytes() {
+        use tokio::{io::AsyncWriteExt, net::TcpListener};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_loopback_request(&mut stream).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+            request
+        });
+
+        let mut input = body_test_input("multipart");
+        input.url = format!("http://{address}/upload");
+        input.multipart_body = vec![
+            MultipartPart {
+                name: "payload".into(),
+                value: "{\"ok\":true}\nsecond".into(),
+                enabled: true,
+                kind: "text".into(),
+                file: None,
+                content_type: "application/json".into(),
+                file_name: String::new(),
+            },
+            MultipartPart {
+                name: "attachment".into(),
+                value: String::new(),
+                enabled: true,
+                kind: "file".into(),
+                file: Some(FilePayload {
+                    file_name: "source.bin".into(),
+                    mime_type: "application/octet-stream".into(),
+                    data_base64: "AP8KDQ==".into(),
+                }),
+                content_type: "application/x-custom".into(),
+                file_name: "renamed.bin".into(),
+            },
+            MultipartPart {
+                name: "disabled".into(),
+                value: "omit".into(),
+                enabled: false,
+                kind: "text".into(),
+                file: None,
+                content_type: String::new(),
+                file_name: String::new(),
+            },
+        ];
+
+        let response = send(input).await.unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "ok");
+
+        let (headers, body) = server.await.unwrap();
+        let content_type = headers
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+            .map(|(_, value)| value.trim())
+            .unwrap();
+        assert!(content_type.starts_with("multipart/form-data; boundary="));
+        let body_text = String::from_utf8_lossy(&body);
+        assert!(body_text.contains("Content-Disposition: form-data; name=\"payload\""));
+        assert!(body_text.contains("Content-Type: application/json"));
+        assert!(body_text.contains("{\"ok\":true}\nsecond"));
+        assert!(body_text.contains(
+            "Content-Disposition: form-data; name=\"attachment\"; filename=\"renamed.bin\""
+        ));
+        assert!(body_text.contains("Content-Type: application/x-custom"));
+        assert!(!body_text.contains("disabled"));
+        assert!(body.windows(4).any(|window| window == [0, 255, 10, 13]));
     }
 }

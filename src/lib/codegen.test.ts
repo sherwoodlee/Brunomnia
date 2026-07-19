@@ -54,6 +54,17 @@ describe('local client code generation', () => {
     expect(snippet.code).toContain('Content-Type');
   });
 
+  it('keeps body template tags literal when rendering is disabled', () => {
+    const request = createBlankRequest('literal-body');
+    request.method = 'POST';
+    request.bodyMode = 'text';
+    request.body = '{{ payload }}';
+    request.renderBodyTemplates = false;
+    const snippet = generateClientCode('curl', request, { payload: 'resolved' });
+    expect(snippet.code).toContain("--data-raw '{{ payload }}'");
+    expect(snippet.warnings).toContain('Unresolved template tags remain in the snippet.');
+  });
+
   it('embeds one exact multipart payload across every target', () => {
     const request = createBlankRequest('multipart-codegen');
     request.method = 'POST';
