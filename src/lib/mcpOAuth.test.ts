@@ -156,7 +156,9 @@ describe('MCP OAuth request mapping', () => {
     client.oauthClientId = '';
     client.oauthScope = '';
     const protectedMetadataUrl = 'https://mcp.example.test/.well-known/oauth-protected-resource';
+    const redirectedProtectedMetadataUrl = 'https://mcp.example.test/oauth/resource-document';
     const authorizationMetadataUrl = 'https://identity.example.test/.well-known/oauth-authorization-server/tenant';
+    const redirectedAuthorizationMetadataUrl = 'https://identity.example.test/tenant/oauth-server-document';
     const registrationUrl = 'https://identity.example.test/tenant/register';
     const protectedRequests: ApiRequest[] = [];
     const persistedClients: McpClient[] = [];
@@ -165,9 +167,16 @@ describe('MCP OAuth request mapping', () => {
       protectedRequests.push(request);
       if (request.name === 'MCP OAuth metadata' && request.url === protectedMetadataUrl) {
         expect(context).toMatchObject({ cookies: [], responses: [], pluginRuntime: undefined, validateCertificates: false, skipOAuth2Acquisition: true });
+        expect(request.transport).toMatchObject({ followRedirects: false, followRedirectsMode: 'off', sendCookies: false, storeCookies: false });
+        return { status: 302, statusText: 'Found', headers: { Location: '/oauth/resource-document' }, body: '', durationMs: 1, sizeBytes: 0 };
+      }
+      if (request.name === 'MCP OAuth metadata' && request.url === redirectedProtectedMetadataUrl) {
         return { status: 200, statusText: 'OK', headers: {}, body: JSON.stringify({ resource: client.url, authorization_servers: ['https://identity.example.test/tenant'], scopes_supported: ['metadata.scope'] }), durationMs: 1, sizeBytes: 1 };
       }
       if (request.name === 'MCP OAuth metadata' && request.url === authorizationMetadataUrl) {
+        return { status: 307, statusText: 'Temporary Redirect', headers: { location: '/tenant/oauth-server-document' }, body: '', durationMs: 1, sizeBytes: 0 };
+      }
+      if (request.name === 'MCP OAuth metadata' && request.url === redirectedAuthorizationMetadataUrl) {
         return { status: 200, statusText: 'OK', headers: {}, body: JSON.stringify({ issuer: 'https://identity.example.test/tenant', authorization_endpoint: 'https://identity.example.test/tenant/authorize', token_endpoint: 'https://identity.example.test/tenant/token', registration_endpoint: registrationUrl, response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'], code_challenge_methods_supported: ['S256'] }), durationMs: 1, sizeBytes: 1 };
       }
       if (request.name === 'MCP OAuth dynamic client registration') {
@@ -197,6 +206,8 @@ describe('MCP OAuth request mapping', () => {
 
     expect(output.client).toMatchObject({ oauthRegisteredClientId: 'dynamic-client', oauthRegisteredClientIdIssuedAt: 123, oauthScope: 'challenge.scope', token: 'dynamic-access', oauthRefreshToken: 'dynamic-refresh' });
     expect(output.events.some((event) => event.method === 'MCP OAuth · dynamic client registration')).toBe(true);
+    expect(output.events.some((event) => event.detail === redirectedProtectedMetadataUrl)).toBe(true);
+    expect(output.events.some((event) => event.detail === redirectedAuthorizationMetadataUrl)).toBe(true);
     expect(protectedRequests.filter((request) => request.name === 'OAuth tools · initialize')).toHaveLength(2);
     expect(persistedClients.some((updated) => updated.oauthRegisteredClientId === 'dynamic-client' && !updated.token)).toBe(true);
     expect(persistedClients.some((updated) => updated.token === 'dynamic-access')).toBe(true);
@@ -231,5 +242,44 @@ describe('MCP OAuth request mapping', () => {
     expect(seenScopes).toEqual(['mcp.read mcp.invoke', 'mcp.admin']);
     expect(output.client).toMatchObject({ oauthScope: 'mcp.admin', token: 'step-up-access' });
     expect(output.events.some((event) => event.detail.includes('403 insufficient_scope'))).toBe(true);
+  });
+
+  it('rejects insecure, looping, and excessive metadata redirects before registration', async () => {
+    const client = oauthClient();
+    client.oauthAuthorizationUrl = '';
+    client.oauthAccessTokenUrl = '';
+    client.oauthClientId = '';
+    client.oauthScope = '';
+    const metadataUrl = 'https://mcp.example.test/.well-known/oauth-protected-resource';
+    const seen: string[] = [];
+    transport.sendRequest.mockImplementation(async (request: ApiRequest) => {
+      seen.push(request.url);
+      if (request.name !== 'MCP OAuth metadata') {
+        return { status: 401, statusText: 'Unauthorized', headers: { 'WWW-Authenticate': `Bearer resource_metadata=\"${metadataUrl}\"` }, body: '', durationMs: 1, sizeBytes: 0 };
+      }
+      return { status: 302, statusText: 'Found', headers: { location: 'http://metadata.example.test/document' }, body: '', durationMs: 1, sizeBytes: 0 };
+    });
+
+    await expect(discoverMcpClient(client, undefined, {})).rejects.toThrow('HTTPS');
+    expect(seen).not.toContain('http://metadata.example.test/document');
+
+    transport.sendRequest.mockImplementation(async (request: ApiRequest) => {
+      if (!request) return { status: 204, statusText: 'No Content', headers: {}, body: '', durationMs: 0, sizeBytes: 0 };
+      return request.name === 'MCP OAuth metadata'
+        ? { status: 302, statusText: 'Found', headers: { location: metadataUrl }, body: '', durationMs: 1, sizeBytes: 0 }
+        : { status: 401, statusText: 'Unauthorized', headers: { 'WWW-Authenticate': `Bearer resource_metadata=\"${metadataUrl}\"` }, body: '', durationMs: 1, sizeBytes: 0 };
+    });
+    await expect(discoverMcpClient(client, undefined, {})).rejects.toThrow('redirect loop');
+
+    transport.sendRequest.mockImplementation(async (request: ApiRequest) => {
+      if (!request) return { status: 204, statusText: 'No Content', headers: {}, body: '', durationMs: 0, sizeBytes: 0 };
+      if (request.name !== 'MCP OAuth metadata') {
+        return { status: 401, statusText: 'Unauthorized', headers: { 'WWW-Authenticate': `Bearer resource_metadata=\"${metadataUrl}\"` }, body: '', durationMs: 1, sizeBytes: 0 };
+      }
+      const match = /\/redirect\/(\d+)$/.exec(request.url);
+      const next = match ? Number(match[1]) + 1 : 1;
+      return { status: 302, statusText: 'Found', headers: { location: `/redirect/${next}` }, body: '', durationMs: 1, sizeBytes: 0 };
+    });
+    await expect(discoverMcpClient(client, undefined, {})).rejects.toThrow('exceeded 20 redirects');
   });
 });

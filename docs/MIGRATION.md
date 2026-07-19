@@ -1409,7 +1409,7 @@ Compatibility bounds remain explicit: endpoint metadata must be entered manually
 | Bundle boundary | Complete | Discovery remains inside the lazy integration path; the 182-module build keeps OAuth at 3.77 kB, Integration at 43.80 kB, and main JavaScript at 498.95 kB without a warning |
 | Documentation and evidence | Complete | Updated [MCP/AI/Konnect](MCP_AI_KONNECT.md), [security and sync](SECURITY_AND_SYNC.md), [parity ledger](PARITY.md), and [Milestone 93 verification](QA_MILESTONE_93.md) |
 
-Compatibility bounds remain explicit: URL-based client-ID metadata documents, metadata redirects, multiple authorization-server failover after valid protected-resource metadata, DPoP, and live third-party fixtures remain open. Runtime credentials remain in the encrypted/local catalog project document rather than an OS-keychain-wrapped database. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds at this milestone were explicit: URL-based client-ID metadata documents, metadata redirects, multiple authorization-server failover after valid protected-resource metadata, DPoP, and live third-party fixtures remained open. Milestone 227 later confirms pinned Insomnia's provider never exposes the SDK's optional `clientMetadataUrl`, removing that false requirement, and adds bounded per-hop metadata redirects. Multiple-server failover, DPoP, and live third-party fixtures remain open. Runtime credentials remain in the encrypted/local catalog project document rather than an OS-keychain-wrapped database. Rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 94 — guided MCP resource templates (complete baseline)
 

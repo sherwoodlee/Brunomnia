@@ -3,7 +3,9 @@ import type { Environment, HttpResponse, McpClient } from '../types';
 import { sendRequest, type SendRequestContext } from './http';
 
 const maxMetadataBytes = 1024 * 1024;
+const maxMetadataRedirects = 20;
 const redirectUrl = 'http://127.0.0.1/mcp/oauth/callback';
+const metadataRedirectStatuses = new Set([301, 302, 303, 307, 308]);
 
 type JsonRecord = Record<string, unknown>;
 type ProtectedResourceMetadata = {
@@ -18,6 +20,10 @@ type AuthorizationServerMetadata = {
   registrationEndpoint: string;
   scopes: string[];
 };
+type MetadataExchange = {
+  response: HttpResponse;
+  hops: Array<{ url: string; response: HttpResponse }>;
+};
 
 export type McpOAuthTrace = {
   direction: 'client' | 'server';
@@ -31,6 +37,7 @@ const asRecord = (value: unknown): JsonRecord | undefined => value && typeof val
 const asString = (value: unknown) => typeof value === 'string' ? value : '';
 const stringArray = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())) : [];
 const unique = (values: string[]) => [...new Set(values)];
+const responseHeader = (response: HttpResponse, name: string) => Object.entries(response.headers).find(([candidate]) => candidate.toLowerCase() === name.toLowerCase())?.[1] ?? '';
 
 const safeOAuthUrl = (value: string, base?: string) => {
   let url: URL;
@@ -130,20 +137,35 @@ const metadataRequest = async (
   context: SendRequestContext,
   method: 'GET' | 'POST' = 'GET',
   body?: JsonRecord,
-) => {
-  const request = createBlankRequest(`mcp-oauth-${crypto.randomUUID()}`);
-  request.name = method === 'GET' ? 'MCP OAuth metadata' : 'MCP OAuth dynamic client registration';
-  request.method = method;
-  request.url = safeOAuthUrl(url).toString();
-  request.headers = [
-    { id: 'mcp-oauth-accept', name: 'Accept', value: 'application/json', enabled: true },
-    { id: 'mcp-oauth-version', name: 'MCP-Protocol-Version', value: '2025-06-18', enabled: true },
-    ...(body ? [{ id: 'mcp-oauth-content-type', name: 'Content-Type', value: 'application/json', enabled: true }] : []),
-  ];
-  request.bodyMode = body ? 'json' : 'none';
-  request.body = body ? JSON.stringify(body) : '';
-  request.transport = { ...request.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMode: 'custom', timeoutMs: 30_000, sendCookies: false, storeCookies: false };
-  return sendRequest(request, environment, { ...context, cookies: [], responses: [], pluginRuntime: undefined, validateCertificates: context.validateAuthCertificates ?? true, skipOAuth2Acquisition: true, onOAuth2Token: undefined, authorizeOAuth2: undefined });
+): Promise<MetadataExchange> => {
+  let requestUrl = safeOAuthUrl(url).toString();
+  let redirects = 0;
+  const visited = new Set<string>();
+  const hops: MetadataExchange['hops'] = [];
+  while (true) {
+    if (visited.has(requestUrl)) throw new Error(`MCP OAuth metadata redirect loop detected at ${requestUrl}`);
+    visited.add(requestUrl);
+    const request = createBlankRequest(`mcp-oauth-${crypto.randomUUID()}`);
+    request.name = method === 'GET' ? 'MCP OAuth metadata' : 'MCP OAuth dynamic client registration';
+    request.method = method;
+    request.url = requestUrl;
+    request.headers = [
+      { id: 'mcp-oauth-accept', name: 'Accept', value: 'application/json', enabled: true },
+      { id: 'mcp-oauth-version', name: 'MCP-Protocol-Version', value: '2025-06-18', enabled: true },
+      ...(body ? [{ id: 'mcp-oauth-content-type', name: 'Content-Type', value: 'application/json', enabled: true }] : []),
+    ];
+    request.bodyMode = body ? 'json' : 'none';
+    request.body = body ? JSON.stringify(body) : '';
+    request.transport = { ...request.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMode: 'custom', timeoutMs: 30_000, sendCookies: false, storeCookies: false };
+    const response = await sendRequest(request, environment, { ...context, cookies: [], responses: [], pluginRuntime: undefined, validateCertificates: context.validateAuthCertificates ?? true, skipOAuth2Acquisition: true, onOAuth2Token: undefined, authorizeOAuth2: undefined });
+    hops.push({ url: requestUrl, response });
+    if (method !== 'GET' || !metadataRedirectStatuses.has(response.status)) return { response, hops };
+    const location = responseHeader(response, 'location');
+    if (!location) throw new Error(`MCP OAuth metadata redirect ${response.status} from ${requestUrl} did not include Location.`);
+    if (redirects >= maxMetadataRedirects) throw new Error(`MCP OAuth metadata exceeded ${maxMetadataRedirects} redirects.`);
+    redirects += 1;
+    requestUrl = safeOAuthUrl(location, requestUrl).toString();
+  }
 };
 
 const parsedJson = (response: HttpResponse, label: string) => {
@@ -191,6 +213,9 @@ const authorizationServer = (response: HttpResponse, expectedIssuer: string): Au
 
 const requestTrace = (method: string, url: string): McpOAuthTrace => ({ direction: 'client', method, detail: url, timestamp: now() });
 const responseTrace = (method: string, response: HttpResponse): McpOAuthTrace => ({ direction: 'server', method, detail: `${response.status} ${response.statusText}`, timestamp: now() });
+const recordMetadataExchange = (traces: McpOAuthTrace[], method: string, exchange: MetadataExchange) => {
+  for (const hop of exchange.hops) traces.push(requestTrace(method, hop.url), responseTrace(method, hop.response));
+};
 
 const discoverProtectedResource = async (
   client: McpClient,
@@ -200,10 +225,9 @@ const discoverProtectedResource = async (
   traces: McpOAuthTrace[],
 ) => {
   for (const url of protectedResourceMetadataUrls(client.url, challengeUrl)) {
-    traces.push(requestTrace('MCP OAuth · protected resource metadata', url));
-    const response = await metadataRequest(url, environment, context);
-    traces.push(responseTrace('MCP OAuth · protected resource metadata', response));
-    const metadata = protectedResource(response, client.url);
+    const exchange = await metadataRequest(url, environment, context);
+    recordMetadataExchange(traces, 'MCP OAuth · protected resource metadata', exchange);
+    const metadata = protectedResource(exchange.response, client.url);
     if (metadata) return metadata;
   }
   return undefined;
@@ -217,10 +241,9 @@ const discoverAuthorizationServer = async (
   traces: McpOAuthTrace[],
 ) => {
   for (const url of authorizationServerMetadataUrls(issuer, client.url)) {
-    traces.push(requestTrace('MCP OAuth · authorization server metadata', url));
-    const response = await metadataRequest(url, environment, context);
-    traces.push(responseTrace('MCP OAuth · authorization server metadata', response));
-    const metadata = authorizationServer(response, issuer);
+    const exchange = await metadataRequest(url, environment, context);
+    recordMetadataExchange(traces, 'MCP OAuth · authorization server metadata', exchange);
+    const metadata = authorizationServer(exchange.response, issuer);
     if (metadata) return metadata;
   }
   return undefined;
@@ -242,9 +265,9 @@ const registerClient = async (
     client_name: 'Brunomnia MCP Client',
     ...(scope ? { scope } : {}),
   };
-  traces.push(requestTrace('MCP OAuth · dynamic client registration', registrationUrl));
-  const response = await metadataRequest(registrationUrl, environment, context, 'POST', body);
-  traces.push(responseTrace('MCP OAuth · dynamic client registration', response));
+  const exchange = await metadataRequest(registrationUrl, environment, context, 'POST', body);
+  recordMetadataExchange(traces, 'MCP OAuth · dynamic client registration', exchange);
+  const { response } = exchange;
   if (response.status !== 200 && response.status !== 201) {
     throw new Error(`MCP OAuth dynamic client registration failed (${response.status}): ${response.body.slice(0, 1_000)}`);
   }

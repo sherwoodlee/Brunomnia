@@ -42,7 +42,7 @@ Rendered QA and live provider/MCP interaction were not run because this task's s
 
 ## Acceptance boundary
 
-MCP OAuth metadata discovery and dynamic registration are a complete baseline. URL-based client-ID metadata documents, discovery redirects, multiple authorization-server failover, DPoP, live third-party interoperability fixtures, and OS-keychain-wrapped runtime credential storage remain open.
+MCP OAuth metadata discovery and dynamic registration are a complete baseline. At this milestone, URL-based client-ID metadata documents, discovery redirects, multiple authorization-server failover, DPoP, live third-party interoperability fixtures, and OS-keychain-wrapped runtime credential storage remained open. Milestone 227 later proves the first item is unreachable in pinned Insomnia's provider and closes bounded discovery redirects.
 
 Validated desktop artifact:
 
