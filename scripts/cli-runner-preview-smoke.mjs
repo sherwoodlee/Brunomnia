@@ -262,6 +262,17 @@ paths:
   const discoveredLintFailure = await runFailure(['lint', 'spec', 'lint-fixture/openapi.yaml', '-w', temporary]);
   assert.equal(discoveredLintFailure.code, 1);
   assert.match(discoveredLintFailure.stdout, /API info needs a description/);
+  for (const [label, command] of [
+    ['lint', ['lint', 'spec', apiDesign.id, '-w', temporary, '--printOptions']],
+    ['export', ['export', 'spec', apiDesign.id, '-w', temporary, '--printOptions']],
+    ['script', ['script', '--config', join(temporary, '.insorc'), 'preview', '--printOptions', '--requestTimeout', '500']],
+  ]) {
+    const diagnosed = await runFailure(command);
+    assert.equal(diagnosed.code, 0, `${label} global diagnostics should not change exit status`);
+    assert.match(diagnosed.stderr, /Found config file at .*\.insorc/);
+    assert.match(diagnosed.stderr, /Loaded options.*"printOptions":true/);
+  }
+  arrivals.length = 0;
 
   const output = await run([
     'run', 'collection', 'preview-c', '--config', join(temporary, '.insorc'),
@@ -562,7 +573,7 @@ paths:
   assert.equal(rejectedNonInteractiveEnvironment.code, 1);
   assert.match(rejectedNonInteractiveEnvironment.stderr, /Collection environment selection requires an interactive terminal.*--env <identifier> or --ci/);
   assert.equal(arrivals.length, arrivalsBeforeEnvironmentRefusals, 'environment refusal happened after transport');
-  console.log('CLI runner preview smoke passed: prefix IDs, deterministic non-interactive resource/environment selection and refusal, pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+console.log('CLI runner preview smoke passed: prefix IDs, deterministic non-interactive resource/environment selection and refusal, pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, cross-command global-option diagnostics, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await close(secureServer).catch(() => undefined);

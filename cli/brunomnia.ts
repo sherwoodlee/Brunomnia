@@ -257,6 +257,16 @@ const loadRunnerConfig = async (configPath: string | undefined, searchStart: str
   }
   return findRunnerConfig(searchStart ?? process.cwd());
 };
+const resolveRunnerGlobalOptions = async (cliWorkingDir?: string) => {
+  const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
+  const workingDir = cliWorkingDir ?? config.options.workingDir;
+  const ci = hasFlag('--ci') || config.options.ci === true;
+  const verbose = hasFlag('--verbose') || config.options.verbose === true;
+  const printOptions = hasFlag('--printOptions') || hasFlag('--print-options') || config.options.printOptions === true;
+  if (verbose && config.filePath) console.error(`Found config file at ${config.filePath}.`);
+  if (printOptions) console.error('Loaded options', JSON.stringify({ workingDir: workingDir ?? '', ci, verbose, printOptions, config: config.filePath ?? '' }));
+  return { config, workingDir, ci, verbose, printOptions };
+};
 const runCliChild = (childArgs: string[]) => new Promise<number>((resolveChild, rejectChild) => {
   const depth = Math.max(0, Number.parseInt(process.env.BRUNOMNIA_SCRIPT_DEPTH ?? '0', 10) || 0);
   if (depth >= 10) throw new Error('Inso script recursion exceeds 10 nested invocations.');
@@ -926,9 +936,7 @@ const main = async () => {
     const positionals = runnerCliPositionalArguments(args.slice(2));
     let identifier = positionals[0];
     const cliWorkingDir = firstFlag('--workingDir', '--working-dir', '-w');
-    const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
-    const workingDir = cliWorkingDir ?? config.options.workingDir;
-    const ci = hasFlag('--ci') || config.options.ci === true;
+    const { workingDir, ci } = await resolveRunnerGlobalOptions(cliWorkingDir);
     const inputBase = await cliWorkingDirectoryBase(workingDir);
     const candidatePath = identifier ? resolve(inputBase, identifier) : '';
     const candidateStats = candidatePath ? await stat(candidatePath).catch((error: NodeJS.ErrnoException) => {
@@ -978,10 +986,8 @@ const main = async () => {
   if (command === 'export' && subject === 'spec') {
     const positionals = runnerCliPositionalArguments(args.slice(2));
     const cliWorkingDir = firstFlag('--workingDir', '--working-dir', '-w');
-    const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
-    const workingDir = cliWorkingDir ?? config.options.workingDir;
+    const { workingDir, ci } = await resolveRunnerGlobalOptions(cliWorkingDir);
     const workspace = await loadWorkspace(workingDir ?? positionals[0] ?? fail('Provide a workspace file or use --workingDir.'));
-    const ci = hasFlag('--ci') || config.options.ci === true;
     let identifier = positionals[workingDir ? 0 : 1];
     if (!identifier) identifier = ci
       ? workspace.apiDesigns[0]?.id
@@ -1006,7 +1012,7 @@ const main = async () => {
     const positionals = runnerCliPositionalArguments(args.slice(1));
     const scriptName = positionals[0] ?? fail('Provide an Inso script name.');
     const cliWorkingDir = firstFlag('--workingDir', '--working-dir', '-w');
-    const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
+    const { config } = await resolveRunnerGlobalOptions(cliWorkingDir);
     const task = config.scripts[scriptName];
     if (!task) fail(`Could not find inso script "${scriptName}" in the config file. Available scripts: ${Object.keys(config.scripts).join(', ') || 'none'}.`);
     const taskArgs = parseRunnerInsoScript(task);
@@ -1029,13 +1035,7 @@ const main = async () => {
   if (command === 'run' && (subject === 'collection' || subject === 'test')) {
     const positionals = runnerCliPositionalArguments(args.slice(2));
     const cliWorkingDir = firstFlag('--workingDir', '--working-dir', '-w');
-    const config = await loadRunnerConfig(flag('--config'), cliWorkingDir);
-    const workingDir = cliWorkingDir ?? config.options.workingDir;
-    const ci = hasFlag('--ci') || config.options.ci === true;
-    const verbose = hasFlag('--verbose') || config.options.verbose === true;
-    const printOptions = hasFlag('--printOptions') || hasFlag('--print-options') || config.options.printOptions === true;
-    if (verbose && config.filePath) console.error(`Found config file at ${config.filePath}.`);
-    if (printOptions) console.error('Loaded options', JSON.stringify({ workingDir: workingDir ?? '', ci, verbose, printOptions, config: config.filePath ?? '' }));
+    const { workingDir, ci } = await resolveRunnerGlobalOptions(cliWorkingDir);
     const workspace = await loadWorkspace(workingDir ?? positionals[0] ?? fail('Provide a workspace file or use --workingDir.'));
     let identifier = positionals[workingDir ? 0 : 1];
     if (!identifier && ci) identifier = subject === 'test' ? orderedTestSuites(workspace.testSuites)[0]?.id : workspace.collections[0]?.id;
