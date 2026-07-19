@@ -27,9 +27,14 @@ Scope: execute reviewed stored-plugin template tags in portable CLI HTTP/GraphQL
 | Clean TypeScript/Vite/CLI production build | Passed: 528 modules; 175.18 kB CSS, 433.88 kB main, 6,478,986-byte CLI |
 | Packaged CLI runner smoke | Passed: denied-by-default tag before transport and explicit-grant stored value on localhost |
 | Node 22 CLI container smoke | Passed: non-root, read-only workspace, `--network none`, suite execution, and explicit-grant plugin tag |
+| Remote container verify/publish | Passed: extended plugin smoke plus signed AMD64/ARM64 publication in Actions run `29707537868` |
 | Parity-row and changed-path checks | Passed: exactly 19 incomplete rows; no whitespace errors |
 
 No Rust/native behavior changed. Milestone 220 remains the latest full native and macOS app-bundle gate.
+
+## Remote follow-up
+
+The first M225 run (`29707482696`) exposed a CI-only fixture issue: `mkdtemp` created the bind-mounted directory with mode `0700`, so the image's non-root `node` user correctly received `EACCES`. Product execution, the image user, and the worker were not weakened. Follow-up commit `1fde391aabc5d51961af5e478d845ba230eb8a1d` makes only the disposable fixture directory/file world-readable (`0755`/`0644`) before mounting them read-only. [Actions run 29707537868](https://github.com/sherwoodlee/Brunomnia/actions/runs/29707537868) then passed the extended Node 22 plugin smoke and the signed multi-architecture publish job.
 
 ## Acceptance boundary
 
