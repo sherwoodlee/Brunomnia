@@ -1,6 +1,6 @@
 import { isTauri } from '@tauri-apps/api/core';
 import { useEffect, useMemo, useState } from 'react';
-import { sendRequest } from '../lib/http';
+import { sendRequest as sendHttpRequest } from '../lib/http';
 import {
   applyPluginTheme,
   describePlugin,
@@ -31,6 +31,7 @@ const activeRequest = (workspace: Workspace) => workspace.collections
   .find((request) => request.id === workspace.activeRequestId);
 
 export function PluginWorkbench({ workspace, onChangeWorkspace }: PluginWorkbenchProps) {
+  const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, { certificates: workspace.certificates, ...context });
   const [selectedId, setSelectedId] = useState(workspace.plugins[0]?.id ?? '');
   const [installName, setInstallName] = useState('Local plugin');
   const [installVersion, setInstallVersion] = useState('0.0.0-local');

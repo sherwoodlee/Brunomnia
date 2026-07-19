@@ -28,7 +28,7 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | gRPC execution | Complete | Dynamic protobuf JSON mapping; unary, client-streaming, server-streaming and bidirectional calls |
 | Rich HTTP bodies | Complete | None, JSON, text, URL-encoded, multipart text/files and binary files |
 | Transport configuration | Complete for HTTP/SSE | Redirect policy, inherited/custom connect/HTTP timeout with `0` disabled, inherited/always/never API certificate validation, unlimited active SSE duration, HTTP proxy and PEM client identity |
-| gRPC TLS | Complete baseline | System roots, timeout, inherited/overridden validation, and domain-scoped PEM client identity; custom CA/PFX remain later closure |
+| gRPC TLS | Complete baseline | System roots plus workspace CA trust, timeout, inherited/overridden validation, and host/port-scoped PEM client identity; PFX remains later closure |
 | WebSocket TLS and proxy | Complete baseline | System roots and arbitrary handshake headers; Milestone 109 adds inherited validation overrides plus domain-scoped PEM identity, Milestone 110 adds authenticated HTTP/HTTPS custom proxy transport plus no-proxy handling, and Milestone 111 matches plain-WS absolute-form forwarding |
 | Workspace migration | Complete | Version 1 workspaces migrate in place to the version 2 protocol schema |
 
@@ -1718,7 +1718,22 @@ Brunomnia now accepts pinned-compatible `grpc://` and `grpcs://` endpoints, norm
 
 Compatibility bounds remain explicit: custom gRPC proxy transport, custom CA/PFX identity, richer reflection/metadata/schema workflows, interactive streaming lifecycle controls, and broad third-party fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 115 — remaining parity closure and release hardening
+## Milestone 115 — workspace CA and PEM certificate manager (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia keeps one non-synced workspace CA record plus non-synced host-scoped client certificate records and passes selected PEM/CA material into HTTP, WebSocket, Socket.IO, authentication, and gRPC transports |
+| Workspace manager | Complete baseline | Security & Sync imports/pastes, enables/disables, lists, and removes one CA plus up to 100 PEM certificate/key identities without an account or entitlement check |
+| Selection behavior | Complete | Port-aware wildcard matches win first; hostname-only fallback runs only when no exact-port record matches, and request-local Transport PEM material remains an explicit override |
+| Transport continuity | Complete | Shared frontend resolution reaches primary and secondary HTTP/GraphQL, OAuth, GraphQL introspection, WebSocket/subscriptions, Socket.IO, SSE, runners, plugins, integrations, and gRPC; native roots remain enabled alongside custom CA roots |
+| Device-local persistence | Complete | Workspace v30 bounds malformed records, omits certificates from split-YAML/Git and encrypted-sync payloads, and restores current-device records after project reload or sync pull |
+| Native safety | Complete | Renderer and IPC enforce 100-record, 5 MiB CA, and 1 MiB certificate/key limits; malformed PEM fails explicitly without process-global verifier changes |
+| Executable coverage | Complete | Focused frontend tests cover matching, precedence, migration, local-only boundaries, and exact command payloads; real private-CA HTTP, WSS, and gRPC loopbacks prove native trust extension |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [security guide](SECURITY_AND_SYNC.md), [parity ledger](PARITY.md), and [Milestone 115 verification](QA_MILESTONE_115.md) |
+
+Compatibility bounds remain explicit: PFX/PKCS#12 identities, certificate-path compatibility exports, custom gRPC proxy transport, richer gRPC metadata/schema workflows, and broad third-party certificate fixtures remain open. Related ledger rows stay Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 116 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

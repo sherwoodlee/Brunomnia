@@ -1163,6 +1163,23 @@ kbd {
 .security-card input, .security-card select, .security-card button { background: #0d1418; border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font-size: 9px; min-height: 34px; padding: 0 9px; }
 .security-card button { background: var(--panel-raised); }
 .security-card button:disabled { cursor: not-allowed; opacity: .45; }
+.certificate-manager-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.certificate-list-card { grid-column: 1 / -1; }
+.security-card textarea { background: #0d1418; border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font: 9px/1.45 var(--font-mono); min-height: 120px; padding: 9px; resize: vertical; }
+.certificate-authority-card > textarea { min-height: 210px; }
+.certificate-enable { align-items: center; color: var(--text-soft); display: flex; font-size: 9px; gap: 6px; }
+.certificate-enable input { accent-color: var(--accent); min-height: 0; }
+.certificate-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.certificate-actions button { align-items: center; display: flex; gap: 5px; }
+.certificate-list { border: 1px solid var(--border-soft); display: grid; }
+.certificate-list article { align-items: center; border-bottom: 1px solid var(--border-soft); display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto 36px; min-height: 55px; padding: 8px 10px; }
+.certificate-list article:last-child { border-bottom: 0; }
+.certificate-list article > div { display: grid; gap: 4px; min-width: 0; }
+.certificate-list article strong { font: 10px var(--font-mono); overflow: hidden; text-overflow: ellipsis; }
+.certificate-list article small { color: var(--faint); font-size: 8px; }
+.certificate-list article label { align-items: center; color: var(--muted); display: flex; font-size: 8px; gap: 6px; }
+.certificate-list article label input { accent-color: var(--accent); min-height: 0; }
+.certificate-list article button { align-items: center; display: flex; justify-content: center; padding: 0; }
 .vault-actions, .sync-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .reveal-toggle, .force-toggle { align-items: center; flex-direction: row !important; text-transform: none !important; }
 .reveal-toggle input, .force-toggle input, .member-list label input, .policy-list label input { accent-color: var(--accent); min-height: auto; }

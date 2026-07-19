@@ -12,6 +12,7 @@ describe('encrypted collaboration boundaries', () => {
     workspace.project.path = '/private/repository';
     workspace.plugins = [{ id: 'plugin', name: 'Private plugin', version: '1', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true, requestedPermissions: [], grantedPermissions: [], installedAt: new Date().toISOString() }];
     workspace.collaboration.path = '/private/share.enc.json';
+    workspace.certificates = { ca: { enabled: true, pem: 'private-ca' }, clients: [{ id: 'cert', host: 'private.example', enabled: true, certificatePem: 'certificate', keyPem: 'private-key' }] };
     workspace.collections[0].requests[0].auth = { ...workspace.collections[0].requests[0].auth, type: 'oauth2', code: 'code', codeVerifier: 'verifier', accessToken: 'access', identityToken: 'identity', refreshToken: 'refresh', expiresAt: 123 };
 
     const shared = shareableWorkspace(workspace);
@@ -21,6 +22,7 @@ describe('encrypted collaboration boundaries', () => {
     expect(shared.project.path).toBe('');
     expect(shared.plugins).toEqual([]);
     expect(shared.collaboration.path).toBe('');
+    expect(shared.certificates).toEqual({ ca: { enabled: false, pem: '' }, clients: [] });
     expect(shared.collections).toHaveLength(workspace.collections.length);
     expect(shared.collections[0].requests[0].auth).toMatchObject({ code: '', codeVerifier: '', accessToken: '', identityToken: '', refreshToken: '', expiresAt: 0 });
     expect(workspace.collections[0].requests[0].auth.accessToken).toBe('access');
@@ -45,6 +47,7 @@ describe('encrypted collaboration boundaries', () => {
     current.streamSessions = [{ id: 'stream', requestId: request.id, requestName: request.name, requestUrl: request.url, environmentId: current.activeEnvironmentId, protocol: 'sse', startedAt: new Date().toISOString(), messages: [] }];
     current.history = [{ id: 'history', requestId: 'request', name: 'Keep', method: 'GET', url: 'https://local.example', status: 200, durationMs: 1, createdAt: new Date().toISOString() }];
     current.collaboration.path = '/local/team.enc.json';
+    current.certificates = { ca: { enabled: true, pem: 'local-ca' }, clients: [{ id: 'cert', host: 'local.test', enabled: true, certificatePem: 'cert', keyPem: 'key' }] };
     current.collections[0].requests[0].auth = { ...current.collections[0].requests[0].auth, type: 'oauth2', accessToken: 'local-access', refreshToken: 'local-refresh', expiresAt: 123 };
     const remote = cloneSeedWorkspace();
     remote.name = 'Remote workspace';
@@ -58,6 +61,7 @@ describe('encrypted collaboration boundaries', () => {
     expect(merged.streamSessions.map((session) => session.id)).toEqual(['stream']);
     expect(merged.collaboration.path).toBe('/local/team.enc.json');
     expect(merged.collaboration.revision).toBe(4);
+    expect(merged.certificates).toEqual(current.certificates);
     expect(merged.governance.currentMemberId).toBe('local-owner');
     expect(merged.collections[0].requests[0].auth).toMatchObject({ accessToken: 'local-access', refreshToken: 'local-refresh', expiresAt: 123 });
   });

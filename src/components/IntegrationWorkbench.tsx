@@ -84,7 +84,8 @@ function IntegrationSecretInput({ disabled, label, onChange, placeholder, showPa
   return <span className={`integration-secret-field${showPasswords ? '' : ' masked'}`}><input disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={inputType} value={value} />{!showPasswords ? <button aria-label={masked ? `Show ${label}` : `Hide ${label}`} disabled={disabled} onClick={() => setRevealed((current) => !current)} type="button">{masked ? 'Show' : 'Hide'}</button> : null}</span>;
 }
 
-export function IntegrationWorkbench({ workspace, environment, requestContext, onChangeWorkspace }: IntegrationWorkbenchProps) {
+export function IntegrationWorkbench({ workspace, environment, requestContext: baseRequestContext, onChangeWorkspace }: IntegrationWorkbenchProps) {
+  const requestContext = { ...baseRequestContext, certificates: workspace.certificates };
   const [tab, setTab] = useState<'mcp' | 'ai' | 'konnect'>('mcp');
   const [activeId, setActiveId] = useState(workspace.mcpClients[0]?.id ?? '');
   const [operationKind, setOperationKind] = useState<'tool' | 'prompt' | 'resource'>('tool');

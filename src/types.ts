@@ -178,8 +178,22 @@ export type TransportConfig = {
   clientCertificatePem: string;
   clientKeyPem: string;
   clientCertificateDomains: string;
+  caCertificatePem: string;
   sendCookies: boolean;
   storeCookies: boolean;
+};
+
+export type WorkspaceClientCertificate = {
+  id: string;
+  host: string;
+  enabled: boolean;
+  certificatePem: string;
+  keyPem: string;
+};
+
+export type WorkspaceCertificates = {
+  ca: { enabled: boolean; pem: string };
+  clients: WorkspaceClientCertificate[];
 };
 
 export type SseConfig = {
@@ -356,7 +370,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 29;
+  version: 30;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -371,6 +385,7 @@ export type Workspace = {
   responses: StoredResponse[];
   streamSessions: StoredStreamSession[];
   responseFilters?: Record<string, { filter: string; history: string[]; previewMode: ResponsePreviewMode }>;
+  certificates: WorkspaceCertificates;
   project: ProjectConfig;
   plugins: PluginRecord[];
   pluginData: Record<string, Record<string, string>>;

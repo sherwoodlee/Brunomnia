@@ -1,5 +1,5 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
-import type { ApiRequest, CookieRecord, Environment, KeyValue, PreferredHttpVersion, StreamConnectionMetadata, StreamMessage } from '../types';
+import type { ApiRequest, CookieRecord, Environment, KeyValue, PreferredHttpVersion, StreamConnectionMetadata, StreamMessage, WorkspaceCertificates } from '../types';
 import { cookieHeaderForUrl } from './cookies';
 import { streamTransportConfig } from './protocol';
 import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
@@ -39,6 +39,7 @@ export const connectSocketIo = async (
   validateCertificates = true,
   proxy?: ProxyPreferences,
   cookies: CookieRecord[] = [],
+  certificates?: WorkspaceCertificates,
 ): Promise<StreamConnectionMetadata> => {
   const variables = environmentMap(environment);
   const url = buildRequestUrl(request, variables);
@@ -55,7 +56,7 @@ export const connectSocketIo = async (
         sessionId,
         url,
         headers,
-        transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, url),
+        transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, url, certificates),
         path: resolveTemplate(request.socketIo.path, variables),
         authToken: request.auth.type === 'bearer' && !request.auth.disabled ? resolveTemplate(request.auth.token, variables) : '',
         eventListeners: request.socketIo.eventListeners

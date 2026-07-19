@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { CSSProperties, DragEvent as ReactDragEvent, ReactNode, RefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from './data/seed';
-import { sendRequest, type SendRequestContext } from './lib/http';
+import { sendRequest as sendHttpRequest, type SendRequestContext } from './lib/http';
 import { storeResponseCookies } from './lib/cookies';
 import { connectStream, disconnectStream, isStreamingRequest, sendWebSocketMessage } from './lib/protocol';
 import { fetchGraphqlSchema } from './lib/graphql';
@@ -27,7 +27,6 @@ import {
   GraphqlEditor,
   HttpBodyEditor,
   StreamSetup,
-  TransportEditor,
 } from './components/ProtocolEditors';
 import type {
   ApiRequest,
@@ -61,6 +60,7 @@ const CookieEditor = lazy(() => import('./components/CookieEditor').then((module
 const AuthEditor = lazy(() => import('./components/AuthEditor').then((module) => ({ default: module.AuthEditor })));
 const SocketIoEditor = lazy(() => import('./components/SocketIoEditor').then((module) => ({ default: module.SocketIoEditor })));
 const GrpcEditor = lazy(() => import('./components/GrpcEditor').then((module) => ({ default: module.GrpcEditor })));
+const TransportEditor = lazy(() => import('./components/TransportEditor').then((module) => ({ default: module.TransportEditor })));
 const StreamConsole = lazy(() => import('./components/StreamConsole').then((module) => ({ default: module.StreamConsole })));
 const StreamHistoryControls = lazy(() => import('./components/StreamHistoryControls').then((module) => ({ default: module.StreamHistoryControls })));
 const OAuthAuthorizationDialog = lazy(() => import('./components/OAuthAuthorizationDialog').then((module) => ({ default: module.OAuthAuthorizationDialog })));
@@ -676,7 +676,7 @@ function RequestPanel({
         {activeTab === 'body' && (request.protocol === 'websocket' || request.protocol === 'sse') ? <StreamSetup onChange={onChange} request={request} /> : null}
         {activeTab === 'body' && request.protocol === 'socketio' ? <Suspense fallback={<div className="dialog-loading">Loading Socket.IO editor…</div>}><SocketIoEditor onChange={onChange} onListenerToggle={onSocketIoListenerToggle} request={request} /></Suspense> : null}
         {activeTab === 'body' && request.protocol === 'grpc' ? <Suspense fallback={<div className="dialog-loading">Loading gRPC editor…</div>}><GrpcEditor onChange={onChange} onLoadSchema={onLoadGrpcSchema} request={request} schema={grpcSchema} schemaLoading={grpcSchemaLoading} /></Suspense> : null}
-        {activeTab === 'transport' ? <TransportEditor globalTimeoutMs={requestContext.requestTimeoutMs ?? 30_000} onChange={onChange} request={request} /> : null}
+        {activeTab === 'transport' ? <Suspense fallback={<div className="dialog-loading">Loading transport settings…</div>}><TransportEditor globalTimeoutMs={requestContext.requestTimeoutMs ?? 30_000} onChange={onChange} request={request} /></Suspense> : null}
         {activeTab === 'scripts' ? (
           <div className="editor-stack">
             <div className="editor-toolbar"><span>Pre-request script</span><small>JavaScript</small></div>
@@ -979,7 +979,7 @@ function FolderDialog({ collection, folder, environment, cookies, responses, req
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 29, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+    format: 'brunomnia', version: 30, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -1114,6 +1114,7 @@ export default function App() {
     httpsProxy: workspace.preferences.httpsProxy,
     noProxy: workspace.preferences.noProxy,
   }), [workspace.preferences.httpProxy, workspace.preferences.httpsProxy, workspace.preferences.noProxy, workspace.preferences.proxyEnabled]);
+  const sendRequest = useCallback((request: ApiRequest, environment: Environment | undefined, context: SendRequestContext = {}) => sendHttpRequest(request, environment, { certificates: workspace.certificates, ...context }), [workspace.certificates]);
   const activeResponseHistory = useMemo(() => visibleResponseHistory(
     workspace.responses,
     active?.request.id ?? '',
@@ -1404,7 +1405,7 @@ export default function App() {
     setGrpcSchemaLoading(true);
     try {
       const { loadGrpcSchema } = await import('./lib/grpc');
-      const schema = await loadGrpcSchema(targetRequest, activeEnvironment, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates);
+      const schema = await loadGrpcSchema(targetRequest, activeEnvironment, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspace.certificates);
       const service = schema.services.find((candidate) => candidate.fullName === targetRequest.grpc.service) ?? schema.services[0];
       const method = service?.methods.find((candidate) => candidate.name === targetRequest.grpc.method) ?? service?.methods[0];
       setGrpcSchemas((current) => ({ ...current, [targetRequest.id]: schema }));
@@ -1429,7 +1430,7 @@ export default function App() {
     const targetRequest = applyCollectionConfiguration(collection, active.request, activeEnvironment).request;
     setGraphqlSchemaLoading(true);
     try {
-      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver });
+      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver });
       setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => ({ ...collection, requests: collection.requests.map((request) => request.id === targetRequest.id ? { ...request, graphql: { ...request.graphql, schema, schemaEndpoint: targetRequest.url, schemaFetchedAt: new Date().toISOString() } } : request) })) }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1481,6 +1482,7 @@ export default function App() {
     validateCertificates: workspace.preferences.validateCertificates,
     validateAuthCertificates: workspace.preferences.validateAuthCertificates,
     proxy: proxyPreferences,
+    certificates: workspace.certificates,
     maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
     filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
     vault: unlockedVault,
@@ -1636,7 +1638,7 @@ export default function App() {
         ),
       }));
       try {
-        const metadata = await connectStream(request, { ...executionEnvironment, variables: [...executionEnvironment.variables, ...Object.entries(unlockedVault).map(([name, value]) => ({ id: `vault-${name}`, name, value, enabled: true }))] }, sessionId, onStreamEvent, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, workspace.cookies);
+        const metadata = await connectStream(request, { ...executionEnvironment, variables: [...executionEnvironment.variables, ...Object.entries(unlockedVault).map(([name, value]) => ({ id: `vault-${name}`, name, value, enabled: true }))] }, sessionId, onStreamEvent, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, workspace.cookies, workspace.certificates);
         setStreamSessionView((current) => current?.id === sessionId ? applyStreamConnectionMetadata([current], sessionId, metadata)[0] : current);
         setWorkspace((current) => ({ ...current, streamSessions: applyStreamConnectionMetadata(current.streamSessions, sessionId, metadata) }));
         if (streamSession.current !== sessionId) {
@@ -1758,7 +1760,7 @@ export default function App() {
         const output = await invokeGrpc(callRequest, {
           ...executionEnvironment,
           variables: Object.entries({ ...requestVariables, ...unlockedVault }).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
-        }, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates);
+        }, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspace.certificates);
         const body = JSON.stringify({ status: output.status, callType: output.callType, messages: output.messages }, null, 2);
         result = await pluginRuntime.afterResponse(executableRequest, { status: 200, statusText: `gRPC ${output.status}`, headers: { 'grpc-call-type': output.callType }, body, durationMs: output.durationMs, sizeBytes: new Blob([body]).size });
       } else {

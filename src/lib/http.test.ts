@@ -238,6 +238,21 @@ describe('native HTTP transport preferences', () => {
     expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({ followRedirects: false }) }) }));
   });
 
+  it('applies workspace CA and host-matched client identity to native requests', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/2.0' });
+    const request = createBlankRequest('workspace-certificate');
+    request.url = 'https://api.example.test/status';
+
+    await sendRequest(request, undefined, { certificates: {
+      ca: { enabled: true, pem: 'workspace-ca' },
+      clients: [{ id: 'client', host: '*.example.test', enabled: true, certificatePem: 'workspace-cert', keyPem: 'workspace-key' }],
+    } });
+
+    expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ transport: expect.objectContaining({
+      caCertificatePem: 'workspace-ca', clientCertificatePem: 'workspace-cert', clientKeyPem: 'workspace-key',
+    }) }) }));
+  });
+
   it('attaches size-bounded outgoing and response timeline evidence', async () => {
     tauri.invoke.mockResolvedValue({ status: 201, statusText: 'Created', headers: {}, body: '{}', durationMs: 3, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
     const request = createBlankRequest('timeline-evidence');

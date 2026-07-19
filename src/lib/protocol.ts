@@ -8,7 +8,9 @@ import type {
   PreferredHttpVersion,
   StreamConnectionMetadata,
   StreamMessage,
+  WorkspaceCertificates,
 } from '../types';
+import { applyWorkspaceCertificates } from './certificates';
 import { cookieHeaderForUrl } from './cookies';
 import { isGraphqlSubscriptionRequest } from './graphql';
 import { graphqlBody } from './http';
@@ -76,7 +78,7 @@ export const sseConnectConfig = (request: ApiRequest) => ({
   sendLastEventId: request.sse?.sendLastEventId !== false,
 });
 
-export const streamTransportConfig = (request: ApiRequest, preferredHttpVersion: PreferredHttpVersion, maxRedirects = 10, followRedirects = true, requestTimeoutMs = 30_000, validateCertificates = true, proxy?: ProxyPreferences, requestUrl = request.url) => ({
+export const streamTransportConfig = (request: ApiRequest, preferredHttpVersion: PreferredHttpVersion, maxRedirects = 10, followRedirects = true, requestTimeoutMs = 30_000, validateCertificates = true, proxy?: ProxyPreferences, requestUrl = request.url, certificates?: WorkspaceCertificates) => applyWorkspaceCertificates({
   ...request.transport,
   followRedirects: resolveFollowRedirects(request.transport, followRedirects),
   timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs),
@@ -84,7 +86,7 @@ export const streamTransportConfig = (request: ApiRequest, preferredHttpVersion:
   ...resolveProxyTransport(request.transport, requestUrl, proxy),
   preferredHttpVersion,
   maxRedirects,
-});
+}, requestUrl, certificates);
 
 export const connectStream = async (
   request: ApiRequest,
@@ -98,10 +100,11 @@ export const connectStream = async (
   validateCertificates = true,
   proxy?: ProxyPreferences,
   cookies: CookieRecord[] = [],
+  certificates?: WorkspaceCertificates,
 ): Promise<StreamConnectionMetadata> => {
   if (request.protocol === 'socketio') {
     const { connectSocketIo } = await import('./socketIo');
-    return connectSocketIo(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies);
+    return connectSocketIo(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies, certificates);
   }
   const variables = environmentMap(environment);
   const graphqlSubscription = isGraphqlSubscriptionRequest(request);
@@ -120,7 +123,7 @@ export const connectStream = async (
     sessionId,
     url,
     headers,
-    transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, url),
+    transport: streamTransportConfig(request, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, url, certificates),
     sse: sseConnectConfig(request),
     ...(graphqlSubscription ? { graphqlSubscription: graphqlBody(request, variables) } : {}),
   };
@@ -204,6 +207,7 @@ export const runStreamSample = async (
   validateCertificates = true,
   proxy?: ProxyPreferences,
   cookies: CookieRecord[] = [],
+  certificates?: WorkspaceCertificates,
 ): Promise<HttpResponse> => {
   if (!isStreamingRequest(request)) throw new Error('Stream sampling only supports WebSocket, Socket.IO, SSE, and GraphQL subscription requests.');
   const sessionId = `runner-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -215,7 +219,7 @@ export const runStreamSample = async (
     messages.push(message);
     if (message.direction === 'incoming' && (request.protocol !== 'graphql' || message.kind === 'next' || message.kind === 'error' || message.kind === 'complete')) resolveIncoming?.();
   };
-  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies);
+  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies, certificates);
   try {
     const variables = environmentMap(environment);
     const startupFrame = resolveTemplate(request.body, variables);

@@ -48,7 +48,8 @@ type ProjectWorkbenchProps = {
 
 const emptyStatus: GitStatus = { branch: '', upstream: '', ahead: 0, behind: 0, canPush: false, files: [], branches: [], remoteBranches: [], remotes: [], mergeInProgress: false, rebaseInProgress: false };
 
-export function ProjectWorkbench({ workspace, environment, requestContext, onChangeWorkspace }: ProjectWorkbenchProps) {
+export function ProjectWorkbench({ workspace, environment, requestContext: baseRequestContext, onChangeWorkspace }: ProjectWorkbenchProps) {
+  const requestContext = { ...baseRequestContext, certificates: workspace.certificates };
   const [path, setPath] = useState(workspace.project.path);
   const [remoteUrl, setRemoteUrl] = useState(workspace.project.remoteUrl);
   const [status, setStatus] = useState<GitStatus>(emptyStatus);

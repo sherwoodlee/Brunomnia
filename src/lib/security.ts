@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { AuditEvent, Workspace } from '../types';
 import { migrateWorkspace } from './storage';
 import { defaultPreferences } from './preferences';
+import { emptyWorkspaceCertificates } from './certificates';
 import { mergeLocalOAuth2RuntimeCredentials, withoutOAuth2RuntimeCredentials } from './oauth2Tokens';
 import { publicEnvironments } from './resources';
 
@@ -138,6 +139,7 @@ export const shareableWorkspace = (workspace: Workspace): Workspace => {
     cookies: [],
     responses: [],
     streamSessions: [],
+    certificates: emptyWorkspaceCertificates(),
     project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
     plugins: [],
     pluginData: {},
@@ -168,6 +170,7 @@ export const mergeSyncedWorkspace = (current: Workspace, payload: SyncPayload): 
     cookies: current.cookies,
     responses: current.responses,
     streamSessions: current.streamSessions,
+    certificates: current.certificates,
     project: current.project,
     plugins: current.plugins,
     pluginData: current.pluginData,

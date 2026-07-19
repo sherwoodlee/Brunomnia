@@ -53,6 +53,8 @@ pub struct TransportConfig {
     #[serde(default)]
     pub client_certificate_domains: String,
     #[serde(default)]
+    pub ca_certificate_pem: String,
+    #[serde(default)]
     pub preferred_http_version: String,
     #[serde(default = "default_max_redirects")]
     pub max_redirects: i64,
@@ -70,6 +72,7 @@ impl Default for TransportConfig {
             client_certificate_pem: String::new(),
             client_key_pem: String::new(),
             client_certificate_domains: String::new(),
+            ca_certificate_pem: String::new(),
             preferred_http_version: String::new(),
             max_redirects: default_max_redirects(),
         }

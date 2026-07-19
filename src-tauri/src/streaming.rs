@@ -1,6 +1,7 @@
 use crate::{
     http_client::{
         apply_preferred_request_version, build_streaming_client, flatten_headers, identity_enabled,
+        validate_certificate_material,
     },
     models::{
         KeyValue, SocketIoConnectInput, StreamConnectInput, StreamConnectOutput, StreamEvent,
@@ -382,10 +383,29 @@ fn native_root_store() -> Result<RootCertStore, String> {
     Ok(roots)
 }
 
+fn certificate_root_store(ca_certificate_pem: &str) -> Result<RootCertStore, String> {
+    let mut roots = native_root_store()?;
+    if ca_certificate_pem.trim().is_empty() {
+        return Ok(roots);
+    }
+    let certificates = CertificateDer::pem_slice_iter(ca_certificate_pem.trim().as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Invalid CA certificate PEM: {error}"))?;
+    if certificates.is_empty() {
+        return Err("The CA certificate PEM contains no certificates.".into());
+    }
+    let (added, rejected) = roots.add_parsable_certificates(certificates);
+    if added == 0 || rejected > 0 {
+        return Err("The CA certificate PEM contains invalid certificates.".into());
+    }
+    Ok(roots)
+}
+
 fn websocket_tls_connector(
     transport: &TransportConfig,
     request_url: &str,
 ) -> Result<Option<Connector>, String> {
+    validate_certificate_material(transport)?;
     let url = Url::parse(request_url).map_err(|error| format!("Invalid WebSocket URL: {error}"))?;
     if url.scheme() != "wss" {
         return Ok(None);
@@ -396,11 +416,15 @@ fn websocket_tls_connector(
         return Err("A client certificate and private key must be supplied together.".into());
     }
     let use_identity = has_certificate && identity_enabled(transport, Some(request_url));
-    if transport.validate_certificates && !use_identity {
+    if transport.validate_certificates
+        && !use_identity
+        && transport.ca_certificate_pem.trim().is_empty()
+    {
         return Ok(None);
     }
     let builder = if transport.validate_certificates {
-        rustls::ClientConfig::builder().with_root_certificates(native_root_store()?)
+        rustls::ClientConfig::builder()
+            .with_root_certificates(certificate_root_store(&transport.ca_certificate_pem)?)
     } else {
         rustls::ClientConfig::builder()
             .dangerous()
@@ -534,9 +558,11 @@ fn parse_proxy_url(raw_proxy_url: &str) -> Result<Url, String> {
     Ok(proxy)
 }
 
-fn proxy_tls_config(validate_certificates: bool) -> Result<Arc<rustls::ClientConfig>, String> {
-    let builder = if validate_certificates {
-        rustls::ClientConfig::builder().with_root_certificates(native_root_store()?)
+fn proxy_tls_config(transport: &TransportConfig) -> Result<Arc<rustls::ClientConfig>, String> {
+    validate_certificate_material(transport)?;
+    let builder = if transport.validate_certificates {
+        rustls::ClientConfig::builder()
+            .with_root_certificates(certificate_root_store(&transport.ca_certificate_pem)?)
     } else {
         rustls::ClientConfig::builder()
             .dangerous()
@@ -743,9 +769,8 @@ async fn websocket_base_stream(
     let mut stream: BoxedWebSocketIo = if proxy.scheme() == "https" {
         let server_name = ServerName::try_from(proxy_host.to_string())
             .map_err(|_| "The WebSocket proxy has an invalid TLS hostname.".to_string())?;
-        let connect =
-            tokio_rustls::TlsConnector::from(proxy_tls_config(transport.validate_certificates)?)
-                .connect(server_name, stream);
+        let connect = tokio_rustls::TlsConnector::from(proxy_tls_config(transport)?)
+            .connect(server_name, stream);
         let stream = if transport.timeout_ms == 0 {
             connect.await
         } else {
@@ -2800,6 +2825,11 @@ mod tests {
             let tls = mutual_acceptor.accept(matched_stream).await.unwrap();
             let mut socket = tokio_tungstenite::accept_async(tls).await.unwrap();
             assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
+
+            let (trusted_stream, _) = listener.accept().await.unwrap();
+            let tls = plain_acceptor.accept(trusted_stream).await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(tls).await.unwrap();
+            assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
         });
 
         let channel = || {
@@ -2853,7 +2883,7 @@ mod tests {
         let output = connect_websocket(
             StreamConnectInput {
                 session_id: "wss-matched-identity".into(),
-                url,
+                url: url.clone(),
                 headers: Vec::new(),
                 transport: crate::models::TransportConfig {
                     validate_certificates: false,
@@ -2872,7 +2902,28 @@ mod tests {
         .unwrap();
         assert_eq!(output.status, 101);
         assert_eq!(output.transport, "WebSocket");
-        disconnect_websocket("wss-matched-identity".into(), state)
+        disconnect_websocket("wss-matched-identity".into(), state.clone())
+            .await
+            .unwrap();
+        let trusted = connect_websocket(
+            StreamConnectInput {
+                session_id: "wss-workspace-ca".into(),
+                url,
+                headers: Vec::new(),
+                transport: crate::models::TransportConfig {
+                    ca_certificate_pem: TLS_CA_CERTIFICATE.into(),
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            channel(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(trusted.status, 101);
+        disconnect_websocket("wss-workspace-ca".into(), state)
             .await
             .unwrap();
         server.await.unwrap();

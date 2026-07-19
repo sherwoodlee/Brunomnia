@@ -25,7 +25,10 @@ describe('gRPC schema loading', () => {
     ];
     request.grpc.protoEntryPath = 'services/api.proto';
 
-    await loadGrpcSchema(request);
+    await loadGrpcSchema(request, undefined, 30_000, true, {
+      ca: { enabled: true, pem: 'workspace-ca' },
+      clients: [{ id: 'client', host: 'localhost', enabled: true, certificatePem: 'workspace-cert', keyPem: 'workspace-key' }],
+    });
 
     expect(tauri.invoke).toHaveBeenCalledWith('grpc_load_schema', expect.objectContaining({ input: expect.objectContaining({
       protoEntryPath: 'services/api.proto',
@@ -33,6 +36,7 @@ describe('gRPC schema loading', () => {
         { path: 'services/api.proto', text: 'import "types.proto"; service API {}' },
         { path: 'types.proto', text: 'message Request {}' },
       ],
+      transport: expect.objectContaining({ caCertificatePem: 'workspace-ca' }),
     }) }));
   });
 });

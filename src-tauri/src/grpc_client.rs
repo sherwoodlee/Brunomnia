@@ -2,7 +2,10 @@ use crate::models::{
     GrpcCallInput, GrpcCallOutput, GrpcMethodInfo, GrpcProtoFileInput, GrpcSchemaInput,
     GrpcSchemaOutput, GrpcServiceInfo, KeyValue, TransportConfig,
 };
-use crate::{http_client::identity_enabled, streaming::AcceptInvalidServerCertificate};
+use crate::{
+    http_client::{identity_enabled, validate_certificate_material},
+    streaming::AcceptInvalidServerCertificate,
+};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor};
@@ -17,7 +20,7 @@ use std::{
 use tonic::{
     codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
     metadata::{Ascii, MetadataKey, MetadataValue},
-    transport::{Channel, ClientTlsConfig, Endpoint, Identity},
+    transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity},
     Request, Status,
 };
 
@@ -220,6 +223,7 @@ fn tonic_endpoint(endpoint: &str) -> Result<(String, bool), String> {
 }
 
 async fn connect_channel(endpoint: &str, transport: &TransportConfig) -> Result<Channel, String> {
+    validate_certificate_material(transport)?;
     let (tonic_endpoint, secure) = tonic_endpoint(endpoint)?;
     let mut builder = Endpoint::from_shared(tonic_endpoint)
         .map_err(|error| format!("Invalid gRPC endpoint: {error}"))?;
@@ -234,7 +238,10 @@ async fn connect_channel(endpoint: &str, transport: &TransportConfig) -> Result<
             return Err("A client certificate and private key must be supplied together.".into());
         }
         let use_identity = has_certificate && identity_enabled(transport, Some(endpoint));
-        if !transport.validate_certificates || use_identity {
+        if !transport.validate_certificates
+            || use_identity
+            || !transport.ca_certificate_pem.trim().is_empty()
+        {
             let mut tls = ClientTlsConfig::new();
             if transport.timeout_ms > 0 {
                 tls = tls.timeout(std::time::Duration::from_millis(transport.timeout_ms));
@@ -244,6 +251,10 @@ async fn connect_channel(endpoint: &str, transport: &TransportConfig) -> Result<
                     transport.client_certificate_pem.clone(),
                     transport.client_key_pem.clone(),
                 ));
+            }
+            if transport.validate_certificates && !transport.ca_certificate_pem.trim().is_empty() {
+                tls =
+                    tls.ca_certificate(Certificate::from_pem(transport.ca_certificate_pem.clone()));
             }
             builder = if transport.validate_certificates {
                 builder.tls_config(tls.with_enabled_roots())
@@ -717,6 +728,9 @@ mod tests {
 
             let (matched_stream, _) = listener.accept().await.unwrap();
             assert!(mutual_acceptor.accept(matched_stream).await.is_ok());
+
+            let (trusted_stream, _) = listener.accept().await.unwrap();
+            assert!(plain_acceptor.accept(trusted_stream).await.is_ok());
         });
 
         let endpoint = format!("https://127.0.0.1:{}", address.port());
@@ -748,6 +762,15 @@ mod tests {
                 client_certificate_pem: TLS_CLIENT_CERTIFICATE.into(),
                 client_key_pem: TLS_CLIENT_KEY.into(),
                 client_certificate_domains: "127.0.0.1".into(),
+                ..Default::default()
+            },
+        )
+        .await;
+        let _ = connect_channel(
+            &endpoint,
+            &TransportConfig {
+                timeout_ms: 1_000,
+                ca_certificate_pem: TLS_CA_CERTIFICATE.into(),
                 ..Default::default()
             },
         )

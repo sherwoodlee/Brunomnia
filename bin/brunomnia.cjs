@@ -7552,6 +7552,60 @@ var init_auth = __esm({
   }
 });
 
+// src/lib/certificates.ts
+var MAX_WORKSPACE_CLIENT_CERTIFICATES, MAX_CERTIFICATE_TEXT_BYTES, MAX_CA_CERTIFICATE_TEXT_BYTES, MAX_CERTIFICATE_HOST_LENGTH, encoder, decoder, byteLength, truncateBytes, record3, stringValue2, normalizeWorkspaceCertificates;
+var init_certificates = __esm({
+  "src/lib/certificates.ts"() {
+    MAX_WORKSPACE_CLIENT_CERTIFICATES = 100;
+    MAX_CERTIFICATE_TEXT_BYTES = 1048576;
+    MAX_CA_CERTIFICATE_TEXT_BYTES = 5242880;
+    MAX_CERTIFICATE_HOST_LENGTH = 512;
+    encoder = new TextEncoder();
+    decoder = new TextDecoder();
+    byteLength = (value) => encoder.encode(value).byteLength;
+    truncateBytes = (value, limit) => {
+      const bytes = encoder.encode(value);
+      if (bytes.byteLength <= limit) return value;
+      let end = limit;
+      let truncated = decoder.decode(bytes.slice(0, end));
+      while (byteLength(truncated) > limit && end > 0) truncated = decoder.decode(bytes.slice(0, --end));
+      return truncated;
+    };
+    record3 = (value) => value && typeof value === "object" ? value : void 0;
+    stringValue2 = (value) => typeof value === "string" ? value : "";
+    normalizeWorkspaceCertificates = (value) => {
+      const source = record3(value);
+      const ca = record3(source?.ca);
+      const caPem = truncateBytes(stringValue2(ca?.pem), MAX_CA_CERTIFICATE_TEXT_BYTES);
+      const ids = /* @__PURE__ */ new Set();
+      const clients = (Array.isArray(source?.clients) ? source.clients : []).flatMap((value2, index) => {
+        const client = record3(value2);
+        const host = stringValue2(client?.host).trim().slice(0, MAX_CERTIFICATE_HOST_LENGTH);
+        if (!client || !host) return [];
+        const requestedId = stringValue2(client.id).trim().slice(0, 256) || `workspace-certificate-${index}`;
+        let id = requestedId;
+        let suffix = 1;
+        while (ids.has(id)) id = `workspace-certificate-${index}-${suffix++}`;
+        ids.add(id);
+        return [{
+          id,
+          host,
+          enabled: client.enabled !== false,
+          certificatePem: truncateBytes(stringValue2(client.certificatePem), MAX_CERTIFICATE_TEXT_BYTES),
+          keyPem: truncateBytes(stringValue2(client.keyPem), MAX_CERTIFICATE_TEXT_BYTES)
+        }];
+      }).slice(0, MAX_WORKSPACE_CLIENT_CERTIFICATES);
+      return {
+        ca: {
+          enabled: ca?.enabled === true && Boolean(caPem.trim()),
+          pem: caPem
+        },
+        clients
+      };
+    };
+  }
+});
+
 // src/lib/templates.ts
 var init_templates = __esm({
   "src/lib/templates.ts"() {
@@ -7580,6 +7634,7 @@ var init_http = __esm({
   "src/lib/http.ts"() {
     init_core();
     init_auth();
+    init_certificates();
     init_cookies();
     init_request();
     init_templates();
@@ -7791,6 +7846,7 @@ var createRequest = (id, name, method, url) => ({
     clientCertificatePem: "",
     clientKeyPem: "",
     clientCertificateDomains: "",
+    caCertificatePem: "",
     sendCookies: true,
     storeCookies: true
   },
@@ -7838,7 +7894,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 29,
+  version: 30,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -7996,6 +8052,7 @@ paths:
   responses: [],
   streamSessions: [],
   responseFilters: {},
+  certificates: { ca: { enabled: false, pem: "" }, clients: [] },
   project: { mode: "local", path: "", remoteUrl: "", remoteName: "origin", authorName: "", authorEmail: "", autoSave: true },
   plugins: [],
   pluginData: {},
@@ -8402,10 +8459,10 @@ var takeUtf8 = (value, maximumBytes) => {
   const encoded = new TextEncoder().encode(value);
   if (encoded.byteLength <= maximumBytes) return { value, bytes: encoded.byteLength, truncated: false };
   let end = Math.max(0, maximumBytes);
-  const decoder2 = new TextDecoder("utf-8", { fatal: true });
+  const decoder3 = new TextDecoder("utf-8", { fatal: true });
   while (end > 0) {
     try {
-      return { value: decoder2.decode(encoded.slice(0, end)), bytes: end, truncated: true };
+      return { value: decoder3.decode(encoded.slice(0, end)), bytes: end, truncated: true };
     } catch {
       end -= 1;
     }
@@ -9767,7 +9824,7 @@ var createScriptModules = (runtime) => {
     }
     if (options.columns) {
       const headers = Array.isArray(options.columns) ? options.columns.map(String) : records.shift() ?? [];
-      return records.map((record5) => Object.fromEntries(headers.map((header, index) => [header, record5[index] ?? ""])));
+      return records.map((record6) => Object.fromEntries(headers.map((header, index) => [header, record6[index] ?? ""])));
     }
     return records;
   };
@@ -9904,8 +9961,8 @@ var createScriptModules = (runtime) => {
   const hexToBytes = (hex) => new Uint8Array((hex.match(/.{1,2}/g) ?? []).map((value) => parseInt(value, 16)));
   const bytesToBase64 = (bytes) => runtime.btoa([...bytes].map((value) => String.fromCharCode(value)).join(""));
   const base64ToBytes = (value) => new Uint8Array([...runtime.atob(value)].map((character) => character.charCodeAt(0)));
-  const wordArray = (bytes) => ({ sigBytes: bytes.length, words: Array.from({ length: Math.ceil(bytes.length / 4) }, (_, index) => (bytes[index * 4] ?? 0) << 24 | (bytes[index * 4 + 1] ?? 0) << 16 | (bytes[index * 4 + 2] ?? 0) << 8 | (bytes[index * 4 + 3] ?? 0)), bytes, toString(encoder2) {
-    return (encoder2 ?? cryptoEnc.Hex).stringify(this);
+  const wordArray = (bytes) => ({ sigBytes: bytes.length, words: Array.from({ length: Math.ceil(bytes.length / 4) }, (_, index) => (bytes[index * 4] ?? 0) << 24 | (bytes[index * 4 + 1] ?? 0) << 16 | (bytes[index * 4 + 2] ?? 0) << 8 | (bytes[index * 4 + 3] ?? 0)), bytes, toString(encoder3) {
+    return (encoder3 ?? cryptoEnc.Hex).stringify(this);
   } });
   const inputBytes = (value) => value && typeof value === "object" && "bytes" in value ? value.bytes : new runtime.TextEncoder().encode(boundedText(value));
   const sha256Hex = (input) => {
@@ -11125,27 +11182,27 @@ init_core();
 
 // src/lib/graphql.ts
 init_http();
-var record3 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+var record4 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
 var text = (value) => typeof value === "string" ? value : "";
 var normalizeTypeRef = (value, depth = 0) => {
-  const source = record3(value);
+  const source = record4(value);
   const ofType = depth < 12 && source?.ofType ? normalizeTypeRef(source.ofType, depth + 1) : void 0;
   return { kind: text(source?.kind), name: text(source?.name), ...ofType?.kind || ofType?.name ? { ofType } : {} };
 };
 var normalizeInputValues = (value) => !Array.isArray(value) ? [] : value.flatMap((item) => {
-  const source = record3(item);
+  const source = record4(item);
   const name = text(source?.name);
   return source && name ? [{ name, description: text(source.description), defaultValue: text(source.defaultValue), type: normalizeTypeRef(source.type) }] : [];
 }).slice(0, 500);
 var normalizeGraphqlSchema = (value) => {
-  const source = record3(value);
+  const source = record4(value);
   const rawTypes = Array.isArray(source?.types) ? source.types : [];
   const types = rawTypes.flatMap((item) => {
-    const type = record3(item);
+    const type = record4(item);
     const name = text(type?.name);
     if (!type || !name) return [];
     const fields = !Array.isArray(type.fields) ? [] : type.fields.flatMap((item2) => {
-      const field = record3(item2);
+      const field = record4(item2);
       const fieldName = text(field?.name);
       return field && fieldName ? [{
         name: fieldName,
@@ -11157,7 +11214,7 @@ var normalizeGraphqlSchema = (value) => {
       }] : [];
     }).slice(0, 1e3);
     const enumValues = !Array.isArray(type.enumValues) ? [] : type.enumValues.flatMap((item2) => {
-      const entry = record3(item2);
+      const entry = record4(item2);
       const entryName = text(entry?.name);
       return entry && entryName ? [{ name: entryName, description: text(entry.description), isDeprecated: entry.isDeprecated === true, deprecationReason: text(entry.deprecationReason) }] : [];
     }).slice(0, 5e3);
@@ -11166,9 +11223,9 @@ var normalizeGraphqlSchema = (value) => {
   }).slice(0, 5e3);
   if (!types.length) return void 0;
   return {
-    queryType: text(record3(source?.queryType)?.name),
-    mutationType: text(record3(source?.mutationType)?.name),
-    subscriptionType: text(record3(source?.subscriptionType)?.name),
+    queryType: text(record4(source?.queryType)?.name),
+    mutationType: text(record4(source?.mutationType)?.name),
+    subscriptionType: text(record4(source?.subscriptionType)?.name),
     types
   };
 };
@@ -11178,15 +11235,15 @@ var GRPC_PROTO_MAX_FILES = 500;
 var GRPC_PROTO_MAX_FILE_BYTES = 1048576;
 var GRPC_PROTO_MAX_TOTAL_BYTES = 10485760;
 var GRPC_PROTO_MAX_PATH_LENGTH = 512;
-var encoder = new TextEncoder();
-var decoder = new TextDecoder();
-var byteLength = (value) => encoder.encode(value).byteLength;
-var truncateBytes = (value, limit) => {
-  const bytes = encoder.encode(value);
+var encoder2 = new TextEncoder();
+var decoder2 = new TextDecoder();
+var byteLength2 = (value) => encoder2.encode(value).byteLength;
+var truncateBytes2 = (value, limit) => {
+  const bytes = encoder2.encode(value);
   if (bytes.byteLength <= limit) return value;
   let end = limit;
-  let truncated = decoder.decode(bytes.slice(0, end));
-  while (byteLength(truncated) > limit && end > 0) truncated = decoder.decode(bytes.slice(0, --end));
+  let truncated = decoder2.decode(bytes.slice(0, end));
+  while (byteLength2(truncated) > limit && end > 0) truncated = decoder2.decode(bytes.slice(0, --end));
   return truncated;
 };
 var normalizeGrpcProtoPath = (value) => {
@@ -11212,27 +11269,27 @@ var normalizeGrpcProtoTree = (value, legacyProtoText = "", preferredEntryPath = 
   let totalBytes = 0;
   for (const [index, candidate] of (Array.isArray(value) ? value : []).slice(0, GRPC_PROTO_MAX_FILES).entries()) {
     if (!candidate || typeof candidate !== "object") continue;
-    const record5 = candidate;
-    if (typeof record5.path !== "string" || typeof record5.text !== "string") continue;
+    const record6 = candidate;
+    if (typeof record6.path !== "string" || typeof record6.text !== "string") continue;
     let path;
     try {
-      path = normalizeGrpcProtoPath(record5.path);
+      path = normalizeGrpcProtoPath(record6.path);
     } catch {
       continue;
     }
     const identity = path.toLowerCase();
     if (paths.has(identity) || totalBytes >= GRPC_PROTO_MAX_TOTAL_BYTES) continue;
-    const text2 = truncateBytes(record5.text, Math.min(GRPC_PROTO_MAX_FILE_BYTES, GRPC_PROTO_MAX_TOTAL_BYTES - totalBytes));
+    const text2 = truncateBytes2(record6.text, Math.min(GRPC_PROTO_MAX_FILE_BYTES, GRPC_PROTO_MAX_TOTAL_BYTES - totalBytes));
     paths.add(identity);
-    totalBytes += byteLength(text2);
+    totalBytes += byteLength2(text2);
     files.push({
-      id: typeof record5.id === "string" && record5.id.trim() ? record5.id.slice(0, 256) : `grpc-proto-file-${index}`,
+      id: typeof record6.id === "string" && record6.id.trim() ? record6.id.slice(0, 256) : `grpc-proto-file-${index}`,
       path,
       text: text2
     });
   }
   if (!files.length && legacyProtoText) {
-    files.push({ id: "grpc-proto-file-0", path: "schema.proto", text: truncateBytes(legacyProtoText, GRPC_PROTO_MAX_FILE_BYTES) });
+    files.push({ id: "grpc-proto-file-0", path: "schema.proto", text: truncateBytes2(legacyProtoText, GRPC_PROTO_MAX_FILE_BYTES) });
   }
   const protoEntryPath = entryPath(files, preferredEntryPath);
   const protoActivePath = files.some((file) => file.path === preferredActivePath) ? preferredActivePath : protoEntryPath;
@@ -11240,11 +11297,12 @@ var normalizeGrpcProtoTree = (value, legacyProtoText = "", preferredEntryPath = 
     protoFiles: files,
     protoEntryPath,
     protoActivePath,
-    protoText: files.find((file) => file.path === protoEntryPath)?.text ?? truncateBytes(legacyProtoText, GRPC_PROTO_MAX_FILE_BYTES)
+    protoText: files.find((file) => file.path === protoEntryPath)?.text ?? truncateBytes2(legacyProtoText, GRPC_PROTO_MAX_FILE_BYTES)
   };
 };
 
 // src/lib/storage.ts
+init_certificates();
 init_request();
 var isWorkspaceEnvelope = (value) => {
   if (!value || typeof value !== "object") return false;
@@ -11255,12 +11313,12 @@ var requestDefaults = () => cloneSeedWorkspace().collections[0].requests[0];
 var knownPluginPermissions = ["request:read", "request:write", "response:read", "response:write", "store", "network", "app:prompt", "app:clipboard", "template", "action", "theme"];
 var governanceRoles = ["owner", "admin", "editor", "viewer"];
 var storageModes = ["local", "folder", "git", "encrypted-file"];
-var record4 = (value) => value && typeof value === "object" ? value : void 0;
-var stringValue2 = (value, fallback = "") => typeof value === "string" ? value : fallback;
+var record5 = (value) => value && typeof value === "object" ? value : void 0;
+var stringValue3 = (value, fallback = "") => typeof value === "string" ? value : fallback;
 var normalizeRows = (value, prefix) => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
-  const row = record4(item);
+  const row = record5(item);
   if (!row) return [];
-  return [{ id: stringValue2(row.id, `${prefix}-${index}`), name: stringValue2(row.name), value: stringValue2(row.value), enabled: row.enabled !== false, description: stringValue2(row.description).slice(0, 2e4), ...row.multiline === true ? { multiline: true } : {} }];
+  return [{ id: stringValue3(row.id, `${prefix}-${index}`), name: stringValue3(row.name), value: stringValue3(row.value), enabled: row.enabled !== false, description: stringValue3(row.description).slice(0, 2e4), ...row.multiline === true ? { multiline: true } : {} }];
 }).slice(0, 1e3);
 var normalizePlugins = (value) => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
   if (!item || typeof item !== "object") return [];
@@ -11283,10 +11341,10 @@ var normalizePlugins = (value) => !Array.isArray(value) ? [] : value.flatMap((it
   }];
 });
 var normalizeGovernance = (value, defaults) => {
-  const source = record4(value);
+  const source = record5(value);
   const rawMembers = Array.isArray(source?.members) ? source.members : [];
   const members = rawMembers.flatMap((value2, index) => {
-    const member = record4(value2);
+    const member = record5(value2);
     if (!member) return [];
     const role = governanceRoles.includes(member.role) ? member.role : "viewer";
     return [{
@@ -11299,7 +11357,7 @@ var normalizeGovernance = (value, defaults) => {
   });
   const safeMembers = members.length ? members : defaults.members;
   if (!safeMembers.some((member) => member.active && member.role === "owner")) safeMembers[0] = { ...safeMembers[0], role: "owner", active: true };
-  const rawPolicy = record4(source?.policy);
+  const rawPolicy = record5(source?.policy);
   const requestedStorage = Array.isArray(rawPolicy?.allowedStorage) ? rawPolicy.allowedStorage : [];
   const externalVaultAllowlist = Array.isArray(rawPolicy?.externalVaultAllowlist) ? rawPolicy.externalVaultAllowlist : [];
   const allowedStorage = requestedStorage.length ? storageModes.filter((mode) => requestedStorage.includes(mode)) : defaults.policy.allowedStorage;
@@ -11312,7 +11370,7 @@ var normalizeGovernance = (value, defaults) => {
     auditRetention
   };
   const audit = (Array.isArray(source?.audit) ? source.audit : []).flatMap((value2) => {
-    const event = record4(value2);
+    const event = record5(value2);
     if (!event || typeof event.action !== "string" || typeof event.timestamp !== "string") return [];
     return [{ id: typeof event.id === "string" ? event.id : `audit-${crypto.randomUUID()}`, timestamp: event.timestamp, actorId: typeof event.actorId === "string" ? event.actorId : safeMembers[0].id, action: event.action, detail: typeof event.detail === "string" ? event.detail : "" }];
   }).slice(0, auditRetention);
@@ -11321,7 +11379,7 @@ var normalizeGovernance = (value, defaults) => {
   return { currentMemberId, members: safeMembers, policy, audit };
 };
 var normalizeCollaboration = (value, defaults) => {
-  const source = record4(value);
+  const source = record5(value);
   return {
     mode: source?.mode === "encrypted-file" ? "encrypted-file" : "off",
     path: typeof source?.path === "string" ? source.path : defaults.path,
@@ -11332,62 +11390,62 @@ var normalizeCollaboration = (value, defaults) => {
   };
 };
 var normalizeMcpResources = (value) => !Array.isArray(value) ? [] : value.flatMap((item) => {
-  const resource = record4(item);
-  const uriTemplate = stringValue2(resource?.uriTemplate);
-  const uri = stringValue2(resource?.uri, uriTemplate);
+  const resource = record5(item);
+  const uriTemplate = stringValue3(resource?.uriTemplate);
+  const uri = stringValue3(resource?.uri, uriTemplate);
   if (!resource || !uri) return [];
   let variables = [];
   if (uriTemplate) {
     variables = [...uriTemplate.matchAll(/\{[+#./;?&]?([^{}]+)\}/g)].flatMap((match) => match[1].split(",").map((name) => name.replace(/\*$/, "").replace(/:\d+$/, ""))).filter((name, index, all) => Boolean(name) && all.indexOf(name) === index).slice(0, 100);
   }
-  return [{ uri, uriTemplate, variables, name: stringValue2(resource.name, uri), description: stringValue2(resource.description), mimeType: stringValue2(resource.mimeType) }];
+  return [{ uri, uriTemplate, variables, name: stringValue3(resource.name, uri), description: stringValue3(resource.description), mimeType: stringValue3(resource.mimeType) }];
 }).slice(0, 5e3);
 var normalizeMcpClients = (value) => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
-  const client = record4(item);
+  const client = record5(item);
   if (!client) return [];
   const authType = client.authType === "bearer" || client.authType === "basic" || client.authType === "oauth2" ? client.authType : "none";
   const tools = !Array.isArray(client.tools) ? [] : client.tools.flatMap((item2) => {
-    const tool = record4(item2);
-    const name = stringValue2(tool?.name);
+    const tool = record5(item2);
+    const name = stringValue3(tool?.name);
     if (!tool || !name) return [];
-    return [{ name, description: stringValue2(tool.description), inputSchema: tool.inputSchema ?? {} }];
+    return [{ name, description: stringValue3(tool.description), inputSchema: tool.inputSchema ?? {} }];
   }).slice(0, 5e3);
   const prompts = !Array.isArray(client.prompts) ? [] : client.prompts.flatMap((item2) => {
-    const prompt = record4(item2);
-    const name = stringValue2(prompt?.name);
+    const prompt = record5(item2);
+    const name = stringValue3(prompt?.name);
     if (!prompt || !name) return [];
     const args2 = Array.isArray(prompt.arguments) ? prompt.arguments.flatMap((item3) => {
-      const argument = record4(item3);
-      const argumentName = stringValue2(argument?.name);
-      return argument && argumentName ? [{ name: argumentName, description: stringValue2(argument.description), required: argument.required === true }] : [];
+      const argument = record5(item3);
+      const argumentName = stringValue3(argument?.name);
+      return argument && argumentName ? [{ name: argumentName, description: stringValue3(argument.description), required: argument.required === true }] : [];
     }).slice(0, 500) : [];
-    return [{ name, description: stringValue2(prompt.description), arguments: args2 }];
+    return [{ name, description: stringValue3(prompt.description), arguments: args2 }];
   }).slice(0, 5e3);
   return [{
-    id: stringValue2(client.id, `migrated-mcp-${index}`),
-    name: stringValue2(client.name, `MCP Client ${index + 1}`),
+    id: stringValue3(client.id, `migrated-mcp-${index}`),
+    name: stringValue3(client.name, `MCP Client ${index + 1}`),
     enabled: client.enabled === true,
     transport: client.transport === "stdio" ? "stdio" : "http",
-    url: stringValue2(client.url),
-    command: stringValue2(client.command),
+    url: stringValue3(client.url),
+    command: stringValue3(client.command),
     args: Array.isArray(client.args) ? client.args.filter((arg) => typeof arg === "string").slice(0, 100) : [],
     headers: normalizeRows(client.headers, `mcp-${index}-header`),
     authType,
-    token: stringValue2(client.token),
-    username: stringValue2(client.username),
-    password: stringValue2(client.password),
-    oauthAuthorizationUrl: stringValue2(client.oauthAuthorizationUrl),
-    oauthAccessTokenUrl: stringValue2(client.oauthAccessTokenUrl),
-    oauthClientId: stringValue2(client.oauthClientId),
-    oauthClientSecret: stringValue2(client.oauthClientSecret),
-    oauthScope: stringValue2(client.oauthScope),
-    oauthState: stringValue2(client.oauthState),
-    oauthRefreshToken: stringValue2(client.oauthRefreshToken),
-    oauthIdentityToken: stringValue2(client.oauthIdentityToken),
+    token: stringValue3(client.token),
+    username: stringValue3(client.username),
+    password: stringValue3(client.password),
+    oauthAuthorizationUrl: stringValue3(client.oauthAuthorizationUrl),
+    oauthAccessTokenUrl: stringValue3(client.oauthAccessTokenUrl),
+    oauthClientId: stringValue3(client.oauthClientId),
+    oauthClientSecret: stringValue3(client.oauthClientSecret),
+    oauthScope: stringValue3(client.oauthScope),
+    oauthState: stringValue3(client.oauthState),
+    oauthRefreshToken: stringValue3(client.oauthRefreshToken),
+    oauthIdentityToken: stringValue3(client.oauthIdentityToken),
     oauthExpiresAt: typeof client.oauthExpiresAt === "number" && Number.isFinite(client.oauthExpiresAt) ? Math.max(0, Math.trunc(client.oauthExpiresAt)) : 0,
-    oauthTokenPrefix: stringValue2(client.oauthTokenPrefix, "Bearer"),
-    oauthRegisteredClientId: stringValue2(client.oauthRegisteredClientId),
-    oauthRegisteredClientSecret: stringValue2(client.oauthRegisteredClientSecret),
+    oauthTokenPrefix: stringValue3(client.oauthTokenPrefix, "Bearer"),
+    oauthRegisteredClientId: stringValue3(client.oauthRegisteredClientId),
+    oauthRegisteredClientSecret: stringValue3(client.oauthRegisteredClientSecret),
     oauthRegisteredClientIdIssuedAt: typeof client.oauthRegisteredClientIdIssuedAt === "number" && Number.isFinite(client.oauthRegisteredClientIdIssuedAt) ? Math.max(0, Math.trunc(client.oauthRegisteredClientIdIssuedAt)) : 0,
     oauthRegisteredClientSecretExpiresAt: typeof client.oauthRegisteredClientSecretExpiresAt === "number" && Number.isFinite(client.oauthRegisteredClientSecretExpiresAt) ? Math.max(0, Math.trunc(client.oauthRegisteredClientSecretExpiresAt)) : 0,
     oauthRegisteredTokenEndpointAuthMethod: client.oauthRegisteredTokenEndpointAuthMethod === "client_secret_basic" || client.oauthRegisteredTokenEndpointAuthMethod === "client_secret_post" ? client.oauthRegisteredTokenEndpointAuthMethod : "none",
@@ -11400,37 +11458,37 @@ var normalizeMcpClients = (value) => !Array.isArray(value) ? [] : value.flatMap(
   }];
 }).slice(0, 100);
 var normalizeAi = (value, defaults) => {
-  const source = record4(value);
+  const source = record5(value);
   const provider = source?.provider === "openai" || source?.provider === "anthropic" || source?.provider === "gemini" || source?.provider === "openai-compatible" ? source.provider : defaults.provider;
   return {
     enabled: source?.enabled === true,
     provider,
-    baseUrl: stringValue2(source?.baseUrl, defaults.baseUrl),
-    model: stringValue2(source?.model),
-    apiKey: stringValue2(source?.apiKey),
+    baseUrl: stringValue3(source?.baseUrl, defaults.baseUrl),
+    model: stringValue3(source?.model),
+    apiKey: stringValue3(source?.apiKey),
     mockGeneration: source?.mockGeneration === true,
     commitSuggestions: source?.commitSuggestions === true
   };
 };
 var normalizeKonnect = (value, defaults) => {
-  const source = record4(value);
+  const source = record5(value);
   const controlPlanes = !Array.isArray(source?.controlPlanes) ? [] : source.controlPlanes.flatMap((item) => {
-    const plane = record4(item);
-    const id = stringValue2(plane?.id);
-    return plane && id ? [{ id, name: stringValue2(plane.name, id), description: stringValue2(plane.description) }] : [];
+    const plane = record5(item);
+    const id = stringValue3(plane?.id);
+    return plane && id ? [{ id, name: stringValue3(plane.name, id), description: stringValue3(plane.description) }] : [];
   }).slice(0, 1e3);
   return {
     enabled: source?.enabled === true,
-    baseUrl: stringValue2(source?.baseUrl, defaults.baseUrl),
-    token: stringValue2(source?.token),
-    controlPlaneId: stringValue2(source?.controlPlaneId),
+    baseUrl: stringValue3(source?.baseUrl, defaults.baseUrl),
+    token: stringValue3(source?.token),
+    controlPlaneId: stringValue3(source?.controlPlaneId),
     controlPlanes,
     lastSyncedAt: typeof source?.lastSyncedAt === "string" ? source.lastSyncedAt : void 0
   };
 };
 var normalizePreferences = (value) => {
-  const source = record4(value);
-  const rawShortcuts = record4(source?.shortcuts);
+  const source = record5(value);
+  const rawShortcuts = record5(source?.shortcuts);
   const shortcuts = Object.fromEntries(Object.keys(defaultShortcuts).map((action) => {
     const candidate = typeof rawShortcuts?.[action] === "string" ? normalizeShortcut(rawShortcuts[action].slice(0, 64)) : "";
     return [action, candidate || defaultShortcuts[action]];
@@ -11440,8 +11498,8 @@ var normalizePreferences = (value) => {
     density: source?.density === "compact" ? "compact" : "comfortable",
     fontSize: Math.min(24, Math.max(8, Number(source?.fontSize) || defaultPreferences.fontSize)),
     interfaceFontSize: Math.min(24, Math.max(8, Number(source?.interfaceFontSize) || defaultPreferences.interfaceFontSize)),
-    fontInterface: stringValue2(source?.fontInterface).replace(/[\r\n]/g, " ").slice(0, 512),
-    fontMonospace: stringValue2(source?.fontMonospace).replace(/[\r\n]/g, " ").slice(0, 512),
+    fontInterface: stringValue3(source?.fontInterface).replace(/[\r\n]/g, " ").slice(0, 512),
+    fontMonospace: stringValue3(source?.fontMonospace).replace(/[\r\n]/g, " ").slice(0, 512),
     showPasswords: source?.showPasswords === true,
     allowHtmlPreviewRemoteResources: source?.allowHtmlPreviewRemoteResources === true,
     allowHtmlPreviewScripts: source?.allowHtmlPreviewScripts === true,
@@ -11456,9 +11514,9 @@ var normalizePreferences = (value) => {
     validateCertificates: source?.validateCertificates !== false,
     validateAuthCertificates: source?.validateAuthCertificates !== false,
     proxyEnabled: source?.proxyEnabled === true,
-    httpProxy: stringValue2(source?.httpProxy).slice(0, 4096),
-    httpsProxy: stringValue2(source?.httpsProxy).slice(0, 4096),
-    noProxy: stringValue2(source?.noProxy).slice(0, 2e4),
+    httpProxy: stringValue3(source?.httpProxy).slice(0, 4096),
+    httpsProxy: stringValue3(source?.httpsProxy).slice(0, 4096),
+    noProxy: stringValue3(source?.noProxy).slice(0, 2e4),
     useBulkHeaderEditor: source?.useBulkHeaderEditor === true,
     useBulkParametersEditor: source?.useBulkParametersEditor === true,
     forceVerticalLayout: source?.forceVerticalLayout === true,
@@ -11477,47 +11535,47 @@ var normalizePreferences = (value) => {
   };
 };
 var normalizeResponseTimeline = (value) => !Array.isArray(value) ? [] : value.slice(0, 1e3).flatMap((entry) => {
-  const source = record4(entry);
+  const source = record5(entry);
   if (!source) return [];
   const name = source.name === "DataOut" ? "DataOut" : "Text";
   const elapsedMs = Number(source.elapsedMs);
   return [{
     name,
-    value: stringValue2(source.value),
+    value: stringValue3(source.value),
     elapsedMs: Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0,
     ...source.hidden === true ? { hidden: true } : {}
   }];
 });
 var normalizeStoredResponses = (value) => Array.isArray(value) ? value.flatMap((entry, index) => {
-  const source = record4(entry);
+  const source = record5(entry);
   if (!source) return [];
   const { bodyBase64: encodedBody, ...response } = source;
   const bodyBase64 = typeof encodedBody === "string" && encodedBody.length ? encodedBody : void 0;
   return [{
     ...response,
-    id: stringValue2(source.id, `legacy-response-${index}`),
-    requestId: stringValue2(source.requestId),
-    requestName: stringValue2(source.requestName),
-    requestUrl: stringValue2(source.requestUrl),
-    environmentId: stringValue2(source.environmentId),
-    receivedAt: stringValue2(source.receivedAt, (/* @__PURE__ */ new Date(0)).toISOString()),
-    body: stringValue2(source.body),
+    id: stringValue3(source.id, `legacy-response-${index}`),
+    requestId: stringValue3(source.requestId),
+    requestName: stringValue3(source.requestName),
+    requestUrl: stringValue3(source.requestUrl),
+    environmentId: stringValue3(source.environmentId),
+    receivedAt: stringValue3(source.receivedAt, (/* @__PURE__ */ new Date(0)).toISOString()),
+    body: stringValue3(source.body),
     ...bodyBase64 ? { bodyBase64 } : {},
     timeline: normalizeResponseTimeline(source.timeline)
   }];
 }) : [];
 var normalizeStreamMessages = (value, sessionId) => {
   const messages = (Array.isArray(value) ? value : []).slice(-5e3).flatMap((entry, index) => {
-    const source = record4(entry);
+    const source = record5(entry);
     if (!source) return [];
     const direction = source.direction === "incoming" || source.direction === "outgoing" ? source.direction : "system";
     return [{
-      id: stringValue2(source.id, `${sessionId}-event-${index}`),
+      id: stringValue3(source.id, `${sessionId}-event-${index}`),
       sessionId,
       direction,
-      kind: stringValue2(source.kind, "event").slice(0, 500),
-      text: stringValue2(source.text).slice(0, 1048576),
-      timestamp: stringValue2(source.timestamp, (/* @__PURE__ */ new Date(0)).toISOString())
+      kind: stringValue3(source.kind, "event").slice(0, 500),
+      text: stringValue3(source.text).slice(0, 1048576),
+      timestamp: stringValue3(source.timestamp, (/* @__PURE__ */ new Date(0)).toISOString())
     }];
   });
   let characters = messages.reduce((total, message) => total + message.text.length, 0);
@@ -11525,30 +11583,30 @@ var normalizeStreamMessages = (value, sessionId) => {
   return messages;
 };
 var normalizeStreamHeaders = (value) => {
-  const source = record4(value);
+  const source = record5(value);
   if (!source) return void 0;
-  return Object.fromEntries(Object.entries(source).slice(0, 500).map(([name, headerValue]) => [name.slice(0, 8192), stringValue2(headerValue).slice(0, 65536)]));
+  return Object.fromEntries(Object.entries(source).slice(0, 500).map(([name, headerValue]) => [name.slice(0, 8192), stringValue3(headerValue).slice(0, 65536)]));
 };
 var normalizeStoredStreamSessions = (value, requestIds) => (Array.isArray(value) ? value : []).slice(0, 5e3).flatMap((entry, index) => {
-  const source = record4(entry);
+  const source = record5(entry);
   if (!source) return [];
-  const requestId = stringValue2(source.requestId);
+  const requestId = stringValue3(source.requestId);
   if (!requestIds.has(requestId)) return [];
   const protocol = source.protocol === "graphql" || source.protocol === "websocket" || source.protocol === "sse" ? source.protocol : "socketio";
-  const id = stringValue2(source.id, `legacy-stream-${index}`);
-  const endedAt = stringValue2(source.endedAt);
-  const requestSnapshot = record4(source.requestSnapshot);
+  const id = stringValue3(source.id, `legacy-stream-${index}`);
+  const endedAt = stringValue3(source.endedAt);
+  const requestSnapshot = record5(source.requestSnapshot);
   const status = typeof source.status === "number" && Number.isFinite(source.status) ? Math.min(999, Math.max(0, Math.trunc(source.status))) : void 0;
   const durationMs = typeof source.durationMs === "number" && Number.isFinite(source.durationMs) ? Math.max(0, Math.trunc(source.durationMs)) : void 0;
   const headers = normalizeStreamHeaders(source.headers);
   return [{
     id,
     requestId,
-    requestName: stringValue2(source.requestName),
-    requestUrl: stringValue2(source.requestUrl),
-    environmentId: stringValue2(source.environmentId),
+    requestName: stringValue3(source.requestName),
+    requestUrl: stringValue3(source.requestUrl),
+    environmentId: stringValue3(source.environmentId),
     protocol,
-    startedAt: stringValue2(source.startedAt, (/* @__PURE__ */ new Date(0)).toISOString()),
+    startedAt: stringValue3(source.startedAt, (/* @__PURE__ */ new Date(0)).toISOString()),
     ...endedAt ? { endedAt } : {},
     messages: normalizeStreamMessages(source.messages, id),
     ...requestSnapshot?.id === requestId ? { requestSnapshot: structuredClone(requestSnapshot) } : {},
@@ -11562,16 +11620,16 @@ var normalizeStoredStreamSessions = (value, requestIds) => (Array.isArray(value)
   }];
 });
 var normalizeResponseFilters = (value, requestIds) => {
-  const source = record4(value);
+  const source = record5(value);
   if (!source) return {};
   return Object.fromEntries(Object.entries(source).flatMap(([requestId, entry]) => {
     if (!requestIds.has(requestId)) return [];
-    const state = record4(entry);
-    const filter = stringValue2(state?.filter).trim().slice(0, 2e3);
+    const state = record5(entry);
+    const filter = stringValue3(state?.filter).trim().slice(0, 2e3);
     const previewMode = state?.previewMode === "friendly" || state?.previewMode === "raw" ? state.previewMode : "source";
     const seen = /* @__PURE__ */ new Set();
     const history = (Array.isArray(state?.history) ? state.history : []).flatMap((candidate) => {
-      const normalized = stringValue2(candidate).trim().slice(0, 2e3);
+      const normalized = stringValue3(candidate).trim().slice(0, 2e3);
       return normalized && !seen.has(normalized) && Boolean(seen.add(normalized)) ? [normalized] : [];
     }).slice(0, 10);
     return [[requestId, { filter, history, previewMode }]];
@@ -11580,20 +11638,20 @@ var normalizeResponseFilters = (value, requestIds) => {
 var normalizeFolders = (value, defaultAuth) => {
   const source = !Array.isArray(value) ? [] : value.slice(0, 1e3);
   const folders = source.flatMap((item, index) => {
-    const folder = record4(item);
+    const folder = record5(item);
     if (!folder) return [];
-    const id = stringValue2(folder.id, `migrated-folder-${index}`);
+    const id = stringValue3(folder.id, `migrated-folder-${index}`);
     return [{
       id,
-      name: stringValue2(folder.name, `Folder ${index + 1}`),
-      parentId: stringValue2(folder.parentId),
+      name: stringValue3(folder.name, `Folder ${index + 1}`),
+      parentId: stringValue3(folder.parentId),
       expanded: folder.expanded !== false,
       headers: normalizeRows(folder.headers, `${id}-header`),
       environment: normalizeRows(folder.environment, `${id}-environment`),
-      auth: folder.auth ? { ...defaultAuth, ...record4(folder.auth) } : void 0,
-      preRequestScript: stringValue2(folder.preRequestScript),
-      tests: stringValue2(folder.tests),
-      documentation: stringValue2(folder.documentation)
+      auth: folder.auth ? { ...defaultAuth, ...record5(folder.auth) } : void 0,
+      preRequestScript: stringValue3(folder.preRequestScript),
+      tests: stringValue3(folder.tests),
+      documentation: stringValue3(folder.documentation)
     }];
   });
   const ids = new Set(folders.map((folder) => folder.id));
@@ -11616,23 +11674,23 @@ var normalizeFolders = (value, defaultAuth) => {
   return normalized;
 };
 var normalizeCollectionEnvironments = (value, collectionId) => !Array.isArray(value) ? [] : value.slice(0, 500).flatMap((item, index) => {
-  const environment = record4(item);
+  const environment = record5(item);
   if (!environment) return [];
-  const id = stringValue2(environment.id, `${collectionId}-sub-environment-${index}`);
+  const id = stringValue3(environment.id, `${collectionId}-sub-environment-${index}`);
   return [{
     id,
-    name: stringValue2(environment.name, `Environment ${index + 1}`),
+    name: stringValue3(environment.name, `Environment ${index + 1}`),
     variables: normalizeRows(environment.variables, `${id}-variable`)
   }];
 });
 var normalizeEnvironments = (value, fallback) => {
   if (!Array.isArray(value) || !value.length) return fallback;
   const environments = value.slice(0, 500).flatMap((item, index) => {
-    const environment = record4(item);
+    const environment = record5(item);
     if (!environment) return [];
-    const id = stringValue2(environment.id, `migrated-environment-${index}`);
-    const color = stringValue2(environment.color);
-    return [{ id, name: stringValue2(environment.name, `Environment ${index + 1}`), variables: normalizeRows(environment.variables, `${id}-variable`), parentId: stringValue2(environment.parentId), private: environment.private === true, color: /^#[0-9a-f]{6}$/i.test(color) ? color : "", source: environment.source }];
+    const id = stringValue3(environment.id, `migrated-environment-${index}`);
+    const color = stringValue3(environment.color);
+    return [{ id, name: stringValue3(environment.name, `Environment ${index + 1}`), variables: normalizeRows(environment.variables, `${id}-variable`), parentId: stringValue3(environment.parentId), private: environment.private === true, color: /^#[0-9a-f]{6}$/i.test(color) ? color : "", source: environment.source }];
   });
   if (!environments.length) return fallback;
   const ids = new Set(environments.map((environment) => environment.id));
@@ -11675,24 +11733,24 @@ var migrateWorkspace = (value) => {
     folders: normalizeFolders(collection2.folders, defaults.auth),
     environment: normalizeRows(collection2.environment, `${collection2.id}-environment`),
     subEnvironments: normalizeCollectionEnvironments(collection2.subEnvironments, collection2.id),
-    activeSubEnvironmentId: stringValue2(collection2.activeSubEnvironmentId),
-    documentation: stringValue2(collection2.documentation),
+    activeSubEnvironmentId: stringValue3(collection2.activeSubEnvironmentId),
+    documentation: stringValue3(collection2.documentation),
     requests: collection2.requests.map((request) => {
-      const graphql = record4(request.graphql);
-      const socketIo = record4(request.socketIo);
-      const requestId = stringValue2(request.id, `migrated-request-${crypto.randomUUID()}`);
-      const method = normalizeHttpMethod(stringValue2(request.method, defaults.method), defaults.method);
+      const graphql = record5(request.graphql);
+      const socketIo = record5(request.socketIo);
+      const requestId = stringValue3(request.id, `migrated-request-${crypto.randomUUID()}`);
+      const method = normalizeHttpMethod(stringValue3(request.method, defaults.method), defaults.method);
       const protocol = request.protocol === "http" || request.protocol === "graphql" || request.protocol === "websocket" || request.protocol === "socketio" || request.protocol === "sse" || request.protocol === "grpc" ? request.protocol : defaults.protocol;
       const followRedirectsMode = request.transport?.followRedirectsMode === "global" || request.transport?.followRedirectsMode === "on" || request.transport?.followRedirectsMode === "off" ? request.transport.followRedirectsMode : request.transport?.followRedirects === false ? "off" : "global";
       const timeoutMode = request.transport?.timeoutMode === "global" || request.transport?.timeoutMode === "custom" ? request.transport.timeoutMode : typeof request.transport?.timeoutMs === "number" ? "custom" : "global";
       const validateCertificatesMode = request.transport?.validateCertificatesMode === "global" || request.transport?.validateCertificatesMode === "on" || request.transport?.validateCertificatesMode === "off" ? request.transport.validateCertificatesMode : typeof request.transport?.validateCertificates === "boolean" ? request.transport.validateCertificates ? "on" : "off" : "global";
-      const proxyMode = request.transport?.proxyMode === "global" || request.transport?.proxyMode === "custom" || request.transport?.proxyMode === "disabled" ? request.transport.proxyMode : stringValue2(request.transport?.proxyUrl).trim() || stringValue2(request.transport?.proxyExclusions).trim() ? "custom" : "global";
-      const grpc = record4(request.grpc);
+      const proxyMode = request.transport?.proxyMode === "global" || request.transport?.proxyMode === "custom" || request.transport?.proxyMode === "disabled" ? request.transport.proxyMode : stringValue3(request.transport?.proxyUrl).trim() || stringValue3(request.transport?.proxyExclusions).trim() ? "custom" : "global";
+      const grpc = record5(request.grpc);
       const protoTree = normalizeGrpcProtoTree(
         grpc?.protoFiles,
-        stringValue2(grpc?.protoText, defaults.grpc.protoText),
-        stringValue2(grpc?.protoEntryPath),
-        stringValue2(grpc?.protoActivePath)
+        stringValue3(grpc?.protoText, defaults.grpc.protoText),
+        stringValue3(grpc?.protoEntryPath),
+        stringValue3(grpc?.protoActivePath)
       );
       return {
         ...defaults,
@@ -11700,9 +11758,9 @@ var migrateWorkspace = (value) => {
         id: requestId,
         protocol,
         method,
-        folderId: stringValue2(request.folderId),
+        folderId: stringValue3(request.folderId),
         inheritFolderAuth: request.inheritFolderAuth === true,
-        documentation: stringValue2(request.documentation),
+        documentation: stringValue3(request.documentation),
         pathParams: normalizeRows(request.pathParams, `${requestId}-path`),
         params: normalizeRows(request.params, `${requestId}-query`),
         headers: normalizeRows(request.headers, `${requestId}-header`),
@@ -11717,8 +11775,8 @@ var migrateWorkspace = (value) => {
           ...defaults.graphql,
           ...request.graphql,
           schema: normalizeGraphqlSchema(graphql?.schema),
-          schemaEndpoint: stringValue2(graphql?.schemaEndpoint),
-          schemaFetchedAt: stringValue2(graphql?.schemaFetchedAt)
+          schemaEndpoint: stringValue3(graphql?.schemaEndpoint),
+          schemaFetchedAt: stringValue3(graphql?.schemaFetchedAt)
         },
         grpc: { ...defaults.grpc, ...request.grpc, ...protoTree, metadata: normalizeRows(grpc?.metadata, `${requestId}-metadata`) },
         transport: {
@@ -11742,25 +11800,25 @@ var migrateWorkspace = (value) => {
           sendLastEventId: request.sse?.sendLastEventId !== false
         },
         socketIo: {
-          path: stringValue2(socketIo?.path, defaults.socketIo.path).slice(0, 2048),
-          eventName: stringValue2(socketIo?.eventName, defaults.socketIo.eventName).slice(0, 500),
+          path: stringValue3(socketIo?.path, defaults.socketIo.path).slice(0, 2048),
+          eventName: stringValue3(socketIo?.eventName, defaults.socketIo.eventName).slice(0, 500),
           args: (Array.isArray(socketIo?.args) ? socketIo.args : defaults.socketIo.args).flatMap((value2, index) => {
-            const arg = record4(value2);
+            const arg = record5(value2);
             if (!arg) return [];
             return [{
-              id: stringValue2(arg.id, `${requestId}-socketio-arg-${index}`),
-              value: stringValue2(arg.value).slice(0, 1048576),
+              id: stringValue3(arg.id, `${requestId}-socketio-arg-${index}`),
+              value: stringValue3(arg.value).slice(0, 1048576),
               mode: arg.mode === "text" ? "text" : "json"
             }];
           }).slice(0, 100),
           ack: socketIo?.ack === true,
           eventListeners: (Array.isArray(socketIo?.eventListeners) ? socketIo.eventListeners : []).flatMap((value2, index) => {
-            const listener = record4(value2);
+            const listener = record5(value2);
             if (!listener) return [];
             return [{
-              id: stringValue2(listener.id, `${requestId}-socketio-listener-${index}`),
-              eventName: stringValue2(listener.eventName).slice(0, 500),
-              description: stringValue2(listener.description ?? listener.desc).slice(0, 2e4),
+              id: stringValue3(listener.id, `${requestId}-socketio-listener-${index}`),
+              eventName: stringValue3(listener.eventName).slice(0, 500),
+              description: stringValue3(listener.description ?? listener.desc).slice(0, 2e4),
               enabled: listener.enabled === true || listener.isOpen === true
             }];
           }).slice(0, 500)
@@ -11794,7 +11852,7 @@ var migrateWorkspace = (value) => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 29,
+    version: 30,
     name: workspace.name || "Imported Workspace",
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? "",
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
@@ -11808,6 +11866,7 @@ var migrateWorkspace = (value) => {
     responses: normalizeStoredResponses(workspace.responses),
     streamSessions: normalizeStoredStreamSessions(workspace.streamSessions, requestIds),
     responseFilters: normalizeResponseFilters(workspace.responseFilters, requestIds),
+    certificates: normalizeWorkspaceCertificates(workspace.certificates),
     project: { ...seed.project, ...workspace.project },
     plugins: normalizePlugins(workspace.plugins),
     pluginData: workspace.pluginData ?? {},

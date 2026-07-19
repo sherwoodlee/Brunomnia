@@ -3,6 +3,7 @@ import type { Workspace } from '../types';
 import { migrateWorkspace } from './storage';
 import { publicEnvironments } from './resources';
 import { mergeLocalOAuth2RuntimeCredentials, withoutOAuth2RuntimeCredentials } from './oauth2Tokens';
+import { emptyWorkspaceCertificates } from './certificates';
 
 export type ProjectWriteResult = { path: string; filesWritten: number; filesUnchanged: number; filesRemoved: number };
 export type GitFileStatus = { path: string; indexStatus: string; worktreeStatus: string; staged: boolean; conflicted: boolean };
@@ -34,7 +35,7 @@ const nativeOnly = () => {
 export const writeProject = async (path: string, workspace: Workspace) => {
   nativeOnly();
   const environments = publicEnvironments(workspace.environments);
-  const projectWorkspace = withoutOAuth2RuntimeCredentials({ ...workspace, environments, activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '' });
+  const projectWorkspace = withoutOAuth2RuntimeCredentials({ ...workspace, certificates: emptyWorkspaceCertificates(), environments, activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '' });
   return invoke<ProjectWriteResult>('project_write', { input: { path, workspace: projectWorkspace } });
 };
 
@@ -49,13 +50,14 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     ...current,
     ...project,
     format: 'brunomnia',
-    version: 29,
+    version: 30,
     history: current.history,
     runnerReports: current.runnerReports,
     imports: current.imports,
     cookies: current.cookies,
     responses: current.responses,
     streamSessions: current.streamSessions,
+    certificates: current.certificates,
     plugins: current.plugins,
     pluginData: current.pluginData,
     activePluginTheme: current.activePluginTheme,

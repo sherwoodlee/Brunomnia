@@ -3,7 +3,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use digest_auth::{AuthContext, HttpMethod as DigestMethod};
 use reqwest::{
     header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE},
-    multipart, Client, Method, RequestBuilder, Response, Version,
+    multipart, Certificate, Client, Method, RequestBuilder, Response, Version,
 };
 use std::{collections::BTreeMap, time::Instant};
 
@@ -21,6 +21,22 @@ enum RedirectMode {
     Disabled,
     Limited(usize),
     Unlimited,
+}
+
+const MAX_CERTIFICATE_TEXT_BYTES: usize = 1_048_576;
+const MAX_CA_CERTIFICATE_TEXT_BYTES: usize = 5_242_880;
+
+pub(crate) fn validate_certificate_material(transport: &TransportConfig) -> Result<(), String> {
+    if transport.ca_certificate_pem.len() > MAX_CA_CERTIFICATE_TEXT_BYTES {
+        return Err("The CA certificate PEM exceeds the 5 MiB limit.".into());
+    }
+    if transport.client_certificate_pem.len() > MAX_CERTIFICATE_TEXT_BYTES {
+        return Err("The client certificate PEM exceeds the 1 MiB limit.".into());
+    }
+    if transport.client_key_pem.len() > MAX_CERTIFICATE_TEXT_BYTES {
+        return Err("The client private key PEM exceeds the 1 MiB limit.".into());
+    }
+    Ok(())
 }
 
 fn redirect_mode(transport: &TransportConfig) -> RedirectMode {
@@ -108,6 +124,7 @@ fn build_client_with_options(
     total_timeout: bool,
     automatic_decompression: bool,
 ) -> Result<Client, String> {
+    validate_certificate_material(transport)?;
     let redirect = match redirect_mode(transport) {
         RedirectMode::Disabled => reqwest::redirect::Policy::none(),
         RedirectMode::Limited(limit) => reqwest::redirect::Policy::limited(limit),
@@ -131,6 +148,17 @@ fn build_client_with_options(
     };
     if !automatic_decompression {
         builder = builder.no_gzip().no_brotli().no_deflate().no_zstd();
+    }
+
+    if transport.validate_certificates && !transport.ca_certificate_pem.trim().is_empty() {
+        let certificates = Certificate::from_pem_bundle(transport.ca_certificate_pem.as_bytes())
+            .map_err(|error| format!("Invalid CA certificate PEM: {error}"))?;
+        if certificates.is_empty() {
+            return Err("The CA certificate PEM contains no certificates.".into());
+        }
+        for certificate in certificates {
+            builder = builder.add_root_certificate(certificate);
+        }
     }
 
     if transport.proxy_mode == "disabled" {
@@ -567,7 +595,10 @@ mod tests {
         }
     }
 
-    async fn read_loopback_request(stream: &mut tokio::net::TcpStream) -> (String, Vec<u8>) {
+    async fn read_loopback_request<S>(stream: &mut S) -> (String, Vec<u8>)
+    where
+        S: tokio::io::AsyncRead + Unpin,
+    {
         use tokio::io::AsyncReadExt;
 
         let mut bytes = Vec::new();
@@ -586,7 +617,7 @@ mod tests {
             .filter_map(|line| line.split_once(':'))
             .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
             .and_then(|(_, value)| value.trim().parse::<usize>().ok())
-            .unwrap();
+            .unwrap_or(0);
         while bytes.len() < header_end + content_length {
             let mut chunk = [0_u8; 4096];
             let read = stream.read(&mut chunk).await.unwrap();
@@ -619,6 +650,51 @@ mod tests {
         assert!(!domain_matches("*.example.com", "example.com"));
         assert!(!domain_matches("api.example.com", "other.example.com"));
         assert!(domain_matches("::1", "[::1]"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn trusts_workspace_ca_for_https_requests() {
+        use rustls::ServerConfig;
+        use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+        use std::sync::Arc;
+        use tokio::{io::AsyncWriteExt, net::TcpListener};
+        use tokio_rustls::TlsAcceptor;
+
+        const CA: &str = include_str!("../tests/fixtures/tls/ca.cert.pem");
+        const CERTIFICATE: &str = include_str!("../tests/fixtures/tls/server.cert.pem");
+        const KEY: &str = include_str!("../tests/fixtures/tls/server.key.pem");
+        let certificates = CertificateDer::pem_slice_iter(CERTIFICATE.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let key = PrivateKeyDer::from_pem_slice(KEY.as_bytes()).unwrap();
+        let mut config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certificates, key)
+            .unwrap();
+        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut stream = acceptor.accept(stream).await.unwrap();
+            let request = read_loopback_request(&mut stream).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+            request
+        });
+
+        let mut input = body_test_input("text");
+        input.url = format!("https://127.0.0.1:{}/trusted", address.port());
+        input.body = "hello".into();
+        input.transport.ca_certificate_pem = CA.into();
+        let response = send(input).await.unwrap();
+        assert_eq!(response.status, 200);
+        let (headers, body) = server.await.unwrap();
+        assert!(headers.starts_with("POST /trusted HTTP/1.1"));
+        assert_eq!(body, b"hello");
     }
 
     #[test]

@@ -115,6 +115,16 @@ describe('streamTransportConfig', () => {
     request.transport.proxyMode = 'disabled';
     expect(streamTransportConfig(request, 'default', 10, true, 30_000, true, { enabled: true, httpProxy: 'http://global', httpsProxy: 'http://global', noProxy: '' }).proxyMode).toBe('disabled');
   });
+
+  it('applies workspace certificate authority and host-matched stream identity', () => {
+    const request = cloneSeedWorkspace().collections[0].requests[0];
+    request.url = 'wss://events.example.test/socket';
+    const transport = streamTransportConfig(request, 'default', 10, true, 30_000, true, undefined, request.url, {
+      ca: { enabled: true, pem: 'workspace-ca' },
+      clients: [{ id: 'client', host: '*.example.test', enabled: true, certificatePem: 'workspace-cert', keyPem: 'workspace-key' }],
+    });
+    expect(transport).toMatchObject({ caCertificatePem: 'workspace-ca', clientCertificatePem: 'workspace-cert', clientKeyPem: 'workspace-key' });
+  });
 });
 
 describe('GraphQL subscription transport routing', () => {

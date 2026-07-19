@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import type { ApiRequest, CookieRecord, Environment, HttpResponse, PreferredHttpVersion, StoredResponse } from '../types';
+import type { ApiRequest, CookieRecord, Environment, HttpResponse, PreferredHttpVersion, StoredResponse, WorkspaceCertificates } from '../types';
 import { applyAdvancedAuth } from './auth';
+import { applyWorkspaceCertificates } from './certificates';
 import { cookieHeaderForUrl } from './cookies';
 import { buildHeaders, buildRequestUrl, environmentMap, mockResponse, resolveTemplate } from './request';
 import { renderTemplate } from './templates';
@@ -18,6 +19,7 @@ export type SendRequestContext = {
   validateCertificates?: boolean;
   validateAuthCertificates?: boolean;
   proxy?: ProxyPreferences;
+  certificates?: WorkspaceCertificates;
   maxTimelineDataSizeKB?: number;
   filterResponsesByEnv?: boolean;
   vault?: Record<string, string>;
@@ -203,7 +205,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         formBody: prepared.formBody,
         multipartBody: prepared.multipartBody,
         binaryBody: prepared.binaryBody,
-        transport: {
+        transport: applyWorkspaceCertificates({
           ...prepared.transport,
           followRedirects,
           timeoutMs,
@@ -211,7 +213,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
           ...proxy,
           preferredHttpVersion: context.preferredHttpVersion ?? 'default',
           maxRedirects: context.maxRedirects ?? 10,
-        },
+        }, url, context.certificates),
         auth: {
           authType: prepared.auth.type,
           disabled: prepared.auth.disabled,
