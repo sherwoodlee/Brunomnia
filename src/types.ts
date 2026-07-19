@@ -856,6 +856,8 @@ export type RunnerReport = {
   id: string;
   collectionId: string;
   collectionName: string;
+  sourceName?: string;
+  folderId?: string;
   environmentId: string;
   startedAt: string;
   finishedAt: string;

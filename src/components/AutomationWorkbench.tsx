@@ -10,11 +10,12 @@ import type {
   MockServer,
   RunnerItemResult,
   RunnerLiveItem,
+  RunnerReport,
   Workspace,
   WorkbenchSection,
 } from '../types';
 import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
-import { aggregateRunnerTimeline, parseRunnerData, resolveRunnerTarget, runCollection, type RunnerWorkbenchDraft } from '../lib/runner';
+import { aggregateRunnerTimeline, discardRunnerReport, parseRunnerData, resolveRunnerTarget, runCollection, runnerReportsForTarget, type RunnerWorkbenchDraft } from '../lib/runner';
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
 import { formatResponseTimeline } from '../lib/timeline';
 import { applyCollectionConfiguration, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
@@ -35,6 +36,11 @@ import { OAuthAuthorizationDialog, type OAuthAuthorizationStatus } from './OAuth
 import { CodeEditor } from './ProtocolEditors';
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+const runnerReportDuration = (report: RunnerReport) => {
+  const duration = Date.parse(report.finishedAt) - Date.parse(report.startedAt);
+  return Number.isFinite(duration) && duration >= 0 ? duration : report.results.reduce((total, result) => total + Math.max(0, result.durationMs), 0);
+};
 
 type AutomationWorkbenchProps = {
   section: Exclude<WorkbenchSection, 'requests' | 'git' | 'plugins' | 'security' | 'integrations'>;
@@ -172,7 +178,8 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const [results, setResults] = useState<RunnerItemResult[]>([]);
   const [liveItems, setLiveItems] = useState<RunnerLiveItem[]>([]);
   const [selectedResultId, setSelectedResultId] = useState('');
-  const [resultPane, setResultPane] = useState<'results' | 'console'>('results');
+  const [selectedReportId, setSelectedReportId] = useState('');
+  const [resultPane, setResultPane] = useState<'results' | 'history' | 'console'>('results');
   const [error, setError] = useState('');
   const [oauthAuthorization, setOAuthAuthorization] = useState<OAuthAuthorizationStatus>();
   const [requestPlan, setRequestPlan] = useState<Array<{ id: string; enabled: boolean }>>(() => runnerDraft?.requestPlan ?? initialTarget.requests.map((request) => ({ id: request.id, enabled: true })));
@@ -222,7 +229,9 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
     oauthFlowId.current = '';
     if (flowId) void import('../lib/oauth2').then(({ cancelOAuth2Authorization }) => cancelOAuth2Authorization(flowId)).catch(() => undefined);
   }, []);
-  const latestReport = workspace.runnerReports.find((report) => report.collectionId === collection?.id);
+  const scopedReports = useMemo(() => runnerReportsForTarget(workspace.runnerReports, collection?.id ?? '', targetFolderId), [collection?.id, targetFolderId, workspace.runnerReports]);
+  const selectedReport = scopedReports.find((report) => report.id === selectedReportId);
+  const displayedReport = selectedReport ?? scopedReports[0];
 
   useEffect(() => {
     const ids = new Set(runnerRequests.map((request) => request.id));
@@ -256,8 +265,8 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   });
 
   const downloadReport = (reporter: Extract<RunnerReporter, 'json' | 'junit'>) => {
-    if (!latestReport) return;
-    const artifact = createRunnerReportArtifact(latestReport, reporter);
+    if (!displayedReport) return;
+    const artifact = createRunnerReportArtifact(displayedReport, reporter);
     const url = URL.createObjectURL(new Blob([artifact.contents], { type: artifact.mimeType }));
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -266,12 +275,23 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
     URL.revokeObjectURL(url);
   };
 
+  const openReport = (reportId: string) => {
+    setSelectedReportId(reportId);
+    setSelectedResultId('');
+    setResultPane('results');
+  };
+
+  const deleteReport = (reportId: string) => {
+    setSelectedReportId((current) => current === reportId ? '' : current);
+    onChangeWorkspace((current) => ({ ...current, runnerReports: discardRunnerReport(current.runnerReports, reportId) }));
+  };
+
   const start = async () => {
     if (!collection || running) return;
     onRunnerStart?.();
     const requestIds = requestPlan.filter((item) => item.enabled).map((item) => item.id);
     if (!requestIds.length) { setError('Select at least one request for this run.'); return; }
-    setRunning(true); setResults([]); setLiveItems([]); setSelectedResultId(''); setError(''); cancelled.current = false; skippedKeys.current.clear(); activeItem.current = undefined;
+    setRunning(true); setResults([]); setLiveItems([]); setSelectedResultId(''); setSelectedReportId(''); setError(''); cancelled.current = false; skippedKeys.current.clear(); activeItem.current = undefined;
     try {
       let runnerCookies = [...workspace.cookies];
       let runnerResponses = [...workspace.responses];
@@ -372,7 +392,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
       let latestRunnerResponseId = '';
       const report = await runCollection(collection, environment, {
-        iterations, retries, bail, keepLog, requestIds, delayMs, scriptTimeoutMs: workspace.preferences.scriptTimeoutMs, environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id), dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current, shouldSkip: (key) => skippedKeys.current.has(key),
+        iterations, retries, bail, keepLog, requestIds, sourceName: targetFolder ? `${collection.name} / ${targetFolder.name}` : collection.name, folderId: targetFolderId || undefined, delayMs, scriptTimeoutMs: workspace.preferences.scriptTimeoutMs, environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id), dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current, shouldSkip: (key) => skippedKeys.current.has(key),
         onLiveItems: setLiveItems,
         onActiveItem: (key, cancel, signal) => {
           activeRunnerSignal = signal;
@@ -474,8 +494,8 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
     }
   };
 
-  const visibleResults = results.length ? results : latestReport?.results ?? [];
-  const visibleLiveItems = liveItems.length ? liveItems : latestReport?.liveItems?.length ? latestReport.liveItems : visibleResults.map((result): RunnerLiveItem => ({
+  const visibleResults = selectedReport ? selectedReport.results : results.length ? results : displayedReport?.results ?? [];
+  const visibleLiveItems = selectedReport?.liveItems?.length ? selectedReport.liveItems : !selectedReport && liveItems.length ? liveItems : displayedReport?.liveItems?.length ? displayedReport.liveItems : visibleResults.map((result): RunnerLiveItem => ({
     key: result.key ?? result.id,
     iteration: result.iteration,
     requestId: result.requestId,
@@ -504,21 +524,21 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
     return item.errorMessage || 'No tests';
   };
   const selectedResult = visibleResults.find((result) => result.id === selectedResultId);
-  const consoleTimeline = aggregateRunnerTimeline(visibleResults, running || results.length ? undefined : latestReport?.flowError);
+  const consoleTimeline = aggregateRunnerTimeline(visibleResults, running || results.length && !selectedReport ? undefined : displayedReport?.flowError);
   const consoleText = formatResponseTimeline(consoleTimeline);
   const consoleTruncated = visibleResults.some((result) => result.timeline?.truncated);
-  const visibleKeepLog = running ? keepLog : latestReport?.keepLog ?? keepLog;
+  const visibleKeepLog = running ? keepLog : displayedReport?.keepLog ?? keepLog;
   return (
     <section className="automation-workbench runner-workbench">
       <AutomationHeader eyebrow="Test" title={targetFolder ? `Runner · ${targetFolder.name}` : 'Collection runner'} subtitle="Run requests in order with iteration data, scripts, assertions, delays, and retries.">
-        {latestReport && !running ? <button className="secondary-action" onClick={() => downloadReport('json')} type="button">Export JSON</button> : null}
-        {latestReport && !running ? <button className="secondary-action" onClick={() => downloadReport('junit')} type="button">Export JUnit</button> : null}
+        {displayedReport && !running ? <button className="secondary-action" onClick={() => downloadReport('json')} type="button">Export JSON</button> : null}
+        {displayedReport && !running ? <button className="secondary-action" onClick={() => downloadReport('junit')} type="button">Export JUnit</button> : null}
         {running ? <button className="danger-action" onClick={cancelRun} type="button">Cancel run</button>
           : <button className="primary-action" disabled={!collection} onClick={() => void start()} type="button">{targetFolder ? 'Run folder' : 'Run collection'}</button>}
       </AutomationHeader>
       <div className="runner-grid">
         <aside className="runner-config">
-          <label>Collection<select aria-label="Runner collection" disabled={Boolean(runnerTarget?.collectionId)} value={collection?.id ?? ''} onChange={(event) => { setCollectionId(event.target.value); setResults([]); setLiveItems([]); setSelectedResultId(''); }}>{workspace.collections.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.requests.length}</option>)}</select></label>
+          <label>Collection<select aria-label="Runner collection" disabled={Boolean(runnerTarget?.collectionId)} value={collection?.id ?? ''} onChange={(event) => { setCollectionId(event.target.value); setResults([]); setLiveItems([]); setSelectedResultId(''); setSelectedReportId(''); }}>{workspace.collections.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.requests.length}</option>)}</select></label>
           {targetFolder ? <label>Folder<input aria-label="Runner folder" disabled value={targetFolder.name} /></label> : null}
           <label>Environment<select aria-label="Runner environment" value={environment.id} onChange={(event) => setEnvironmentId(event.target.value)}>{workspace.environments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <fieldset className="runner-plan"><legend>Request order</legend>{requestPlan.map((item, index) => {
@@ -535,7 +555,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           <p>Dataset values override environment variables for each iteration.</p>
         </aside>
         <div className="runner-results">
-          <header><div className="runner-heading"><small>{running ? 'Run in progress' : latestReport ? `Last run · ${new Date(latestReport.finishedAt).toLocaleString()}` : 'Ready to run'}</small><h2>{collection?.name ?? 'No collection'}</h2><nav aria-label="Runner result views" className="runner-view-tabs"><button aria-pressed={resultPane === 'results'} onClick={() => setResultPane('results')} type="button">Results</button><button aria-pressed={resultPane === 'console'} onClick={() => setResultPane('console')} type="button">Console</button></nav></div><div className="runner-stats"><strong>{visibleLiveItems.length}</strong><span>Planned</span><strong className="active">{liveCount('running')}</strong><span>Running</span><strong className="ok">{finishedCount}</strong><span>Finished</span><strong>{liveCount('skipped')}</strong><span>Skipped</span><strong>{liveCount('canceled')}</strong><span>Canceled</span></div></header>
+          <header><div className="runner-heading"><small>{running ? 'Run in progress' : displayedReport ? `${selectedReport ? 'Selected run' : 'Last run'} · ${new Date(displayedReport.finishedAt).toLocaleString()}` : 'Ready to run'}</small><h2>{collection?.name ?? 'No collection'}</h2><nav aria-label="Runner result views" className="runner-view-tabs"><button aria-pressed={resultPane === 'results'} onClick={() => setResultPane('results')} type="button">Results</button><button aria-pressed={resultPane === 'history'} onClick={() => setResultPane('history')} type="button">History{scopedReports.length ? ` · ${scopedReports.length}` : ''}</button><button aria-pressed={resultPane === 'console'} onClick={() => setResultPane('console')} type="button">Console</button></nav></div><div className="runner-stats"><strong>{visibleLiveItems.length}</strong><span>Planned</span><strong className="active">{liveCount('running')}</strong><span>Running</span><strong className="ok">{finishedCount}</strong><span>Finished</span><strong>{liveCount('skipped')}</strong><span>Skipped</span><strong>{liveCount('canceled')}</strong><span>Canceled</span></div></header>
           {resultPane === 'results' ? <><div className="runner-table"><div className="runner-table-head"><span>Request</span><span>Iteration</span><span>Attempt</span><span>Status</span><span>Response</span><span>Tests / error</span><span>Action</span></div>{visibleLiveItems.map((item) => {
             const result = resultForItem(item);
             const selected = selectedResult?.id === result?.id;
@@ -544,7 +564,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
             const select = () => { if (result) setSelectedResultId(result.id); };
             return <article aria-pressed={selected} className={selected ? 'selected' : ''} key={item.key} onClick={select} onKeyDown={(event) => { if (result && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); select(); } }} role={result ? 'button' : undefined} tabIndex={result ? 0 : undefined}><span><strong>{item.requestName}</strong><small title={item.requestUrl}>{item.requestUrl || 'Prepared request'}</small></span><span>{item.iteration}</span><span>{item.attempt ?? '—'}</span><span className={`runner-status status-${statusTone}`}>{statusLabel}</span><span>{responseStats(item)}</span><span title={testSummary(item)}>{testSummary(item)}</span><span>{running && !isFinished(item.status) ? <button className="runner-skip" onClick={(event) => { event.stopPropagation(); skipItem(item.key); }} type="button">Skip</button> : '—'}</span></article>;
           })}{!visibleLiveItems.length ? <div className="empty-state compact"><Icon name="history" size={28} /><strong>No runner results</strong><span>Start the selected collection to build a local report.</span></div> : null}</div>
-          {selectedResult ? <section className="runner-response-detail"><header><div><small>Attempt evidence</small><strong>{selectedResult.requestName} · iteration {selectedResult.iteration}, attempt {selectedResult.attempt}</strong></div><button aria-label="Close attempt evidence" onClick={() => setSelectedResultId('')} type="button">Close</button></header>{selectedResult.request ? <div className="runner-request-content"><div><small>Request</small><strong>{selectedResult.request.method} · {selectedResult.request.protocol}</strong><code title={selectedResult.request.url}>{selectedResult.request.url}{selectedResult.request.urlTruncated ? '…' : ''}</code></div><details><summary>{selectedResult.request.headers.length} configured headers{selectedResult.request.headersTruncated ? ' · truncated' : ''}</summary><pre>{selectedResult.request.headers.map((header) => `${header.name}: ${header.value}`).join('\n') || '(no configured headers)'}</pre></details><div><small>{selectedResult.request.bodyMode} body</small><strong>{selectedResult.request.bodySummary}</strong><span>{selectedResult.request.bodySizeEstimated ? 'Approximately ' : ''}{selectedResult.request.bodySizeBytes.toLocaleString()} payload bytes · {selectedResult.request.storedBytes.toLocaleString()} snapshot bytes</span></div></div> : null}{selectedResult.response ? <div className="runner-response-content"><div className="runner-response-meta"><span><strong>{selectedResult.status}</strong> {selectedResult.response.statusText}{selectedResult.response.statusTextTruncated ? '…' : ''}</span><span>{selectedResult.response.sizeBytes.toLocaleString()} response bytes</span><span>{selectedResult.durationMs} ms</span></div><details><summary>{Object.keys(selectedResult.response.headers).length} response headers{selectedResult.response.headersTruncated ? ' · truncated' : ''}</summary><pre>{Object.entries(selectedResult.response.headers).map(([name, value]) => `${name}: ${value}`).join('\n') || '(no response headers)'}</pre></details><div className="runner-body-preview"><small>Response body preview · {selectedResult.response.storedBytes.toLocaleString()} snapshot bytes{selectedResult.response.bodyTruncated ? ' · truncated' : ''}</small><pre>{selectedResult.response.bodyPreview || '(empty response body)'}</pre></div></div> : <p>{selectedResult.error || 'No response was returned for this attempt.'}</p>}</section> : null}</> : <section className="runner-console" aria-label="Runner console">{consoleText ? <pre>{consoleText}</pre> : <div className="empty-state compact"><Icon name="history" size={28} /><strong>No runner logs</strong><span>{visibleKeepLog ? 'Run the selected requests to capture local timeline evidence.' : 'Log retention was disabled for this run.'}</span></div>}{consoleTruncated ? <p>Console evidence reached the bounded local retention limit and was truncated.</p> : null}</section>}
+          {selectedResult ? <section className="runner-response-detail"><header><div><small>Attempt evidence</small><strong>{selectedResult.requestName} · iteration {selectedResult.iteration}, attempt {selectedResult.attempt}</strong></div><button aria-label="Close attempt evidence" onClick={() => setSelectedResultId('')} type="button">Close</button></header>{selectedResult.request ? <div className="runner-request-content"><div><small>Request</small><strong>{selectedResult.request.method} · {selectedResult.request.protocol}</strong><code title={selectedResult.request.url}>{selectedResult.request.url}{selectedResult.request.urlTruncated ? '…' : ''}</code></div><details><summary>{selectedResult.request.headers.length} configured headers{selectedResult.request.headersTruncated ? ' · truncated' : ''}</summary><pre>{selectedResult.request.headers.map((header) => `${header.name}: ${header.value}`).join('\n') || '(no configured headers)'}</pre></details><div><small>{selectedResult.request.bodyMode} body</small><strong>{selectedResult.request.bodySummary}</strong><span>{selectedResult.request.bodySizeEstimated ? 'Approximately ' : ''}{selectedResult.request.bodySizeBytes.toLocaleString()} payload bytes · {selectedResult.request.storedBytes.toLocaleString()} snapshot bytes</span></div></div> : null}{selectedResult.response ? <div className="runner-response-content"><div className="runner-response-meta"><span><strong>{selectedResult.status}</strong> {selectedResult.response.statusText}{selectedResult.response.statusTextTruncated ? '…' : ''}</span><span>{selectedResult.response.sizeBytes.toLocaleString()} response bytes</span><span>{selectedResult.durationMs} ms</span></div><details><summary>{Object.keys(selectedResult.response.headers).length} response headers{selectedResult.response.headersTruncated ? ' · truncated' : ''}</summary><pre>{Object.entries(selectedResult.response.headers).map(([name, value]) => `${name}: ${value}`).join('\n') || '(no response headers)'}</pre></details><div className="runner-body-preview"><small>Response body preview · {selectedResult.response.storedBytes.toLocaleString()} snapshot bytes{selectedResult.response.bodyTruncated ? ' · truncated' : ''}</small><pre>{selectedResult.response.bodyPreview || '(empty response body)'}</pre></div></div> : <p>{selectedResult.error || 'No response was returned for this attempt.'}</p>}</section> : null}</> : resultPane === 'history' ? <section className="runner-history" aria-label="Runner history"><div className="runner-history-head"><span>Source</span><span>Iterations</span><span>Duration</span><span>Total</span><span>Passed</span><span>Failed</span><span>Skipped</span><span>Delete</span></div>{scopedReports.map((report) => <article className={selectedReportId === report.id ? 'selected' : ''} key={report.id}><span><button onClick={() => openReport(report.id)} type="button"><i className={report.failed ? 'failed' : 'passed'} /><strong>{report.sourceName ?? report.collectionName}</strong><small title={new Date(report.startedAt).toLocaleString()}>{new Date(report.startedAt).toLocaleString()}</small></button></span><span>{report.iterations}</span><span>{runnerReportDuration(report)} ms</span><span>{report.total}</span><span>{report.passed}</span><span>{report.failed}</span><span>{report.skipped ?? 0}</span><span><button aria-label={`Delete run from ${new Date(report.startedAt).toLocaleString()}`} className="runner-history-delete" onClick={() => deleteReport(report.id)} type="button"><Icon name="trash" size={13} /></button></span></article>)}{!scopedReports.length ? <div className="empty-state compact"><Icon name="history" size={28} /><strong>No saved runs</strong><span>Completed runs for this Runner appear here.</span></div> : null}</section> : <section className="runner-console" aria-label="Runner console">{consoleText ? <pre>{consoleText}</pre> : <div className="empty-state compact"><Icon name="history" size={28} /><strong>No runner logs</strong><span>{visibleKeepLog ? 'Run the selected requests to capture local timeline evidence.' : 'Log retention was disabled for this run.'}</span></div>}{consoleTruncated ? <p>Console evidence reached the bounded local retention limit and was truncated.</p> : null}</section>}
         </div>
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}

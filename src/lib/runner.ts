@@ -39,6 +39,8 @@ export type RunnerOptions = {
   scriptTimeoutMs?: number;
   environmentScopes?: ScriptEnvironmentScopes;
   requestIds?: string[];
+  sourceName?: string;
+  folderId?: string;
   testNamePattern?: string;
   bail?: boolean;
   keepLog?: boolean;
@@ -78,6 +80,13 @@ export const discardRunnerDraftEntries = (drafts: Record<string, RunnerWorkbench
     }
   });
   return changed ? next : drafts;
+};
+
+export const runnerReportsForTarget = (reports: RunnerReport[], collectionId: string, folderId = '') => reports.filter((report) => report.collectionId === collectionId && (report.folderId ?? '') === folderId);
+
+export const discardRunnerReport = (reports: RunnerReport[], reportId: string) => {
+  const next = reports.filter((report) => report.id !== reportId);
+  return next.length === reports.length ? reports : next;
 };
 
 export const resolveRunnerTarget = (workspace: Workspace, target?: RunnerTarget) => {
@@ -623,6 +632,8 @@ export const runCollection = async (
     id: runId(),
     collectionId: collection.id,
     collectionName: collection.name,
+    ...(options.sourceName ? { sourceName: options.sourceName } : {}),
+    ...(options.folderId ? { folderId: options.folderId } : {}),
     environmentId: environment.id,
     startedAt,
     finishedAt: new Date().toISOString(),

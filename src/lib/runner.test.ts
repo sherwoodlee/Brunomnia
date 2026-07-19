@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { RunnerItemResult, Workspace } from '../types';
-import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, discardRunnerDraftEntries, parseRunnerData, resolveRunnerTarget, runCollection, runnerDraftKey, validateTestNamePattern } from './runner';
+import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, RUNNER_TIMELINE_PER_RESULT_BYTES, RUNNER_TIMELINE_REPORT_BYTES, aggregateRunnerTimeline, buildRunnerItemKey, discardRunnerDraftEntries, discardRunnerReport, parseRunnerData, resolveRunnerTarget, runCollection, runnerDraftKey, runnerReportsForTarget, validateTestNamePattern } from './runner';
 import { formatResponseTimeline } from './timeline';
 
 describe('collection runner', () => {
@@ -31,6 +31,16 @@ describe('collection runner', () => {
       [runnerDraftKey('workspace-b', 'runner_one')]: { ...draft, iterations: 4 },
     });
     expect(discardRunnerDraftEntries(retained, 'workspace-a', ['missing'])).toBe(retained);
+  });
+
+  it('scopes saved reports to collection and folder Runner documents', () => {
+    const report = (id: string, collectionId: string, folderId?: string) => ({ id, collectionId, collectionName: collectionId, environmentId: 'env', startedAt: '', finishedAt: '', iterations: 1, retries: 0, total: 0, passed: 0, failed: 0, cancelled: false, results: [], ...(folderId ? { folderId } : {}) });
+    const reports = [report('root-a', 'a'), report('folder-a', 'a', 'folder'), report('root-b', 'b')];
+    expect(runnerReportsForTarget(reports, 'a').map((item) => item.id)).toEqual(['root-a']);
+    expect(runnerReportsForTarget(reports, 'a', 'folder').map((item) => item.id)).toEqual(['folder-a']);
+    expect(runnerReportsForTarget(reports, 'a', 'missing')).toEqual([]);
+    expect(discardRunnerReport(reports, 'folder-a').map((item) => item.id)).toEqual(['root-a', 'root-b']);
+    expect(discardRunnerReport(reports, 'missing')).toBe(reports);
   });
   it('parses JSON and quoted CSV iteration data', () => {
     expect(parseRunnerData('[{"id":1}]')).toEqual([{ id: '1' }]);
@@ -165,7 +175,7 @@ describe('collection runner', () => {
     const report = await runCollection(
       { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
       { id: 'env', name: 'Env', variables: [] },
-      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], onLiveItems: (items) => snapshots.push(items.map((item) => item.status)) },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], sourceName: 'Collection / Folder', folderId: 'folder', onLiveItems: (items) => snapshots.push(items.map((item) => item.status)) },
       async (_activeRequest, _variables, execution) => {
         expect(execution).toMatchObject({ key: buildRunnerItemKey(1, 0, request.id), attempt: 1 });
         expect(execution.signal.aborted).toBe(false);
@@ -177,7 +187,7 @@ describe('collection runner', () => {
     expect(snapshots[0]).toEqual(['pending']);
     expect(snapshots).toContainEqual(['running']);
     expect(snapshots.at(-1)).toEqual(['completed']);
-    expect(report).toMatchObject({ planned: 1, completed: 1, skipped: 0, canceled: 0 });
+    expect(report).toMatchObject({ sourceName: 'Collection / Folder', folderId: 'folder', planned: 1, completed: 1, skipped: 0, canceled: 0 });
     expect(report.liveItems?.[0]).toMatchObject({ status: 'completed', statusCode: 201, statusMessage: 'Created', responseTime: 12, responseSize: 2, requestUrl: 'https://example.test/rendered', tests: [{ name: 'created', passed: true }] });
   });
 
