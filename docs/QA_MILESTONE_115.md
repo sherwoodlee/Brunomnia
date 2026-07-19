@@ -43,7 +43,7 @@ Rendered interaction QA is omitted by standing direction. No screenshot, DOM, co
 
 ## Acceptance boundary
 
-PFX/PKCS#12 identities, certificate-path compatibility exports, custom gRPC proxy transport, richer gRPC metadata/schema workflows, and broad third-party certificate fixtures remain open. Related parity rows remain `Baseline`, and Brunomnia is not declared feature-complete.
+PFX/PKCS#12 identities, certificate-path compatibility exports, richer gRPC metadata/schema workflows, and broad third-party certificate fixtures remain open. Milestone 117 later confirmed the pinned upstream gRPC channel does not install the application HTTP/HTTPS proxy agent, so custom gRPC proxy transport is not a parity requirement. Related parity rows remain `Baseline`, and Brunomnia is not declared feature-complete.
 
 Validated desktop artifact:
 

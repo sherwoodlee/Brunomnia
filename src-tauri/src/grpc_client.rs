@@ -1,6 +1,7 @@
 use crate::models::{
     GrpcCallInput, GrpcCallOutput, GrpcMethodInfo, GrpcProtoFileInput, GrpcSchemaInput,
-    GrpcSchemaOutput, GrpcServiceInfo, KeyValue, TransportConfig,
+    GrpcSchemaOutput, GrpcServiceInfo, GrpcSessionStartInput, GrpcSessionStartOutput, KeyValue,
+    StreamEvent, TransportConfig,
 };
 use crate::{
     client_identity::{effective_client_identity_pem, validate_certificate_material},
@@ -8,21 +9,58 @@ use crate::{
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use prost::Message;
-use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor};
+use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor, MethodDescriptor};
 use prost_types::{FileDescriptorProto, FileDescriptorSet};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Component, Path},
     sync::Arc,
     time::Instant,
 };
+use tauri::ipc::Channel as IpcChannel;
+use tokio::sync::{mpsc, Mutex};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{
     codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
     metadata::{Ascii, MetadataKey, MetadataValue},
     transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity},
     Request, Status,
 };
+use uuid::Uuid;
+
+const MAX_GRPC_DESCRIPTOR_BYTES: usize = 10_485_760;
+const MAX_GRPC_MESSAGE_BYTES: usize = 1_048_576;
+const MAX_GRPC_SESSIONS: usize = 100;
+const GRPC_SESSION_COMMAND_CAPACITY: usize = 256;
+
+#[derive(Clone, Default)]
+pub struct GrpcSessionState {
+    sessions: Arc<Mutex<HashMap<String, GrpcSessionHandle>>>,
+}
+
+#[derive(Clone)]
+struct GrpcSessionHandle {
+    token: Uuid,
+    sender: mpsc::Sender<GrpcSessionCommand>,
+    input: MessageDescriptor,
+    client_streaming: bool,
+    committed: bool,
+}
+
+enum GrpcSessionCommand {
+    Send {
+        message: DynamicMessage,
+        text: String,
+    },
+    Commit,
+    Cancel,
+}
+
+struct GrpcMethodSelection {
+    method: MethodDescriptor,
+    path: http::uri::PathAndQuery,
+}
 
 pub async fn load_schema(input: GrpcSchemaInput) -> Result<GrpcSchemaOutput, String> {
     let (pool, bytes) = if input.source == "proto" {
@@ -37,10 +75,13 @@ pub async fn load_schema(input: GrpcSchemaInput) -> Result<GrpcSchemaOutput, Str
     Ok(schema_output(&pool, &bytes))
 }
 
-pub async fn call(input: GrpcCallInput) -> Result<GrpcCallOutput, String> {
+fn select_method(input: &GrpcCallInput) -> Result<GrpcMethodSelection, String> {
     let descriptor_bytes = STANDARD
         .decode(&input.descriptor_set_base64)
         .map_err(|error| format!("Invalid descriptor set: {error}"))?;
+    if descriptor_bytes.len() > MAX_GRPC_DESCRIPTOR_BYTES {
+        return Err("The gRPC descriptor set exceeds 10 MiB.".into());
+    }
     let pool = DescriptorPool::decode(descriptor_bytes.as_slice())
         .map_err(|error| format!("Unable to decode descriptors: {error}"))?;
     let service = pool
@@ -50,6 +91,400 @@ pub async fn call(input: GrpcCallInput) -> Result<GrpcCallOutput, String> {
         .methods()
         .find(|method| method.name() == input.method || method.full_name() == input.method)
         .ok_or_else(|| format!("gRPC method '{}' was not found.", input.method))?;
+    let path = http::uri::PathAndQuery::from_maybe_shared(format!(
+        "/{}/{}",
+        service.full_name(),
+        method.name()
+    ))
+    .map_err(|error| format!("Invalid gRPC method path: {error}"))?;
+    Ok(GrpcMethodSelection { method, path })
+}
+
+fn deserialize_session_message(
+    input: &str,
+    descriptor: MessageDescriptor,
+) -> Result<(DynamicMessage, String), String> {
+    if input.len() > MAX_GRPC_MESSAGE_BYTES {
+        return Err("gRPC messages cannot exceed 1 MiB.".into());
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(input).map_err(|error| format!("Invalid gRPC JSON input: {error}"))?;
+    let bytes = serde_json::to_vec(&value).map_err(|error| error.to_string())?;
+    let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
+    let message = DynamicMessage::deserialize(descriptor, &mut deserializer)
+        .map_err(|error| format!("gRPC input does not match the message schema: {error}"))?;
+    let text = serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?;
+    Ok((message, text))
+}
+
+fn send_session_event(channel: &IpcChannel<StreamEvent>, event: StreamEvent) {
+    let _ = channel.send(event);
+}
+
+fn send_response_message(
+    channel: &IpcChannel<StreamEvent>,
+    session_id: &str,
+    message: DynamicMessage,
+) -> Result<(), String> {
+    let value = dynamic_to_json(message)?;
+    let text = serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?;
+    send_session_event(channel, StreamEvent::incoming(session_id, "message", text));
+    Ok(())
+}
+
+enum GrpcCommandAction {
+    Continue,
+    Cancel,
+}
+
+fn apply_stream_command(
+    command: GrpcSessionCommand,
+    request_sender: &mut Option<mpsc::UnboundedSender<DynamicMessage>>,
+    channel: &IpcChannel<StreamEvent>,
+    session_id: &str,
+) -> Result<GrpcCommandAction, String> {
+    match command {
+        GrpcSessionCommand::Send { message, text } => {
+            let sender = request_sender
+                .as_ref()
+                .ok_or_else(|| "The gRPC request stream is already committed.".to_string())?;
+            sender
+                .send(message)
+                .map_err(|_| "The gRPC request stream has ended.".to_string())?;
+            send_session_event(channel, StreamEvent::outgoing(session_id, "message", text));
+            Ok(GrpcCommandAction::Continue)
+        }
+        GrpcSessionCommand::Commit => {
+            request_sender.take();
+            send_session_event(
+                channel,
+                StreamEvent::system(session_id, "commit", "Request stream committed"),
+            );
+            Ok(GrpcCommandAction::Continue)
+        }
+        GrpcSessionCommand::Cancel => {
+            send_session_event(
+                channel,
+                StreamEvent::system(session_id, "cancel", "Call cancelled"),
+            );
+            Ok(GrpcCommandAction::Cancel)
+        }
+    }
+}
+
+async fn run_session(
+    mut client: tonic::client::Grpc<Channel>,
+    selection: GrpcMethodSelection,
+    initial_message: Option<(DynamicMessage, String)>,
+    metadata: Vec<KeyValue>,
+    mut commands: mpsc::Receiver<GrpcSessionCommand>,
+    on_event: &IpcChannel<StreamEvent>,
+    session_id: &str,
+) -> Result<(), String> {
+    let method = selection.method;
+    let path = selection.path;
+    let codec = DynamicCodec::new(method.output());
+    match (method.is_client_streaming(), method.is_server_streaming()) {
+        (false, false) => {
+            let (message, text) = initial_message
+                .ok_or_else(|| "A unary gRPC call requires one input message.".to_string())?;
+            send_session_event(on_event, StreamEvent::outgoing(session_id, "message", text));
+            let mut request = Request::new(message);
+            apply_metadata(&mut request, &metadata)?;
+            let call = client.unary(request, path, codec);
+            tokio::pin!(call);
+            let response = tokio::select! {
+                response = &mut call => response.map_err(format_status)?,
+                command = commands.recv() => match command {
+                    Some(GrpcSessionCommand::Cancel) | None => {
+                        send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                        return Ok(());
+                    }
+                    Some(_) => return Err("Unary gRPC calls do not accept stream commands.".into()),
+                }
+            };
+            send_response_message(on_event, session_id, response.into_inner())?;
+        }
+        (false, true) => {
+            let (message, text) = initial_message.ok_or_else(|| {
+                "A server-streaming gRPC call requires one input message.".to_string()
+            })?;
+            send_session_event(on_event, StreamEvent::outgoing(session_id, "message", text));
+            let mut request = Request::new(message);
+            apply_metadata(&mut request, &metadata)?;
+            let call = client.server_streaming(request, path, codec);
+            tokio::pin!(call);
+            let response = tokio::select! {
+                response = &mut call => response.map_err(format_status)?,
+                command = commands.recv() => match command {
+                    Some(GrpcSessionCommand::Cancel) | None => {
+                        send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                        return Ok(());
+                    }
+                    Some(_) => return Err("Server-streaming gRPC calls do not accept request-stream commands.".into()),
+                }
+            };
+            let mut stream = response.into_inner();
+            loop {
+                tokio::select! {
+                    message = stream.message() => match message.map_err(format_status)? {
+                        Some(message) => send_response_message(on_event, session_id, message)?,
+                        None => break,
+                    },
+                    command = commands.recv() => match command {
+                        Some(GrpcSessionCommand::Cancel) | None => {
+                            send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                            return Ok(());
+                        }
+                        Some(_) => return Err("Server-streaming gRPC calls do not accept request-stream commands.".into()),
+                    }
+                }
+            }
+        }
+        (true, false) => {
+            let (request_sender, request_receiver) = mpsc::unbounded_channel();
+            let mut request_sender = Some(request_sender);
+            let mut request = Request::new(UnboundedReceiverStream::new(request_receiver));
+            apply_metadata(&mut request, &metadata)?;
+            let call = client.client_streaming(request, path, codec);
+            tokio::pin!(call);
+            let response = loop {
+                tokio::select! {
+                    response = &mut call => break response.map_err(format_status)?,
+                    command = commands.recv() => match command {
+                        Some(command) => if matches!(apply_stream_command(command, &mut request_sender, on_event, session_id)?, GrpcCommandAction::Cancel) { return Ok(()); },
+                        None => {
+                            send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                            return Ok(());
+                        }
+                    }
+                }
+            };
+            send_response_message(on_event, session_id, response.into_inner())?;
+        }
+        (true, true) => {
+            let (request_sender, request_receiver) = mpsc::unbounded_channel();
+            let mut request_sender = Some(request_sender);
+            let mut request = Request::new(UnboundedReceiverStream::new(request_receiver));
+            apply_metadata(&mut request, &metadata)?;
+            let call = client.streaming(request, path, codec);
+            tokio::pin!(call);
+            let response = loop {
+                tokio::select! {
+                    response = &mut call => break response.map_err(format_status)?,
+                    command = commands.recv() => match command {
+                        Some(command) => if matches!(apply_stream_command(command, &mut request_sender, on_event, session_id)?, GrpcCommandAction::Cancel) { return Ok(()); },
+                        None => {
+                            send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                            return Ok(());
+                        }
+                    }
+                }
+            };
+            let mut stream = response.into_inner();
+            loop {
+                tokio::select! {
+                    message = stream.message() => match message.map_err(format_status)? {
+                        Some(message) => send_response_message(on_event, session_id, message)?,
+                        None => break,
+                    },
+                    command = commands.recv() => match command {
+                        Some(command) => if matches!(apply_stream_command(command, &mut request_sender, on_event, session_id)?, GrpcCommandAction::Cancel) { return Ok(()); },
+                        None => {
+                            send_session_event(on_event, StreamEvent::system(session_id, "cancel", "Call cancelled"));
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    send_session_event(
+        on_event,
+        StreamEvent::system(session_id, "status", "gRPC OK"),
+    );
+    Ok(())
+}
+
+pub async fn start_session(
+    input: GrpcSessionStartInput,
+    on_event: IpcChannel<StreamEvent>,
+    state: GrpcSessionState,
+) -> Result<GrpcSessionStartOutput, String> {
+    let session_id = input.session_id.trim().to_string();
+    if session_id.is_empty() || session_id.len() > 256 {
+        return Err("gRPC session IDs must contain 1 to 256 characters.".into());
+    }
+    {
+        let sessions = state.sessions.lock().await;
+        if sessions.contains_key(&session_id) {
+            return Err("This gRPC session is already active.".into());
+        }
+        if sessions.len() >= MAX_GRPC_SESSIONS {
+            return Err(format!(
+                "No more than {MAX_GRPC_SESSIONS} gRPC sessions can be active."
+            ));
+        }
+    }
+
+    let selection = select_method(&input.call)?;
+    let client_streaming = selection.method.is_client_streaming();
+    let server_streaming = selection.method.is_server_streaming();
+    let initial_message = if client_streaming {
+        None
+    } else {
+        Some(deserialize_session_message(
+            &input.call.messages_json,
+            selection.method.input(),
+        )?)
+    };
+    let started = Instant::now();
+    let channel = connect_channel(&input.call.endpoint, &input.call.transport).await?;
+    let mut client = tonic::client::Grpc::new(channel);
+    client
+        .ready()
+        .await
+        .map_err(|error| format!("gRPC service is not ready: {error}"))?;
+
+    let (sender, receiver) = mpsc::channel(GRPC_SESSION_COMMAND_CAPACITY);
+    let token = Uuid::new_v4();
+    {
+        let mut sessions = state.sessions.lock().await;
+        if sessions.contains_key(&session_id) {
+            return Err("This gRPC session is already active.".into());
+        }
+        if sessions.len() >= MAX_GRPC_SESSIONS {
+            return Err(format!(
+                "No more than {MAX_GRPC_SESSIONS} gRPC sessions can be active."
+            ));
+        }
+        sessions.insert(
+            session_id.clone(),
+            GrpcSessionHandle {
+                token,
+                sender,
+                input: selection.method.input(),
+                client_streaming,
+                committed: false,
+            },
+        );
+    }
+
+    let call_type = call_type(client_streaming, server_streaming);
+    send_session_event(
+        &on_event,
+        StreamEvent::system(&session_id, "start", format!("{call_type} call started")),
+    );
+    let sessions = state.sessions.clone();
+    let task_session_id = session_id.clone();
+    let metadata = input.call.metadata;
+    tokio::spawn(async move {
+        if let Err(error) = run_session(
+            client,
+            selection,
+            initial_message,
+            metadata,
+            receiver,
+            &on_event,
+            &task_session_id,
+        )
+        .await
+        {
+            send_session_event(
+                &on_event,
+                StreamEvent::system(&task_session_id, "error", error),
+            );
+        }
+        send_session_event(
+            &on_event,
+            StreamEvent::system(&task_session_id, "end", "Call ended"),
+        );
+        let mut sessions = sessions.lock().await;
+        if sessions
+            .get(&task_session_id)
+            .is_some_and(|handle| handle.token == token)
+        {
+            sessions.remove(&task_session_id);
+        }
+    });
+
+    Ok(GrpcSessionStartOutput {
+        session_id,
+        call_type,
+        duration_ms: started.elapsed().as_millis(),
+    })
+}
+
+pub async fn send_session_message(
+    session_id: String,
+    message_json: String,
+    state: GrpcSessionState,
+) -> Result<(), String> {
+    let mut sessions = state.sessions.lock().await;
+    let handle = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| "Start the gRPC call before sending a message.".to_string())?;
+    if !handle.client_streaming {
+        return Err("This gRPC method does not accept a request stream.".into());
+    }
+    if handle.committed {
+        return Err("The gRPC request stream is already committed.".into());
+    }
+    let (message, text) = deserialize_session_message(&message_json, handle.input.clone())?;
+    handle
+        .sender
+        .try_send(GrpcSessionCommand::Send { message, text })
+        .map_err(|error| format!("Unable to queue the gRPC message: {error}"))
+}
+
+pub async fn commit_session(session_id: String, state: GrpcSessionState) -> Result<(), String> {
+    let mut sessions = state.sessions.lock().await;
+    let handle = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| "The gRPC call is not active.".to_string())?;
+    if !handle.client_streaming {
+        return Err("This gRPC method does not have a request stream to commit.".into());
+    }
+    if handle.committed {
+        return Err("The gRPC request stream is already committed.".into());
+    }
+    handle
+        .sender
+        .try_send(GrpcSessionCommand::Commit)
+        .map_err(|error| format!("Unable to commit the gRPC request stream: {error}"))?;
+    handle.committed = true;
+    Ok(())
+}
+
+pub async fn cancel_session(session_id: String, state: GrpcSessionState) -> Result<(), String> {
+    let handle = state
+        .sessions
+        .lock()
+        .await
+        .remove(&session_id)
+        .ok_or_else(|| "The gRPC call is not active.".to_string())?;
+    handle
+        .sender
+        .try_send(GrpcSessionCommand::Cancel)
+        .map_err(|error| format!("Unable to cancel the gRPC call: {error}"))
+}
+
+pub async fn close_all_sessions(state: GrpcSessionState) {
+    let handles = state
+        .sessions
+        .lock()
+        .await
+        .drain()
+        .map(|(_, handle)| handle)
+        .collect::<Vec<_>>();
+    for handle in handles {
+        let _ = handle.sender.try_send(GrpcSessionCommand::Cancel);
+    }
+}
+
+pub async fn call(input: GrpcCallInput) -> Result<GrpcCallOutput, String> {
+    let selection = select_method(&input)?;
+    let method = selection.method;
     let messages = deserialize_messages(
         &input.messages_json,
         method.input(),
@@ -61,12 +496,7 @@ pub async fn call(input: GrpcCallInput) -> Result<GrpcCallOutput, String> {
         .ready()
         .await
         .map_err(|error| format!("gRPC service is not ready: {error}"))?;
-    let path = http::uri::PathAndQuery::from_maybe_shared(format!(
-        "/{}/{}",
-        service.full_name(),
-        method.name()
-    ))
-    .map_err(|error| format!("Invalid gRPC method path: {error}"))?;
+    let path = selection.path;
     let codec = DynamicCodec::new(method.output());
     let started = Instant::now();
 
@@ -565,6 +995,17 @@ mod tests {
     use super::*;
     use rustls::{RootCertStore, ServerConfig};
     use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+    use std::{convert::Infallible, sync::Mutex as StdMutex, task::Poll};
+    use tauri::ipc::InvokeResponseBody;
+    use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
+    use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
+    use tonic::{
+        body::Body,
+        codegen::{BoxFuture, Service, StdError},
+        server::{ClientStreamingService, NamedService, StreamingService},
+        transport::Server,
+        Response, Streaming,
+    };
 
     const TEST_PROTO: &str = r#"
         syntax = "proto3";
@@ -572,6 +1013,8 @@ mod tests {
         service Greeter {
           rpc SayHello (HelloRequest) returns (HelloReply);
           rpc WatchHello (HelloRequest) returns (stream HelloReply);
+          rpc CollectHello (stream HelloRequest) returns (HelloReply);
+          rpc ChatHello (stream HelloRequest) returns (stream HelloReply);
         }
         message HelloRequest { string name = 1; }
         message HelloReply { string message = 1; }
@@ -581,6 +1024,218 @@ mod tests {
     const TLS_SERVER_KEY: &str = include_str!("../tests/fixtures/tls/server.key.pem");
     const TLS_CLIENT_CERTIFICATE: &str = include_str!("../tests/fixtures/tls/client.cert.pem");
     const TLS_CLIENT_KEY: &str = include_str!("../tests/fixtures/tls/client.key.pem");
+
+    #[derive(Clone)]
+    struct LifecycleTestServer {
+        request: MessageDescriptor,
+        reply: MessageDescriptor,
+    }
+
+    struct CollectHelloService(MessageDescriptor);
+
+    impl ClientStreamingService<DynamicMessage> for CollectHelloService {
+        type Response = DynamicMessage;
+        type Future = BoxFuture<Response<Self::Response>, Status>;
+
+        fn call(&mut self, request: Request<Streaming<DynamicMessage>>) -> Self::Future {
+            let reply = self.0.clone();
+            Box::pin(async move {
+                let mut stream = request.into_inner();
+                let mut count = 0usize;
+                while stream.message().await?.is_some() {
+                    count += 1;
+                }
+                let (message, _) = deserialize_session_message(
+                    &serde_json::json!({ "message": format!("received {count}") }).to_string(),
+                    reply,
+                )
+                .map_err(Status::internal)?;
+                Ok(Response::new(message))
+            })
+        }
+    }
+
+    struct ChatHelloService(MessageDescriptor);
+
+    impl StreamingService<DynamicMessage> for ChatHelloService {
+        type Response = DynamicMessage;
+        type ResponseStream = ReceiverStream<Result<DynamicMessage, Status>>;
+        type Future = BoxFuture<Response<Self::ResponseStream>, Status>;
+
+        fn call(&mut self, request: Request<Streaming<DynamicMessage>>) -> Self::Future {
+            let reply = self.0.clone();
+            Box::pin(async move {
+                let mut stream = request.into_inner();
+                let (sender, receiver) = mpsc::channel(8);
+                tokio::spawn(async move {
+                    while let Ok(Some(message)) = stream.message().await {
+                        let value = match dynamic_to_json(message) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                let _ = sender.send(Err(Status::internal(error))).await;
+                                break;
+                            }
+                        };
+                        let name = value
+                            .get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default();
+                        let response = deserialize_session_message(
+                            &serde_json::json!({ "message": format!("echo {name}") }).to_string(),
+                            reply.clone(),
+                        )
+                        .map(|(message, _)| message)
+                        .map_err(Status::internal);
+                        if sender.send(response).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+                Ok(Response::new(ReceiverStream::new(receiver)))
+            })
+        }
+    }
+
+    impl<B> Service<http::Request<B>> for LifecycleTestServer
+    where
+        B: tonic::codegen::Body + Send + 'static,
+        B::Error: Into<StdError> + Send + 'static,
+    {
+        type Response = http::Response<Body>;
+        type Error = Infallible;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+
+        fn poll_ready(
+            &mut self,
+            _context: &mut std::task::Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, request: http::Request<B>) -> Self::Future {
+            match request.uri().path() {
+                "/brunomnia.test.Greeter/CollectHello" => {
+                    let method = CollectHelloService(self.reply.clone());
+                    let codec = DynamicCodec::new(self.request.clone());
+                    Box::pin(async move {
+                        let response = tonic::server::Grpc::new(codec)
+                            .client_streaming(method, request)
+                            .await;
+                        Ok(response)
+                    })
+                }
+                "/brunomnia.test.Greeter/ChatHello" => {
+                    let method = ChatHelloService(self.reply.clone());
+                    let codec = DynamicCodec::new(self.request.clone());
+                    Box::pin(async move {
+                        let response = tonic::server::Grpc::new(codec)
+                            .streaming(method, request)
+                            .await;
+                        Ok(response)
+                    })
+                }
+                _ => Box::pin(async move {
+                    let mut response = http::Response::new(Body::default());
+                    response.headers_mut().insert(
+                        Status::GRPC_STATUS,
+                        (tonic::Code::Unimplemented as i32).into(),
+                    );
+                    response.headers_mut().insert(
+                        http::header::CONTENT_TYPE,
+                        tonic::metadata::GRPC_CONTENT_TYPE,
+                    );
+                    Ok(response)
+                }),
+            }
+        }
+    }
+
+    impl NamedService for LifecycleTestServer {
+        const NAME: &'static str = "brunomnia.test.Greeter";
+    }
+
+    fn recording_channel(events: Arc<StdMutex<Vec<serde_json::Value>>>) -> IpcChannel<StreamEvent> {
+        IpcChannel::new(move |body| {
+            if let InvokeResponseBody::Json(json) = body {
+                events.lock().unwrap().push(serde_json::from_str(&json)?);
+            }
+            Ok(())
+        })
+    }
+
+    async fn wait_for_events(
+        events: &Arc<StdMutex<Vec<serde_json::Value>>>,
+        kind: &str,
+        count: usize,
+    ) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let found = events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|event| {
+                        event.get("kind").and_then(serde_json::Value::as_str) == Some(kind)
+                    })
+                    .count();
+                if found >= count {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("gRPC lifecycle events arrive");
+    }
+
+    async fn start_lifecycle_server(
+        pool: &DescriptorPool,
+    ) -> (std::net::SocketAddr, oneshot::Sender<()>, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let service = LifecycleTestServer {
+            request: pool
+                .get_message_by_name("brunomnia.test.HelloRequest")
+                .unwrap(),
+            reply: pool
+                .get_message_by_name("brunomnia.test.HelloReply")
+                .unwrap(),
+        };
+        let (shutdown, shutdown_receiver) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            Server::builder()
+                .add_service(service)
+                .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
+                    let _ = shutdown_receiver.await;
+                })
+                .await
+                .unwrap();
+        });
+        (address, shutdown, task)
+    }
+
+    fn lifecycle_input(
+        endpoint: &str,
+        descriptor_bytes: &[u8],
+        session_id: &str,
+        method: &str,
+    ) -> GrpcSessionStartInput {
+        GrpcSessionStartInput {
+            session_id: session_id.into(),
+            call: GrpcCallInput {
+                endpoint: endpoint.into(),
+                service: "brunomnia.test.Greeter".into(),
+                method: method.into(),
+                descriptor_set_base64: STANDARD.encode(descriptor_bytes),
+                messages_json: "{}".into(),
+                metadata: vec![],
+                transport: TransportConfig {
+                    timeout_ms: 5_000,
+                    ..Default::default()
+                },
+            },
+        }
+    }
 
     fn test_tls_server_config(require_client_identity: bool) -> ServerConfig {
         let certificates = CertificateDer::pem_slice_iter(TLS_SERVER_CERTIFICATE.as_bytes())
@@ -703,6 +1358,121 @@ mod tests {
             ("https://api.example.test/".into(), true)
         );
         assert!(tonic_endpoint("ws://api.example.test").is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn runs_client_streaming_and_bidirectional_session_lifecycles() {
+        let (pool, descriptor_bytes) = compile_proto(TEST_PROTO, &[], "").unwrap();
+        let (address, shutdown, server) = start_lifecycle_server(&pool).await;
+        let endpoint = format!("http://{address}");
+        let state = GrpcSessionState::default();
+
+        let client_events = Arc::new(StdMutex::new(Vec::new()));
+        let output = start_session(
+            lifecycle_input(
+                &endpoint,
+                &descriptor_bytes,
+                "client-stream",
+                "CollectHello",
+            ),
+            recording_channel(client_events.clone()),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.call_type, "client-streaming");
+        send_session_message(
+            "client-stream".into(),
+            r#"{"name":"Ada"}"#.into(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        send_session_message(
+            "client-stream".into(),
+            r#"{"name":"Grace"}"#.into(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        commit_session("client-stream".into(), state.clone())
+            .await
+            .unwrap();
+        wait_for_events(&client_events, "end", 1).await;
+        {
+            let client_events = client_events.lock().unwrap();
+            assert_eq!(
+                client_events
+                    .iter()
+                    .filter(
+                        |event| event.get("direction").and_then(serde_json::Value::as_str)
+                            == Some("outgoing"),
+                    )
+                    .count(),
+                2
+            );
+            assert!(client_events.iter().any(|event| event
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|text| text.contains("received 2"))));
+        }
+
+        let bidi_events = Arc::new(StdMutex::new(Vec::new()));
+        let output = start_session(
+            lifecycle_input(&endpoint, &descriptor_bytes, "bidi-stream", "ChatHello"),
+            recording_channel(bidi_events.clone()),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.call_type, "bidirectional-streaming");
+        send_session_message(
+            "bidi-stream".into(),
+            r#"{"name":"Lin"}"#.into(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        send_session_message(
+            "bidi-stream".into(),
+            r#"{"name":"Margaret"}"#.into(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        wait_for_events(&bidi_events, "message", 4).await;
+        commit_session("bidi-stream".into(), state.clone())
+            .await
+            .unwrap();
+        wait_for_events(&bidi_events, "end", 1).await;
+        {
+            let bidi_events = bidi_events.lock().unwrap();
+            assert!(bidi_events.iter().any(|event| event
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|text| text.contains("echo Lin"))));
+            assert!(bidi_events.iter().any(|event| event
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|text| text.contains("echo Margaret"))));
+        }
+
+        let cancel_events = Arc::new(StdMutex::new(Vec::new()));
+        start_session(
+            lifecycle_input(&endpoint, &descriptor_bytes, "cancel-stream", "ChatHello"),
+            recording_channel(cancel_events.clone()),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        cancel_session("cancel-stream".into(), state.clone())
+            .await
+            .unwrap();
+        wait_for_events(&cancel_events, "cancel", 1).await;
+        wait_for_events(&cancel_events, "end", 1).await;
+
+        let _ = shutdown.send(());
+        server.await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

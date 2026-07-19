@@ -675,7 +675,7 @@ function RequestPanel({
         {activeTab === 'body' && request.protocol === 'graphql' ? <GraphqlEditor onChange={onChange} onLoadSchema={onLoadGraphqlSchema} request={request} schemaLoading={graphqlSchemaLoading} /> : null}
         {activeTab === 'body' && (request.protocol === 'websocket' || request.protocol === 'sse') ? <StreamSetup onChange={onChange} request={request} /> : null}
         {activeTab === 'body' && request.protocol === 'socketio' ? <Suspense fallback={<div className="dialog-loading">Loading Socket.IO editor…</div>}><SocketIoEditor onChange={onChange} onListenerToggle={onSocketIoListenerToggle} request={request} /></Suspense> : null}
-        {activeTab === 'body' && request.protocol === 'grpc' ? <Suspense fallback={<div className="dialog-loading">Loading gRPC editor…</div>}><GrpcEditor onChange={onChange} onLoadSchema={onLoadGrpcSchema} request={request} schema={grpcSchema} schemaLoading={grpcSchemaLoading} /></Suspense> : null}
+        {activeTab === 'body' && request.protocol === 'grpc' ? <Suspense fallback={<div className="dialog-loading">Loading gRPC editor…</div>}><GrpcEditor environment={environment} onChange={onChange} onLoadSchema={onLoadGrpcSchema} request={request} requestContext={requestContext} schema={grpcSchema} schemaLoading={grpcSchemaLoading} /></Suspense> : null}
         {activeTab === 'transport' ? <Suspense fallback={<div className="dialog-loading">Loading transport settings…</div>}><TransportEditor globalTimeoutMs={requestContext.requestTimeoutMs ?? 30_000} onChange={onChange} request={request} /></Suspense> : null}
         {activeTab === 'scripts' ? (
           <div className="editor-stack">
@@ -2184,7 +2184,7 @@ export default function App() {
             onSocketIoListenerToggle={(eventName, enabled) => void toggleSocketIoListener(eventName, enabled)}
             onTabChange={setRequestTab}
             request={active.request}
-            requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, authorizeOAuth2: authorizeOAuth2WithStatus }}
+            requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, authorizeOAuth2: authorizeOAuth2WithStatus }}
             scheduledSendLabel={scheduledSendLabel}
             showPasswords={workspace.preferences.showPasswords}
             storedResponses={workspace.responses}

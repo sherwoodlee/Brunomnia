@@ -42,4 +42,4 @@ Rendered interaction QA is omitted by standing direction. No screenshot, DOM, co
 
 ## Acceptance boundary
 
-This milestone closes password-protected PFX/PKCS#12 identity import and native desktop execution. Certificate-path compatibility import/export, encrypted PEM-key passphrases, portable CLI client-certificate transport, custom gRPC proxy transport, richer gRPC metadata/schema workflows, and broad third-party fixtures remain open. Related parity rows remain `Baseline`; Brunomnia is not declared feature-complete.
+This milestone closes password-protected PFX/PKCS#12 identity import and native desktop execution. Certificate-path compatibility import/export, encrypted PEM-key passphrases, portable CLI client-certificate transport, richer gRPC metadata/schema workflows, and broad third-party fixtures remain open. Milestone 117 later confirmed the pinned upstream gRPC channel does not install the application HTTP/HTTPS proxy agent, so custom gRPC proxy transport is not a parity requirement. Related parity rows remain `Baseline`; Brunomnia is not declared feature-complete.

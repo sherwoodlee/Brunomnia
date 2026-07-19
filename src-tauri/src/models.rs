@@ -302,6 +302,21 @@ pub struct GrpcCallOutput {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GrpcSessionStartInput {
+    pub session_id: String,
+    pub call: GrpcCallInput,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcSessionStartOutput {
+    pub session_id: String,
+    pub call_type: String,
+    pub duration_ms: u128,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MockRouteInput {
     pub id: String,
     pub name: String,

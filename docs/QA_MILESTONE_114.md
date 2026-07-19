@@ -43,7 +43,7 @@ Scope: import, persist, edit, migrate, and natively compile bounded multi-file g
 
 ## Acceptance boundary
 
-- Rendered interaction QA remains omitted by standing direction. Custom gRPC proxy transport, custom CA/PFX identity, and richer schema workflows remain open, so parity is not declared.
+- Rendered interaction QA remains omitted by standing direction. Custom CA/PFX identity and richer schema workflows remain open, so parity is not declared. Milestone 117 later confirmed the pinned upstream gRPC channel does not install the application HTTP/HTTPS proxy agent, so custom gRPC proxy transport is not a parity requirement.
 
 Validated desktop artifact:
 

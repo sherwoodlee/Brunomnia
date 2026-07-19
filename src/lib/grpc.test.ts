@@ -1,15 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { loadGrpcSchema } from './grpc';
+import { cancelGrpcSession, commitGrpcSession, loadGrpcSchema, sendGrpcSessionMessage, startGrpcSession } from './grpc';
 
-const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
+const tauri = vi.hoisted(() => ({ channels: [] as Array<{ onmessage?: (message: unknown) => void }>, invoke: vi.fn() }));
 
 vi.mock('@tauri-apps/api/core', () => ({
+  Channel: class {
+    onmessage?: (message: unknown) => void;
+
+    constructor() {
+      tauri.channels.push(this);
+    }
+  },
   invoke: tauri.invoke,
   isTauri: () => true,
 }));
 
 beforeEach(() => {
+  tauri.channels.length = 0;
   tauri.invoke.mockReset();
   tauri.invoke.mockResolvedValue({ services: [], descriptorSetBase64: 'descriptor' });
 });
@@ -39,5 +47,66 @@ describe('gRPC schema loading', () => {
       ],
       transport: expect.objectContaining({ caCertificatePem: 'workspace-ca', clientCertificatePfxBase64: 'cGZ4', clientCertificatePassphrase: 'secret' }),
     }) }));
+  });
+
+  it('starts a channel-backed session with resolved metadata and workspace TLS', async () => {
+    const request = createBlankRequest('grpc-session');
+    request.protocol = 'grpc';
+    request.url = 'grpcs://{{ host }}:50051';
+    request.grpc.service = 'brunomnia.test.Greeter';
+    request.grpc.method = 'Chat';
+    request.grpc.descriptorSetBase64 = 'descriptor';
+    request.grpc.input = '{"name":"{{ person }}"}';
+    request.grpc.metadata = [{ id: 'metadata', name: 'x-tenant', value: '{{ tenant }}', enabled: true }];
+    tauri.invoke.mockResolvedValue({ sessionId: 'session-1', callType: 'bidirectional-streaming', durationMs: 4 });
+    const onEvent = vi.fn();
+
+    await startGrpcSession(request, {
+      id: 'environment',
+      name: 'Development',
+      variables: [
+        { id: 'host', name: 'host', value: 'localhost', enabled: true },
+        { id: 'tenant', name: 'tenant', value: 'acme', enabled: true },
+        { id: 'person', name: 'person', value: 'Ada', enabled: true },
+      ],
+    }, 'session-1', onEvent, 4_000, false, {
+      ca: { enabled: true, pem: 'workspace-ca' },
+      clients: [{ id: 'client', host: 'localhost', enabled: true, certificatePem: 'certificate', keyPem: 'key', pfxBase64: '', passphrase: '' }],
+    });
+
+    expect(tauri.invoke).toHaveBeenCalledWith('grpc_start_session', expect.objectContaining({
+      input: expect.objectContaining({
+        sessionId: 'session-1',
+        call: expect.objectContaining({
+          endpoint: 'grpcs://localhost:50051',
+          messagesJson: '{"name":"Ada"}',
+          metadata: [expect.objectContaining({ value: 'acme' })],
+          transport: expect.objectContaining({
+            timeoutMs: 4_000,
+            validateCertificates: false,
+            caCertificatePem: 'workspace-ca',
+            clientCertificatePem: 'certificate',
+          }),
+        }),
+      }),
+      onEvent: tauri.channels[0],
+    }));
+    tauri.channels[0].onmessage?.({ sessionId: 'session-1', direction: 'incoming', kind: 'message', text: '{}', timestamp: '2026-07-18T00:00:00Z' });
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ id: expect.any(String), sessionId: 'session-1', kind: 'message' }));
+  });
+
+  it('maps send, commit, and cancel to independent lifecycle commands', async () => {
+    tauri.invoke.mockResolvedValue(undefined);
+    const environment = { id: 'environment', name: 'Development', variables: [{ id: 'name', name: 'name', value: 'Grace', enabled: true }] };
+
+    await sendGrpcSessionMessage('session-2', '{"name":"{{ name }}"}', environment);
+    await commitGrpcSession('session-2');
+    await cancelGrpcSession('session-2');
+
+    expect(tauri.invoke.mock.calls).toEqual([
+      ['grpc_send_message', { sessionId: 'session-2', messageJson: '{"name":"Grace"}' }],
+      ['grpc_commit_session', { sessionId: 'session-2' }],
+      ['grpc_cancel_session', { sessionId: 'session-2' }],
+    ]);
   });
 });

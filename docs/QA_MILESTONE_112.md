@@ -45,7 +45,7 @@ Rendered interaction QA was not run because this task's standing direction prohi
 
 ## Acceptance boundary
 
-Brunomnia's packaged Tauri path now applies effective validation and domain-scoped PEM identity to secure gRPC reflection and calls. Importable proto trees, custom CA/PFX identity, gRPC proxy transport, richer reflection/schema workflows, interactive streaming lifecycle controls, and broad third-party fixtures remain open. The gRPC parity row therefore remains `Baseline`, and Brunomnia is not yet declared feature-complete.
+Brunomnia's packaged Tauri path now applies effective validation and domain-scoped PEM identity to secure gRPC reflection and calls. Importable proto trees, custom CA/PFX identity, richer reflection/schema workflows, interactive streaming lifecycle controls, and broad third-party fixtures remain open. Milestone 117 later confirmed the pinned upstream gRPC channel does not install the application HTTP/HTTPS proxy agent, so custom gRPC proxy transport is not a parity requirement. The gRPC parity row therefore remains `Baseline`, and Brunomnia is not yet declared feature-complete.
 
 Validated desktop artifact:
 

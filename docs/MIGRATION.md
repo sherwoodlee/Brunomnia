@@ -525,7 +525,7 @@ Compatibility bounds remain explicit: browser engines own TLS validation and CLI
 | Executable coverage | Complete baseline | Frontend tests cover system/manual protocol selection, no-proxy forwarding, both overrides, legacy migration, native invocation, stream input, and cURL behavior; native compile/lint passes and rendered/live proxy fixtures remain intentionally omitted |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 35 verification](QA_MILESTONE_35.md) |
 
-Compatibility bounds at Milestone 35 were explicit: reqwest's discovery is not claimed to reproduce Electron session PAC resolution. Browser engines own development-mode proxy routing. Milestone 110 later closes inherited/per-request custom WebSocket proxy transport; gRPC proxying, PAC-authenticated system WebSocket discovery, and CLI manual proxy execution remain open. The CLI deliberately refuses a manual proxy instead of silently bypassing it. Brunomnia's request-level Custom/Direct modes are an additional local capability; current Insomnia exposes proxy selection globally.
+Compatibility bounds at Milestone 35 were explicit: reqwest's discovery is not claimed to reproduce Electron session PAC resolution. Browser engines own development-mode proxy routing. Milestone 110 later closes inherited/per-request custom WebSocket proxy transport; PAC-authenticated system WebSocket discovery and CLI manual proxy execution remain open. The CLI deliberately refuses a manual proxy instead of silently bypassing it. Brunomnia's request-level Custom/Direct modes are an additional local capability; current Insomnia exposes proxy selection globally. Milestone 117's pinned source audit confirms current Insomnia does not install its HTTP/HTTPS proxy agent on `@grpc/grpc-js` channels, removing custom gRPC proxying from the parity backlog.
 
 ## Milestone 36 — bulk request-header and query-parameter editors (complete baseline)
 
@@ -1698,7 +1698,7 @@ Compatibility bounds remain explicit: PAC-authenticated system proxy discovery, 
 | Executable coverage | Complete | A real sequential TLS server observes strict rejection of its untrusted certificate, mTLS rejection when the identity domain mismatches, and successful mTLS negotiation when it matches |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 112 verification](QA_MILESTONE_112.md) |
 
-Compatibility bounds remain explicit: importable proto trees, custom CA/PFX identity, gRPC proxy transport, richer reflection/schema workflows, interactive streaming lifecycle controls, and broad third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: importable proto trees, custom CA/PFX identity, richer reflection/schema workflows, interactive streaming lifecycle controls, and broad third-party fixtures remain open. A later Milestone 117 audit confirms custom gRPC proxy transport is not present in the pinned upstream channel path. Rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 113 — authored gRPC URL schemes (complete)
 
@@ -1716,7 +1716,7 @@ Brunomnia now accepts pinned-compatible `grpc://` and `grpcs://` endpoints, norm
 | Executable coverage | Complete | Frontend tests cover path normalization, root stripping, entry choice, migration, and command payloads; native tests compile a real service importing messages from another folder and reject unsafe/duplicate paths |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 114 verification](QA_MILESTONE_114.md) |
 
-Compatibility bounds remain explicit: custom gRPC proxy transport, custom CA/PFX identity, richer reflection/metadata/schema workflows, interactive streaming lifecycle controls, and broad third-party fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: custom CA/PFX identity, richer reflection/metadata/schema workflows, interactive streaming lifecycle controls, and broad third-party fixtures remain open. A later Milestone 117 audit confirms custom gRPC proxy transport is not present in the pinned upstream channel path. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 115 — workspace CA and PEM certificate manager (complete baseline)
 
@@ -1731,7 +1731,7 @@ Compatibility bounds remain explicit: custom gRPC proxy transport, custom CA/PFX
 | Executable coverage | Complete | Focused frontend tests cover matching, precedence, migration, local-only boundaries, and exact command payloads; real private-CA HTTP, WSS, and gRPC loopbacks prove native trust extension |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [security guide](SECURITY_AND_SYNC.md), [parity ledger](PARITY.md), and [Milestone 115 verification](QA_MILESTONE_115.md) |
 
-Compatibility bounds remain explicit: PFX/PKCS#12 identities, certificate-path compatibility exports, custom gRPC proxy transport, richer gRPC metadata/schema workflows, and broad third-party certificate fixtures remain open. Related ledger rows stay Baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: PFX/PKCS#12 identities, certificate-path compatibility exports, richer gRPC metadata/schema workflows, and broad third-party certificate fixtures remain open. A later Milestone 117 audit confirms custom gRPC proxy transport is not present in the pinned upstream channel path. Related ledger rows stay Baseline, and rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 116 — PFX/PKCS#12 client identities (complete baseline)
 
@@ -1746,9 +1746,23 @@ Compatibility bounds remain explicit: PFX/PKCS#12 identities, certificate-path c
 | Executable coverage | Complete | Frontend tests cover matching, precedence, scripts, migration, persistence, explicit export, and publication checks; native tests decode modern/legacy and OpenSSL-produced bundles and complete real HTTPS, WSS, and gRPC mTLS handshakes |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [scripting](SCRIPTING.md), [security guide](SECURITY_AND_SYNC.md), [parity ledger](PARITY.md), and [Milestone 116 verification](QA_MILESTONE_116.md) |
 
-Compatibility bounds remain explicit: certificate-path compatibility import/export, encrypted PEM-key passphrases, portable CLI client-certificate transport, custom gRPC proxy transport, richer gRPC metadata/schema workflows, and broader third-party certificate fixtures remain open. Related ledger rows stay Baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: certificate-path compatibility import/export, encrypted PEM-key passphrases, portable CLI client-certificate transport, richer gRPC metadata/schema workflows, and broader third-party certificate fixtures remain open. A later Milestone 117 audit confirms custom gRPC proxy transport is not present in the pinned upstream channel path. Related ledger rows stay Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 117 — remaining parity closure and release hardening
+## Milestone 117 — interactive gRPC streaming lifecycle (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned `main/ipc/grpc.ts` keeps active calls in `grpcCalls`, exposes `start`/`sendMessage`/`commit`/`cancel`, forwards status/data/error/end events, and creates direct `@grpc/grpc-js` channels without a separate HTTP/HTTPS proxy agent |
+| Persistent native sessions | Complete | Tauri owns up to 100 duplicate-safe sessions with 256-command queues, 1 MiB schema-validated messages, generation-safe cleanup, normal end, half-close, cancel, and close-all behavior |
+| Call-shape coverage | Complete | Unary and server-streaming calls send their initial object at start; client and bidirectional streams accept independent messages and preserve incoming delivery after commit |
+| Policy continuity | Complete | Interactive setup shares endpoint normalization, templated metadata, timeout, validation, workspace CA, and host/port-scoped PEM or PFX/PKCS#12 identity resolution with reflection and one-shot calls |
+| Account-free editor | Complete baseline | Body controls expose Start, Send message, Commit, Cancel, Clear, state/call type, errors, and the newest 500 ordered events without login, organization, plan, or entitlement checks |
+| Executable coverage | Complete | Renderer tests verify channel wiring, environment resolution, certificate payloads, and lifecycle commands; a real in-process HTTP/2 server verifies client-streaming aggregation, bidi replies, half-close, and cancel |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 117 verification](QA_MILESTONE_117.md) |
+
+Compatibility bounds remain explicit: richer reflection/schema authoring, metadata diagnostics, persisted gRPC call history, and broader third-party fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 118 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

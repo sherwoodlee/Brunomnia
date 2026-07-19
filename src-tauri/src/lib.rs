@@ -678,6 +678,48 @@ async fn send_grpc_request(input: models::GrpcCallInput) -> Result<models::GrpcC
 }
 
 #[tauri::command]
+async fn grpc_start_session(
+    input: models::GrpcSessionStartInput,
+    on_event: Channel<models::StreamEvent>,
+    state: State<'_, grpc_client::GrpcSessionState>,
+) -> Result<models::GrpcSessionStartOutput, String> {
+    grpc_client::start_session(input, on_event, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn grpc_send_message(
+    session_id: String,
+    message_json: String,
+    state: State<'_, grpc_client::GrpcSessionState>,
+) -> Result<(), String> {
+    grpc_client::send_session_message(session_id, message_json, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn grpc_commit_session(
+    session_id: String,
+    state: State<'_, grpc_client::GrpcSessionState>,
+) -> Result<(), String> {
+    grpc_client::commit_session(session_id, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn grpc_cancel_session(
+    session_id: String,
+    state: State<'_, grpc_client::GrpcSessionState>,
+) -> Result<(), String> {
+    grpc_client::cancel_session(session_id, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn grpc_close_all_sessions(
+    state: State<'_, grpc_client::GrpcSessionState>,
+) -> Result<(), String> {
+    grpc_client::close_all_sessions(state.inner().clone()).await;
+    Ok(())
+}
+
+#[tauri::command]
 async fn start_mock_server(
     input: models::MockServerInput,
     state: State<'_, mock_server::MockServerState>,
@@ -705,6 +747,7 @@ async fn stop_mock_server(
 pub fn run() {
     tauri::Builder::default()
         .manage(streaming::StreamingState::default())
+        .manage(grpc_client::GrpcSessionState::default())
         .manage(mock_server::MockServerState::default())
         .manage(oauth2_callback::OAuthCallbackState::default())
         .manage(external_vault::ExternalSecretCache::default())
@@ -775,6 +818,11 @@ pub fn run() {
             disconnect_sse,
             grpc_load_schema,
             send_grpc_request,
+            grpc_start_session,
+            grpc_send_message,
+            grpc_commit_session,
+            grpc_cancel_session,
+            grpc_close_all_sessions,
             start_mock_server,
             update_mock_server,
             stop_mock_server
