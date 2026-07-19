@@ -1030,6 +1030,14 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Updated account-free Runner shortcut documentation: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
 - Exact verification record: [`docs/QA_MILESTONE_188.md`](QA_MILESTONE_188.md)
 
+## Milestone 189 acceptance evidence
+
+- Pinned forced/responsive Runner direction and split-pane orientation audit: [`docs/QA_MILESTONE_189.md`](QA_MILESTONE_189.md)
+- Pure forced-layout direction mapping with focused regression: [`src/lib/runnerPlan.ts`](../src/lib/runnerPlan.ts) and [`src/lib/runnerPlan.test.ts`](../src/lib/runnerPlan.test.ts)
+- Preference-driven Runner direction state and wide-screen vertical stack styling: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx) and [`src/styles.css`](../src/styles.css)
+- Updated account-free Runner layout documentation: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
+- Exact verification record: [`docs/QA_MILESTONE_189.md`](QA_MILESTONE_189.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).

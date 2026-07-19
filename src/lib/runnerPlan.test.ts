@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRunnerNumberDraft, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from './runnerPlan';
+import { parseRunnerNumberDraft, runnerLayoutDirection, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from './runnerPlan';
 
 describe('Runner request-plan selection', () => {
   it('distinguishes empty, none, partial, and complete selection', () => {
@@ -35,5 +35,10 @@ describe('Runner request-plan selection', () => {
     expect(runnerShortcutShouldStart({ ...event, repeat: true } as KeyboardEvent, 'Mod+Enter', true)).toBe(false);
     expect(runnerShortcutShouldStart(event, 'Mod+Shift+Enter', true)).toBe(false);
     expect(runnerShortcutLabel(' mod + Enter ')).toBe('⌘/Ctrl+Enter');
+  });
+
+  it('maps the forced layout preference to the Runner pane direction', () => {
+    expect(runnerLayoutDirection(false)).toBe('horizontal');
+    expect(runnerLayoutDirection(true)).toBe('vertical');
   });
 });

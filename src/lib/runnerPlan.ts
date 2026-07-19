@@ -22,3 +22,6 @@ export const runnerShortcutLabel = (shortcut: string) => normalizeShortcut(short
 
 export const runnerShortcutShouldStart = (event: KeyboardEvent, shortcut: string, canStart: boolean) =>
   canStart && !event.repeat && shortcutMatches(event, shortcut);
+
+export const runnerLayoutDirection = (forceVerticalLayout: boolean): 'vertical' | 'horizontal' =>
+  forceVerticalLayout ? 'vertical' : 'horizontal';

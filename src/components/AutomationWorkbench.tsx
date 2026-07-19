@@ -18,7 +18,7 @@ import { aggregateRunnerTimeline, discardRunnerReport, parseRunnerData, resolveR
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
 import { summarizeRunnerAssertions, summarizeRunnerHistory } from '../lib/runnerHistory';
 import { isRunnerItemFinished, summarizeRunnerLiveProgress } from '../lib/runnerFeedback';
-import { parseRunnerNumberDraft, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from '../lib/runnerPlan';
+import { parseRunnerNumberDraft, runnerLayoutDirection, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from '../lib/runnerPlan';
 import type { ScriptTestFilter } from '../lib/scriptTests';
 import { formatResponseTimeline } from '../lib/timeline';
 import { applyCollectionConfiguration, folderAncestors, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
@@ -559,7 +559,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
   const consoleTruncated = visibleResults.some((result) => result.timeline?.truncated);
   const visibleKeepLog = usesCurrentRun ? keepLog : displayedReport?.keepLog ?? keepLog;
   return (
-    <section className="automation-workbench runner-workbench">
+    <section className="automation-workbench runner-workbench" data-direction={runnerLayoutDirection(workspace.preferences.forceVerticalLayout)}>
       <AutomationHeader eyebrow="Test" title={targetFolder ? `Runner · ${targetFolder.name}` : 'Collection runner'} subtitle="Run requests in order with iteration data, scripts, assertions, delays, and retries.">
         {!running ? <button className="secondary-action" disabled={!collection || !selectedRequestIds.length} onClick={() => setShowCliDialog(true)} type="button">Run via CLI</button> : null}
         {displayedReport && !running ? <button className="secondary-action" onClick={() => downloadReport('json')} type="button">Export JSON</button> : null}

@@ -12,6 +12,8 @@ Run and Run via CLI stay disabled when the plan has no selected requests. Iterat
 
 The configured **Send request** shortcut starts the open Runner from anywhere in its document, including while a control has focus. It follows the same active-run and selected-request guards as the Run button, ignores key-repeat events, and appears in the Run button tooltip using the current device-local shortcut preference.
 
+Enabling **Use vertical layout** in Preferences stacks Runner configuration above Results on wide screens as well as narrow ones. With the preference off, Runner keeps its side-by-side desktop layout and still falls back to the same stacked presentation at the responsive breakpoint.
+
 Enable **Stop after first exhausted failure** to bail once a request has used all configured retry attempts and still fails. A failure that succeeds on retry does not bail. Manual cancellation and bail remain distinct report states.
 
 The optional 0–30,000 ms delay runs after an item becomes active but before each transport attempt, including the first request and retries. Skip or Cancel during that wait prevents the transport from starting; Brunomnia does not add a trailing delay after the final attempt.
