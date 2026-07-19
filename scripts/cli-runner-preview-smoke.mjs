@@ -36,8 +36,9 @@ const temporary = await mkdtemp(join(tmpdir(), 'brunomnia-cli-runner-'));
 const arrivals = [];
 const server = http.createServer((request, response) => {
   arrivals.push({ path: request.url, at: performance.now() });
-  response.writeHead(200, { 'Content-Type': 'application/json' });
-  response.end(JSON.stringify({ ok: true }));
+  const status = request.url?.startsWith('/second') ? 500 : 200;
+  response.writeHead(status, { 'Content-Type': 'application/json' });
+  response.end(JSON.stringify({ ok: status === 200 }));
 });
 
 try {
@@ -79,15 +80,16 @@ try {
   const output = await run([
     'run', 'collection', temporary, collection.id,
     '--env', environment.id,
-    '--request', 'request-third',
-    '--request', 'request-second',
-    '--request', 'request-first',
+    '--item', 'request-third',
+    '--item', 'request-second',
+    '--item', 'request-first',
     '--requestNamePattern', '^(Third|First)$',
-    '--iterations', '2',
+    '--iteration-count', '2',
     '--delay-request', '35',
-    '--data', join(temporary, 'iterations.csv'),
+    '--iteration-data', join(temporary, 'iterations.csv'),
     '--env-var', 'region=override',
     '--allow-scripts',
+    '-b',
     '--reporter', 'json',
   ]);
   const artifact = JSON.parse(output);
@@ -119,7 +121,17 @@ try {
   const rejectedEmptyPlan = await runFailure(['run', 'collection', temporary, collection.id, '--requestNamePattern', '^Missing$']);
   assert.equal(rejectedEmptyPlan.code, 1);
   assert.match(rejectedEmptyPlan.stderr, /No requests identified; nothing to run/);
-  console.log('CLI runner preview smoke passed: split project, request-name filtering, selected order, data, environment overrides, delay, and assertion evidence.');
+  const bailed = await runFailure([
+    'run', 'collection', temporary, collection.id,
+    '--item', 'request-second', '--item', 'request-first',
+    '--env-var', 'row=bail', '--env-var', 'region=bail',
+    '-b', '--reporter', 'json',
+  ]);
+  assert.equal(bailed.code, 1);
+  const bailedArtifact = JSON.parse(bailed.stdout);
+  assert.equal(bailedArtifact.report.bailed, true);
+  assert.deepEqual(bailedArtifact.report.results.map((result) => result.requestId), ['request-second']);
+  console.log('CLI runner preview smoke passed: split project, pinned aliases, request-name filtering, selected order, data, environment overrides, delay, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });

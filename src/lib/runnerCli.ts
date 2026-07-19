@@ -64,14 +64,14 @@ export const buildRunnerCliCommand = (options: RunnerCliCommandOptions) => {
     '--env',
     options.environmentId,
   ];
-  options.requestIds.forEach((requestId) => command.push('--request', requestId));
+  options.requestIds.forEach((requestId) => command.push('--item', requestId));
   const iterations = boundedInteger(options.iterations, 1, 1_000);
   const retries = boundedInteger(options.retries, 0, 10);
   const delayMs = boundedInteger(options.delayMs, 0, 30_000);
-  if (iterations > 1) command.push('--iterations', String(iterations));
+  if (iterations > 1) command.push('--iteration-count', String(iterations));
   if (retries > 0) command.push('--retries', String(retries));
   if (delayMs > 0) command.push('--delay-request', String(delayMs));
-  if (options.dataPath) command.push('--data', options.dataPath);
+  if (options.dataPath) command.push('--iteration-data', options.dataPath);
   if (options.bail) command.push('--bail');
   return command.map(quotePosixShellArgument).join(' ');
 };

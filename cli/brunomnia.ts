@@ -557,8 +557,8 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --request <name-or-id>]... [--env-var <key=value>]... [-n, --iterations N] [--retries N] [--delay-request MS] [-d, --data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
-  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [same options except --request/--delay-request]
+  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
+  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [same options except --item/--env-var/--delay-request]
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
 `;
@@ -608,11 +608,11 @@ const main = async () => {
     const environmentIdentifier = firstFlag('--env', '-e') ?? workspace.activeEnvironmentId;
     const selectedEnvironment: Environment = workspace.environments.find((candidate) => candidate.id === environmentIdentifier || candidate.name === environmentIdentifier) ?? workspace.environments[0] ?? fail('The workspace has no environment.');
     const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
-    const dataPath = firstFlag('--data', '-d');
-    const requestedRequests = flagValues('--request', '-i');
+    const dataPath = firstFlag('--iteration-data', '--data', '-d');
+    const requestedRequests = flagValues('--item', '--request', '-i');
     const environmentOverrides = flagValues('--env-var');
     const requestedDelay = firstFlag('--delay-request', '--delay');
-    if (subject === 'test' && requestedRequests.length) fail('--request is only available for run collection.');
+    if (subject === 'test' && requestedRequests.length) fail('--item/--request is only available for run collection.');
     if (subject === 'test' && environmentOverrides.length) fail('--env-var is only available for run collection.');
     if (subject === 'test' && requestedDelay !== undefined) fail('--delay-request is only available for run collection.');
     const selectedRequestIds = requestedRequests.map((requestIdentifier) => {
@@ -706,7 +706,7 @@ const main = async () => {
       return stored;
     };
     const executeWorkspaceHttp = async (request: ApiRequest, variables: Record<string, string>) => (await executeAndStore(request, variables, environment.id)).result;
-    const iterations = Math.min(1_000, Math.max(1, Math.floor(Number(firstFlag('--iterations', '-n') ?? 1) || 1)));
+    const iterations = Math.min(1_000, Math.max(1, Math.floor(Number(firstFlag('--iteration-count', '--iterations', '-n') ?? 1) || 1)));
     const retries = Math.min(10, Math.max(0, Math.floor(Number(flag('--retries') ?? 0) || 0)));
     const delayMs = Math.min(30_000, Math.max(0, Math.floor(Number(requestedDelay ?? 0) || 0)));
     const scriptTimeoutMs = Math.min(60_000, Math.max(1_000, Number(flag('--script-timeout') ?? 10_000)));
@@ -714,7 +714,7 @@ const main = async () => {
     let report: RunnerReport;
     if (subject === 'collection') {
       report = await runCollection(collection, environment, {
-        iterations, retries, bail: hasFlag('--bail'), delayMs,
+        iterations, retries, bail: hasFlag('--bail') || hasFlag('-b'), delayMs,
         scriptTimeoutMs,
         environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
         dataRows,
@@ -801,7 +801,7 @@ const main = async () => {
                 tests,
               });
               if (passed || attempt > retries) {
-                if (!passed && hasFlag('--bail')) { bailed = true; break outer; }
+                if (!passed && (hasFlag('--bail') || hasFlag('-b'))) { bailed = true; break outer; }
                 break;
               }
             }

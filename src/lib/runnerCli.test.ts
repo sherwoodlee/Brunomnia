@@ -13,7 +13,7 @@ describe('Runner CLI command preview', () => {
       delayMs: 125,
       dataPath: '/tmp/iteration data.csv',
       bail: true,
-    })).toBe("brunomnia run collection '/tmp/My Projects/orders' collection-orders --env environment-local --request request-third --request request-first --iterations 4 --retries 2 --delay-request 125 --data '/tmp/iteration data.csv' --bail");
+    })).toBe("brunomnia run collection '/tmp/My Projects/orders' collection-orders --env environment-local --item request-third --item request-first --iteration-count 4 --retries 2 --delay-request 125 --iteration-data '/tmp/iteration data.csv' --bail");
   });
 
   it('omits default controls and bounds numeric input like the runner', () => {
@@ -26,7 +26,7 @@ describe('Runner CLI command preview', () => {
       retries: -8,
       delayMs: 100_000,
       bail: false,
-    })).toBe('brunomnia run collection workspace.json collection --env environment --request request --delay-request 30000');
+    })).toBe('brunomnia run collection workspace.json collection --env environment --item request --delay-request 30000');
   });
 
   it('quotes empty, whitespace, apostrophe, and shell-control values', () => {

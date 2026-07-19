@@ -69,7 +69,7 @@ Use **Run via CLI** in a collection or folder Runner to preview a POSIX-shell co
 
 Browser-local projects have no filesystem path, so export all workspace data as Brunomnia JSON and enter the downloaded path. Browser file inputs likewise do not reveal a durable data-file path; when the Runner contains iteration data, save the decoded data as UTF-8 JSON/CSV and enter its path before copying. The copy action stays disabled while either required path is unresolved.
 
-Repeated `--request`/`-i` flags preserve the previewed order and omit unchecked requests. `--delay-request`/`--delay` uses the same bounded 0–30,000 ms delay before every desktop Runner attempt; `--iterations`/`-n`, `--data`/`-d`, and `--env`/`-e` have matching short aliases. Duplicate request names are rejected as ambiguous, so generated commands use stable request IDs. CLI script, file, script-network, template-file, and external-vault authorities remain separate explicit `--allow-*` grants and are never added silently by the preview.
+Repeated pinned `--item`/`-i` flags preserve the previewed order and omit unchecked requests. `--delay-request`/`--delay` uses the same bounded 0–30,000 ms delay before every desktop Runner attempt; `--iteration-count`/`-n`, `--iteration-data`/`-d`, `--bail`/`-b`, and `--env`/`-e` match pinned spellings. The earlier `--request`, `--iterations`, and `--data` forms remain compatible aliases. Duplicate request names are rejected as ambiguous, so generated commands use stable request IDs. CLI script, file, script-network, template-file, and external-vault authorities remain separate explicit `--allow-*` grants and are never added silently by the preview.
 
 ## CLI reporters
 
@@ -83,11 +83,11 @@ node bin/brunomnia.cjs run collection workspace.json "Collection" --reporter jso
 
 `run collection` accepts repeated `--env-var key=value` overrides. Values use URL-query decoding, later entries win, and overrides replace matching fields in every JSON/CSV iteration row. Without a data file, the overrides form one reusable iteration row. The flag is collection-only, matching pinned Inso.
 
-`run collection` also accepts `-t`/`--requestNamePattern <regex>`. It filters either the full collection or the requests selected by repeated `--request`/`-i` flags, preserves selected order, and exits with an error when nothing matches. `run test` keeps the same short flag for its separate `--testNamePattern` behavior, matching pinned Inso's subject-specific command surface.
+`run collection` also accepts `-t`/`--requestNamePattern <regex>`. It filters either the full collection or the requests selected by repeated `--item`/`-i` flags, preserves selected order, and exits with an error when nothing matches. `run test` keeps the same short flag for its separate `--testNamePattern` behavior, matching pinned Inso's subject-specific command surface.
 
 Supported names are `dot`, `list`, `min`, `progress`, `spec`, and `tap`, matching the names in the current Inso `run test` reference, plus machine-readable `json` and `junit`. `--output`/`-o` writes the selected artifact to a file; without it, the report goes to standard output. A failed attempt still makes the process exit non-zero regardless of reporter or destination.
 
-For `run collection`, `--bail` stops subsequent requests and iterations only after the current request exhausts its configured retries. For `run test`, it stops subsequent standalone tests after the current test exhausts its retries. Without it, the runner records the complete plan.
+For `run collection`, `--bail`/`-b` stops subsequent requests and iterations only after the current request exhausts its configured retries. For `run test`, it stops subsequent standalone tests after the current test exhausts its retries. Without it, the runner records the complete plan.
 
 ## Test-name filtering
 

@@ -1118,6 +1118,13 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Subject-specific CLI short flag, collection/test boundary, bundled help, and localhost execution smoke: [`cli/brunomnia.ts`](../cli/brunomnia.ts), [`bin/brunomnia.cjs`](../bin/brunomnia.cjs), and [`scripts/cli-runner-preview-smoke.mjs`](../scripts/cli-runner-preview-smoke.mjs)
 - Updated command examples, account-free CI documentation, and exact verification record: [`README.md`](../README.md), [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md), and [`docs/QA_MILESTONE_200.md`](QA_MILESTONE_200.md)
 
+## Milestone 201 acceptance evidence
+
+- Pinned Inso collection `--item`, `--iteration-count`, `--iteration-data`, and short bail-option audit: [`docs/QA_MILESTONE_201.md`](QA_MILESTONE_201.md)
+- Backward-compatible parser aliases and bundled help alignment: [`cli/brunomnia.ts`](../cli/brunomnia.ts) and [`bin/brunomnia.cjs`](../bin/brunomnia.cjs)
+- Run-via-CLI generation using pinned long names with focused shell-command regressions: [`src/lib/runnerCli.ts`](../src/lib/runnerCli.ts) and [`src/lib/runnerCli.test.ts`](../src/lib/runnerCli.test.ts)
+- Packaged selected-order/data/iteration aliases plus real short-bail failure smoke and exact verification record: [`scripts/cli-runner-preview-smoke.mjs`](../scripts/cli-runner-preview-smoke.mjs), [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md), and [`docs/QA_MILESTONE_201.md`](QA_MILESTONE_201.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).
