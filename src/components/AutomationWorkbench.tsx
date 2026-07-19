@@ -18,7 +18,7 @@ import { aggregateRunnerTimeline, discardRunnerReport, parseRunnerData, resolveR
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
 import { summarizeRunnerAssertions, summarizeRunnerHistory } from '../lib/runnerHistory';
 import { isRunnerItemFinished, summarizeRunnerLiveProgress } from '../lib/runnerFeedback';
-import { parseRunnerNumberDraft, runnerPlanSelectionState, toggleRunnerPlanSelection } from '../lib/runnerPlan';
+import { parseRunnerNumberDraft, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from '../lib/runnerPlan';
 import type { ScriptTestFilter } from '../lib/scriptTests';
 import { formatResponseTimeline } from '../lib/timeline';
 import { applyCollectionConfiguration, folderAncestors, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
@@ -514,6 +514,16 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
     }
   };
 
+  useEffect(() => {
+    const runFromShortcut = (event: KeyboardEvent) => {
+      if (!runnerShortcutShouldStart(event, workspace.preferences.shortcuts.send, Boolean(collection && selectedRequestIds.length && !running))) return;
+      event.preventDefault();
+      void start();
+    };
+    window.addEventListener('keydown', runFromShortcut, true);
+    return () => window.removeEventListener('keydown', runFromShortcut, true);
+  }, [collection, running, selectedRequestIds.length, start, workspace.preferences.shortcuts.send]);
+
   const usesCurrentRun = running || canceledRun;
   const visibleResults = selectedReport ? selectedReport.results : usesCurrentRun ? results : results.length ? results : displayedReport?.results ?? [];
   const visibleLiveItems = selectedReport?.liveItems?.length ? selectedReport.liveItems : usesCurrentRun ? liveItems : !selectedReport && liveItems.length ? liveItems : displayedReport?.liveItems?.length ? displayedReport.liveItems : visibleResults.map((result): RunnerLiveItem => ({
@@ -554,7 +564,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
         {!running ? <button className="secondary-action" disabled={!collection || !selectedRequestIds.length} onClick={() => setShowCliDialog(true)} type="button">Run via CLI</button> : null}
         {displayedReport && !running ? <button className="secondary-action" onClick={() => downloadReport('json')} type="button">Export JSON</button> : null}
         {displayedReport && !running ? <button className="secondary-action" onClick={() => downloadReport('junit')} type="button">Export JUnit</button> : null}
-        {!running ? <button className="primary-action" disabled={!collection || !selectedRequestIds.length} onClick={() => void start()} type="button">{targetFolder ? 'Run folder' : 'Run collection'}</button> : null}
+        {!running ? <button className="primary-action" disabled={!collection || !selectedRequestIds.length} onClick={() => void start()} title={`Run with ${runnerShortcutLabel(workspace.preferences.shortcuts.send)}`} type="button">{targetFolder ? 'Run folder' : 'Run collection'}</button> : null}
       </AutomationHeader>
       <div className="runner-grid">
         <aside className="runner-config">

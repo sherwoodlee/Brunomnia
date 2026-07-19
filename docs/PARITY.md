@@ -1022,6 +1022,14 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Updated account-free Runner input documentation: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
 - Exact verification record: [`docs/QA_MILESTONE_187.md`](QA_MILESTONE_187.md)
 
+## Milestone 188 acceptance evidence
+
+- Pinned Runner `request_send`, capture-phase key binding, active/empty disabled guard, and empty-state hotkey audit: [`docs/QA_MILESTONE_188.md`](QA_MILESTONE_188.md)
+- Pure configured-shortcut matching, repeat suppression, runnable-state gating, and display-label regressions: [`src/lib/runnerPlan.ts`](../src/lib/runnerPlan.ts) and [`src/lib/runnerPlan.test.ts`](../src/lib/runnerPlan.test.ts)
+- Window-capture Runner execution binding and current-shortcut Run tooltip: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx)
+- Updated account-free Runner shortcut documentation: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
+- Exact verification record: [`docs/QA_MILESTONE_188.md`](QA_MILESTONE_188.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).
