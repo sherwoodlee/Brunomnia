@@ -14,6 +14,8 @@ The configured **Send request** shortcut starts the open Runner from anywhere in
 
 Enabling **Use vertical layout** in Preferences stacks Runner configuration above Results on wide screens as well as narrow ones. With the preference off, Runner keeps its side-by-side desktop layout and still falls back to the same stacked presentation at the responsive breakpoint.
 
+On wide layouts, drag the separator between configuration and Results to resize the first pane from 35% through 90%. The separator is focusable: the axis-matching arrow keys move 2%, Shift+Arrow moves 10%, and Home/End select the limits. Forced vertical layout uses the same bounded control on the vertical axis; the automatic narrow-screen stack removes the horizontal splitter.
+
 Enable **Stop after first exhausted failure** to bail once a request has used all configured retry attempts and still fails. A failure that succeeds on retry does not bail. Manual cancellation and bail remain distinct report states.
 
 The optional 0–30,000 ms delay runs after an item becomes active but before each transport attempt, including the first request and retries. Skip or Cancel during that wait prevents the transport from starting; Brunomnia does not add a trailing delay after the final attempt.

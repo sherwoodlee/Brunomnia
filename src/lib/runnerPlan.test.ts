@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRunnerNumberDraft, runnerLayoutDirection, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from './runnerPlan';
+import { clampRunnerPaneSize, parseRunnerNumberDraft, runnerLayoutDirection, runnerPaneSizeFromKey, runnerPaneSizeFromPointer, runnerPlanSelectionState, runnerShortcutLabel, runnerShortcutShouldStart, toggleRunnerPlanSelection } from './runnerPlan';
 
 describe('Runner request-plan selection', () => {
   it('distinguishes empty, none, partial, and complete selection', () => {
@@ -40,5 +40,24 @@ describe('Runner request-plan selection', () => {
   it('maps the forced layout preference to the Runner pane direction', () => {
     expect(runnerLayoutDirection(false)).toBe('horizontal');
     expect(runnerLayoutDirection(true)).toBe('vertical');
+  });
+
+  it('bounds pointer-derived Runner pane sizes in either direction', () => {
+    const bounds = { left: 100, top: 50, width: 1_000, height: 800 };
+    expect(runnerPaneSizeFromPointer('horizontal', bounds, 600, 0)).toBe(50);
+    expect(runnerPaneSizeFromPointer('horizontal', bounds, 200, 0)).toBe(35);
+    expect(runnerPaneSizeFromPointer('vertical', bounds, 0, 650)).toBe(75);
+    expect(runnerPaneSizeFromPointer('vertical', bounds, 0, 900)).toBe(90);
+    expect(clampRunnerPaneSize(Number.NaN)).toBe(35);
+  });
+
+  it('resizes the first Runner pane with axis-aware keyboard controls', () => {
+    expect(runnerPaneSizeFromKey(50, 'horizontal', 'ArrowLeft')).toBe(48);
+    expect(runnerPaneSizeFromKey(50, 'horizontal', 'ArrowRight', 10)).toBe(60);
+    expect(runnerPaneSizeFromKey(50, 'vertical', 'ArrowUp')).toBe(48);
+    expect(runnerPaneSizeFromKey(50, 'vertical', 'ArrowDown', 10)).toBe(60);
+    expect(runnerPaneSizeFromKey(50, 'vertical', 'Home')).toBe(35);
+    expect(runnerPaneSizeFromKey(50, 'horizontal', 'End')).toBe(90);
+    expect(runnerPaneSizeFromKey(50, 'horizontal', 'Enter')).toBe(50);
   });
 });

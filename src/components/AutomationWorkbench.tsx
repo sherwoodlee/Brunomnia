@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from '../data/seed';
 import type {
@@ -40,6 +40,7 @@ import { CodeEditor } from './ProtocolEditors';
 import { RunnerDataDialog } from './RunnerDataDialog';
 import { RunnerCliDialog } from './RunnerCliDialog';
 import { RunnerAttemptCard } from './RunnerAttemptCard';
+import { RunnerPaneSplitter } from './RunnerPaneSplitter';
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
@@ -187,6 +188,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
   const [showDataDialog, setShowDataDialog] = useState(false);
   const [showCliDialog, setShowCliDialog] = useState(false);
   const [running, setRunning] = useState(false);
+  const [paneSize, setPaneSize] = useState(35);
   const [canceledRun, setCanceledRun] = useState(false);
   const [results, setResults] = useState<RunnerItemResult[]>([]);
   const [liveItems, setLiveItems] = useState<RunnerLiveItem[]>([]);
@@ -558,16 +560,17 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
   const consoleText = formatResponseTimeline(consoleTimeline);
   const consoleTruncated = visibleResults.some((result) => result.timeline?.truncated);
   const visibleKeepLog = usesCurrentRun ? keepLog : displayedReport?.keepLog ?? keepLog;
+  const paneDirection = runnerLayoutDirection(workspace.preferences.forceVerticalLayout);
   return (
-    <section className="automation-workbench runner-workbench" data-direction={runnerLayoutDirection(workspace.preferences.forceVerticalLayout)}>
+    <section className="automation-workbench runner-workbench" data-direction={paneDirection}>
       <AutomationHeader eyebrow="Test" title={targetFolder ? `Runner · ${targetFolder.name}` : 'Collection runner'} subtitle="Run requests in order with iteration data, scripts, assertions, delays, and retries.">
         {!running ? <button className="secondary-action" disabled={!collection || !selectedRequestIds.length} onClick={() => setShowCliDialog(true)} type="button">Run via CLI</button> : null}
         {displayedReport && !running ? <button className="secondary-action" onClick={() => downloadReport('json')} type="button">Export JSON</button> : null}
         {displayedReport && !running ? <button className="secondary-action" onClick={() => downloadReport('junit')} type="button">Export JUnit</button> : null}
         {!running ? <button className="primary-action" disabled={!collection || !selectedRequestIds.length} onClick={() => void start()} title={`Run with ${runnerShortcutLabel(workspace.preferences.shortcuts.send)}`} type="button">{targetFolder ? 'Run folder' : 'Run collection'}</button> : null}
       </AutomationHeader>
-      <div className="runner-grid">
-        <aside className="runner-config">
+      <div className="runner-grid" style={{ '--runner-pane-size': `${paneSize}%` } as CSSProperties}>
+        <aside className="runner-config" id="runner-config-pane">
           <label>Collection<select aria-label="Runner collection" disabled={running || Boolean(runnerTarget?.collectionId)} value={collection?.id ?? ''} onChange={(event) => { setCollectionId(event.target.value); setCanceledRun(false); setResults([]); setLiveItems([]); setSelectedReportId(''); }}>{workspace.collections.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.requests.length}</option>)}</select></label>
           {targetFolder ? <label>Folder<input aria-label="Runner folder" disabled value={targetFolder.name} /></label> : null}
           <label>Environment<select aria-label="Runner environment" disabled={running} value={environment.id} onChange={(event) => setEnvironmentId(event.target.value)}>{workspace.environments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -586,7 +589,8 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
           <div className="runner-data-control"><label>Iteration data<textarea aria-label="Runner iteration data" disabled={running} placeholder={'JSON array or CSV\norderId,status\nord_1,open'} value={data} onChange={(event) => { setData(event.target.value); setDataFileName(''); setDataFileEncoding('utf-8'); setDataFileBytesBase64(''); }} /></label><button disabled={running} onClick={() => setShowDataDialog(true)} type="button"><Icon name={dataFileName ? 'history' : 'import'} size={13} /> {dataFileName ? `View data · ${dataFileName}` : 'Upload data'}</button></div>
           <p>Dataset values override environment variables for each iteration.</p>
         </aside>
-        <div className="runner-results">
+        <RunnerPaneSplitter direction={paneDirection} onChange={setPaneSize} value={paneSize} />
+        <div className="runner-results" id="runner-results-pane">
           <header><div className="runner-heading"><small>{running ? 'Run in progress' : displayedReport ? `${selectedReport ? 'Selected run' : 'Last run'} · ${new Date(displayedReport.finishedAt).toLocaleString()}` : 'Ready to run'}</small><h2>{collection?.name ?? 'No collection'}</h2>{visibleReportSummary?.durationMs ? <span className="runner-duration-tag" title={`${visibleReportSummary.durationMs} ms`}>{visibleReportSummary.duration}</span> : null}<nav aria-label="Runner result views" className="runner-view-tabs"><button aria-pressed={resultPane === 'results'} onClick={() => setResultPane('results')} type="button">Results <span className={`runner-result-count ${resultAssertions.tone}`} title={`${resultAssertions.passed} of ${resultAssertions.total} assertions passed`}>{resultAssertions.passed} / {resultAssertions.total}</span></button><button aria-pressed={resultPane === 'history'} onClick={() => setResultPane('history')} type="button">History{scopedReports.length ? ` · ${scopedReports.length}` : ''}</button><button aria-pressed={resultPane === 'console'} onClick={() => setResultPane('console')} type="button">Console</button></nav></div><div className="runner-stats"><strong>{visibleLiveItems.length}</strong><span>Planned</span><strong className="active">{liveCount('running')}</strong><span>Running</span><strong className="ok">{finishedCount}</strong><span>Finished</span><strong>{liveCount('skipped')}</strong><span>Skipped</span><strong>{liveCount('canceled')}</strong><span>Canceled</span></div></header>
           {resultPane === 'results' ? <div className="runner-attempt-list">{showLiveProgress ? <div className="runner-live-progress"><span>{liveProgress.label}</span>{running ? <button onClick={cancelRun} type="button">Cancel all</button> : null}</div> : <div className="runner-result-filters"><nav aria-label="Filter Runner assertion results">{(['all', 'passed', 'failed', 'skipped'] as ScriptTestFilter[]).map((filter) => <button aria-pressed={resultStatusFilter === filter} key={filter} onClick={() => setResultStatusFilter(filter)} type="button">{filter[0].toUpperCase() + filter.slice(1)}</button>)}</nav><input aria-label="Filter test results" onChange={(event) => setResultNameFilter(event.target.value)} placeholder="Filter test results with name" title="Filter test results" type="text" value={resultNameFilter} /></div>}{visibleLiveItemGroups.map((group) => <section className="runner-iteration-group" key={group.iteration}><header><strong>Iteration {group.iteration}</strong><span>{group.items.length} {group.items.length === 1 ? 'attempt' : 'attempts'}</span></header><div>{group.items.map((item) => <RunnerAttemptCard defaultExpanded={!running} item={item} key={`${item.key}-${running}`} nameFilter={resultNameFilter} onSkip={running && !isRunnerItemFinished(item.status) ? () => skipItem(item.key) : undefined} result={resultForItem(item)} statusFilter={resultStatusFilter} />)}</div></section>)}{!visibleLiveItems.length ? <div className="empty-state compact"><Icon name="history" size={28} /><strong>{!usesCurrentRun && displayedReport ? 'No results from this run' : 'Run results will appear here'}</strong><span>{!usesCurrentRun && displayedReport ? 'Add test cases in scripts and run them to see results.' : 'Select requests and run them to see results.'}</span></div> : null}</div> : resultPane === 'history' ? <section className="runner-history" aria-label="Runner history"><div className="runner-history-head"><span>Source</span><span>Iterations</span><span>Duration</span><span>Total</span><span>Passed</span><span>Failed</span><span>Skipped</span><span>Delete</span></div>{scopedReports.map((report) => { const summary = summarizeRunnerHistory(report); return <article className={selectedReportId === report.id ? 'selected' : ''} key={report.id}><span><button onClick={() => openReport(report.id)} type="button"><i className={summary.failed ? 'failed' : 'passed'} /><strong>{report.sourceName ?? report.collectionName}</strong><small title={new Date(report.startedAt).toLocaleString()}>{new Date(report.startedAt).toLocaleString()}</small></button></span><span>{report.iterations}</span><span title={`${summary.durationMs} ms`}>{summary.duration}</span><span>{summary.total}</span><span>{summary.passed}</span><span>{summary.failed}</span><span>{summary.skipped}</span><span><button aria-label={`Delete run from ${new Date(report.startedAt).toLocaleString()}`} className="runner-history-delete" onClick={() => deleteReport(report.id)} type="button"><Icon name="trash" size={13} /></button></span></article>; })}{!scopedReports.length ? <div className="empty-state compact"><Icon name="history" size={28} /><strong>No saved runs</strong><span>Completed runs for this Runner appear here.</span></div> : null}</section> : <section className="runner-console" aria-label="Runner console">{consoleText ? <pre>{consoleText}</pre> : <div className="empty-state compact"><Icon name="history" size={28} /><strong>No runner logs</strong><span>{visibleKeepLog ? 'Run the selected requests to capture local timeline evidence.' : 'Log retention was disabled for this run.'}</span></div>}{consoleTruncated ? <p>Console evidence reached the bounded local retention limit and was truncated.</p> : null}</section>}
         </div>
