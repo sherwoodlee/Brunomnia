@@ -41,6 +41,7 @@ Production preview: `http://127.0.0.1:4173/` in the Codex in-app browser.
 ## Deliberate bounds
 
 - Git credentials use the installed Git/SSH configuration; provider-specific authentication and repository onboarding are not claimed.
-- Commit history UI, rebase/cherry-pick, automatic project discovery, and cross-device collaboration remain open.
+- Bounded commit history arrives in Milestone 61. Provider-specific authentication/onboarding, credential validation, and automatic repository discovery remain open.
+- Milestone 221 later confirms that rebase and cherry-pick are not user-facing standard Git Sync capabilities and removes them as parity requirements.
 - Plugins must be dependency-free or pre-bundled CommonJS; arbitrary npm packages, native modules, remote installation, file watching, and full ecosystem compatibility are not claimed.
 - Plugin request/response integration covers HTTP, GraphQL, gRPC, and non-streaming collection runs. Streaming-specific hooks and the complete Insomnia context/hook/template-argument surface remain tracked in [PARITY.md](PARITY.md).

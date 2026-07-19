@@ -41,4 +41,6 @@ Rendered QA was not run because this task's standing direction prohibited the in
 
 ## Acceptance boundary
 
-Brunomnia reads commits reachable from the current local `HEAD` and does not fetch. It does not yet aggregate remote branches, render a commit graph, search or paginate beyond the bounded call, display full message bodies/signatures, render binary patches, or provide checkout/revert/reset actions from a commit. Rebase, cherry-pick, provider-specific authentication/onboarding, automatic project discovery, and broader Git edge-case fixtures remain open in the parity ledger.
+Brunomnia reads commits reachable from the current local `HEAD` and does not fetch. It does not yet aggregate remote branches, render a commit graph, search or paginate beyond the bounded call, display full message bodies/signatures, render binary patches, or provide checkout/revert/reset actions from a commit. Provider-specific authentication/onboarding, credential validation, and automatic repository discovery remain open in the parity ledger.
+
+Milestone 221 correction: a later audit of the same pinned source confirms that rebase and cherry-pick are not user-facing standard Git Sync capabilities, and that its history route accepts no arbitrary branch/ref selector. Those items and broader unspecified edge-case fixtures are therefore not parity requirements.
