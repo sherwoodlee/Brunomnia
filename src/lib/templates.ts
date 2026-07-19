@@ -1,5 +1,6 @@
 import type { ApiRequest, CookieRecord, StoredResponse } from '../types';
-import { cookieValueForUrl } from './cookies';
+import { cookiesForUrl } from './cookies';
+import { renderFakerValue } from './faker';
 
 export type TemplateContext = {
   variables: Record<string, string>;
@@ -9,6 +10,7 @@ export type TemplateContext = {
   now?: Date;
   uuid?: () => string;
   prompt?: (message: string, defaultValue?: string) => string | null;
+  readFile?: (path: string) => Promise<string>;
   customTag?: (name: string, args: string[]) => Promise<string | undefined>;
   externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
 };
@@ -40,6 +42,7 @@ const tagArguments = (source: string): string[] => {
 const bytesToHex = (bytes: Uint8Array) => [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 const bytesToBase64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
 const utf8 = (value: string) => new TextEncoder().encode(value);
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 const digest = async (algorithm: string, value: string, encoding: string) => {
   const names: Record<string, AlgorithmIdentifier> = { sha1: 'SHA-1', sha256: 'SHA-256', sha384: 'SHA-384', sha512: 'SHA-512' };
@@ -49,18 +52,23 @@ const digest = async (algorithm: string, value: string, encoding: string) => {
   return encoding.toLowerCase() === 'base64' ? bytesToBase64(output) : bytesToHex(output);
 };
 
-const jsonPath = (body: string, path: string) => {
+const jsonPath = async (body: string, path: string) => {
   if (!path || path === '$') return body;
-  let value: unknown = JSON.parse(body);
-  const normalized = path.replace(/^\$\.?/, '').replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
-  for (const key of normalized.split('.').filter(Boolean)) {
-    if (value === null || typeof value !== 'object') return '';
-    value = (value as Record<string, unknown>)[key];
+  let value: JsonValue;
+  try { value = JSON.parse(body); } catch (error) { throw new Error(`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  let results: unknown[];
+  try {
+    const { JSONPath } = await import('jsonpath-plus');
+    results = JSONPath({ json: value, path, eval: 'safe', wrap: true }) as unknown[];
+  } catch {
+    throw new Error(`Invalid JSONPath query: ${path}`);
   }
-  return typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value);
+  if (!results.length) throw new Error(`JSONPath query returned no results: ${path}`);
+  const result = results[0];
+  return typeof result === 'string' ? result : result === undefined ? '' : JSON.stringify(result);
 };
 
-const responseValue = (context: TemplateContext, attribute: string, requestId: string, filter: string) => {
+const responseValue = async (context: TemplateContext, attribute: string, requestId: string, filter: string) => {
   const response = context.responses.find((candidate) => candidate.requestId === requestId || candidate.requestName === requestId);
   if (!response) throw new Error(`No stored response exists for '${requestId}'. Send that request before resolving this template.`);
   if (attribute === 'body') return filter ? jsonPath(response.body, filter) : response.body;
@@ -70,42 +78,44 @@ const responseValue = (context: TemplateContext, attribute: string, requestId: s
   return '';
 };
 
-const faker = (name: string, uuid: () => string, now: Date) => {
-  const firstNames = ['Avery', 'Jordan', 'Morgan', 'Riley', 'Taylor'];
-  const lastNames = ['Chen', 'Garcia', 'Johnson', 'Patel', 'Williams'];
-  const pick = <T,>(values: T[]) => values[Math.floor(Math.random() * values.length)];
-  if (name === 'guid' || name === 'randomUUID') return uuid();
-  if (name === 'randomInt') return String(Math.floor(Math.random() * 1000));
-  if (name === 'randomBoolean') return String(Math.random() >= 0.5);
-  if (name === 'randomFirstName') return pick(firstNames);
-  if (name === 'randomLastName') return pick(lastNames);
-  if (name === 'randomFullName') return `${pick(firstNames)} ${pick(lastNames)}`;
-  if (name === 'randomEmail') return `${pick(firstNames).toLowerCase()}.${pick(lastNames).toLowerCase()}@example.com`;
-  if (name === 'randomDateFuture') return new Date(now.getTime() + 86_400_000 * (1 + Math.floor(Math.random() * 365))).toISOString();
-  if (name === 'randomDatePast') return new Date(now.getTime() - 86_400_000 * (1 + Math.floor(Math.random() * 365))).toISOString();
-  if (name === 'randomStreetAddress') return `${1 + Math.floor(Math.random() * 9999)} Market Street`;
-  throw new Error(`Faker variable '${name}' is not supported.`);
-};
-
 const resolveRawTag = async (name: string, args: string[], context: TemplateContext) => {
   const now = context.now ?? new Date();
   const uuid = context.uuid ?? (() => crypto.randomUUID());
   if (name === 'uuid') return uuid();
-  if (name === 'timestamp') {
+  if (name === 'timestamp' || name === 'now') {
     const format = args[0]?.toLowerCase();
-    if (format === 'milliseconds' || format === 'ms') return String(now.getTime());
+    if (format === 'milliseconds' || format === 'millis' || format === 'ms') return String(now.getTime());
     if (format === 'iso-8601' || format === 'iso') return now.toISOString();
     return String(Math.floor(now.getTime() / 1000));
   }
   if (name === 'base64') {
-    const [operation = 'encode', value = ''] = args;
-    return operation === 'decode' ? new TextDecoder().decode(Uint8Array.from(atob(value), (character) => character.charCodeAt(0))) : bytesToBase64(utf8(value));
+    const operation = args[0] || 'encode';
+    const kind = args.length >= 3 ? args[1] || 'normal' : 'normal';
+    const value = args.length >= 3 ? args[2] || '' : args[1] || '';
+    if (!['encode', 'decode'].includes(operation)) throw new Error(`Invalid Base64 action '${operation}'.`);
+    if (!['normal', 'url', 'hex'].includes(kind)) throw new Error(`Invalid Base64 kind '${kind}'.`);
+    if (operation === 'encode') {
+      const bytes = kind === 'hex'
+        ? Uint8Array.from(value.match(/.{1,2}/g) ?? [], (byte) => Number.parseInt(byte, 16))
+        : utf8(value);
+      const encoded = bytesToBase64(bytes);
+      return kind === 'url' ? encoded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : encoded;
+    }
+    const normalized = kind === 'url' ? value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=') : value;
+    const bytes = Uint8Array.from(atob(normalized), (character) => character.charCodeAt(0));
+    return kind === 'hex' ? bytesToHex(bytes) : new TextDecoder().decode(bytes);
   }
   if (name === 'hash') return digest(args[0] || 'sha256', args[2] ?? '', args[1] || 'hex');
   if (name === 'jsonpath') return jsonPath(args[0] ?? '', args[1] ?? '$');
   if (name === 'cookie') {
-    const requestUrl = context.request.url.replace(environmentPattern, (match, variable: string) => context.variables[variable.trim()] ?? match);
-    return cookieValueForUrl(context.cookies, requestUrl, args[0] ?? '', now);
+    const explicitUrl = args.length > 1;
+    const requestUrl = (explicitUrl ? args[0] : context.request.url)
+      .replace(environmentPattern, (match, variable: string) => context.variables[variable.trim()] ?? match);
+    const cookieName = args[explicitUrl ? 1 : 0] ?? '';
+    const matching = cookiesForUrl(context.cookies, requestUrl, now);
+    const cookie = matching.find((candidate) => candidate.name === cookieName);
+    if (!cookie) throw new Error(`No cookie with name '${cookieName}' exists for '${requestUrl}'.`);
+    return cookie.value;
   }
   if (name === 'response') return responseValue(context, args[0] ?? 'body', args[1] ?? '', args[2] ?? '');
   if (name === 'request') {
@@ -116,7 +126,12 @@ const resolveRawTag = async (name: string, args: string[], context: TemplateCont
     if (attribute === 'body') return context.request.body;
     return '';
   }
-  if (name === 'faker') return faker(args[0] ?? 'guid', uuid, now);
+  if (name === 'faker') return renderFakerValue(args[0] ?? 'guid');
+  if (name === 'file') {
+    if (!args[0]) throw new Error('No file selected.');
+    if (!context.readFile) throw new Error('File template tags require desktop file access and an allowed data folder.');
+    return context.readFile(args[0]);
+  }
   if (name === 'prompt') {
     const prompt = context.prompt ?? (typeof globalThis.prompt === 'function' ? globalThis.prompt.bind(globalThis) : undefined);
     if (!prompt) throw new Error('Prompt template tags require an interactive app window.');
@@ -138,23 +153,39 @@ const resolveRawTag = async (name: string, args: string[], context: TemplateCont
   throw new Error(`Template tag '${name}' is not supported.`);
 };
 
-export const renderTemplate = async (source: string, context: TemplateContext): Promise<string> => {
-  let output = source.replace(environmentPattern, (match, name: string) => {
-    const trimmed = name.trim();
-    if (trimmed.startsWith('faker.')) return faker(trimmed.slice(6), context.uuid ?? (() => crypto.randomUUID()), context.now ?? new Date());
-    if (trimmed === '$randomUUID' || trimmed === '$guid') return (context.uuid ?? (() => crypto.randomUUID()))();
-    if (trimmed === '$timestamp') return String(Math.floor((context.now ?? new Date()).getTime() / 1000));
-    if (trimmed === '$isoTimestamp') return (context.now ?? new Date()).toISOString();
-    if (trimmed.startsWith('$random')) return faker(trimmed.slice(1), context.uuid ?? (() => crypto.randomUUID()), context.now ?? new Date());
-    return context.variables[trimmed] ?? match;
-  });
-  rawTagPattern.lastIndex = 0;
-  let match = rawTagPattern.exec(output);
+const renderEnvironmentValues = async (source: string, context: TemplateContext) => {
+  let output = source;
+  const pattern = new RegExp(environmentPattern.source, 'g');
+  let match = pattern.exec(output);
   while (match) {
-    const replacement = await resolveRawTag(match[1], tagArguments(match[2]), context);
+    const trimmed = match[1].trim();
+    let replacement = match[0];
+    if (trimmed.startsWith('faker.')) {
+      const fakerName = trimmed.slice(6);
+      replacement = context.uuid && (fakerName === 'guid' || fakerName === 'randomUUID') ? context.uuid() : await renderFakerValue(fakerName);
+    } else if (trimmed === '$randomUUID' || trimmed === '$guid') replacement = (context.uuid ?? (() => crypto.randomUUID()))();
+    else if (trimmed === '$timestamp') replacement = String(Math.floor((context.now ?? new Date()).getTime() / 1000));
+    else if (trimmed === '$isoTimestamp') replacement = (context.now ?? new Date()).toISOString();
+    else if (trimmed.startsWith('$random')) {
+      const fakerName = trimmed.slice(1);
+      replacement = context.uuid && fakerName === 'randomUUID' ? context.uuid() : await renderFakerValue(fakerName);
+    } else replacement = context.variables[trimmed] ?? match[0];
     output = `${output.slice(0, match.index)}${replacement}${output.slice(match.index + match[0].length)}`;
-    rawTagPattern.lastIndex = match.index + replacement.length;
-    match = rawTagPattern.exec(output);
+    pattern.lastIndex = match.index + replacement.length;
+    match = pattern.exec(output);
+  }
+  return output;
+};
+
+export const renderTemplate = async (source: string, context: TemplateContext): Promise<string> => {
+  let output = await renderEnvironmentValues(source, context);
+  const pattern = new RegExp(rawTagPattern.source, 'g');
+  let match = pattern.exec(output);
+  while (match) {
+    const replacement = String(await resolveRawTag(match[1], tagArguments(match[2]), context));
+    output = `${output.slice(0, match.index)}${replacement}${output.slice(match.index + match[0].length)}`;
+    pattern.lastIndex = match.index + replacement.length;
+    match = pattern.exec(output);
   }
   return output;
 };

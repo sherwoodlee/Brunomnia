@@ -80,7 +80,7 @@ Compatibility bounds remain explicit: nested source folders are represented in f
 | Script/test API | Complete baseline | Environment/base/collection/local/iteration variable APIs, replacement helpers, request getters/setters, response header/cookie helpers, console capture, and Jest/Chai-style expectation aliases |
 | Interoperability and migration | Complete | Workspace v5, advanced Insomnia/Postman auth mapping, Insomnia v4/v5 cookie-jar round trips, and collision-safe cookie import |
 
-Compatibility bounds at Milestone 5 were explicit: OAuth 2 authorization used a copied URL and manual returned code/token. Milestone 88 adds native system-browser loopback capture while retaining that browser-development fallback. Netrc contents were project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, and arbitrary Spectral JavaScript/functions/remote `extends` remained deferred. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. Milestone 109 closes WSS client identity and validation overrides, and Milestone 110 closes custom WebSocket proxy transport; headless CLI streaming/auth parity remains later closure work. The later permission-bounded scripting expansion is recorded in Milestone 12.
+Compatibility bounds at Milestone 5 were explicit: OAuth 2 authorization used a copied URL and manual returned code/token. Milestone 88 adds native system-browser loopback capture while retaining that browser-development fallback. Netrc contents were project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, and arbitrary Spectral JavaScript/functions/remote `extends` remained deferred. Milestone 131 later closes the File/external-vault/Faker/JSONPath dynamic-variable gaps. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. Milestone 109 closes WSS client identity and validation overrides, and Milestone 110 closes custom WebSocket proxy transport; headless CLI streaming/auth parity remains later closure work. The later permission-bounded scripting expansion is recorded in Milestone 12.
 
 ## Milestone 6 — Git Sync and extensibility (complete)
 
@@ -684,7 +684,7 @@ Compatibility bounds remain explicit: debug/HAR artifacts are textual diagnostic
 | Executable coverage | Complete baseline | Focused tests cover JSONPath traversal, wildcards, recursive descent, invalid selectors, language detection, filter-history bounds, chronological grouping, and hostile persisted metadata |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 46 verification](QA_MILESTONE_46.md) |
 
-Compatibility bounds remain explicit: the dependency-free JSONPath baseline does not yet implement predicates, unions, slices, or script expressions. XPath execution depends on the standards-based desktop/browser DOM rather than the Node-only test runner. Response filter metadata is bounded but remains part of the local workspace store. The pinned current Insomnia history component has no response-comparison action, so the earlier generic comparison gap is removed rather than implemented without source evidence. Rendered/browser interaction QA remains omitted by standing direction.
+Compatibility bounds at Milestone 46 were explicit: the dependency-free JSONPath baseline did not implement predicates, unions, slices, or script expressions. Milestone 131 later replaces it with JSONPath Plus 10.4 and closes those selector gaps. XPath execution depends on the standards-based desktop/browser DOM rather than the Node-only test runner. Response filter metadata is bounded but remains part of the local workspace store. The pinned current Insomnia history component has no response-comparison action, so the earlier generic comparison gap is removed rather than implemented without source evidence. Rendered/browser interaction QA remains omitted by standing direction.
 
 ## Milestone 47 — large-response preview safety (complete baseline)
 
@@ -1944,7 +1944,22 @@ Compatibility bounds remain explicit: Milestone 130 later closes request-plugin 
 
 Compatibility bounds remain explicit: Digest, NTLM, Netrc, and IAM remain transport/challenge-managed rather than static HAR Authorization headers. Pinned Insomnia does not expose converter options, dependency installation, target-program validation, or snippet execution, so those are not parity requirements. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 131 — remaining parity closure and release hardening
+## Milestone 131 — complete dynamic variables and guided tags (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia uses `@faker-js/faker` 9.7 for 118 named generators, JSONPath Plus 10.x with its safe evaluator, mediated UTF-8 File reads, local/external/plugin tags, and guided tag definitions rather than handwritten approximations |
+| Exact Faker engine | Complete | The shared renderer lazily loads Faker 9.7 and maps all 118 pinned names to the same modules/functions, preserving output categories, locale corpus, distributions, image strings, and date behavior without network calls |
+| Full JSONPath Plus | Complete | Dynamic tags, stored-response chaining, and response-preview filters use JSONPath Plus 10.4 safe predicates, unions, slices, recursive descent, type selectors, and expressions; tags select the first match while previews retain every match |
+| Confined File tags | Complete | Desktop File tags reuse the off-by-default file grant, canonical allowed roots, symlink/traversal rejection, regular-file checks, 5 MB bound, and UTF-8 decoding across primary/plugin/integration sends, OAuth/schema traffic, collection runs, and generated code |
+| Guided builder | Complete | The account-free Tags dialog builds thirteen built-in/external families and appends or replaces compatible syntax across names/values for URL, body, parameters, headers, form/multipart, authentication, transport, GraphQL variables, and gRPC fields |
+| Shared safety | Complete | Concurrent field rendering uses independent parser state; JSONPath expressions use the package safe evaluator, File access exposes one mediated read callback, and browser/ungranted/out-of-root access fails explicitly |
+| Executable coverage | Complete | All 118 Faker functions, advanced JSONPath selectors/failures, Base64 variants, timestamp aliases, explicit cookie URLs, File mediation, concurrent raw tags, destination enumeration/insertion, and shared HTTP/code-generation regressions pass |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [security boundaries](SECURITY_AND_SYNC.md), [parity ledger](PARITY.md), and [Milestone 131 verification](QA_MILESTONE_131.md); the dynamic-variables row is Complete |
+
+Compatibility bounds remain explicit: File tags are desktop-only and inherit the existing 5 MB approved-root safety ceiling. gRPC/stream execution and the portable CLI do not yet resolve external-vault or File tags. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 132 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

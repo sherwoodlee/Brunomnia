@@ -28,9 +28,16 @@ describe('response body filters', () => {
     expect(queryJsonPath(body, '$..id')).toEqual([1, 2, 3]);
   });
 
+  it('supports predicates, unions, and slices with safe JSONPath evaluation', () => {
+    const body = JSON.stringify({ items: [{ id: 1, active: true }, { id: 2, active: false }, { id: 3, active: true }] });
+    expect(queryJsonPath(body, '$.items[?(@.active)].id')).toEqual([1, 3]);
+    expect(queryJsonPath(body, '$.items[0,2].id')).toEqual([1, 3]);
+    expect(queryJsonPath(body, '$.items[0:2].id')).toEqual([1, 2]);
+  });
+
   it('reports invalid JSONPath without mutating the response', () => {
     const original = response('{"items":[1]}');
-    expect(applyResponseBodyFilter(original, '$.items[?(@ > 0)]')).toMatchObject({ contents: '[]', matchCount: null });
+    expect(applyResponseBodyFilter(original, '$.items[?(@ >)]')).toMatchObject({ contents: '[]', matchCount: null });
     expect(original.body).toBe('{"items":[1]}');
   });
 

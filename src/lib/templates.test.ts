@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
 import type { StoredResponse } from '../types';
+import { fakerFunctionNames, renderFakerValue } from './faker';
 import { renderTemplate } from './templates';
 
 const request = cloneSeedWorkspace().collections[0].requests[0];
@@ -42,5 +43,50 @@ describe('template engine', () => {
     const externalSecret = async (input: unknown) => { calls.push(input); return 'resolved-secret'; };
     await expect(renderTemplate("{% external 'hashicorp', 'secret/orders', '', 'token', 'latest' %}", { variables: {}, cookies: [], responses: [], request, externalSecret })).resolves.toBe('resolved-secret');
     expect(calls[0]).toMatchObject({ provider: 'hashicorp', reference: 'secret/orders', field: 'token', version: 'latest' });
+  });
+
+  it('matches the pinned 118-function Faker registry', async () => {
+    expect(fakerFunctionNames).toHaveLength(118);
+    expect(fakerFunctionNames).toEqual(expect.arrayContaining(['randomAlphaNumeric', 'randomBankAccountIban', 'randomDatabaseEngine', 'randomImageDataUri', 'randomLoremLines']));
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      for (const name of fakerFunctionNames) expect(await renderFakerValue(name)).not.toBe('');
+    } finally {
+      warning.mockRestore();
+    }
+    await expect(renderFakerValue('notARealFakerFunction')).rejects.toThrow("Faker variable 'notARealFakerFunction' is not supported");
+  });
+
+  it('supports safe JSONPath filters, recursive descent, slices, unions, and explicit failures', async () => {
+    const context = { variables: {}, cookies: [], responses: [], request };
+    const source = JSON.stringify({ store: { book: [{ title: 'one', price: 8 }, { title: 'two', price: 12 }, { title: 'three', price: 6 }], bicycle: { price: 19 } } });
+    await expect(renderTemplate(`{% jsonpath '${source}', '$.store.book[?(@.price < 10)].title' %}`, context)).resolves.toBe('one');
+    await expect(renderTemplate(`{% jsonpath '${source}', '$..price' %}`, context)).resolves.toBe('8');
+    await expect(renderTemplate(`{% jsonpath '${source}', '$.store.book[0:2].title' %}`, context)).resolves.toBe('one');
+    await expect(renderTemplate(`{% jsonpath '${source}', '$.store.book[0,2].title' %}`, context)).resolves.toBe('one');
+    await expect(renderTemplate(`{% jsonpath '${source}', '$.missing' %}`, context)).rejects.toThrow('JSONPath query returned no results');
+    await expect(renderTemplate("{% jsonpath '{', '$.id' %}", context)).rejects.toThrow('Invalid JSON');
+  });
+
+  it('supports pinned Base64 variants, timestamp aliases, explicit cookie URLs, and confined file reads', async () => {
+    const cookies = [{ id: 'session', name: 'session', value: 'abc', domain: 'api.example.com', path: '/api', secure: true, httpOnly: true, sameSite: 'lax' as const, hostOnly: true, createdAt: '2026-07-16T12:00:00Z' }];
+    const calls: string[] = [];
+    const context = { variables: {}, cookies, responses: [], request, now: new Date('2026-07-16T12:00:00Z'), readFile: async (path: string) => { calls.push(path); return 'file contents'; } };
+    await expect(renderTemplate("{% base64 'encode', 'url', 'hello?' %}", context)).resolves.toBe('aGVsbG8_');
+    await expect(renderTemplate("{% base64 'decode', 'url', 'aGVsbG8_' %}", context)).resolves.toBe('hello?');
+    await expect(renderTemplate("{% base64 'encode', 'hex', '6869' %}", context)).resolves.toBe('aGk=');
+    await expect(renderTemplate("{% base64 'decode', 'hex', 'aGk=' %}", context)).resolves.toBe('6869');
+    await expect(renderTemplate("{% now 'millis' %}/{% now 'unix' %}", context)).resolves.toBe('1784203200000/1784203200');
+    await expect(renderTemplate("{% cookie 'https://api.example.com/api/items', 'session' %}", context)).resolves.toBe('abc');
+    await expect(renderTemplate("{% file '/approved/data.txt' %}", context)).resolves.toBe('file contents');
+    expect(calls).toEqual(['/approved/data.txt']);
+    await expect(renderTemplate("{% file '/blocked.txt' %}", { ...context, readFile: undefined })).rejects.toThrow('desktop file access');
+    await expect(renderTemplate("{% cookie 'https://other.example.com', 'session' %}", context)).rejects.toThrow("No cookie with name 'session'");
+  });
+
+  it('renders raw tags independently across concurrent request fields', async () => {
+    const context = { variables: {}, cookies: [], responses: [], request };
+    const outputs = await Promise.all(Array.from({ length: 20 }, (_, index) => renderTemplate(`field-${index}:{% base64 'encode', 'value-${index}' %}`, context)));
+    expect(outputs).toEqual(Array.from({ length: 20 }, (_, index) => `field-${index}:${btoa(`value-${index}`)}`));
   });
 });

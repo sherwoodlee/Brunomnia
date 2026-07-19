@@ -1,86 +1,15 @@
 import type { HttpResponse } from '../types';
+import { JSONPath } from 'jsonpath-plus';
 
 export type ResponseFilterLanguage = 'json' | 'xml' | '';
 export type ResponseFilterResult = { contents: string; error: string; matchCount: number | null };
 
-type PathToken = {
-  kind: 'property' | 'index' | 'wildcard';
-  key?: string;
-  index?: number;
-  recursive: boolean;
-};
-
-const decodeProperty = (value: string) => {
-  const trimmed = value.trim();
-  if (trimmed.startsWith('"') && trimmed.endsWith('"')) return JSON.parse(trimmed) as string;
-  if (trimmed.startsWith("'") && trimmed.endsWith("'")) return trimmed.slice(1, -1).replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-  throw new Error(`Unsupported bracket selector [${value}]`);
-};
-
-const parseJsonPath = (source: string): PathToken[] => {
-  const path = source.trim();
-  if (!path.startsWith('$')) throw new Error('JSONPath must start with $.');
-  const tokens: PathToken[] = [];
-  let index = 1;
-  while (index < path.length) {
-    let recursive = false;
-    if (path.startsWith('..', index)) { recursive = true; index += 2; }
-    else if (path[index] === '.') index += 1;
-    else if (path[index] !== '[') throw new Error(`Unexpected JSONPath token at position ${index + 1}.`);
-
-    if (path[index] === '[') {
-      const end = path.indexOf(']', index + 1);
-      if (end < 0) throw new Error('JSONPath bracket selector is not closed.');
-      const selector = path.slice(index + 1, end).trim();
-      if (selector === '*') tokens.push({ kind: 'wildcard', recursive });
-      else if (/^\d+$/.test(selector)) tokens.push({ kind: 'index', index: Number(selector), recursive });
-      else tokens.push({ kind: 'property', key: decodeProperty(selector), recursive });
-      index = end + 1;
-      continue;
-    }
-
-    if (path[index] === '*') {
-      tokens.push({ kind: 'wildcard', recursive });
-      index += 1;
-      continue;
-    }
-    const start = index;
-    while (index < path.length && path[index] !== '.' && path[index] !== '[') index += 1;
-    const key = path.slice(start, index);
-    if (!key) throw new Error(`Missing JSONPath property at position ${start + 1}.`);
-    tokens.push({ kind: 'property', key, recursive });
-  }
-  return tokens;
-};
-
-const children = (value: unknown): unknown[] => Array.isArray(value)
-  ? value
-  : value !== null && typeof value === 'object' ? Object.values(value as Record<string, unknown>) : [];
-
-const directMatches = (value: unknown, token: PathToken): unknown[] => {
-  if (token.kind === 'wildcard') return children(value);
-  if (token.kind === 'index') return Array.isArray(value) && token.index! < value.length ? [value[token.index!]] : [];
-  if (value !== null && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, token.key!)) {
-    return [(value as Record<string, unknown>)[token.key!]];
-  }
-  return [];
-};
-
-const recursiveMatches = (value: unknown, token: PathToken, output: unknown[]) => {
-  output.push(...directMatches(value, token));
-  children(value).forEach((child) => recursiveMatches(child, token, output));
-};
-
-export const queryJsonPath = (body: string, path: string): unknown[] => {
-  const tokens = parseJsonPath(path);
-  let values: unknown[] = [JSON.parse(body)];
-  tokens.forEach((token) => {
-    const next: unknown[] = [];
-    values.forEach((value) => token.recursive ? recursiveMatches(value, token, next) : next.push(...directMatches(value, token)));
-    values = next;
-  });
-  return values;
-};
+export const queryJsonPath = (body: string, path: string): unknown[] => JSONPath({
+  eval: 'safe',
+  json: JSON.parse(body) as object,
+  path: path.trim(),
+  wrap: true,
+}) as unknown[];
 
 const escapeXml = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 

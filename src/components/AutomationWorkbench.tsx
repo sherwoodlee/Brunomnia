@@ -17,7 +17,7 @@ import { parseRunnerData, runCollection } from '../lib/runner';
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
 import { persistEffectiveAuthentication, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
 import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
-import { readDesktopScriptFile } from '../lib/scriptFiles';
+import { readDesktopScriptFile, readDesktopTemplateFile } from '../lib/scriptFiles';
 import { storeResponseCookies } from '../lib/cookies';
 import { sendRequest as sendHttpRequest } from '../lib/http';
 import { createPluginRuntime, type PluginHostCallbacks, type PluginRunState } from '../lib/plugins';
@@ -133,7 +133,13 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection }: Aut
 }
 
 function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace }: AutomationWorkbenchProps) {
-  const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, { certificates: workspace.certificates, ...context });
+  const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
+    certificates: workspace.certificates,
+    readFile: workspace.preferences.allowScriptFileAccess && isTauri()
+      ? (path) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)
+      : undefined,
+    ...context,
+  });
   const [collectionId, setCollectionId] = useState(workspace.collections[0]?.id ?? '');
   const [environmentId, setEnvironmentId] = useState(activeEnvironment.id);
   const [iterations, setIterations] = useState(1);
@@ -363,7 +369,13 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
 }
 
 function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, runningMocks, focusedMock, onStartMock, onStopMock }: AutomationWorkbenchProps) {
-  const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, { certificates: workspace.certificates, ...context });
+  const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
+    certificates: workspace.certificates,
+    readFile: workspace.preferences.allowScriptFileAccess && isTauri()
+      ? (path) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)
+      : undefined,
+    ...context,
+  });
   const [activeId, setActiveId] = useState(workspace.mockServers[0]?.id ?? '');
   const [activeRouteId, setActiveRouteId] = useState(workspace.mockServers[0]?.routes[0]?.id ?? '');
   const [error, setError] = useState('');

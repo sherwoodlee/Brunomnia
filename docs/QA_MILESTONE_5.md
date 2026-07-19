@@ -47,4 +47,4 @@ Interaction path: Requests → Auth → OAuth 2; Response → Cookies → Add co
 - OAuth 2 uses a copied authorization URL with manual returned code/token entry; embedded callback capture is not claimed.
 - Digest/NTLM/Netrc execution is native-only; browser fallback remains constrained by browser networking rules.
 - The custom rules engine is a safe Spectral-compatible subset and does not execute arbitrary JavaScript or remote/package extensions.
-- File/external-vault template tags, MD5, full Faker/JSONPath breadth, WebSocket proxy/client identity, and full headless streaming/auth parity remain tracked in the parity ledger.
+- At this milestone, File/external-vault template tags, MD5, full Faker/JSONPath breadth, WebSocket proxy/client identity, and full headless streaming/auth parity remained tracked in the parity ledger. Milestone 131 later closes the File/external-vault/Faker/JSONPath dynamic-variable gaps.

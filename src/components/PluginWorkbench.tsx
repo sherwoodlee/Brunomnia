@@ -15,6 +15,7 @@ import {
   type PluginNotification,
 } from '../lib/plugins';
 import { readLocalPluginSource } from '../lib/project';
+import { readDesktopTemplateFile } from '../lib/scriptFiles';
 import type { PluginPermission, PluginRecord, Workspace } from '../types';
 import { Icon } from './Icon';
 
@@ -31,7 +32,13 @@ const activeRequest = (workspace: Workspace) => workspace.collections
   .find((request) => request.id === workspace.activeRequestId);
 
 export function PluginWorkbench({ workspace, onChangeWorkspace }: PluginWorkbenchProps) {
-  const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, { certificates: workspace.certificates, ...context });
+  const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
+    certificates: workspace.certificates,
+    readFile: workspace.preferences.allowScriptFileAccess && isTauri()
+      ? (path) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)
+      : undefined,
+    ...context,
+  });
   const [selectedId, setSelectedId] = useState(workspace.plugins[0]?.id ?? '');
   const [installName, setInstallName] = useState('Local plugin');
   const [installVersion, setInstallVersion] = useState('0.0.0-local');

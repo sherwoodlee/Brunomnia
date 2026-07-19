@@ -91,6 +91,7 @@ export type ClientCodeGenerationContext = {
     templateTag: (name: string, args: string[], request: ApiRequest) => Promise<string | undefined>;
   };
   externalSecret?: RequestRenderContext['externalSecret'];
+  readFile?: RequestRenderContext['readFile'];
 };
 
 type MaterializedRequest = {
@@ -1000,6 +1001,7 @@ export const generateClientCodeWithAuth = async (
     responses: context.responses,
     customTag: context.pluginRuntime ? (name, args) => context.pluginRuntime!.templateTag(name, args, request) : undefined,
     externalSecret: context.externalSecret,
+    readFile: context.readFile,
   });
   const effectiveRequest = context.pluginRuntime ? await context.pluginRuntime.beforeRequest(rendered) : rendered;
   const prepared = withCookieJar(materialize(effectiveRequest, {}), effectiveRequest, context.cookies);

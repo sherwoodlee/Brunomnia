@@ -26,6 +26,7 @@ export type SendRequestContext = {
   filterResponsesByEnv?: boolean;
   vault?: Record<string, string>;
   externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
+  readFile?: (path: string) => Promise<string>;
   skipOAuth2Acquisition?: boolean;
   onOAuth2Token?: (request: ApiRequest) => void;
   authorizeOAuth2?: (request: ApiRequest, environment: Environment | undefined) => Promise<ApiRequest['auth']>;
@@ -105,6 +106,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     responses: renderContext.responses,
     customTag: renderContext.pluginRuntime ? (name, args) => renderContext.pluginRuntime!.templateTag(name, args, hooked) : undefined,
     externalSecret: renderContext.externalSecret,
+    readFile: renderContext.readFile,
   });
   const followRedirects = resolveFollowRedirects(prepared.transport, context.followRedirects ?? true);
   const timeoutMs = resolveRequestTimeout(prepared.transport, context.requestTimeoutMs ?? 30_000);

@@ -81,11 +81,11 @@ export function PreferencesWorkbench({ workspace, onChangeWorkspace }: Preferenc
           <div className="preference-fields">
             <label>Script deadline (ms)<input disabled={!canEdit} min="1000" max="60000" step="1000" type="number" value={preferences.scriptTimeoutMs} onChange={(event) => update({ scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(event.target.value) || 10_000)) })} /></label>
             <label className="preference-toggle"><input checked={preferences.allowScriptRequests} disabled={!canEdit} onChange={(event) => update({ allowScriptRequests: event.target.checked })} type="checkbox" /> Allow scripts to send secondary HTTP requests</label>
-            <label className="preference-toggle"><input checked={preferences.allowScriptFileAccess} disabled={!canEdit || !isTauri()} onChange={(event) => update({ allowScriptFileAccess: event.target.checked })} type="checkbox" /> Allow scripts to attach local body and certificate files</label>
+            <label className="preference-toggle"><input checked={preferences.allowScriptFileAccess} disabled={!canEdit || !isTauri()} onChange={(event) => update({ allowScriptFileAccess: event.target.checked })} type="checkbox" /> Allow scripts and File template tags to read approved local files</label>
             <label className="preference-data-folders">Allowed data folders<textarea disabled={!canEdit || !isTauri()} onBlur={commitDataFolders} onChange={(event) => setDataFoldersDraft(event.target.value)} placeholder="One absolute folder per line" spellCheck={false} value={dataFoldersDraft} /><small>One absolute folder per line. Changes apply when this field loses focus.</small></label>
             <label className="preference-toggle"><input checked={preferences.enableVaultInScripts} disabled={!canEdit} onChange={(event) => update({ enableVaultInScripts: event.target.checked })} type="checkbox" /> Expose the unlocked local vault through <code>insomnia.vault</code></label>
           </div>
-          <p>All three capabilities are off by default and remain device-local. Desktop file attachments require both the file grant and a matching allowed folder; canonical containment rejects traversal and symlink escapes. Direct <code>fetch</code>, arbitrary imports, file writes, and other host APIs stay unavailable.</p>
+          <p>All three capabilities are off by default and remain device-local. Desktop script attachments and File template tags require both the file grant and a matching allowed folder; canonical containment rejects traversal and symlink escapes. Direct <code>fetch</code>, arbitrary imports, file writes, and other host APIs stay unavailable.</p>
         </section>
       </div> : null}
 

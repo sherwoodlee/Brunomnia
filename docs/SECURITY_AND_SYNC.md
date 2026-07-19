@@ -37,7 +37,11 @@ Template syntax is:
 
 `scope` means AWS region, GCP project, or Azure vault name. `field` is used for HashiCorp KV responses. `version` is a provider version/stage where supported. Before request rendering can resolve a reference, an owner or admin must approve the exact provider/reference/scope/field/version tuple in **Security & Sync**. Changing any part of that tuple requires a new approval. The explicit **Test without revealing** action can check a reference and reports only its byte length.
 
-External tags currently cover HTTP, GraphQL, OAuth token requests, and non-streaming collection runs. gRPC/stream tags and CLI provider parity remain open.
+External tags cover HTTP, GraphQL, OAuth/schema requests, non-streaming collection runs, plugin-mediated HTTP, integrations, and generated client code. gRPC/stream tags and CLI provider parity remain open.
+
+## Local File template tags
+
+The desktop `{% file '/absolute/path.txt' %}` tag reuses the device-local script file grant and allowed-folder list. The host canonicalizes both the requested file and each configured absolute root, rejects traversal and symlink escapes, requires a regular file, caps reads at 5 MB, and returns UTF-8 inspection text. The renderer never receives unrestricted filesystem authority. Browser development, disabled grants, missing roots, and out-of-root paths fail explicitly; File tags cannot write, list directories, or execute content.
 
 ## Plaintext-secret guardrail
 

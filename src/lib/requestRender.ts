@@ -6,6 +6,7 @@ export type RequestRenderContext = {
   responses?: StoredResponse[];
   customTag?: (name: string, args: string[]) => Promise<string | undefined>;
   externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
+  readFile?: (path: string) => Promise<string>;
 };
 
 const renderRows = async (rows: ApiRequest['headers'], render: (value: string) => Promise<string>) => Promise.all(rows.map(async (row) => ({
@@ -26,6 +27,7 @@ export const renderApiRequest = async (
     request,
     customTag: context.customTag,
     externalSecret: context.externalSecret,
+    readFile: context.readFile,
   };
   const render = (value: string) => renderTemplate(value, templateContext);
   const renderBody = request.renderBodyTemplates !== false ? render : async (value: string) => value;
