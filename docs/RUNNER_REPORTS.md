@@ -8,6 +8,8 @@ The desktop runner lists the selected collection's requests before execution. **
 
 While execution is active, collection, environment, selection, row navigation, drag/drop, keyboard-equivalent up/down controls, iterations, retries, bail, log retention, delay, stream window, raw iteration data, and data upload/view controls are disabled. This freezes the visible execution contract instead of allowing edits that cannot affect the already-started run. Results Skip and Cancel all remain available through their dedicated live controls.
 
+Run and Run via CLI stay disabled when the plan has no selected requests. Iterations, retries, delay, and stream-window inputs keep their visible editing draft separate from the last valid execution value: clearing a field, typing an invalid value, or moving outside its documented bounds does not silently replace the runnable value. Leaving the field restores that last valid value. Applying uploaded iteration data updates both the runnable iteration count and its visible draft.
+
 Enable **Stop after first exhausted failure** to bail once a request has used all configured retry attempts and still fails. A failure that succeeds on retry does not bail. Manual cancellation and bail remain distinct report states.
 
 The optional 0–30,000 ms delay runs after an item becomes active but before each transport attempt, including the first request and retries. Skip or Cancel during that wait prevents the transport from starting; Brunomnia does not add a trailing delay after the final attempt.

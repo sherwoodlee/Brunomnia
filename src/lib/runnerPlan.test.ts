@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runnerPlanSelectionState, toggleRunnerPlanSelection } from './runnerPlan';
+import { parseRunnerNumberDraft, runnerPlanSelectionState, toggleRunnerPlanSelection } from './runnerPlan';
 
 describe('Runner request-plan selection', () => {
   it('distinguishes empty, none, partial, and complete selection', () => {
@@ -17,5 +17,14 @@ describe('Runner request-plan selection', () => {
     expect(toggleRunnerPlanSelection([{ id: 'one', enabled: true }, { id: 'two', enabled: false }])).toEqual([{ id: 'one', enabled: true }, { id: 'two', enabled: true }]);
     expect(toggleRunnerPlanSelection([{ id: 'one', enabled: false }, { id: 'two', enabled: false }])).toEqual([{ id: 'one', enabled: true }, { id: 'two', enabled: true }]);
     expect(toggleRunnerPlanSelection([])).toEqual([]);
+  });
+
+  it('keeps blank, invalid, and out-of-range number drafts out of execution state', () => {
+    expect(parseRunnerNumberDraft('', 1, 1_000)).toBeUndefined();
+    expect(parseRunnerNumberDraft('invalid', 1, 1_000)).toBeUndefined();
+    expect(parseRunnerNumberDraft('0', 1, 1_000)).toBeUndefined();
+    expect(parseRunnerNumberDraft('1001', 1, 1_000)).toBeUndefined();
+    expect(parseRunnerNumberDraft('4.9', 1, 1_000)).toBe(4);
+    expect(parseRunnerNumberDraft('42', 1, 1_000)).toBe(42);
   });
 });

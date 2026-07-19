@@ -18,7 +18,7 @@ import { aggregateRunnerTimeline, discardRunnerReport, parseRunnerData, resolveR
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
 import { summarizeRunnerAssertions, summarizeRunnerHistory } from '../lib/runnerHistory';
 import { isRunnerItemFinished, summarizeRunnerLiveProgress } from '../lib/runnerFeedback';
-import { runnerPlanSelectionState, toggleRunnerPlanSelection } from '../lib/runnerPlan';
+import { parseRunnerNumberDraft, runnerPlanSelectionState, toggleRunnerPlanSelection } from '../lib/runnerPlan';
 import type { ScriptTestFilter } from '../lib/scriptTests';
 import { formatResponseTimeline } from '../lib/timeline';
 import { applyCollectionConfiguration, folderAncestors, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
@@ -176,6 +176,10 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
   const [keepLog, setKeepLog] = useState(runnerDraft?.keepLog ?? true);
   const [delayMs, setDelayMs] = useState(runnerDraft?.delayMs ?? 0);
   const [streamWindowMs, setStreamWindowMs] = useState(runnerDraft?.streamWindowMs ?? 1000);
+  const [iterationsDraft, setIterationsDraft] = useState(String(runnerDraft?.iterations ?? 1));
+  const [retriesDraft, setRetriesDraft] = useState(String(runnerDraft?.retries ?? 0));
+  const [delayDraft, setDelayDraft] = useState(String(runnerDraft?.delayMs ?? 0));
+  const [streamWindowDraft, setStreamWindowDraft] = useState(String(runnerDraft?.streamWindowMs ?? 1000));
   const [data, setData] = useState(runnerDraft?.data ?? '');
   const [dataFileName, setDataFileName] = useState(runnerDraft?.dataFileName ?? '');
   const [dataFileEncoding, setDataFileEncoding] = useState(runnerDraft?.dataFileEncoding ?? 'utf-8');
@@ -204,6 +208,11 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
   const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
   const selectedRequestIds = requestPlan.filter((item) => item.enabled).map((item) => item.id);
   const planSelection = runnerPlanSelectionState(requestPlan);
+  const updateNumberDraft = (draft: string, minimum: number, maximum: number, setDraft: (value: string) => void, setValue: (value: number) => void) => {
+    const value = parseRunnerNumberDraft(draft, minimum, maximum);
+    setDraft(value === undefined ? draft : String(value));
+    if (value !== undefined) setValue(value);
+  };
 
   useEffect(() => {
     if (!runnerDraftKey || !onRunnerDraftChange) return;
@@ -545,7 +554,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
         {!running ? <button className="secondary-action" disabled={!collection || !selectedRequestIds.length} onClick={() => setShowCliDialog(true)} type="button">Run via CLI</button> : null}
         {displayedReport && !running ? <button className="secondary-action" onClick={() => downloadReport('json')} type="button">Export JSON</button> : null}
         {displayedReport && !running ? <button className="secondary-action" onClick={() => downloadReport('junit')} type="button">Export JUnit</button> : null}
-        {!running ? <button className="primary-action" disabled={!collection} onClick={() => void start()} type="button">{targetFolder ? 'Run folder' : 'Run collection'}</button> : null}
+        {!running ? <button className="primary-action" disabled={!collection || !selectedRequestIds.length} onClick={() => void start()} type="button">{targetFolder ? 'Run folder' : 'Run collection'}</button> : null}
       </AutomationHeader>
       <div className="runner-grid">
         <aside className="runner-config">
@@ -559,11 +568,11 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
             const methodClass = request.method.toLowerCase().replace(/[^a-z0-9]+/g, '-');
             return <div aria-disabled={running} draggable={!running} key={item.id} onDragEnd={() => { draggedRequestId.current = ''; }} onDragOver={(event) => { if (!running) event.preventDefault(); }} onDragStart={() => { if (!running) draggedRequestId.current = item.id; }} onDrop={() => { if (!running) dropRequest(item.id); }}><input aria-label={`Include ${request.name}`} checked={item.enabled} disabled={running} onChange={(event) => setRequestPlan((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, enabled: event.target.checked } : candidate))} type="checkbox" /><span className={`method method-${methodClass}`}>{request.method.toUpperCase()}</span><span className="runner-plan-identity"><button disabled={running || !onOpenRequest} onClick={() => onOpenRequest?.(request.id)} title={`Open ${request.name}`} type="button">{request.name}</button>{ancestorNames.length ? <small title={ancestorNames.join(' / ')}>{ancestorNames.join(' / ')}</small> : null}</span><div><button aria-label={`Move ${request.name} up`} disabled={running || index === 0} onClick={() => moveRequest(item.id, -1)} type="button">↑</button><button aria-label={`Move ${request.name} down`} disabled={running || index === requestPlan.length - 1} onClick={() => moveRequest(item.id, 1)} type="button">↓</button></div></div>;
           })}</fieldset>
-          <div className="runner-number-grid"><label>Iterations<input disabled={running} min="1" max="1000" type="number" value={iterations} onChange={(event) => setIterations(Number(event.target.value))} /></label><label>Retries<input disabled={running} min="0" max="10" type="number" value={retries} onChange={(event) => setRetries(Number(event.target.value))} /></label></div>
+          <div className="runner-number-grid"><label>Iterations<input disabled={running} min="1" max="1000" type="number" value={iterationsDraft} onBlur={() => setIterationsDraft(String(iterations))} onChange={(event) => updateNumberDraft(event.target.value, 1, 1_000, setIterationsDraft, setIterations)} /></label><label>Retries<input disabled={running} min="0" max="10" type="number" value={retriesDraft} onBlur={() => setRetriesDraft(String(retries))} onChange={(event) => updateNumberDraft(event.target.value, 0, 10, setRetriesDraft, setRetries)} /></label></div>
           <label className="runner-toggle"><input checked={bail} disabled={running} onChange={(event) => setBail(event.target.checked)} type="checkbox" /><span>Stop after first exhausted failure</span></label>
           <label className="runner-toggle"><input checked={keepLog} disabled={running} onChange={(event) => setKeepLog(event.target.checked)} type="checkbox" /><span>Keep logs after run</span></label>
-          <label>Delay before each request (ms)<input disabled={running} min="0" max="30000" type="number" value={delayMs} onChange={(event) => setDelayMs(Number(event.target.value))} /></label>
-          <label>Stream sample window (ms)<input disabled={running} min="100" max="30000" type="number" value={streamWindowMs} onChange={(event) => setStreamWindowMs(Number(event.target.value))} /></label>
+          <label>Delay before each request (ms)<input disabled={running} min="0" max="30000" type="number" value={delayDraft} onBlur={() => setDelayDraft(String(delayMs))} onChange={(event) => updateNumberDraft(event.target.value, 0, 30_000, setDelayDraft, setDelayMs)} /></label>
+          <label>Stream sample window (ms)<input disabled={running} min="100" max="30000" type="number" value={streamWindowDraft} onBlur={() => setStreamWindowDraft(String(streamWindowMs))} onChange={(event) => updateNumberDraft(event.target.value, 100, 30_000, setStreamWindowDraft, setStreamWindowMs)} /></label>
           <div className="runner-data-control"><label>Iteration data<textarea aria-label="Runner iteration data" disabled={running} placeholder={'JSON array or CSV\norderId,status\nord_1,open'} value={data} onChange={(event) => { setData(event.target.value); setDataFileName(''); setDataFileEncoding('utf-8'); setDataFileBytesBase64(''); }} /></label><button disabled={running} onClick={() => setShowDataDialog(true)} type="button"><Icon name={dataFileName ? 'history' : 'import'} size={13} /> {dataFileName ? `View data · ${dataFileName}` : 'Upload data'}</button></div>
           <p>Dataset values override environment variables for each iteration.</p>
         </aside>
@@ -573,7 +582,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
         </div>
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}
-      {showDataDialog ? <RunnerDataDialog data={data} fileBytesBase64={dataFileBytesBase64} fileEncoding={dataFileEncoding} fileName={dataFileName} onApply={(nextData, nextFileName, nextFileEncoding, nextFileBytesBase64, rowCount) => { setData(nextData); setDataFileName(nextFileName); setDataFileEncoding(nextFileEncoding); setDataFileBytesBase64(nextFileBytesBase64); setIterations(rowCount); }} onClear={() => { setData(''); setDataFileName(''); setDataFileEncoding('utf-8'); setDataFileBytesBase64(''); }} onClose={() => setShowDataDialog(false)} /> : null}
+      {showDataDialog ? <RunnerDataDialog data={data} fileBytesBase64={dataFileBytesBase64} fileEncoding={dataFileEncoding} fileName={dataFileName} onApply={(nextData, nextFileName, nextFileEncoding, nextFileBytesBase64, rowCount) => { setData(nextData); setDataFileName(nextFileName); setDataFileEncoding(nextFileEncoding); setDataFileBytesBase64(nextFileBytesBase64); setIterations(rowCount); setIterationsDraft(String(rowCount)); }} onClear={() => { setData(''); setDataFileName(''); setDataFileEncoding('utf-8'); setDataFileBytesBase64(''); }} onClose={() => setShowDataDialog(false)} /> : null}
       {showCliDialog && collection ? <RunnerCliDialog bail={bail} collectionId={collection.id} dataFileName={dataFileName} delayMs={delayMs} environmentId={selectedEnvironment.id} hasData={Boolean(data.trim())} iterations={iterations} onClose={() => setShowCliDialog(false)} requestIds={selectedRequestIds} retries={retries} workspace={workspace} workspaceId={workspaceId} /> : null}
       {oauthAuthorization ? <OAuthAuthorizationDialog onCancel={cancelRun} status={oauthAuthorization} /> : null}
     </section>

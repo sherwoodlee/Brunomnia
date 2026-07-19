@@ -9,3 +9,9 @@ export const toggleRunnerPlanSelection = (plan: RunnerPlanItem[]): RunnerPlanIte
   const enabled = runnerPlanSelectionState(plan) !== 'all';
   return plan.map((item) => ({ ...item, enabled }));
 };
+
+export const parseRunnerNumberDraft = (draft: string, minimum: number, maximum: number): number | undefined => {
+  if (draft === '') return undefined;
+  const value = Number.parseInt(draft, 10);
+  return Number.isFinite(value) && value >= minimum && value <= maximum ? value : undefined;
+};

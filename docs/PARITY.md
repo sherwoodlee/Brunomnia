@@ -1014,6 +1014,14 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Updated account-free Request Order documentation: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
 - Exact verification record: [`docs/QA_MILESTONE_186.md`](QA_MILESTONE_186.md)
 
+## Milestone 187 acceptance evidence
+
+- Pinned clearable Iterations/Delay state, decimal parsing, blur restoration, upload synchronization, and empty-selection Run guard audit: [`docs/QA_MILESTONE_187.md`](QA_MILESTONE_187.md)
+- Shared bounded numeric-draft parsing and focused blank/invalid/range/decimal regressions: [`src/lib/runnerPlan.ts`](../src/lib/runnerPlan.ts) and [`src/lib/runnerPlan.test.ts`](../src/lib/runnerPlan.test.ts)
+- Separate iterations/retries/delay/stream drafts, last-valid execution continuity, uploaded-row synchronization, and zero-selection Run lock: [`src/components/AutomationWorkbench.tsx`](../src/components/AutomationWorkbench.tsx)
+- Updated account-free Runner input documentation: [`docs/RUNNER_REPORTS.md`](RUNNER_REPORTS.md)
+- Exact verification record: [`docs/QA_MILESTONE_187.md`](QA_MILESTONE_187.md)
+
 ## Parity declaration rule
 
 Brunomnia must not be described as feature-complete while any row is `Baseline`, `Early baseline`, or `Not started`. Before a parity release, re-read the current Insomnia documentation and changelog, add newly documented capability rows, and attach reproducible evidence for every row. Commercial availability in Insomnia does not remove a capability from this ledger; Brunomnia's implementation remains governed by [the free feature policy](FREE_FEATURE_POLICY.md).
