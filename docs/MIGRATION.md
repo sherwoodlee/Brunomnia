@@ -1828,7 +1828,20 @@ Compatibility bounds remain explicit: broader third-party gRPC fixtures remain o
 
 Compatibility bounds remain explicit: a live external third-party gRPC server matrix remains open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 123 — remaining parity closure and release hardening
+## Milestone 123 — Insomnia gRPC proto-resource interchange (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | `ProtoFile` stores name/text, `ProtoDirectory` stores name, v4 resources export both model types, and the recursive writer excludes the synthetic root name from relative import paths |
+| V4 import | Complete | Referenced entry ancestry must terminate at the same workspace; only files below its root are reconstructed with sanitized relative paths and shared proto-tree limits |
+| V4 export | Complete | Every proto-backed request receives deterministic root/subdirectory/file resources and a `protoFileId` that resolves to its compile entry |
+| V5 boundary | Complete | Current v5 YAML carries only a database ID and no proto contents; import/export warn explicitly, preserve the unavailable ID as metadata, and do not claim a working source |
+| Executable coverage | Complete | A nested two-file tree with a cross-directory import round-trips through JSON resources with exact paths/text/entry; v5 import and export warnings are asserted |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 123 verification](QA_MILESTONE_123.md) |
+
+Compatibility bounds remain explicit: Insomnia v5 cannot carry its database-backed proto contents in collection YAML. Other import/export gaps remain in the ledger, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 124 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

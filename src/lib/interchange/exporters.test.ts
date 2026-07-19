@@ -95,6 +95,43 @@ describe('artifact export adapters', () => {
     expect(exported.warnings.filter((warning) => warning.code === 'unsupported-protocol')).toHaveLength(4);
   });
 
+  it('round-trips complete gRPC proto trees through Insomnia v4 resources', () => {
+    const workspace = cloneSeedWorkspace();
+    const request = workspace.collections.flatMap((collection) => collection.requests).find((candidate) => candidate.protocol === 'grpc')!;
+    request.grpc.descriptorSource = 'proto';
+    request.grpc.protoFiles = [
+      { id: 'messages', path: 'types/messages.proto', text: 'syntax = "proto3"; package acme; message HelloRequest { string name = 1; }' },
+      { id: 'service', path: 'services/greeter.proto', text: 'syntax = "proto3"; package acme; import "types/messages.proto"; service Greeter { rpc SayHello (HelloRequest) returns (HelloRequest); }' },
+    ];
+    request.grpc.protoEntryPath = 'services/greeter.proto';
+    request.grpc.protoActivePath = 'types/messages.proto';
+    request.grpc.protoText = request.grpc.protoFiles[1].text;
+
+    const exported = exportArtifact(workspace, { format: 'insomnia-v4', scope: 'all' });
+    const raw = JSON.parse(exported.contents) as { resources: Array<Record<string, unknown>> };
+    const grpcResource = raw.resources.find((resource) => resource._type === 'grpc_request' && resource.name === request.name)!;
+    const entry = raw.resources.find((resource) => resource._id === grpcResource.protoFileId)!;
+    expect(entry).toMatchObject({ _type: 'proto_file', name: 'greeter.proto', protoText: request.grpc.protoFiles[1].text });
+    expect(raw.resources.filter((resource) => resource._type === 'proto_file')).toHaveLength(2);
+    expect(raw.resources.filter((resource) => resource._type === 'proto_directory')).toHaveLength(3);
+
+    const imported = importArtifact(exported.contents, exported.fileName);
+    const roundTripped = imported.collections.flatMap((collection) => collection.requests).find((candidate) => candidate.name === request.name)!;
+    expect(roundTripped.grpc).toMatchObject({
+      descriptorSource: 'proto',
+      protoEntryPath: 'services/greeter.proto',
+      protoActivePath: 'services/greeter.proto',
+      protoText: request.grpc.protoFiles[1].text,
+    });
+    expect(roundTripped.grpc.protoFiles.map((file) => [file.path, file.text])).toEqual([
+      ['types/messages.proto', request.grpc.protoFiles[0].text],
+      ['services/greeter.proto', request.grpc.protoFiles[1].text],
+    ]);
+
+    const v5 = exportArtifact(workspace, { format: 'insomnia-v5', scope: 'all' });
+    expect(v5.warnings).toContainEqual(expect.objectContaining({ code: 'external-schema', resource: request.name }));
+  });
+
   it('creates scoped Brunomnia and raw OpenAPI exports', () => {
     const workspace = cloneSeedWorkspace();
     workspace.certificates.clients = [{ id: 'pfx', host: 'api.example.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }];

@@ -1,5 +1,6 @@
 import { stringify } from 'yaml';
 import type { ApiDesign, ApiRequest, Collection, CookieRecord, Environment, ImportWarning, JsonValue, KeyValue, MockRoute, MockServer, RequestFolder } from '../../types';
+import { normalizeGrpcProtoTree } from '../grpcProto';
 import { asArray, asBoolean, asNumber, asRecord, asString, keyValues, normalizeMethod, objectVariables, requestFrom, sourceId, sourceMetadata, toJsonValue, type UnknownRecord } from './common';
 import { emptyResources, type ArtifactImport } from './types';
 
@@ -161,7 +162,7 @@ const mapInsomniaRequest = (
       service: asString(raw.protoMethodName).split('/').slice(0, -1).join('/'),
       input: asString(asRecord(raw.body)?.text, '{}'),
       metadata: keyValues(raw.metadata, `${request.id}-metadata`),
-      descriptorSource: asBoolean(reflectionApi?.enabled) ? 'buf' : asString(raw.protoFileId) ? 'proto' : 'reflection',
+      descriptorSource: asBoolean(reflectionApi?.enabled) ? 'buf' : 'reflection',
       reflectionApiUrl: asString(reflectionApi?.url, request.grpc.reflectionApiUrl),
       reflectionApiKey: asString(reflectionApi?.apiKey),
       reflectionApiModule: asString(reflectionApi?.module, request.grpc.reflectionApiModule),
@@ -287,6 +288,66 @@ const v4Mocks = (resources: UnknownRecord[], workspaceId: string): MockServer[] 
   });
 };
 
+const protoResourceName = (value: unknown, fallback: string, ensureExtension = false) => {
+  const leaf = asString(value).trim().replaceAll('\\', '/').split('/').filter(Boolean).at(-1);
+  const name = !leaf || leaf === '.' || leaf === '..' ? fallback : leaf;
+  return ensureExtension && !name.toLowerCase().endsWith('.proto') ? `${name}.proto` : name;
+};
+
+const v4ProtoTree = (
+  protoFileId: string,
+  workspaceId: string,
+  protoFiles: Map<string, UnknownRecord>,
+  protoDirectories: Map<string, UnknownRecord>,
+  warnings: ImportWarning[],
+  requestName: string,
+) => {
+  const entry = protoFiles.get(protoFileId);
+  if (!entry) {
+    warnings.push({ code: 'external-schema', message: `Proto file '${protoFileId}' referenced by the request was not included in the export.`, resource: requestName });
+    return undefined;
+  }
+  let rootDirectoryId = '';
+  let parentId = asString(entry.parentId);
+  const ancestors = new Set<string>();
+  while (protoDirectories.has(parentId) && !ancestors.has(parentId)) {
+    ancestors.add(parentId);
+    rootDirectoryId = parentId;
+    parentId = asString(protoDirectories.get(parentId)?.parentId);
+  }
+  if (parentId !== workspaceId) {
+    warnings.push({ code: 'external-schema', message: `Proto file '${protoFileId}' is outside the request workspace.`, resource: requestName });
+    return undefined;
+  }
+  const resourcePath = (file: UnknownRecord) => {
+    const segments = [protoResourceName(file.name, 'schema.proto', true)];
+    if (!rootDirectoryId) return asString(file._id) === protoFileId ? segments.join('/') : '';
+    let currentParentId = asString(file.parentId);
+    const visited = new Set<string>();
+    while (currentParentId !== rootDirectoryId) {
+      if (!currentParentId || visited.has(currentParentId)) return '';
+      visited.add(currentParentId);
+      const directory = protoDirectories.get(currentParentId);
+      if (!directory) return '';
+      segments.unshift(protoResourceName(directory.name, '_'));
+      currentParentId = asString(directory.parentId);
+    }
+    return segments.join('/');
+  };
+  const rawFiles = [...protoFiles.values()].flatMap((file) => {
+    const path = resourcePath(file);
+    return path ? [{ id: asString(file._id), path, text: asString(file.protoText) }] : [];
+  });
+  const preferredEntryPath = resourcePath(entry);
+  const tree = normalizeGrpcProtoTree(rawFiles, '', preferredEntryPath, preferredEntryPath);
+  if (!tree.protoFiles.length) {
+    warnings.push({ code: 'external-schema', message: `Proto resources for '${requestName}' contained no usable .proto files.`, resource: requestName });
+    return undefined;
+  }
+  if (tree.protoFiles.length !== rawFiles.length) warnings.push({ code: 'external-schema', message: `Some proto resources for '${requestName}' were invalid, duplicated, or exceeded Brunomnia's import limits.`, resource: requestName });
+  return tree;
+};
+
 export const isInsomniaV4 = (document: UnknownRecord) => document.__export_format === 4 && Array.isArray(document.resources);
 
 export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): ArtifactImport => {
@@ -294,6 +355,8 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
   const resources = asArray(document.resources).map(asRecord).filter((resource): resource is UnknownRecord => Boolean(resource));
   const workspaces = resources.filter((resource) => resource._type === 'workspace');
   const folders = new Map(resources.filter((resource) => resource._type === 'request_group').map((folder) => [asString(folder._id), folder]));
+  const protoFiles = new Map(resources.filter((resource) => resource._type === 'proto_file').map((file) => [asString(file._id), file]));
+  const protoDirectories = new Map(resources.filter((resource) => resource._type === 'proto_directory').map((directory) => [asString(directory._id), directory]));
   const socketIoPayloads = new Map(resources.filter((resource) => resource._type === 'socketio_payload' || resource._type === 'socket_io_payload').map((payload) => [asString(payload.parentId), payload]));
   const collectionWorkspaces = workspaces.length ? workspaces : [{ _id: '__WORKSPACE_ID__', name: sourceName }];
   const collections: Collection[] = [];
@@ -342,6 +405,13 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
       })
       .map((resource, requestIndex) => {
         const request = mapInsomniaRequest({ ...resource, payload: socketIoPayloads.get(asString(resource._id)) ?? resource.payload }, 'insomnia-v4', requestIndex, [], { headers: [], preRequestScript: '', tests: '' }, warnings, workspaceId);
+        if (request.protocol === 'grpc' && !asBoolean(asRecord(resource.reflectionApi)?.enabled)) {
+          const protoFileId = asString(resource.protoFileId);
+          if (protoFileId) {
+            const tree = v4ProtoTree(protoFileId, workspaceId, protoFiles, protoDirectories, warnings, request.name);
+            if (tree) request.grpc = { ...request.grpc, ...tree, descriptorSource: 'proto' };
+          }
+        }
         request.folderId = folderIds.get(asString(resource.parentId)) ?? '';
         request.inheritFolderAuth = Boolean(request.folderId) && !resource.authentication;
         return request;
@@ -383,6 +453,11 @@ const nestedV5Requests = (
       nestedV5Requests(child.children, folderId, warnings, output, folders, identityPrefix);
     } else {
       const request = mapInsomniaRequest(child, 'insomnia-v5', output.length, [], { headers: [], preRequestScript: '', tests: '' }, warnings, identityPrefix);
+      const protoFileId = asString(child.protoFileId);
+      if (request.protocol === 'grpc' && protoFileId && request.grpc.descriptorSource !== 'buf') {
+        warnings.push({ code: 'external-schema', message: `Insomnia v5 references proto file '${protoFileId}' by database ID without embedding its contents; import the proto source separately.`, resource: request.name });
+        request.source = { ...request.source!, unsupported: { ...(request.source?.unsupported ?? {}), protoFileId } };
+      }
       request.folderId = parentId;
       request.inheritFolderAuth = Boolean(parentId) && !child.authentication;
       output.push(request);

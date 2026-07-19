@@ -220,6 +220,14 @@ collection:
         url: https://api.example.com/items
         settings: { followRedirects: on }
         body: { mimeType: application/json, text: '{"ok":true}' }
+      - name: Legacy gRPC
+        meta: { id: greq_v5 }
+        url: grpc://localhost:50051
+        body: { text: '{}' }
+        metadata: []
+        protoFileId: pf_missing
+        protoMethodName: acme.Greeter/SayHello
+        reflectionApi: { enabled: false, url: '', apiKey: '', module: '' }
 environments:
   name: Base
   data: { baseUrl: https://api.example.com }
@@ -228,6 +236,9 @@ environments:
     expect(v5.collections[0].requests[0]).toMatchObject({ name: 'Create', bodyMode: 'json', transport: expect.objectContaining({ followRedirectsMode: 'on' }) });
     expect(v5.collections[0].folders?.[0]).toMatchObject({ name: 'Folder', parentId: '' });
     expect(v5.collections[0].requests[0].folderId).toBe(v5.collections[0].folders?.[0].id);
+    expect(v5.collections[0].requests[1].grpc.descriptorSource).toBe('reflection');
+    expect(v5.collections[0].requests[1].source?.unsupported).toMatchObject({ protoFileId: 'pf_missing' });
+    expect(v5.warnings).toContainEqual(expect.objectContaining({ code: 'external-schema', resource: 'Legacy gRPC' }));
     expect(v5.collections[0].environment?.[0]).toMatchObject({ name: 'baseUrl', value: 'https://api.example.com' });
     const applied = applyArtifactImport(cloneSeedWorkspace(), v5);
     const appliedCollection = applied.collections.at(-1)!;
