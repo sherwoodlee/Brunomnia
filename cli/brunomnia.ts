@@ -10,6 +10,7 @@ import { Agent, EnvHttpProxyAgent, fetch as undiciFetch } from 'undici';
 import { parse as parseYaml, parseAllDocuments } from 'yaml';
 import { analyzeOpenApi, exportOpenApiSpecification, generateCollectionFromOpenApi } from '../src/lib/openapi';
 import { createBlankRequest } from '../src/data/seed';
+import packageJson from '../package.json';
 import { buildHeaders, buildRequestUrl, environmentMap } from '../src/lib/request';
 import { renderApiRequest } from '../src/lib/requestRender';
 import { parseRunnerData, runCollection, validateTestNamePattern } from '../src/lib/runner';
@@ -32,6 +33,7 @@ import { createCliExternalSecretResolver } from './externalVault';
 import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, selectRunnerResource, type RunnerInsoConfig } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
+const cliVersion = process.env.VERSION || packageJson.version;
 const flag = (name: string) => {
   const index = args.findIndex((argument) => argument === name || argument.startsWith(`${name}=`));
   if (index < 0) return undefined;
@@ -873,6 +875,7 @@ const executeHttp = async (
 
 const usage = `Brunomnia CLI
 
+  brunomnia -v, --version
   brunomnia lint spec <design-name-id-prefix-or-file> [-w <workspace-or-project>] [-r, --ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <design-name-or-id-prefix> -w <workspace-or-project> [-s, --skipAnnotations] [--output <file>]
@@ -888,6 +891,7 @@ Reporters: dot, list, min, progress, spec, tap, json, junit
 
 const main = async () => {
   const [command, subject] = args;
+  if (hasFlag('--version') || hasFlag('-v')) { console.log(cliVersion); return; }
   if (!command || hasFlag('--help') || hasFlag('-h')) { console.log(usage); return; }
 
   if (command === 'lint' && subject === 'spec') {

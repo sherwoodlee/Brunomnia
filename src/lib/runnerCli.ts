@@ -26,7 +26,7 @@ const runnerCliVariadicValueOptions = new Set(['--dataFolders', '--data-folders'
 
 const runnerCliBooleanOptions = new Set([
   '--bail', '-b', '--allow-scripts', '--allow-script-requests', '--allow-script-files', '--allow-template-files',
-  '--allow-external-vaults', '--disableCertValidation', '--disable-cert-validation', '-k', '--acceptRisk', '--accept-risk', '--keepFile', '--keep-file', '--skipAnnotations', '--skip-annotations', '-s', '--json', '--ci', '--verbose', '--printOptions', '--print-options', '--help', '-h',
+  '--allow-external-vaults', '--disableCertValidation', '--disable-cert-validation', '-k', '--acceptRisk', '--accept-risk', '--keepFile', '--keep-file', '--skipAnnotations', '--skip-annotations', '-s', '--json', '--ci', '--verbose', '--printOptions', '--print-options', '--version', '-v', '--help', '-h',
 ]);
 
 export const runnerCliPositionalArguments = (values: string[]) => {

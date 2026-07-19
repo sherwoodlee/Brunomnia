@@ -8,8 +8,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse, stringify } from 'yaml';
 
-const run = (args) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [join(process.cwd(), 'bin', 'brunomnia.cjs'), ...args], { cwd: process.cwd() });
+const run = (args, env = process.env) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, [join(process.cwd(), 'bin', 'brunomnia.cjs'), ...args], { cwd: process.cwd(), env });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -35,6 +35,10 @@ const listen = (server) => new Promise((resolve, reject) => {
 
 const close = (server) => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 const temporary = await mkdtemp(join(tmpdir(), 'brunomnia-cli-runner-'));
+const { VERSION: _inheritedVersion, ...baseEnvironment } = process.env;
+const packageVersion = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8')).version;
+assert.equal((await run(['--version'], baseEnvironment)).trim(), packageVersion);
+assert.equal((await run(['-v'], { ...baseEnvironment, VERSION: '9.8.7-preview' })).trim(), '9.8.7-preview');
 const arrivals = [];
 const secureArrivals = [];
 const mutualArrivals = [];

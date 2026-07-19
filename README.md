@@ -79,7 +79,10 @@ Build the bundled `brunomnia` executable and inspect its commands:
 ```sh
 npm run build:cli
 node bin/brunomnia.cjs --help
+node bin/brunomnia.cjs --version
 ```
+
+Pinned `-v`/`--version` prints the bundled package version and exits without loading projects or configuration. Release wrappers may supply the same `VERSION` environment override used by Inso; an empty or absent override falls back to `package.json`.
 
 Examples:
 
