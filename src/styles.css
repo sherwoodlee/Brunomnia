@@ -232,6 +232,7 @@ kbd {
 }
 .icon-button.subtle { color: var(--text-soft); }
 .icon-button.subtle:hover { background: var(--panel-raised); color: var(--text); }
+.icon-button.subtle.active { background: var(--panel-raised); color: var(--accent); }
 .icon-button.bordered { border: 1px solid var(--border); border-radius: 4px; color: var(--accent); height: 36px; width: 38px; }
 
 .app-body {
@@ -410,6 +411,13 @@ kbd {
 .folder-document-panel > .folder-modal-content { flex: 1 1 auto; }
 .folder-document-panel .folder-script-grid { min-height: 100%; }
 .folder-document-panel .folder-modal-content > .request-docs-editor { height: 100%; min-height: 360px; }
+.environment-document-panel { background: var(--bg); display: grid; grid-template-rows: 60px 68px minmax(0, 1fr) 62px; min-height: 0; min-width: 0; overflow: hidden; }
+.environment-document-panel > header { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 12px 22px; }
+.environment-document-panel > header small { color: var(--accent); font-size: 8px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.environment-document-panel > header h2 { font-size: 17px; margin: 4px 0 0; }
+.environment-document-panel > header > span, .environment-document-panel > footer > span { color: var(--muted); font: 8px var(--font-mono); }
+.environment-document-panel > footer { align-items: center; border-top: 1px solid var(--border); display: flex; gap: 8px; padding: 12px 22px; }
+.environment-document-panel > footer .danger-action, .environment-document-panel > footer .secondary-button { height: 34px; }
 .document-automation-panel { background: var(--bg); display: grid; grid-template-rows: 60px minmax(0, 1fr); min-height: 0; min-width: 0; overflow: hidden; }
 .document-automation-panel > .automation-workbench { grid-column: 1; grid-row: 2; }
 .app-shell[data-force-vertical-layout="true"] .workbench { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(520px, 1fr) minmax(430px, .85fr); overflow: auto; }
@@ -1745,6 +1753,7 @@ kbd {
   .workbench { grid-column: 2; }
   .project-dashboard { grid-column: 2; padding: 24px 16px; }
   .folder-document-panel { grid-column: 2; }
+  .environment-document-panel { grid-column: 2; }
   .document-automation-panel { grid-column: 2; }
   .project-dashboard > header { align-items: flex-start; flex-direction: column; }
   .project-dashboard-actions { justify-content: flex-start; }

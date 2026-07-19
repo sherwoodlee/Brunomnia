@@ -106,6 +106,7 @@ const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.ran
 const requestPinsStorageKey = (workspaceId: string) => `brunomnia-request-pins:${workspaceId}`;
 const requestTabsStorageKey = (workspaceId: string) => `brunomnia-request-tabs:${workspaceId}`;
 const runnerDocumentId = (workspaceId: string, folderId = '') => `runner_${folderId || workspaceId}`;
+const environmentDocumentId = (workspaceId: string) => `environment_${workspaceId}`;
 const workspaceDocumentReferences = (workspace: Workspace, workspaceId: string): DocumentTabReference[] => [
   ...workspace.collections.flatMap((collection) => [
     ...collection.requests.map((request): DocumentTabReference => ({ id: request.id, type: 'request' })),
@@ -113,6 +114,7 @@ const workspaceDocumentReferences = (workspace: Workspace, workspaceId: string):
     ...(collection.folders ?? []).map((folder): DocumentTabReference => ({ id: runnerDocumentId(workspaceId, folder.id), type: 'runner' })),
   ]),
   { id: runnerDocumentId(workspaceId), type: 'runner' },
+  { id: environmentDocumentId(workspaceId), type: 'environment' },
 ];
 const workspaceCatalogApi = () => import('./lib/workspaceCatalog');
 
@@ -592,12 +594,13 @@ type ProjectDashboardProps = {
   workspace: Workspace;
   canReopenRequest: boolean;
   onAddRequest: () => void;
+  onOpenEnvironment: () => void;
   onOpenRequest: (requestId: string) => void;
   onOpenSection: (section: 'design' | 'mocks') => void;
   onReopenRequest: () => void;
 };
 
-function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onOpenRequest, onOpenSection, onReopenRequest }: ProjectDashboardProps) {
+function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onOpenEnvironment, onOpenRequest, onOpenSection, onReopenRequest }: ProjectDashboardProps) {
   const requestCount = workspace.collections.reduce((total, collection) => total + collection.requests.length, 0);
   return <section aria-labelledby="project-dashboard-title" className="project-dashboard">
     <header>
@@ -614,8 +617,9 @@ function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onOpenReq
       <div><strong>{workspace.mockServers.length}</strong><span>Mock servers</span></div>
     </div>
     <section className="project-dashboard-resources">
-      <header><div><small>Local resources</small><h2>Project files</h2></div><span>{workspace.collections.length + workspace.apiDesigns.length + workspace.mockServers.length} total</span></header>
+      <header><div><small>Local resources</small><h2>Project files</h2></div><span>{workspace.collections.length + workspace.apiDesigns.length + workspace.mockServers.length + 1} total</span></header>
       <div className="project-dashboard-grid">
+        <button onClick={onOpenEnvironment} type="button"><Icon name="braces" size={19} /><span><strong>Environments</strong><small>{workspace.environments.length} environment{workspace.environments.length === 1 ? '' : 's'} · active {workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId)?.name ?? 'base'}</small></span><Icon name="chevron-right" size={14} /></button>
         {workspace.collections.map((collection) => {
           const firstRequest = collection.requests[0];
           return <button disabled={!firstRequest} key={collection.id} onClick={() => { if (firstRequest) onOpenRequest(firstRequest.id); }} type="button">
@@ -626,7 +630,6 @@ function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onOpenReq
         })}
         {workspace.apiDesigns.map((design) => <button key={design.id} onClick={() => onOpenSection('design')} type="button"><Icon name="grid" size={19} /><span><strong>{design.name}</strong><small>API design</small></span><Icon name="chevron-right" size={14} /></button>)}
         {workspace.mockServers.map((server) => <button key={server.id} onClick={() => onOpenSection('mocks')} type="button"><Icon name="spark" size={19} /><span><strong>{server.name}</strong><small>{server.routes.length} route{server.routes.length === 1 ? '' : 's'} · 127.0.0.1:{server.port}</small></span><Icon name="chevron-right" size={14} /></button>)}
-        {!workspace.collections.length && !workspace.apiDesigns.length && !workspace.mockServers.length ? <div className="empty-state"><Icon name="archive" size={28} /><strong>No project resources</strong><span>Create a request to start a collection.</span></div> : null}
       </div>
     </section>
   </section>;
@@ -712,9 +715,10 @@ function DocumentTabStrip({ documents, activeDocumentId, canReopenDocument, pinn
       const activeDocument = document.id === activeDocumentId;
       const dropClass = documentDrop?.id === document.id ? ` drop-${documentDrop.placement}` : '';
       const pinned = document.type === 'request' && pinnedIds.has(document.id);
+      const editableName = document.type === 'request' || document.type === 'folder';
       return <div aria-haspopup="menu" aria-selected={activeDocument} className={`document-tab${activeDocument ? ' active' : ''}${document.temporary ? ' temporary' : ''}${draggedDocumentId === document.id ? ' is-dragging' : ''}${dropClass}`} draggable key={document.id} onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); onCloseDocument(document.id); } }} onClick={() => onSelectDocument(document.id, document.type)} onContextMenu={(event) => { event.preventDefault(); openDocumentMenu(document.id, event.clientX, event.clientY); }} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('button,input')) onPromoteDocument(document.id); }} onDragEnd={clearDocumentDrag} onDragOver={(event) => dropOnDocument(event, document.id, false)} onDragStart={(event) => beginDocumentDrag(event, document.id)} onDrop={(event) => dropOnDocument(event, document.id, true)} onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') onSelectDocument(document.id, document.type); else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); openDocumentMenu(document.id, bounds.left, bounds.bottom); } }} role="tab" tabIndex={0} title={document.temporary ? 'Temporary tab · Double-click to keep open' : document.name}>
-        {document.request ? <span className={`method method-${methodClass(document.request.method)} protocol-${document.request.protocol}`}>{protocolLabel(document.request)}</span> : <Icon name={document.type === 'runner' ? 'play' : 'folder'} size={14} />}
-        {activeDocument ? <input aria-label={`${document.type === 'folder' ? 'Folder' : 'Request'} name`} onChange={(event) => onRenameDocument(document.id, document.type, event.target.value)} onClick={(event) => event.stopPropagation()} spellCheck={false} value={document.name} /> : <span className="document-tab-name">{document.name}</span>}
+        {document.request ? <span className={`method method-${methodClass(document.request.method)} protocol-${document.request.protocol}`}>{protocolLabel(document.request)}</span> : <Icon name={document.type === 'runner' ? 'play' : document.type === 'environment' ? 'braces' : 'folder'} size={14} />}
+        {activeDocument && editableName ? <input aria-label={`${document.type === 'folder' ? 'Folder' : 'Request'} name`} onChange={(event) => onRenameDocument(document.id, document.type, event.target.value)} onClick={(event) => event.stopPropagation()} spellCheck={false} value={document.name} /> : <span className="document-tab-name">{document.name}</span>}
         {document.temporary ? <button aria-label={`Keep ${document.name} tab open`} onClick={(event) => { event.stopPropagation(); onPromoteDocument(document.id); }} title="Keep tab open" type="button"><Icon name="check" size={11} /></button> : null}
         {activeDocument && document.type === 'request' ? <button aria-label={pinned ? 'Unpin request' : 'Pin request'} className={pinned ? 'active' : ''} onClick={(event) => { event.stopPropagation(); onToggleRequestPin(document.id); }} title={pinned ? 'Unpin request' : 'Pin request'} type="button"><Icon name="pin" size={13} /></button> : null}
         <button aria-label={`Close ${document.name}`} onClick={(event) => { event.stopPropagation(); onCloseDocument(document.id); }} title="Close tab" type="button"><Icon name="x" size={12} /></button>
@@ -1078,10 +1082,10 @@ function ResponsePanel({
   );
 }
 
-type EnvironmentDialogProps = {
+type EnvironmentDocumentPanelProps = {
   environments: Environment[];
   activeId: string;
-  onClose: () => void;
+  documentTabStrip: ReactNode;
   onChange: (environment: Environment) => void;
   onSelect: (id: string) => void;
   onAdd: (parentId: string) => void;
@@ -1090,7 +1094,7 @@ type EnvironmentDialogProps = {
   onMove: (move: WorkspaceEnvironmentMove) => void;
 };
 
-function EnvironmentDialog({ environments, activeId, onClose, onChange, onSelect, onAdd, onDelete, onDuplicate, onMove }: EnvironmentDialogProps) {
+function EnvironmentDocumentPanel({ environments, activeId, documentTabStrip, onChange, onSelect, onAdd, onDelete, onDuplicate, onMove }: EnvironmentDocumentPanelProps) {
   const dragEnvironmentRef = useRef<string | undefined>(undefined);
   const [draggedEnvironmentId, setDraggedEnvironmentId] = useState('');
   const [environmentDrop, setEnvironmentDrop] = useState<{ id: string; placement: 'before' | 'after' }>();
@@ -1146,18 +1150,17 @@ function EnvironmentDialog({ environments, activeId, onClose, onChange, onSelect
     return <div key={candidate.id}><button aria-grabbed={draggedEnvironmentId === candidate.id} aria-keyshortcuts={candidate.parentId ? 'Alt+ArrowUp Alt+ArrowDown Alt+Home Alt+End' : undefined} className={`${candidate.id === environment.id ? 'active' : ''}${draggedEnvironmentId === candidate.id ? ' is-dragging' : ''}${dropClass}`} draggable={Boolean(candidate.parentId)} onClick={() => onSelect(candidate.id)} onDragEnd={clearEnvironmentDrag} onDragOver={(event) => dropOnEnvironment(event, candidate, false)} onDragStart={(event) => beginEnvironmentDrag(event, candidate)} onDrop={(event) => dropOnEnvironment(event, candidate, true)} onKeyDown={(event) => keyboardEnvironmentMove(event, candidate)} style={{ '--environment-depth': depth } as CSSProperties} title={candidate.parentId ? 'Drag to reorder siblings · Option/Alt+Up/Down/Home/End reorders' : undefined} type="button"><i style={{ background: candidate.color || 'var(--muted)' }} /><span>{candidate.name}</span>{candidate.private ? <small>PRIVATE</small> : null}</button>{environments.filter((child) => child.parentId === candidate.id).map((child) => renderEnvironment(child, depth + 1))}</div>;
   };
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section aria-labelledby="environment-title" aria-modal="true" className="modal environment-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
-        <header><div><small>Active environment</small><h2 id="environment-title">{environment.name}</h2></div><button aria-label="Close" className="icon-button subtle" onClick={onClose} type="button"><Icon name="x" /></button></header>
-        <div className="environment-layout"><aside><div>{roots.map((candidate) => renderEnvironment(candidate, 0))}</div><button onClick={() => onAdd('')} type="button"><Icon name="plus" size={13} /> Base environment</button><button onClick={() => onAdd(environment.id)} type="button"><Icon name="plus" size={13} /> Sub-environment</button></aside><main>
-          <div className="environment-identity"><label>Name<input onChange={(event) => onChange({ ...environment, name: event.target.value })} value={environment.name} /></label><label>Parent<select onChange={(event) => { const parentId = event.target.value; onChange({ ...environment, parentId, private: parentId ? environment.private || !publicIds.has(parentId) : false }); }} value={environment.parentId ?? ''}><option value="">None (base)</option>{environments.filter((candidate) => candidate.id !== environment.id && !environmentAncestors(environments, candidate.id).some((ancestor) => ancestor.id === environment.id)).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label><label>Color<input onChange={(event) => onChange({ ...environment, color: event.target.value })} type="color" value={environment.color || '#7e8a91'} /></label><label className="private-environment"><input checked={environment.private === true} disabled={!environment.parentId || !publicIds.has(environment.parentId)} onChange={(event) => onChange({ ...environment, private: event.target.checked })} type="checkbox" /> Private on this device</label></div>
-          <p>Own values override inherited values immediately. Private sub-environments are omitted from project sync and exports; use vault references for encrypted secrets.</p>
-          {inherited.length ? <div className="inherited-variables"><strong>Inherited from parent</strong>{inherited.map((variable) => <span key={variable.name}><code>{variable.name}</code><em>{variable.value}</em></span>)}</div> : null}
-          <KeyValueEditor rows={environment.variables} onChange={(variables) => onChange({ ...environment, variables })} namePlaceholder="Variable" />
-        </main></div>
-        <footer><button className="danger-action" disabled={environments.length <= 1} onClick={() => onDelete(environment.id)} type="button">Delete</button><button className="secondary-button" disabled={!environment.parentId} onClick={() => onDuplicate(environment.id)} type="button"><Icon name="copy" size={13} /> Duplicate</button><span className="footer-spacer" /><button className="secondary-button" onClick={onClose} type="button">Done</button></footer>
-      </section>
-    </div>
+    <section aria-labelledby="environment-title" className="environment-document-panel">
+      {documentTabStrip}
+      <header><div><small>Project environments</small><h2 id="environment-title">{environment.name}</h2></div><span>{environment.private ? 'Private on this device' : 'Shared project data'}</span></header>
+      <div className="environment-layout"><aside><div>{roots.map((candidate) => renderEnvironment(candidate, 0))}</div><button onClick={() => onAdd('')} type="button"><Icon name="plus" size={13} /> Base environment</button><button onClick={() => onAdd(environment.id)} type="button"><Icon name="plus" size={13} /> Sub-environment</button></aside><main>
+        <div className="environment-identity"><label>Name<input onChange={(event) => onChange({ ...environment, name: event.target.value })} value={environment.name} /></label><label>Parent<select onChange={(event) => { const parentId = event.target.value; onChange({ ...environment, parentId, private: parentId ? environment.private || !publicIds.has(parentId) : false }); }} value={environment.parentId ?? ''}><option value="">None (base)</option>{environments.filter((candidate) => candidate.id !== environment.id && !environmentAncestors(environments, candidate.id).some((ancestor) => ancestor.id === environment.id)).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label><label>Color<input onChange={(event) => onChange({ ...environment, color: event.target.value })} type="color" value={environment.color || '#7e8a91'} /></label><label className="private-environment"><input checked={environment.private === true} disabled={!environment.parentId || !publicIds.has(environment.parentId)} onChange={(event) => onChange({ ...environment, private: event.target.checked })} type="checkbox" /> Private on this device</label></div>
+        <p>Own values override inherited values immediately. Private sub-environments are omitted from project sync and exports; use vault references for encrypted secrets.</p>
+        {inherited.length ? <div className="inherited-variables"><strong>Inherited from parent</strong>{inherited.map((variable) => <span key={variable.name}><code>{variable.name}</code><em>{variable.value}</em></span>)}</div> : null}
+        <KeyValueEditor rows={environment.variables} onChange={(variables) => onChange({ ...environment, variables })} namePlaceholder="Variable" />
+      </main></div>
+      <footer><button className="danger-action" disabled={environments.length <= 1} onClick={() => onDelete(environment.id)} type="button">Delete</button><button className="secondary-button" disabled={!environment.parentId} onClick={() => onDuplicate(environment.id)} type="button"><Icon name="copy" size={13} /> Duplicate</button><span className="footer-spacer" /><span>{environments.length} environment{environments.length === 1 ? '' : 's'}</span></footer>
+    </section>
   );
 }
 
@@ -1282,7 +1285,6 @@ export default function App() {
   const [selectedStreamSessionId, setSelectedStreamSessionId] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [oauthAuthorization, setOAuthAuthorization] = useState<OAuthAuthorizationStatus>();
-  const [showEnvironment, setShowEnvironment] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -1466,6 +1468,9 @@ export default function App() {
       const folderName = target?.folderId ? foldersById.get(target.folderId)?.folder.name : '';
       return runnerTargetsById.has(tab.requestId) ? [{ id: tab.requestId, type: 'runner', name: folderName ? `Runner · ${folderName}` : 'Runner', temporary: tab.temporary }] : [];
     }
+    if (tab.type === 'environment') {
+      return tab.requestId === environmentDocumentId(activeWorkspaceId) ? [{ id: tab.requestId, type: 'environment', name: 'Environments', temporary: tab.temporary }] : [];
+    }
     const folder = foldersById.get(tab.requestId)?.folder;
     return folder ? [{ id: folder.id, type: 'folder', name: folder.name, temporary: tab.temporary }] : [];
   });
@@ -1473,6 +1478,7 @@ export default function App() {
   const activeFolderDocument = activeDocumentTab?.type === 'folder' ? foldersById.get(activeDocumentTab.requestId) : undefined;
   const activeRunnerTarget = activeDocumentTab?.type === 'runner' ? runnerTargetsById.get(activeDocumentTab.requestId) : undefined;
   const isRunnerDocument = activeDocumentTab?.type === 'runner' && runnerTargetsById.has(activeDocumentTab.requestId);
+  const isEnvironmentDocument = activeDocumentTab?.type === 'environment' && activeDocumentTab.requestId === environmentDocumentId(activeWorkspaceId);
   const isRequestDocument = activeDocumentTab?.type === 'request';
   const isRequestDashboard = activeRequestDocumentState.dashboard && openDocumentTabs.length === 0;
   useEffect(() => {
@@ -1795,6 +1801,10 @@ export default function App() {
     openWorkspaceDocument(runnerDocumentId(activeWorkspaceId, folderId), 'runner');
   };
 
+  const openEnvironmentDocument = () => {
+    openWorkspaceDocument(environmentDocumentId(activeWorkspaceId), 'environment');
+  };
+
   const promoteRequestDocument = (requestId: string) => {
     applyRequestDocumentState(promoteRequestTab(activeRequestDocumentState, requestId));
   };
@@ -1827,6 +1837,7 @@ export default function App() {
   };
 
   const renameWorkspaceDocument = (documentId: string, type: DocumentTabType, name: string) => {
+    if (type !== 'request' && type !== 'folder') return;
     promoteRequestDocument(documentId);
     setWorkspace((current) => ({
       ...current,
@@ -2691,7 +2702,6 @@ export default function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setShowPalette(false);
-        setShowEnvironment(false);
         setShowSendOptions(false);
         setShowCodeGeneration(false);
         return;
@@ -2705,7 +2715,7 @@ export default function App() {
       if (shortcutMatches(event, shortcuts.palette)) action(() => setShowPalette((visible) => !visible));
       else if (shortcutMatches(event, shortcuts.preferences)) action(() => setWorkbenchSection('preferences'));
       else if (shortcutMatches(event, shortcuts.send) && isRequestDocument) action(() => { if (scheduledSendLabel) cancelScheduledSends(); else if (!isSending) void executeRequest(); });
-      else if (shortcutMatches(event, shortcuts.environment)) action(() => setShowEnvironment(true));
+      else if (shortcutMatches(event, shortcuts.environment)) action(openEnvironmentDocument);
       else if (shortcutMatches(event, shortcuts.history)) action(() => { setWorkbenchSection('requests'); setSidebarMode('history'); setSidebarHidden(false); });
       else if (shortcutMatches(event, shortcuts['toggle-sidebar'])) action(() => setSidebarHidden((hidden) => !hidden));
       else if (shortcutMatches(event, shortcuts['new-request'])) action(addRequest);
@@ -2718,7 +2728,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [active, isRequestDocument, isSending, scheduledSendLabel, workspace]);
+  }, [active, activeRequestDocumentState, activeWorkspaceId, isRequestDocument, isSending, scheduledSendLabel, workspace]);
 
   const applyImport = async (result: ArtifactImport) => {
     const { applyArtifactImport } = await import('./lib/interchange/apply');
@@ -2912,7 +2922,7 @@ export default function App() {
           {workspace.environments.map((environment) => <option key={environment.id} value={environment.id}>{`${'— '.repeat(environmentAncestors(workspace.environments, environment.id).length)}${environment.name}${environment.private ? ' · private' : ''}`}</option>)}
         </select>
         <div className="topbar-actions">
-          <button aria-label="Edit environment" className="icon-button subtle" onClick={() => setShowEnvironment(true)} type="button"><Icon name="braces" size={18} /></button>
+          <button aria-label="Edit environment" className={`icon-button subtle${isEnvironmentDocument ? ' active' : ''}`} onClick={openEnvironmentDocument} type="button"><Icon name="braces" size={18} /></button>
           <button aria-label="Import artifacts" className="icon-button subtle" onClick={() => setShowImport(true)} type="button"><Icon name="import" size={18} /></button>
           <button aria-label="Export artifacts" className="icon-button subtle" onClick={() => setShowExport(true)} type="button"><Icon name="download" size={18} /></button>
         </div>
@@ -2959,10 +2969,21 @@ export default function App() {
         {workbenchSection === 'requests' ? (isRequestDashboard ? <ProjectDashboard
           canReopenRequest={activeRequestDocumentState.closed.some((documentId) => validDocumentReferences.some((document) => document.id === documentId))}
           onAddRequest={addRequest}
+          onOpenEnvironment={openEnvironmentDocument}
           onOpenRequest={(requestId) => openRequestDocument(requestId)}
           onOpenSection={setWorkbenchSection}
           onReopenRequest={reopenRequestDocument}
           workspace={workspace}
+        /> : isEnvironmentDocument ? <EnvironmentDocumentPanel
+          activeId={workspace.activeEnvironmentId}
+          documentTabStrip={renderDocumentTabStrip()}
+          environments={workspace.environments}
+          onAdd={(parentId) => { promoteRequestDocument(environmentDocumentId(activeWorkspaceId)); addEnvironment(parentId); }}
+          onChange={(environment) => { promoteRequestDocument(environmentDocumentId(activeWorkspaceId)); updateEnvironment(environment); }}
+          onDelete={(environmentId) => { deleteEnvironment(environmentId); promoteRequestDocument(environmentDocumentId(activeWorkspaceId)); }}
+          onDuplicate={(environmentId) => { promoteRequestDocument(environmentDocumentId(activeWorkspaceId)); duplicateEnvironment(environmentId); }}
+          onMove={(move) => { promoteRequestDocument(environmentDocumentId(activeWorkspaceId)); moveEnvironment(move); }}
+          onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))}
         /> : activeFolderDocument ? <FolderDocumentPanel
           collection={activeFolderDocument.collection}
           cookies={workspace.cookies}
@@ -3069,10 +3090,9 @@ export default function App() {
         <span>{vaultSession.unlocked ? `Vault: ${vaultSession.entries.length} unlocked` : 'Vault: locked'}</span>
         <span>Local-only</span>
         <span>UTF-8</span>
-        <span>{workbenchSection === 'requests' ? isRequestDashboard ? 'Project' : activeFolderDocument ? 'Folder' : isRunnerDocument ? 'Runner' : protocolLabel(active.request) : titleCase(workbenchSection)}</span>
+        <span>{workbenchSection === 'requests' ? isRequestDashboard ? 'Project' : isEnvironmentDocument ? 'Environment' : activeFolderDocument ? 'Folder' : isRunnerDocument ? 'Runner' : protocolLabel(active.request) : titleCase(workbenchSection)}</span>
       </footer>
 
-      {showEnvironment ? <EnvironmentDialog activeId={workspace.activeEnvironmentId} environments={workspace.environments} onAdd={addEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} onDelete={deleteEnvironment} onDuplicate={duplicateEnvironment} onMove={moveEnvironment} onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))} /> : null}
       {configuredCollection ? <CollectionDialog collection={configuredCollection} onChange={updateCollection} onClose={() => setCollectionEditor(undefined)} /> : null}
       {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={activeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} onDuplicate={() => duplicateFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
       {showSendOptions ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSendOptions(false)}>
@@ -3091,7 +3111,7 @@ export default function App() {
       {showImport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading import tools…</div></div>}><ImportDialog onApply={applyImport} onClose={() => setShowImport(false)} onFetchUrl={fetchImportUrl} /></Suspense> : null}
       {showExport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading export tools…</div></div>}><ExportDialog onClose={() => setShowExport(false)} workspace={workspace} /></Suspense> : null}
       {showCodeGeneration ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading code generator…</div></div>}><CodeGenerationDialog generate={generateCode} onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /></Suspense> : null}
-      {showPalette ? <Suspense fallback={<div className="dialog-loading">Loading commands…</div>}><CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => setWorkbenchSection('design')} onEnvironment={() => setShowEnvironment(true)} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => setWorkbenchSection('mocks')} onPreferences={() => setWorkbenchSection('preferences')} onRunner={() => openRunnerDocument()} /></Suspense> : null}
+      {showPalette ? <Suspense fallback={<div className="dialog-loading">Loading commands…</div>}><CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => setWorkbenchSection('design')} onEnvironment={openEnvironmentDocument} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => setWorkbenchSection('mocks')} onPreferences={() => setWorkbenchSection('preferences')} onRunner={() => openRunnerDocument()} /></Suspense> : null}
     </main>
   );
 }

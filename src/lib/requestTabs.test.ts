@@ -127,4 +127,15 @@ describe('request document tabs', () => {
     ]);
     expect(reopenClosedDocumentTab(closeRequestTab(reconciled, 'runner_folder'), [{ id: 'runner_folder', type: 'runner' }]).tabs.at(-1)).toEqual({ requestId: 'runner_folder', type: 'runner', temporary: false });
   });
+
+  it('persists the environment workspace in the shared document lifecycle', () => {
+    let state = openRequestTab(emptyRequestTabState(), 'request', true);
+    state = openDocumentTab(state, 'environment_workspace', 'environment');
+    expect(parseRequestTabState(JSON.stringify(state)).tabs.at(-1)).toEqual({ requestId: 'environment_workspace', type: 'environment', temporary: true });
+    const closed = closeRequestTab(state, 'environment_workspace');
+    expect(reopenClosedDocumentTab(closed, [
+      { id: 'request', type: 'request' },
+      { id: 'environment_workspace', type: 'environment' },
+    ]).tabs.at(-1)).toEqual({ requestId: 'environment_workspace', type: 'environment', temporary: false });
+  });
 });

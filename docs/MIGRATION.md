@@ -2309,7 +2309,21 @@ Compatibility bounds remain explicit: pinned Runner context retains unsaved per-
 
 Compatibility bounds remain explicit: drafts are session-memory context for currently open Runner documents, matching the pinned unsaved-context behavior rather than silently persisting control edits into project files; closing a Runner intentionally discards its draft. Environment, collection/design, mock-server/route, and test-suite resources still do not participate in the shared strip. Collections and Collection runner stay `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 158 — remaining parity closure and release hardening
+## Milestone 158 — project Environment document tab (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned tab audit | Complete | Pinned `BaseTab` includes `environment`; an environment-scoped workspace resource becomes one ordinary tab whose resource ID, name, URL, and temporary/permanent lifecycle follow the shared tab context |
+| Local identity mapping | Complete baseline | Brunomnia exposes one namespaced Environment synthetic document per local project, avoiding collisions with request/folder IDs while representing the project's complete global base/sub-environment workspace |
+| Shared lifecycle | Complete | The Environment document persists with typed tab storage and shares temporary replacement/promotion, active history, cycling, drag order, middle/final/all/other close, reopen, and dashboard behavior |
+| Editor workbench | Complete baseline | The prior modal is a full document pane with base/sub-environment selection, immediate active-environment switching, name/parent/color/privacy/variables, inherited-value evidence, drag/keyboard ordering, add, duplicate, and guarded delete |
+| Entry and recovery paths | Complete | Top-bar edit, the configured shortcut, command palette, and project-dashboard resource card all open or activate the same document; edits promote a temporary tab and legacy stored tab JSON remains readable |
+| Tab correctness | Complete | Non-resource synthetic Runner/Environment names render as fixed tab labels instead of misleading editable Request inputs; request/folder inline rename and request pin controls remain unchanged |
+| Executable evidence | Complete baseline | Focused typed-tab/environment-resource regressions, strict React/TypeScript compilation, full frontend/native suites, CLI/audit gates, and a rebuilt macOS app verify the milestone without rendered Browser QA |
+
+Compatibility bounds remain explicit: this document represents Brunomnia's project-global environment tree. Collection base/sub-environments remain in each collection's existing settings pane rather than fabricating a second pinned environment-workspace route. Mock-server/route, collection/design document, and test-suite resources still do not participate in the shared strip. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 159 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

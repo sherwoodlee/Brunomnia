@@ -1,4 +1,4 @@
-export type DocumentTabType = 'request' | 'folder' | 'runner';
+export type DocumentTabType = 'request' | 'folder' | 'runner' | 'environment';
 
 export type DocumentTabReference = {
   id: string;
@@ -51,7 +51,7 @@ export const parseRequestTabState = (value: string | null): RequestTabState => {
       seen.add(requestId);
       const temporary = tab.temporary === true && !temporarySeen;
       temporarySeen ||= temporary;
-      const type: DocumentTabType = tab.type === 'folder' || tab.type === 'runner' ? tab.type : 'request';
+      const type: DocumentTabType = tab.type === 'folder' || tab.type === 'runner' || tab.type === 'environment' ? tab.type : 'request';
       return [{ requestId, type, temporary }];
     }).slice(0, MAX_OPEN_TABS);
     return {
