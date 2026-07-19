@@ -154,7 +154,7 @@ Compatibility bounds at Milestone 9 were explicit: validation was structural plu
 | Workspace migration | Complete | Versions 1–9 migrate to v10 normalized folder/environment fields, bounded ancestry, cycle repair, private-descendant propagation, and collision-safe imported references |
 | Documentation and evidence | Complete | [Resource hierarchy guide](RESOURCE_HIERARCHY.md) and [Milestone 10 verification](QA_MILESTONE_10.md) |
 
-Compatibility bounds remain explicit: bulk folder actions, rendered Markdown, environment-tree reordering, richer collected-data UI, keyboard-equivalent tree reordering, and a full template-tag builder remain open. Private values are omitted rather than encrypted by private-environment storage itself; vault references remain the encrypted-secret path. Insomnia compatibility export cannot represent every Brunomnia hierarchy variant or unsupported protocol without the warnings already recorded by the interchange layer.
+Compatibility bounds at this milestone remain explicit: bulk folder actions, rendered Markdown, environment-tree reordering, richer collected-data UI, keyboard-equivalent tree reordering, and a full template-tag builder remain open. Milestone 144 later closes keyboard-equivalent collection-tree reordering. Private values are omitted rather than encrypted by private-environment storage itself; vault references remain the encrypted-secret path. Insomnia compatibility export cannot represent every Brunomnia hierarchy variant or unsupported protocol without the warnings already recorded by the interchange layer.
 
 ## Milestone 11 — request authoring and local client code (complete baseline)
 
@@ -356,7 +356,7 @@ Compatibility bounds remain explicit: configured headers do not include every tr
 | Executable coverage | Complete | Resource tests cover mixed rendering, sibling ordering, reparenting, subtree transfer, cycle rejection, and collection ordering; migration tests cover malformed order metadata |
 | Documentation and evidence | Complete | Updated [resource hierarchy guide](RESOURCE_HIERARCHY.md) and [Milestone 24 verification](QA_MILESTONE_24.md) |
 
-Compatibility bounds remain explicit: the sidebar currently depends on native pointer drag/drop. Keyboard-equivalent reordering, multi-select/bulk resource actions, environment-tree ordering, and compatibility-format guarantees for arbitrary mixed sibling order remain open.
+Compatibility bounds at this milestone remain explicit: the sidebar depends on native pointer drag/drop. Milestone 144 later closes keyboard-equivalent reordering; multi-select/bulk resource actions, environment-tree ordering, and compatibility-format guarantees for arbitrary mixed sibling order remain open.
 
 ## Milestone 25 — headless test-name filtering (complete baseline)
 
@@ -2131,7 +2131,19 @@ Compatibility bounds remain explicit: preserving a user's manual local-folder re
 
 Compatibility bounds remain explicit: the pinned parser deliberately ignores unsupported predicates when any safe field is found and can over-approximate correlated OR branches into a method/path cross-product; Brunomnia matches and documents that behavior instead of claiming a full Kong expressions evaluator. Automatic all-control-plane project/workspace reconciliation and a credentialed live-tenant fixture remain open. Service integrations stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 144 — remaining parity closure and release hardening
+## Milestone 144 — keyboard collection-tree reordering (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Mixed sibling movement | Complete | Focused request and folder controls use Option/Alt + Arrow Up/Down or Home/End for before/after and first/last placement through the same validated move primitive as drag/drop |
+| Indent/outdent | Complete | Option/Alt + Right indents into a preceding folder; Option/Alt + Left moves a nested request/folder after its parent at the grandparent level |
+| Collection ordering | Complete | Focused collection controls support Option/Alt + Arrow Up/Down/Home/End without treating indent/outdent as valid collection operations |
+| Safety and discoverability | Complete | Search disables keyboard moves, impossible and boundary operations are no-ops, focusable controls advertise `aria-keyshortcuts`, and titles describe macOS Option plus cross-platform Alt behavior |
+| Executable evidence | Complete | A pure planner regression applies real moves across mixed siblings, indent/outdent, first placement, collection placement, and invalid boundaries; strict TypeScript proves all focusable wiring |
+
+Compatibility bounds remain explicit: keyboard moves operate one resource at a time and do not add multi-select/bulk tree actions. Rendered interaction and assistive-technology QA remain omitted by standing direction, so this milestone claims source semantics, focusable controls, shortcut metadata, pure move evidence, full regression suites, and packaged-app verification rather than observed focus visuals. Richer resource actions, environment-tree ordering, collected-data breadth, legacy-version reconstruction, byte-exact wire diagnostic export, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete.
+
+## Milestone 145 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

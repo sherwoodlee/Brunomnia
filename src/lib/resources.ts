@@ -16,6 +16,12 @@ export type WorkspaceResourceMove =
     placement?: 'before' | 'after';
   };
 
+export type WorkspaceResourceKeyboardTarget =
+  | { kind: 'collection'; collectionId: string }
+  | { kind: 'folder' | 'request'; collectionId: string; resourceId: string };
+
+export type WorkspaceResourceKeyboardAction = 'up' | 'down' | 'first' | 'last' | 'indent' | 'outdent';
+
 const collectionResourceOrder = (collection: Collection): string[] => {
   const validIds = new Set([
     ...(collection.folders ?? []).map((folder) => folder.id),
@@ -39,6 +45,54 @@ export const orderedCollectionChildren = (collection: Collection, parentId = '')
     if ((request?.folderId ?? '') === parentId) return [{ kind: 'request', id }];
     return [];
   });
+};
+
+export const keyboardWorkspaceResourceMove = (
+  workspace: Workspace,
+  target: WorkspaceResourceKeyboardTarget,
+  action: WorkspaceResourceKeyboardAction,
+): WorkspaceResourceMove | undefined => {
+  if (target.kind === 'collection') {
+    const index = workspace.collections.findIndex((collection) => collection.id === target.collectionId);
+    if (index < 0 || workspace.collections.length < 2 || action === 'indent' || action === 'outdent') return undefined;
+    const targetIndex = action === 'up' ? index - 1 : action === 'down' ? index + 1 : action === 'first' ? 0 : workspace.collections.length - 1;
+    const sibling = workspace.collections[targetIndex];
+    if (!sibling || sibling.id === target.collectionId) return undefined;
+    return {
+      kind: 'collection',
+      collectionId: target.collectionId,
+      targetCollectionId: sibling.id,
+      placement: action === 'down' || action === 'last' ? 'after' : 'before',
+    };
+  }
+
+  const collection = workspace.collections.find((candidate) => candidate.id === target.collectionId);
+  if (!collection) return undefined;
+  const folder = target.kind === 'folder' ? (collection.folders ?? []).find((candidate) => candidate.id === target.resourceId) : undefined;
+  const request = target.kind === 'request' ? collection.requests.find((candidate) => candidate.id === target.resourceId) : undefined;
+  if (!folder && !request) return undefined;
+  const parentId = folder?.parentId ?? request?.folderId ?? '';
+  const siblings = orderedCollectionChildren(collection, parentId);
+  const index = siblings.findIndex((candidate) => candidate.kind === target.kind && candidate.id === target.resourceId);
+  if (index < 0) return undefined;
+  if (action === 'indent') {
+    const previous = siblings[index - 1];
+    return previous?.kind === 'folder' ? { ...target, targetCollectionId: collection.id, targetParentId: previous.id } : undefined;
+  }
+  if (action === 'outdent') {
+    const parent = (collection.folders ?? []).find((candidate) => candidate.id === parentId);
+    return parent ? { ...target, targetCollectionId: collection.id, targetParentId: parent.parentId, targetResourceId: parent.id, placement: 'after' } : undefined;
+  }
+  const targetIndex = action === 'up' ? index - 1 : action === 'down' ? index + 1 : action === 'first' ? 0 : siblings.length - 1;
+  const sibling = siblings[targetIndex];
+  if (!sibling || sibling.id === target.resourceId) return undefined;
+  return {
+    ...target,
+    targetCollectionId: collection.id,
+    targetParentId: parentId,
+    targetResourceId: sibling.id,
+    placement: action === 'down' || action === 'last' ? 'after' : 'before',
+  };
 };
 
 const sortCollectionResources = (collection: Collection, resourceOrder: string[]): Collection => {

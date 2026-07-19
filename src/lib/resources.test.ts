@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
 import type { Collection, Environment, RequestFolder } from '../types';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes } from './resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, keyboardWorkspaceResourceMove, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes } from './resources';
 
 const row = (id: string, name: string, value: string) => ({ id, name, value, enabled: true });
 
@@ -166,5 +166,29 @@ describe('resource hierarchy', () => {
     const second = workspace.collections[1].id;
     const moved = moveWorkspaceResource(workspace, { kind: 'collection', collectionId: first, targetCollectionId: second, placement: 'after' });
     expect(moved.collections.slice(0, 2).map((collection) => collection.id)).toEqual([second, first]);
+  });
+
+  it('plans keyboard reorder, indent, outdent, and boundary moves', () => {
+    const workspace = cloneSeedWorkspace();
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    workspace.collections = [{
+      id: 'source', name: 'Source', expanded: true, requests: [first, second],
+      folders: [{ id: 'folder', name: 'Folder', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' }],
+      resourceOrder: ['folder', 'first', 'second'],
+    }, { id: 'target', name: 'Target', expanded: true, requests: [], resourceOrder: [] }];
+
+    const movedFirst = moveWorkspaceResource(workspace, keyboardWorkspaceResourceMove(workspace, { kind: 'request', collectionId: 'source', resourceId: 'second' }, 'first')!);
+    expect(orderedCollectionChildren(movedFirst.collections[0]).map((resource) => resource.id)).toEqual(['second', 'folder', 'first']);
+
+    const indented = moveWorkspaceResource(workspace, keyboardWorkspaceResourceMove(workspace, { kind: 'request', collectionId: 'source', resourceId: 'first' }, 'indent')!);
+    expect(indented.collections[0].requests.find((request) => request.id === 'first')?.folderId).toBe('folder');
+    const outdented = moveWorkspaceResource(indented, keyboardWorkspaceResourceMove(indented, { kind: 'request', collectionId: 'source', resourceId: 'first' }, 'outdent')!);
+    expect(orderedCollectionChildren(outdented.collections[0]).map((resource) => resource.id)).toEqual(['folder', 'first', 'second']);
+
+    const movedCollection = moveWorkspaceResource(workspace, keyboardWorkspaceResourceMove(workspace, { kind: 'collection', collectionId: 'target' }, 'first')!);
+    expect(movedCollection.collections.map((collection) => collection.id)).toEqual(['target', 'source']);
+    expect(keyboardWorkspaceResourceMove(workspace, { kind: 'request', collectionId: 'source', resourceId: 'second' }, 'down')).toBeUndefined();
+    expect(keyboardWorkspaceResourceMove(workspace, { kind: 'folder', collectionId: 'source', resourceId: 'folder' }, 'outdent')).toBeUndefined();
   });
 });

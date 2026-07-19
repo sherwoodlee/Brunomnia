@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, DragEvent as ReactDragEvent, ReactNode, RefObject } from 'react';
+import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from './data/seed';
 import { sendRequest as sendHttpRequest, type SendRequestContext } from './lib/http';
@@ -16,8 +16,8 @@ import type { ArtifactImport } from './lib/interchange/types';
 import { applyPluginTheme, createPluginRuntime, describePlugin, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
 import { plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
 import { defaultPreferences, shortcutMatches } from './lib/preferences';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
-import type { WorkspaceResourceMove } from './lib/resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, keyboardWorkspaceResourceMove, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
+import type { WorkspaceResourceKeyboardAction, WorkspaceResourceMove } from './lib/resources';
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
 import type { AppliedResponseMockTarget } from './lib/mockRouteFromResponse';
@@ -412,6 +412,24 @@ function CollectionSidebar({
     return ` drop-${dropIndicator.slice(prefix.length)}`;
   };
   const sourceClass = (source: SidebarDragSource) => dragSource && JSON.stringify(dragSource) === JSON.stringify(source) ? ' is-dragging' : '';
+  const keyboardMove = (event: ReactKeyboardEvent<HTMLElement>, source: SidebarDragSource) => {
+    if (normalizedSearch || !event.altKey || event.metaKey || event.ctrlKey) return;
+    const actions: Partial<Record<string, WorkspaceResourceKeyboardAction>> = {
+      ArrowUp: 'up',
+      ArrowDown: 'down',
+      ArrowLeft: 'outdent',
+      ArrowRight: 'indent',
+      Home: 'first',
+      End: 'last',
+    };
+    const action = actions[event.key];
+    if (!action) return;
+    const move = keyboardWorkspaceResourceMove(workspace, source, action);
+    if (!move) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onMoveResource(move);
+  };
 
   return (
     <aside className="collection-sidebar">
@@ -464,8 +482,10 @@ function CollectionSidebar({
             onDragStart={(event) => beginDrag(event, source)}
             onDrop={(event) => dropOnRequest(event, collection.id, request, true)}
             onClick={() => onSelectRequest(request.id)}
+            onKeyDown={(event) => keyboardMove(event, source)}
             style={{ '--resource-depth': depth } as CSSProperties}
-            title={normalizedSearch ? 'Clear search to reorder' : 'Drag to reorder or move'}
+            title={normalizedSearch ? 'Clear search to reorder' : 'Drag to move · Option/Alt+Arrows reorder, indent, or outdent · Option/Alt+Home/End moves first or last'}
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight Alt+Home Alt+End"
             type="button"
           ><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span>{request.name}</span></button>;
           }
@@ -492,10 +512,10 @@ function CollectionSidebar({
                 onDragStart={(event) => beginDrag(event, source)}
                 onDrop={(event) => dropOnFolder(event, collection.id, folder, true)}
                 style={{ '--resource-depth': depth } as CSSProperties}
-                title={normalizedSearch ? 'Clear search to reorder' : 'Drag edges to reorder; drop in the center to move inside'}
+                title={normalizedSearch ? 'Clear search to reorder' : 'Drag edges to reorder; drop in the center to move inside · Option/Alt+Arrows reorder, indent, or outdent'}
               >
                 <button aria-label={`${folder.expanded ? 'Collapse' : 'Expand'} ${folder.name}`} onClick={() => onToggleFolder(collection.id, folder.id)} type="button"><Icon name={folder.expanded ? 'chevron-down' : 'chevron-right'} size={12} /></button>
-                <button onClick={() => onEditFolder(collection.id, folder.id)} type="button"><Icon name="folder" size={14} /><span>{folder.name}</span></button>
+                <button aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight Alt+Home Alt+End" onClick={() => onEditFolder(collection.id, folder.id)} onKeyDown={(event) => keyboardMove(event, source)} type="button"><Icon name="folder" size={14} /><span>{folder.name}</span></button>
                 <small>{collection.requests.filter((request) => folderAncestors(collection, request.folderId).some((ancestor) => ancestor.id === folder.id)).length}</small>
                 <button aria-label={`Add subfolder to ${folder.name}`} onClick={() => onAddFolder(collection.id, folder.id)} type="button"><Icon name="plus" size={12} /></button>
                 <button aria-label={`Configure ${folder.name}`} onClick={() => onEditFolder(collection.id, folder.id)} type="button"><Icon name="settings" size={12} /></button>
@@ -514,8 +534,8 @@ function CollectionSidebar({
                 onDragOver={(event) => dropOnCollection(event, collection.id, false)}
                 onDragStart={(event) => beginDrag(event, collectionSource)}
                 onDrop={(event) => dropOnCollection(event, collection.id, true)}
-                title={normalizedSearch ? 'Clear search to reorder' : 'Drag to reorder collections; drop a resource here to move it to the root'}
-              ><button onClick={() => onToggleCollection(collection.id)} type="button"><Icon name={collection.expanded ? 'chevron-down' : 'chevron-right'} size={14} /><Icon name="archive" size={16} /><span>{collection.name}</span><small>{collection.requests.length}</small></button><button aria-label={`Add folder to ${collection.name}`} onClick={() => onAddFolder(collection.id, '')} type="button"><Icon name="plus" size={13} /></button><button aria-label={`Configure ${collection.name}`} onClick={() => onEditCollection(collection.id)} type="button"><Icon name="settings" size={13} /></button></div>
+                title={normalizedSearch ? 'Clear search to reorder' : 'Drag to reorder collections; drop a resource here to move it to the root · Option/Alt+Up/Down/Home/End reorders'}
+              ><button aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+Home Alt+End" onClick={() => onToggleCollection(collection.id)} onKeyDown={(event) => keyboardMove(event, collectionSource)} type="button"><Icon name={collection.expanded ? 'chevron-down' : 'chevron-right'} size={14} /><Icon name="archive" size={16} /><span>{collection.name}</span><small>{collection.requests.length}</small></button><button aria-label={`Add folder to ${collection.name}`} onClick={() => onAddFolder(collection.id, '')} type="button"><Icon name="plus" size={13} /></button><button aria-label={`Configure ${collection.name}`} onClick={() => onEditCollection(collection.id)} type="button"><Icon name="settings" size={13} /></button></div>
               {collection.expanded ? <div>{renderResources('', 0)}</div> : null}
             </div>
           );

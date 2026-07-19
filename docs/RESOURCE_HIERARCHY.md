@@ -15,11 +15,20 @@ Milestone 24 adds persistent pointer drag/drop to the collection tree:
 - drop a request or folder in the center of a folder row to move it inside the folder; and
 - drop a request or folder on a collection title to move it to that collection's root.
 
+Milestone 144 adds focusable keyboard-equivalent moves on each request row, folder-name control, and collection-name control. Clear sidebar search, focus the resource, then use:
+
+- **Option/Alt + Arrow Up/Down** to move before or after the adjacent mixed sibling;
+- **Option/Alt + Home/End** to move first or last among siblings;
+- **Option/Alt + Arrow Right** to indent into the preceding sibling when it is a folder; and
+- **Option/Alt + Arrow Left** to outdent after the current parent folder.
+
+Collections support Option/Alt + Arrow Up/Down/Home/End. Boundary, missing-resource, impossible-indent, root-outdent, and collection indent/outdent operations are no-ops. The focused keyed control remains the same resource after a successful move.
+
 Moving a folder across collections carries its complete descendant folder/request subtree and preserves every resource ID. A folder cannot be moved into itself or one of its descendants. Missing destinations and cross-collection ID collisions are rejected without a partial move. Destination collections and folders expand so the result remains visible.
 
 Order is stored in the native workspace and split-YAML project representation. Older workspaces are upgraded by retaining every valid folder/request once, discarding stale or duplicate order IDs, and appending valid resources that were absent from the saved order. Brunomnia compatibility imports remap saved order IDs with the imported resources.
 
-Drag/drop is intentionally disabled while sidebar search is active because hidden siblings make an apparent filtered order ambiguous. Clear the search field before reordering. Keyboard-equivalent tree reordering and arbitrary mixed-order guarantees in third-party compatibility exports remain open parity work.
+Drag/drop and keyboard moves are intentionally disabled while sidebar search is active because hidden siblings make an apparent filtered order ambiguous. Clear the search field before reordering. Arbitrary mixed-order guarantees in third-party compatibility exports remain open parity work.
 
 Configuration is composed for every execution path:
 
