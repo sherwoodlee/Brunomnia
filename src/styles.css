@@ -631,7 +631,15 @@ kbd {
 .compact-button { font-size: 10px; padding: 7px 11px; }
 .grpc-workspace { display: grid; min-height: 0; }
 .grpc-workspace.with-proto { grid-template-columns: minmax(280px, 1fr) minmax(320px, 1fr); }
-.proto-source-pane { border-right: 1px solid var(--border); display: grid; grid-template-rows: 34px minmax(0, 1fr); min-height: 0; min-width: 0; }
+.proto-source-pane { border-right: 1px solid var(--border); display: grid; grid-template-rows: 38px 50px minmax(0, 1fr); min-height: 0; min-width: 0; }
+.proto-import-bar { align-items: center; border-bottom: 1px solid var(--border-soft); display: flex; gap: 8px; justify-content: space-between; min-width: 0; padding: 0 8px; }
+.proto-import-bar > div { display: flex; gap: 5px; }
+.proto-import-bar button { align-items: center; background: var(--panel-soft); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); display: flex; font-size: 8px; gap: 4px; padding: 5px 7px; white-space: nowrap; }
+.proto-import-bar small { color: var(--faint); font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proto-import-bar small.error { color: var(--danger); }
+.proto-file-controls { align-items: center; border-bottom: 1px solid var(--border-soft); display: grid; gap: 7px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 5px 8px; }
+.proto-file-controls label { color: var(--muted); display: grid; font-size: 7px; gap: 3px; letter-spacing: .06em; min-width: 0; text-transform: uppercase; }
+.proto-file-controls select { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft); font: 8px var(--font-mono); height: 25px; min-width: 0; }
 .pane-label { align-items: center; border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; padding: 0 12px; }
 .pane-label strong { color: var(--text-soft); font: 9px var(--font-mono); }
 .pane-label small { color: var(--faint); font-size: 8px; }

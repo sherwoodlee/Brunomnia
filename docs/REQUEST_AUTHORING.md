@@ -77,6 +77,14 @@ GraphQL subscriptions use the shared realtime response panel, session retention,
 
 WSS subscriptions use the effective API certificate-validation choice and the same domain-scoped PEM client certificate/private key as native HTTP. Validation remains on by default; Never accepts an untrusted server certificate only for that request. A configured identity is sent only when the resolved hostname matches its exact, wildcard, comma-separated, or newline-separated domain allowlist. Inherited manual or per-request custom HTTP/HTTPS proxies use a bounded CONNECT tunnel, optional URL Basic credentials, and the current no-proxy list before the WSS handshake. The subscription path has no login, organization, plan, or entitlement check. Streaming plugin hooks, advanced signing schemes, upstream filesystem-backed event logs, and broad third-party server fixtures remain open.
 
+## gRPC proto trees
+
+Choose **Proto source**, then import one or more `.proto` files or a complete folder. Folder import removes the selected root folder once, preserves every nested relative path, and lets imports such as `types/messages.proto` resolve from the temporary compilation root. Import replaces the request's previous tree; use **Editing** to switch the visible file and **Compile entry** to choose the file whose service graph should be opened.
+
+Proto trees accept at most 500 files, 1 MiB per file, 10 MiB total, and 512 characters per relative path. Absolute paths, parent traversal, non-proto files, and case-insensitive duplicate paths are rejected in both the renderer and native command. Native compilation recreates only the validated tree in an isolated temporary directory, includes imported descriptors/source information, and never reads source paths directly from the user's filesystem.
+
+Workspace v29 persists the files, active editor path, and compile entry while retaining the entry source in the legacy `protoText` field for interchange compatibility. Older single-source requests migrate to `schema.proto` without changing their text. Browser development previews the combined source deterministically; real cross-file compilation and calls run in the packaged Tauri app. Custom gRPC proxy transport, custom CA/PFX identity, and richer reflection/schema workflows remain open, so the gRPC parity row remains Baseline.
+
 ## Socket.IO sessions
 
 Choose **Socket.IO** as the request protocol, enter the server URL, and use the Engine.IO path field when the server does not use `/socket.io`. A URL path becomes the Socket.IO namespace, while query rows remain handshake query parameters. Enabled headers are templated in order; the cookie jar contributes a `Cookie` header when request cookie sending is enabled. Active Bearer authentication is sent as the Socket.IO namespace-connect `auth.token` value rather than duplicated as an HTTP authorization header.

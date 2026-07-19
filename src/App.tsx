@@ -25,7 +25,6 @@ import { withoutOAuth2RuntimeCredentials } from './lib/oauth2Tokens';
 import {
   CodeEditor,
   GraphqlEditor,
-  GrpcEditor,
   HttpBodyEditor,
   StreamSetup,
   TransportEditor,
@@ -61,6 +60,7 @@ const CommandPalette = lazy(() => import('./components/CommandPalette').then((mo
 const CookieEditor = lazy(() => import('./components/CookieEditor').then((module) => ({ default: module.CookieEditor })));
 const AuthEditor = lazy(() => import('./components/AuthEditor').then((module) => ({ default: module.AuthEditor })));
 const SocketIoEditor = lazy(() => import('./components/SocketIoEditor').then((module) => ({ default: module.SocketIoEditor })));
+const GrpcEditor = lazy(() => import('./components/GrpcEditor').then((module) => ({ default: module.GrpcEditor })));
 const StreamConsole = lazy(() => import('./components/StreamConsole').then((module) => ({ default: module.StreamConsole })));
 const StreamHistoryControls = lazy(() => import('./components/StreamHistoryControls').then((module) => ({ default: module.StreamHistoryControls })));
 const OAuthAuthorizationDialog = lazy(() => import('./components/OAuthAuthorizationDialog').then((module) => ({ default: module.OAuthAuthorizationDialog })));
@@ -675,7 +675,7 @@ function RequestPanel({
         {activeTab === 'body' && request.protocol === 'graphql' ? <GraphqlEditor onChange={onChange} onLoadSchema={onLoadGraphqlSchema} request={request} schemaLoading={graphqlSchemaLoading} /> : null}
         {activeTab === 'body' && (request.protocol === 'websocket' || request.protocol === 'sse') ? <StreamSetup onChange={onChange} request={request} /> : null}
         {activeTab === 'body' && request.protocol === 'socketio' ? <Suspense fallback={<div className="dialog-loading">Loading Socket.IO editor…</div>}><SocketIoEditor onChange={onChange} onListenerToggle={onSocketIoListenerToggle} request={request} /></Suspense> : null}
-        {activeTab === 'body' && request.protocol === 'grpc' ? <GrpcEditor onChange={onChange} onLoadSchema={onLoadGrpcSchema} request={request} schema={grpcSchema} schemaLoading={grpcSchemaLoading} /> : null}
+        {activeTab === 'body' && request.protocol === 'grpc' ? <Suspense fallback={<div className="dialog-loading">Loading gRPC editor…</div>}><GrpcEditor onChange={onChange} onLoadSchema={onLoadGrpcSchema} request={request} schema={grpcSchema} schemaLoading={grpcSchemaLoading} /></Suspense> : null}
         {activeTab === 'transport' ? <TransportEditor globalTimeoutMs={requestContext.requestTimeoutMs ?? 30_000} onChange={onChange} request={request} /> : null}
         {activeTab === 'scripts' ? (
           <div className="editor-stack">
@@ -979,7 +979,7 @@ function FolderDialog({ collection, folder, environment, cookies, responses, req
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 28, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+    format: 'brunomnia', version: 29, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], responseFilters: {}, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');

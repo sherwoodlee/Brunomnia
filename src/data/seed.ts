@@ -1,6 +1,18 @@
 import type { ApiRequest, Collection, HttpMethod, Workspace } from '../types';
 import { defaultPreferences } from '../lib/preferences';
 
+const seedProtoText = `syntax = "proto3";
+package brunomnia.orders.v1;
+
+service OrdersService {
+  rpc GetOrder (GetOrderRequest) returns (Order);
+  rpc WatchOrders (WatchOrdersRequest) returns (stream Order);
+}
+
+message GetOrderRequest { string id = 1; }
+message WatchOrdersRequest { string status = 1; }
+message Order { string id = 1; string status = 2; double total = 3; }`;
+
 const createRequest = (id: string, name: string, method: HttpMethod, url: string): ApiRequest => ({
   id,
   name,
@@ -44,17 +56,10 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
     service: '',
     method: '',
     descriptorSource: 'reflection',
-    protoText: `syntax = "proto3";
-package brunomnia.orders.v1;
-
-service OrdersService {
-  rpc GetOrder (GetOrderRequest) returns (Order);
-  rpc WatchOrders (WatchOrdersRequest) returns (stream Order);
-}
-
-message GetOrderRequest { string id = 1; }
-message WatchOrdersRequest { string status = 1; }
-message Order { string id = 1; string status = 2; double total = 3; }`,
+    protoText: seedProtoText,
+    protoFiles: [{ id: `${id}-grpc-schema`, path: 'schema.proto', text: seedProtoText }],
+    protoEntryPath: 'schema.proto',
+    protoActivePath: 'schema.proto',
     descriptorSetBase64: '',
     input: '{}',
     metadata: [],
@@ -122,7 +127,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 28,
+  version: 29,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',

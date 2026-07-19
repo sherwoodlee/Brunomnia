@@ -146,11 +146,20 @@ export type GraphqlSchema = {
   types: GraphqlSchemaType[];
 };
 
+export type GrpcProtoFile = {
+  id: string;
+  path: string;
+  text: string;
+};
+
 export type GrpcConfig = {
   service: string;
   method: string;
   descriptorSource: 'reflection' | 'proto';
   protoText: string;
+  protoFiles: GrpcProtoFile[];
+  protoEntryPath: string;
+  protoActivePath: string;
   descriptorSetBase64: string;
   input: string;
   metadata: KeyValue[];
@@ -347,7 +356,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 28;
+  version: 29;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

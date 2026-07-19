@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
 import type { AiSettings, ApiRequest, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ShortcutAction, StoredResponse, StoredStreamSession, StreamMessage, Workspace } from '../types';
 import { normalizeGraphqlSchema } from './graphql';
+import { normalizeGrpcProtoTree } from './grpcProto';
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 import { normalizeHttpMethod } from './request';
 
@@ -523,6 +524,13 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         : stringValue(request.transport?.proxyUrl).trim() || stringValue(request.transport?.proxyExclusions).trim()
           ? 'custom'
           : 'global';
+      const grpc = record(request.grpc);
+      const protoTree = normalizeGrpcProtoTree(
+        grpc?.protoFiles,
+        stringValue(grpc?.protoText, defaults.grpc.protoText),
+        stringValue(grpc?.protoEntryPath),
+        stringValue(grpc?.protoActivePath),
+      );
       return {
         ...defaults,
         ...request,
@@ -551,7 +559,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
           schemaEndpoint: stringValue(graphql?.schemaEndpoint),
           schemaFetchedAt: stringValue(graphql?.schemaFetchedAt),
         },
-        grpc: { ...defaults.grpc, ...request.grpc, metadata: normalizeRows(record(request.grpc)?.metadata, `${requestId}-metadata`) },
+        grpc: { ...defaults.grpc, ...request.grpc, ...protoTree, metadata: normalizeRows(grpc?.metadata, `${requestId}-metadata`) },
         transport: {
           ...defaults.transport,
           ...request.transport,
@@ -627,7 +635,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 28,
+    version: 29,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

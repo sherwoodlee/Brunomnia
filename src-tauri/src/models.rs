@@ -223,10 +223,21 @@ pub struct StreamEvent {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GrpcProtoFileInput {
+    pub path: String,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GrpcSchemaInput {
     pub endpoint: String,
     pub source: String,
     pub proto_text: String,
+    #[serde(default)]
+    pub proto_files: Vec<GrpcProtoFileInput>,
+    #[serde(default)]
+    pub proto_entry_path: String,
     pub metadata: Vec<KeyValue>,
     #[serde(default)]
     pub transport: TransportConfig,

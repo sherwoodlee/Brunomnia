@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { ApiRequest, Environment, GrpcSchema } from '../types';
+import { grpcProtoSource } from './grpcProto';
 import { environmentMap, resolveTemplate } from './request';
 import { resolveCertificateValidation, resolveRequestTimeout } from './transport';
 
@@ -35,7 +36,7 @@ export const previewGrpcSchema = (protoText: string): GrpcSchema => {
   };
 };
 
-const mockGrpcSchema = (request: ApiRequest): GrpcSchema => previewGrpcSchema(request.grpc.protoText);
+const mockGrpcSchema = (request: ApiRequest): GrpcSchema => previewGrpcSchema(grpcProtoSource(request.grpc));
 
 export const loadGrpcSchema = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000, validateCertificates = true): Promise<GrpcSchema> => {
   const variables = environmentMap(environment);
@@ -48,6 +49,8 @@ export const loadGrpcSchema = async (request: ApiRequest, environment?: Environm
       endpoint: resolveTemplate(request.url, variables),
       source: request.grpc.descriptorSource,
       protoText: request.grpc.protoText,
+      protoFiles: request.grpc.protoFiles.map(({ path, text }) => ({ path, text })),
+      protoEntryPath: request.grpc.protoEntryPath,
       metadata: request.grpc.metadata,
       transport: { ...request.transport, timeoutMs: resolveRequestTimeout(request.transport, requestTimeoutMs), validateCertificates: resolveCertificateValidation(request.transport, validateCertificates) },
     },

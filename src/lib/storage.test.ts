@@ -148,7 +148,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(28);
+    expect(migrated.version).toBe(29);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
@@ -196,12 +196,34 @@ describe('workspace migrations', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(28);
+    expect(migrated.version).toBe(29);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
       expect.objectContaining({ id: 'legacy', multiline: false, contentType: '', fileName: '' }),
     ]);
+  });
+
+  it('migrates legacy gRPC text into a bounded persisted proto tree', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.version = 28;
+    const request = (workspace.collections as Array<{ requests: Array<Record<string, unknown>> }>)[0].requests[0];
+    request.grpc = {
+      ...(request.grpc as Record<string, unknown>),
+      protoText: 'syntax = "proto3"; service Legacy {}',
+      protoFiles: [{ path: '../escape.proto', text: 'invalid' }],
+      protoEntryPath: '../escape.proto',
+      protoActivePath: 'missing.proto',
+    };
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.version).toBe(29);
+    expect(migrated.collections[0].requests[0].grpc).toMatchObject({
+      protoText: 'syntax = "proto3"; service Legacy {}',
+      protoEntryPath: 'schema.proto',
+      protoActivePath: 'schema.proto',
+      protoFiles: [expect.objectContaining({ path: 'schema.proto', text: 'syntax = "proto3"; service Legacy {}' })],
+    });
   });
 
   it('repairs minimal exports with usable collections, environments, and active IDs', () => {
@@ -278,7 +300,7 @@ describe('workspace migrations', () => {
     collection.subEnvironments = [{ id: 'staging', name: 'Staging', variables: [{ name: 'host', value: 'staging.example', enabled: true }] }, null];
     collection.activeSubEnvironmentId = 'missing';
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(28);
+    expect(migrated.version).toBe(29);
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
   });

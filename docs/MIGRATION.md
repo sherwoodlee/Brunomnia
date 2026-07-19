@@ -1704,7 +1704,21 @@ Compatibility bounds remain explicit: importable proto trees, custom CA/PFX iden
 
 Brunomnia now accepts pinned-compatible `grpc://` and `grpcs://` endpoints, normalizes them internally to Tonic's HTTP/HTTPS schemes, preserves authority/path/query, and keeps the authored request URL unchanged. HTTP/HTTPS aliases continue to work, unsupported ambient schemes fail explicitly, and the secure classification feeds Milestone 112 validation/identity behavior. See [Milestone 113 verification](QA_MILESTONE_113.md).
 
-## Milestone 114 — remaining parity closure and release hardening
+## Milestone 114 — importable gRPC proto trees (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia stores imported proto files as a relative tree and materializes that tree in a temporary compilation directory so imports resolve without reading arbitrary ambient files |
+| Persisted tree model | Complete | Workspace v29 stores bounded proto files plus active and compile-entry paths, synchronizes the entry source to legacy `protoText`, and migrates older single-source requests to `schema.proto` |
+| File and folder authoring | Complete baseline | Requests can replace their tree from selected files or a directory, preserve nested paths after removing one common root, switch the edited file, and explicitly select the compiler entry |
+| Dual-boundary validation | Complete | Renderer and Rust command reject absolute/traversing/non-proto/duplicate paths and enforce 500 files, 1 MiB per file, 10 MiB total, and 512-character relative paths |
+| Native compilation | Complete | Tauri recreates only validated files below a fresh temporary root and opens the selected entry through Protox with imported descriptors and source information included |
+| Executable coverage | Complete | Frontend tests cover path normalization, root stripping, entry choice, migration, and command payloads; native tests compile a real service importing messages from another folder and reject unsafe/duplicate paths |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 114 verification](QA_MILESTONE_114.md) |
+
+Compatibility bounds remain explicit: custom gRPC proxy transport, custom CA/PFX identity, richer reflection/metadata/schema workflows, interactive streaming lifecycle controls, and broad third-party fixtures remain open. The gRPC ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 115 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

@@ -1,13 +1,19 @@
 use crate::models::{
-    GrpcCallInput, GrpcCallOutput, GrpcMethodInfo, GrpcSchemaInput, GrpcSchemaOutput,
-    GrpcServiceInfo, KeyValue, TransportConfig,
+    GrpcCallInput, GrpcCallOutput, GrpcMethodInfo, GrpcProtoFileInput, GrpcSchemaInput,
+    GrpcSchemaOutput, GrpcServiceInfo, KeyValue, TransportConfig,
 };
 use crate::{http_client::identity_enabled, streaming::AcceptInvalidServerCertificate};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor};
 use prost_types::{FileDescriptorProto, FileDescriptorSet};
-use std::{collections::HashSet, fs, sync::Arc, time::Instant};
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Component, Path},
+    sync::Arc,
+    time::Instant,
+};
 use tonic::{
     codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
     metadata::{Ascii, MetadataKey, MetadataValue},
@@ -17,7 +23,11 @@ use tonic::{
 
 pub async fn load_schema(input: GrpcSchemaInput) -> Result<GrpcSchemaOutput, String> {
     let (pool, bytes) = if input.source == "proto" {
-        compile_proto(&input.proto_text)?
+        compile_proto(
+            &input.proto_text,
+            &input.proto_files,
+            &input.proto_entry_path,
+        )?
     } else {
         reflect_schema(&input.endpoint, &input.metadata, &input.transport).await?
     };
@@ -335,18 +345,110 @@ async fn reflect_schema(
     Ok((pool, encoded))
 }
 
-fn compile_proto(proto_text: &str) -> Result<(DescriptorPool, Vec<u8>), String> {
-    if proto_text.trim().is_empty() {
+const MAX_PROTO_FILES: usize = 500;
+const MAX_PROTO_FILE_BYTES: usize = 1_048_576;
+const MAX_PROTO_TOTAL_BYTES: usize = 10_485_760;
+const MAX_PROTO_PATH_CHARS: usize = 512;
+
+fn normalize_proto_path(value: &str) -> Result<String, String> {
+    let normalized = value.trim().replace('\\', "/");
+    if normalized.is_empty()
+        || normalized.starts_with('/')
+        || normalized.as_bytes().get(1) == Some(&b':')
+    {
+        return Err("Proto paths must be relative.".into());
+    }
+    let mut segments = Vec::new();
+    for component in Path::new(&normalized).components() {
+        match component {
+            Component::Normal(segment) => segments.push(
+                segment
+                    .to_str()
+                    .ok_or_else(|| "Proto paths must be valid UTF-8.".to_string())?,
+            ),
+            Component::CurDir => {}
+            _ => return Err("Proto paths cannot traverse parent folders.".into()),
+        }
+    }
+    let path = segments.join("/");
+    if path.is_empty() || path.chars().count() > MAX_PROTO_PATH_CHARS {
+        return Err(format!(
+            "Proto paths must contain 1 to {MAX_PROTO_PATH_CHARS} characters."
+        ));
+    }
+    if !path.to_ascii_lowercase().ends_with(".proto") {
+        return Err("Only .proto files can be compiled.".into());
+    }
+    Ok(path)
+}
+
+fn compile_proto(
+    proto_text: &str,
+    proto_files: &[GrpcProtoFileInput],
+    proto_entry_path: &str,
+) -> Result<(DescriptorPool, Vec<u8>), String> {
+    if proto_files.is_empty() && proto_text.trim().is_empty() {
         return Err("Paste or import a .proto definition first.".into());
     }
+    if proto_files.len() > MAX_PROTO_FILES {
+        return Err(format!(
+            "Proto trees cannot exceed {MAX_PROTO_FILES} files."
+        ));
+    }
+    let fallback;
+    let source_files = if proto_files.is_empty() {
+        fallback = vec![GrpcProtoFileInput {
+            path: "schema.proto".into(),
+            text: proto_text.into(),
+        }];
+        fallback.as_slice()
+    } else {
+        proto_files
+    };
+    let mut files = Vec::with_capacity(source_files.len());
+    let mut paths = HashSet::with_capacity(source_files.len());
+    let mut total_bytes = 0usize;
+    for file in source_files {
+        let path = normalize_proto_path(&file.path)?;
+        if file.text.len() > MAX_PROTO_FILE_BYTES {
+            return Err(format!("Proto file '{path}' exceeds the 1 MiB limit."));
+        }
+        total_bytes = total_bytes
+            .checked_add(file.text.len())
+            .ok_or_else(|| "Proto tree size overflowed.".to_string())?;
+        if total_bytes > MAX_PROTO_TOTAL_BYTES {
+            return Err("Proto trees cannot exceed 10 MiB.".into());
+        }
+        if !paths.insert(path.to_lowercase()) {
+            return Err(format!("Proto file path '{path}' is duplicated."));
+        }
+        files.push((path, file.text.as_str()));
+    }
+    let entry = if proto_entry_path.trim().is_empty() {
+        files
+            .iter()
+            .min_by_key(|(path, text)| (!text.contains("service "), path.len(), path.as_str()))
+            .map(|(path, _)| path.clone())
+            .ok_or_else(|| "Paste or import a .proto definition first.".to_string())?
+    } else {
+        normalize_proto_path(proto_entry_path)?
+    };
+    if !paths.contains(&entry.to_lowercase()) {
+        return Err(format!("Proto entry file '{entry}' was not imported."));
+    }
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
-    let proto_path = directory.path().join("schema.proto");
-    fs::write(&proto_path, proto_text).map_err(|error| error.to_string())?;
+    for (path, text) in files {
+        let proto_path = directory.path().join(&path);
+        if let Some(parent) = proto_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::write(proto_path, text).map_err(|error| error.to_string())?;
+    }
     let mut compiler = protox::Compiler::new([directory.path()])
         .map_err(|error| format!("Unable to initialize the proto compiler: {error}"))?;
     compiler.include_imports(true).include_source_info(true);
     compiler
-        .open_file("schema.proto")
+        .open_file(&entry)
         .map_err(|error| format!("Invalid proto definition: {error}"))?;
     Ok((
         compiler.descriptor_pool(),
@@ -506,7 +608,7 @@ mod tests {
 
     #[test]
     fn compiles_proto_and_describes_streaming_methods() {
-        let (pool, bytes) = compile_proto(TEST_PROTO).expect("proto compiles");
+        let (pool, bytes) = compile_proto(TEST_PROTO, &[], "").expect("proto compiles");
         let output = schema_output(&pool, &bytes);
         assert_eq!(output.services[0].full_name, "brunomnia.test.Greeter");
         assert!(!output.services[0].methods[0].server_streaming);
@@ -515,8 +617,64 @@ mod tests {
     }
 
     #[test]
+    fn compiles_imported_multi_file_proto_tree() {
+        let files = vec![
+            GrpcProtoFileInput {
+                path: "types/messages.proto".into(),
+                text: r#"
+                    syntax = "proto3";
+                    package brunomnia.tree;
+                    message HelloRequest { string name = 1; }
+                    message HelloReply { string message = 1; }
+                "#
+                .into(),
+            },
+            GrpcProtoFileInput {
+                path: "services/greeter.proto".into(),
+                text: r#"
+                    syntax = "proto3";
+                    package brunomnia.tree;
+                    import "types/messages.proto";
+                    service Greeter { rpc SayHello (HelloRequest) returns (HelloReply); }
+                "#
+                .into(),
+            },
+        ];
+        let (pool, bytes) =
+            compile_proto("", &files, "services/greeter.proto").expect("proto tree compiles");
+        let output = schema_output(&pool, &bytes);
+        assert_eq!(output.services[0].full_name, "brunomnia.tree.Greeter");
+        assert!(pool
+            .get_message_by_name("brunomnia.tree.HelloRequest")
+            .is_some());
+        assert_eq!(pool.files().count(), 2);
+    }
+
+    #[test]
+    fn rejects_unsafe_or_duplicate_proto_paths() {
+        let unsafe_file = GrpcProtoFileInput {
+            path: "../escape.proto".into(),
+            text: TEST_PROTO.into(),
+        };
+        assert!(compile_proto("", &[unsafe_file], "../escape.proto").is_err());
+        let duplicate = vec![
+            GrpcProtoFileInput {
+                path: "schema.proto".into(),
+                text: TEST_PROTO.into(),
+            },
+            GrpcProtoFileInput {
+                path: "SCHEMA.proto".into(),
+                text: TEST_PROTO.into(),
+            },
+        ];
+        assert!(compile_proto("", &duplicate, "schema.proto")
+            .unwrap_err()
+            .contains("duplicated"));
+    }
+
+    #[test]
     fn deserializes_dynamic_json_input() {
-        let (pool, _) = compile_proto(TEST_PROTO).expect("proto compiles");
+        let (pool, _) = compile_proto(TEST_PROTO, &[], "").expect("proto compiles");
         let descriptor = pool
             .get_message_by_name("brunomnia.test.HelloRequest")
             .expect("message exists");

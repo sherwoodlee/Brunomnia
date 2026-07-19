@@ -2,7 +2,6 @@ import { lazy, Suspense, useMemo, useRef, useState } from 'react';
 import type {
   ApiRequest,
   BodyMode,
-  GrpcSchema,
 } from '../types';
 import { graphqlTypeLabel, insertGraphqlRootField, validateGraphqlDocument } from '../lib/graphql';
 import { prettyRequestBody } from '../lib/request';
@@ -144,52 +143,6 @@ export function GraphqlEditor({ request, onChange, schemaLoading, onLoadSchema }
           <div className="graphql-issues" aria-live="polite">{issues.map((issue, index) => <span className={issue.severity} key={`${issue.message}-${index}`}><Icon name={issue.severity === 'error' ? 'x' : 'spark'} size={12} />{issue.message}</span>)}{!issues.length ? <span className="valid"><Icon name="check" size={12} />Document is structurally valid against cached root fields.</span> : null}</div>
         </div>
         {showSchema && schema ? <aside className="graphql-explorer"><header><div><small>{operation} root</small><strong>{rootName || 'Unavailable'}</strong></div><input aria-label="Filter GraphQL fields" placeholder="Filter fields…" value={filter} onChange={(event) => setFilter(event.target.value)} /></header><div className="graphql-field-list">{fields.map((field) => <article className={field.isDeprecated ? 'deprecated' : ''} key={field.name}><button aria-label={`Insert ${field.name}`} onClick={() => onChange({ graphql: { ...graphql, query: insertGraphqlRootField(graphql.query, operation, field, schema) } })} type="button"><Icon name="plus" size={12} /></button><button onClick={() => { let type = field.type; while (type.ofType) type = type.ofType; setSelectedType(type.name); }} type="button"><strong>{field.name}</strong><code>{graphqlTypeLabel(field.type)}</code><small>{field.description || field.deprecationReason || 'No description'}</small></button></article>)}{!fields.length ? <p>No matching root fields.</p> : null}</div>{documented ? <div className="graphql-type-doc"><header><small>{documented.kind}</small><strong>{documented.name}</strong></header><p>{documented.description || 'No type description.'}</p>{documented.fields.slice(0, 200).map((field) => <button key={field.name} onClick={() => { let type = field.type; while (type.ofType) type = type.ofType; setSelectedType(type.name); }} type="button"><span>{field.name}</span><code>{graphqlTypeLabel(field.type)}</code>{field.args.length ? <small>({field.args.map((argument) => `${argument.name}: ${graphqlTypeLabel(argument.type)}`).join(', ')})</small> : null}</button>)}</div> : null}</aside> : null}
-      </div>
-    </div>
-  );
-}
-
-export function GrpcEditor({
-  request,
-  schema,
-  schemaLoading,
-  onChange,
-  onLoadSchema,
-}: {
-  request: ApiRequest;
-  schema?: GrpcSchema;
-  schemaLoading: boolean;
-  onChange: ChangeRequest;
-  onLoadSchema: () => void;
-}) {
-  const grpc = request.grpc;
-  const service = schema?.services.find((candidate) => candidate.fullName === grpc.service) ?? schema?.services[0];
-  const method = service?.methods.find((candidate) => candidate.name === grpc.method) ?? service?.methods[0];
-  const update = (patch: Partial<ApiRequest['grpc']>) => onChange({ grpc: { ...grpc, ...patch } });
-  return (
-    <div className="grpc-editor">
-      <div className="grpc-schema-bar">
-        <div className="segmented-control">
-          <button className={grpc.descriptorSource === 'reflection' ? 'active' : ''} onClick={() => update({ descriptorSource: 'reflection', descriptorSetBase64: '' })} type="button">Reflection</button>
-          <button className={grpc.descriptorSource === 'proto' ? 'active' : ''} onClick={() => update({ descriptorSource: 'proto', descriptorSetBase64: '' })} type="button">Proto source</button>
-        </div>
-        <button className="secondary-button compact-button" disabled={schemaLoading} onClick={onLoadSchema} type="button">{schemaLoading ? 'Loading…' : 'Load schema'}</button>
-      </div>
-      <div className={`grpc-workspace${grpc.descriptorSource === 'proto' ? ' with-proto' : ''}`}>
-        {grpc.descriptorSource === 'proto' ? (
-          <div className="proto-source-pane">
-            <div className="pane-label"><strong>schema.proto</strong><small>Editable source</small></div>
-            <CodeEditor ariaLabel="Protocol Buffer definition" value={grpc.protoText} onChange={(protoText) => update({ protoText, descriptorSetBase64: '' })} />
-          </div>
-        ) : null}
-        <div className="grpc-call-editor">
-          <div className="grpc-method-picker">
-            <label>Service<select aria-label="gRPC service" value={service?.fullName ?? ''} onChange={(event) => { const next = schema?.services.find((candidate) => candidate.fullName === event.target.value); update({ service: event.target.value, method: next?.methods[0]?.name ?? '' }); }}><option value="">Select service</option>{schema?.services.map((item) => <option key={item.fullName} value={item.fullName}>{item.fullName}</option>)}</select></label>
-            <label>Method<select aria-label="gRPC method" value={method?.name ?? ''} onChange={(event) => update({ service: service?.fullName ?? '', method: event.target.value })}><option value="">Select method</option>{service?.methods.map((item) => <option key={item.fullName} value={item.name}>{item.name}</option>)}</select></label>
-            {method ? <span className="rpc-kind">{method.clientStreaming ? 'client stream' : 'single request'} → {method.serverStreaming ? 'server stream' : 'single response'}</span> : null}
-          </div>
-          {schema ? <CodeEditor ariaLabel="gRPC JSON message" value={grpc.input} onChange={(input) => update({ input })} /> : <div className="empty-state compact"><Icon name="database" size={26} /><strong>Load reflection or this proto definition</strong><span>Brunomnia builds dynamic request and response messages locally.</span></div>}
-        </div>
       </div>
     </div>
   );

@@ -7669,6 +7669,17 @@ var normalizeShortcut = (value) => {
 };
 
 // src/data/seed.ts
+var seedProtoText = `syntax = "proto3";
+package brunomnia.orders.v1;
+
+service OrdersService {
+  rpc GetOrder (GetOrderRequest) returns (Order);
+  rpc WatchOrders (WatchOrdersRequest) returns (stream Order);
+}
+
+message GetOrderRequest { string id = 1; }
+message WatchOrdersRequest { string status = 1; }
+message Order { string id = 1; string status = 2; double total = 3; }`;
 var createRequest = (id, name, method, url) => ({
   id,
   name,
@@ -7759,17 +7770,10 @@ var createRequest = (id, name, method, url) => ({
     service: "",
     method: "",
     descriptorSource: "reflection",
-    protoText: `syntax = "proto3";
-package brunomnia.orders.v1;
-
-service OrdersService {
-  rpc GetOrder (GetOrderRequest) returns (Order);
-  rpc WatchOrders (WatchOrdersRequest) returns (stream Order);
-}
-
-message GetOrderRequest { string id = 1; }
-message WatchOrdersRequest { string status = 1; }
-message Order { string id = 1; string status = 2; double total = 3; }`,
+    protoText: seedProtoText,
+    protoFiles: [{ id: `${id}-grpc-schema`, path: "schema.proto", text: seedProtoText }],
+    protoEntryPath: "schema.proto",
+    protoActivePath: "schema.proto",
     descriptorSetBase64: "",
     input: "{}",
     metadata: []
@@ -7834,7 +7838,7 @@ var collection = (id, name, requests) => ({
 });
 var seedWorkspace = {
   format: "brunomnia",
-  version: 28,
+  version: 29,
   name: "Local Workspace",
   activeRequestId: orders.id,
   activeEnvironmentId: "development",
@@ -8398,10 +8402,10 @@ var takeUtf8 = (value, maximumBytes) => {
   const encoded = new TextEncoder().encode(value);
   if (encoded.byteLength <= maximumBytes) return { value, bytes: encoded.byteLength, truncated: false };
   let end = Math.max(0, maximumBytes);
-  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const decoder2 = new TextDecoder("utf-8", { fatal: true });
   while (end > 0) {
     try {
-      return { value: decoder.decode(encoded.slice(0, end)), bytes: end, truncated: true };
+      return { value: decoder2.decode(encoded.slice(0, end)), bytes: end, truncated: true };
     } catch {
       end -= 1;
     }
@@ -9900,8 +9904,8 @@ var createScriptModules = (runtime) => {
   const hexToBytes = (hex) => new Uint8Array((hex.match(/.{1,2}/g) ?? []).map((value) => parseInt(value, 16)));
   const bytesToBase64 = (bytes) => runtime.btoa([...bytes].map((value) => String.fromCharCode(value)).join(""));
   const base64ToBytes = (value) => new Uint8Array([...runtime.atob(value)].map((character) => character.charCodeAt(0)));
-  const wordArray = (bytes) => ({ sigBytes: bytes.length, words: Array.from({ length: Math.ceil(bytes.length / 4) }, (_, index) => (bytes[index * 4] ?? 0) << 24 | (bytes[index * 4 + 1] ?? 0) << 16 | (bytes[index * 4 + 2] ?? 0) << 8 | (bytes[index * 4 + 3] ?? 0)), bytes, toString(encoder) {
-    return (encoder ?? cryptoEnc.Hex).stringify(this);
+  const wordArray = (bytes) => ({ sigBytes: bytes.length, words: Array.from({ length: Math.ceil(bytes.length / 4) }, (_, index) => (bytes[index * 4] ?? 0) << 24 | (bytes[index * 4 + 1] ?? 0) << 16 | (bytes[index * 4 + 2] ?? 0) << 8 | (bytes[index * 4 + 3] ?? 0)), bytes, toString(encoder2) {
+    return (encoder2 ?? cryptoEnc.Hex).stringify(this);
   } });
   const inputBytes = (value) => value && typeof value === "object" && "bytes" in value ? value.bytes : new runtime.TextEncoder().encode(boundedText(value));
   const sha256Hex = (input) => {
@@ -11169,6 +11173,77 @@ var normalizeGraphqlSchema = (value) => {
   };
 };
 
+// src/lib/grpcProto.ts
+var GRPC_PROTO_MAX_FILES = 500;
+var GRPC_PROTO_MAX_FILE_BYTES = 1048576;
+var GRPC_PROTO_MAX_TOTAL_BYTES = 10485760;
+var GRPC_PROTO_MAX_PATH_LENGTH = 512;
+var encoder = new TextEncoder();
+var decoder = new TextDecoder();
+var byteLength = (value) => encoder.encode(value).byteLength;
+var truncateBytes = (value, limit) => {
+  const bytes = encoder.encode(value);
+  if (bytes.byteLength <= limit) return value;
+  let end = limit;
+  let truncated = decoder.decode(bytes.slice(0, end));
+  while (byteLength(truncated) > limit && end > 0) truncated = decoder.decode(bytes.slice(0, --end));
+  return truncated;
+};
+var normalizeGrpcProtoPath = (value) => {
+  const path = value.trim().replaceAll("\\", "/").replace(/\/+/g, "/");
+  if (!path || path.startsWith("/") || /^[a-z]:\//i.test(path)) throw new Error("Proto paths must be relative.");
+  const segments = path.split("/").filter((segment) => segment !== ".");
+  if (!segments.length || segments.some((segment) => !segment || segment === "..")) throw new Error("Proto paths cannot traverse parent folders.");
+  const normalized = segments.join("/");
+  if (normalized.length > GRPC_PROTO_MAX_PATH_LENGTH) throw new Error(`Proto paths cannot exceed ${GRPC_PROTO_MAX_PATH_LENGTH} characters.`);
+  if (!normalized.toLowerCase().endsWith(".proto")) throw new Error("Only .proto files can be imported.");
+  return normalized;
+};
+var entryPath = (files, preferred = "") => {
+  if (files.some((file) => file.path === preferred)) return preferred;
+  return [...files].sort((left, right) => {
+    const serviceDifference = Number(!/\bservice\s+[A-Za-z_]\w*/.test(left.text)) - Number(!/\bservice\s+[A-Za-z_]\w*/.test(right.text));
+    return serviceDifference || left.path.length - right.path.length || left.path.localeCompare(right.path);
+  })[0]?.path ?? "";
+};
+var normalizeGrpcProtoTree = (value, legacyProtoText = "", preferredEntryPath = "", preferredActivePath = "") => {
+  const files = [];
+  const paths = /* @__PURE__ */ new Set();
+  let totalBytes = 0;
+  for (const [index, candidate] of (Array.isArray(value) ? value : []).slice(0, GRPC_PROTO_MAX_FILES).entries()) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const record5 = candidate;
+    if (typeof record5.path !== "string" || typeof record5.text !== "string") continue;
+    let path;
+    try {
+      path = normalizeGrpcProtoPath(record5.path);
+    } catch {
+      continue;
+    }
+    const identity = path.toLowerCase();
+    if (paths.has(identity) || totalBytes >= GRPC_PROTO_MAX_TOTAL_BYTES) continue;
+    const text2 = truncateBytes(record5.text, Math.min(GRPC_PROTO_MAX_FILE_BYTES, GRPC_PROTO_MAX_TOTAL_BYTES - totalBytes));
+    paths.add(identity);
+    totalBytes += byteLength(text2);
+    files.push({
+      id: typeof record5.id === "string" && record5.id.trim() ? record5.id.slice(0, 256) : `grpc-proto-file-${index}`,
+      path,
+      text: text2
+    });
+  }
+  if (!files.length && legacyProtoText) {
+    files.push({ id: "grpc-proto-file-0", path: "schema.proto", text: truncateBytes(legacyProtoText, GRPC_PROTO_MAX_FILE_BYTES) });
+  }
+  const protoEntryPath = entryPath(files, preferredEntryPath);
+  const protoActivePath = files.some((file) => file.path === preferredActivePath) ? preferredActivePath : protoEntryPath;
+  return {
+    protoFiles: files,
+    protoEntryPath,
+    protoActivePath,
+    protoText: files.find((file) => file.path === protoEntryPath)?.text ?? truncateBytes(legacyProtoText, GRPC_PROTO_MAX_FILE_BYTES)
+  };
+};
+
 // src/lib/storage.ts
 init_request();
 var isWorkspaceEnvelope = (value) => {
@@ -11612,6 +11687,13 @@ var migrateWorkspace = (value) => {
       const timeoutMode = request.transport?.timeoutMode === "global" || request.transport?.timeoutMode === "custom" ? request.transport.timeoutMode : typeof request.transport?.timeoutMs === "number" ? "custom" : "global";
       const validateCertificatesMode = request.transport?.validateCertificatesMode === "global" || request.transport?.validateCertificatesMode === "on" || request.transport?.validateCertificatesMode === "off" ? request.transport.validateCertificatesMode : typeof request.transport?.validateCertificates === "boolean" ? request.transport.validateCertificates ? "on" : "off" : "global";
       const proxyMode = request.transport?.proxyMode === "global" || request.transport?.proxyMode === "custom" || request.transport?.proxyMode === "disabled" ? request.transport.proxyMode : stringValue2(request.transport?.proxyUrl).trim() || stringValue2(request.transport?.proxyExclusions).trim() ? "custom" : "global";
+      const grpc = record4(request.grpc);
+      const protoTree = normalizeGrpcProtoTree(
+        grpc?.protoFiles,
+        stringValue2(grpc?.protoText, defaults.grpc.protoText),
+        stringValue2(grpc?.protoEntryPath),
+        stringValue2(grpc?.protoActivePath)
+      );
       return {
         ...defaults,
         ...request,
@@ -11638,7 +11720,7 @@ var migrateWorkspace = (value) => {
           schemaEndpoint: stringValue2(graphql?.schemaEndpoint),
           schemaFetchedAt: stringValue2(graphql?.schemaFetchedAt)
         },
-        grpc: { ...defaults.grpc, ...request.grpc, metadata: normalizeRows(record4(request.grpc)?.metadata, `${requestId}-metadata`) },
+        grpc: { ...defaults.grpc, ...request.grpc, ...protoTree, metadata: normalizeRows(grpc?.metadata, `${requestId}-metadata`) },
         transport: {
           ...defaults.transport,
           ...request.transport,
@@ -11712,7 +11794,7 @@ var migrateWorkspace = (value) => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   return {
     ...workspace,
-    version: 28,
+    version: 29,
     name: workspace.name || "Imported Workspace",
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? "",
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
