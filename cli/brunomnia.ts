@@ -1,12 +1,14 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node:os';
 import { basename, extname } from 'node:path';
 import vm from 'node:vm';
 import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openapi';
-import { buildHeaders, buildRequestUrl, resolveTemplate } from '../src/lib/request';
+import { buildHeaders, buildRequestUrl, environmentMap } from '../src/lib/request';
+import { renderApiRequest } from '../src/lib/requestRender';
 import { parseRunnerData, runCollection, validateTestNamePattern } from '../src/lib/runner';
 import { createRunnerReportArtifact, parseRunnerReporter } from '../src/lib/runnerReport';
-import type { ApiDesign, ApiRequest, AuthConfig, Environment, HttpResponse, ScriptRunResult, Workspace } from '../src/types';
-import { resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resources';
+import type { ApiDesign, ApiRequest, AuthConfig, CookieRecord, Environment, HttpResponse, ScriptRunResult, StoredResponse, Workspace } from '../src/types';
+import { applyCollectionConfiguration, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../src/lib/resources';
 import { hydrateScriptFileReferences, prepareScriptSubrequest, type ScriptFileBudget, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 import { createScriptExpect } from '../src/lib/scriptExpect';
 import { createScriptModules } from '../src/lib/scriptModules';
@@ -15,6 +17,9 @@ import { resolveCertificateValidation, resolveProxyTransport, resolveRequestTime
 import { migrateWorkspace } from '../src/lib/storage';
 import { applyDefaultUserAgentHeader } from '../src/lib/userAgent';
 import { applyDefaultAcceptHeader } from '../src/lib/calculatedHeaders';
+import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
+import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
+import { createCliExternalSecretResolver } from './externalVault';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -34,6 +39,11 @@ const readCliScriptFile = async (path: string) => {
   const bytes = await readFile(path);
   if (bytes.byteLength > 5_000_000) throw new Error(`Script file '${path}' exceeds the 5 MB per-file limit.`);
   return { fileName: basename(path) || 'attachment.bin', mimeType: scriptFileMime(path), dataBase64: bytes.toString('base64') };
+};
+const readCliTemplateFile = async (path: string) => {
+  const bytes = await readFile(path);
+  if (bytes.byteLength > 5_000_000) throw new Error(`Template file '${path}' exceeds the 5 MB per-file limit.`);
+  return bytes.toString('utf8');
 };
 const loadWorkspace = async (path: string): Promise<Workspace> => {
   const parsed = JSON.parse(await loadText(path)) as unknown;
@@ -373,24 +383,55 @@ const runNodeScript = async (
   return { request: hydratedRequest, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
 };
 
-const executeHttp = async (request: ApiRequest, variables: Record<string, string>, requestTimeoutMs = 30_000, proxyPreferences?: ProxyPreferences): Promise<HttpResponse> => {
+type CliRequestContext = {
+  environmentId: string;
+  cookies: CookieRecord[];
+  responses: StoredResponse[];
+  certificates: Workspace['certificates'];
+  readFile?: (path: string) => Promise<string>;
+  externalSecret?: ReturnType<typeof createCliExternalSecretResolver>;
+  resolveResponse?: Parameters<typeof renderApiRequest>[2]['resolveResponse'];
+  requestAncestors?: string[];
+  requestChain?: string[];
+};
+
+const executeHttp = async (
+  request: ApiRequest,
+  variables: Record<string, string>,
+  requestTimeoutMs = 30_000,
+  validateCertificates = true,
+  proxyPreferences?: ProxyPreferences,
+  context?: CliRequestContext,
+): Promise<HttpResponse> => {
   if (request.protocol !== 'http' && request.protocol !== 'graphql') throw new Error(`CLI collection execution does not yet support ${request.protocol}.`);
-  const url = buildRequestUrl(request, variables);
-  let headers = buildHeaders(request, variables);
-  const renderBody = (value: string) => request.renderBodyTemplates !== false ? resolveTemplate(value, variables) : value;
+  request = await renderApiRequest(request, variables, {
+    cookies: context?.cookies,
+    responses: context?.responses,
+    environmentId: context?.environmentId,
+    externalSecret: context?.externalSecret,
+    readFile: context?.readFile,
+    requestAncestors: context?.requestAncestors,
+    renderPurpose: 'send',
+    resolveResponse: context?.resolveResponse,
+    requestChain: context?.requestChain,
+    osInfo: async () => ({ arch: arch(), cpus: cpus(), freemem: freemem(), hostname: hostname(), platform: platform(), release: release(), userInfo: userInfo() }),
+  });
+  let url = buildRequestUrl(request, {});
+  request = { ...request, transport: applyWorkspaceCertificates(request.transport, url, context?.certificates) };
+  let headers = buildHeaders(request, {});
   let body: BodyInit | undefined;
   if (request.protocol === 'graphql') {
-    body = JSON.stringify({ query: request.graphql.query, variables: JSON.parse(renderBody(request.graphql.variables || '{}')), operationName: request.graphql.operationName || undefined });
+    body = JSON.stringify({ query: request.graphql.query, variables: JSON.parse(request.graphql.variables || '{}'), operationName: request.graphql.operationName || undefined });
     if (!headers.some((header) => header.name.toLowerCase() === 'content-type')) headers.push({ id: 'cli-graphql', name: 'Content-Type', value: 'application/json', enabled: true });
-  } else if (request.bodyMode === 'json' || request.bodyMode === 'text') body = renderBody(request.body);
-  else if (request.bodyMode === 'form-urlencoded') body = new URLSearchParams(request.formBody.filter((row) => row.enabled).map((row) => [renderBody(row.name), renderBody(row.value)]));
+  } else if (request.bodyMode === 'json' || request.bodyMode === 'text') body = request.body;
+  else if (request.bodyMode === 'form-urlencoded') body = new URLSearchParams(request.formBody.filter((row) => row.enabled).map((row) => [row.name, row.value]));
   else if (request.bodyMode === 'multipart') {
     const form = new FormData();
     request.multipartBody.filter((part) => part.enabled && part.name).forEach((part) => {
       if (part.kind === 'file' && part.file) {
-        form.append(renderBody(part.name), new Blob([Buffer.from(part.file.dataBase64, 'base64')], { type: renderBody(part.contentType || part.file.mimeType) }), renderBody(part.fileName || part.file.fileName));
+        form.append(part.name, new Blob([Buffer.from(part.file.dataBase64, 'base64')], { type: part.contentType || part.file.mimeType }), part.fileName || part.file.fileName);
       } else {
-        form.append(renderBody(part.name), renderBody(part.value));
+        form.append(part.name, part.value);
       }
     });
     body = form;
@@ -398,6 +439,10 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
   else if (request.bodyMode === 'binary' && request.binaryBody) {
     body = Buffer.from(request.binaryBody.dataBase64, 'base64');
     if (!headers.some((header) => header.enabled && header.name.toLowerCase() === 'content-type')) headers.push({ id: 'cli-binary', name: 'Content-Type', value: request.binaryBody.mimeType, enabled: true });
+  }
+  if (request.transport.sendCookies && !headers.some((header) => header.enabled && header.name.toLowerCase() === 'cookie')) {
+    const cookie = cookieHeaderForUrl(context?.cookies ?? [], url);
+    if (cookie) headers.push({ id: 'cli-cookie-jar', name: 'Cookie', value: cookie, enabled: true });
   }
   headers = applyDefaultUserAgentHeader(applyDefaultAcceptHeader(headers), request.disableUserAgentHeader);
   const started = performance.now();
@@ -408,6 +453,9 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
   if (request.transport.caCertificatePem || request.transport.clientCertificatePem || request.transport.clientKeyPem || request.transport.clientCertificatePfxBase64) {
     throw new Error('The CLI cannot attach custom CA or client-certificate material because Node Fetch does not expose per-request TLS configuration. Use the native desktop transport for workspace CA, PEM, or PFX/PKCS#12 identities.');
   }
+  if (!resolveCertificateValidation(request.transport, validateCertificates)) {
+    throw new Error('The CLI cannot disable TLS certificate validation because Node Fetch does not expose that authority. Use the native desktop transport for explicitly untrusted development certificates.');
+  }
   const response = await fetch(url, {
     method: request.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled && header.name).map((header) => [header.name, header.value])),
@@ -416,7 +464,8 @@ const executeHttp = async (request: ApiRequest, variables: Record<string, string
     signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
   });
   const responseBody = await response.text();
-  return { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url };
+  const getSetCookie = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+  return { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url, setCookies: getSetCookie?.call(response.headers) ?? [] };
 };
 
 const usage = `Brunomnia CLI
@@ -424,7 +473,7 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files]
+  brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
   brunomnia run test <workspace> <collection-name-or-id> [-t, --testNamePattern <regex>] [same options]
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
@@ -475,20 +524,61 @@ const main = async () => {
     const requestedTestNamePattern = flag('--testNamePattern') ?? flag('-t') ?? flag('--test-name-pattern');
     if (subject === 'collection' && requestedTestNamePattern !== undefined) fail('--testNamePattern is only available for run test.');
     const testNamePattern = subject === 'test' ? validateTestNamePattern(requestedTestNamePattern) : undefined;
-    const executeWorkspaceHttp = (request: ApiRequest, variables: Record<string, string>) => {
-      const requestUrl = buildRequestUrl(request, variables);
-      const preparedRequest = { ...request, transport: applyWorkspaceCertificates(request.transport, requestUrl, workspace.certificates) };
-      const validateCertificates = workspace.preferences.validateCertificates;
-      if (!resolveCertificateValidation(preparedRequest.transport, validateCertificates)) {
-        throw new Error('The CLI cannot disable TLS certificate validation because Node Fetch does not expose that authority. Use the native desktop transport for explicitly untrusted development certificates.');
-      }
-      return executeHttp(preparedRequest, variables, workspace.preferences.requestTimeoutMs, {
+    let cliCookies = [...workspace.cookies];
+    let cliResponses = [...workspace.responses];
+    const templateFileReader = hasFlag('--allow-template-files') || hasFlag('--allow-script-files')
+      ? readCliTemplateFile
+      : async (_path: string) => { throw new Error('Template file access is disabled. Re-run trusted workspaces with --allow-template-files.'); };
+    const externalSecret = hasFlag('--allow-external-vaults')
+      ? createCliExternalSecretResolver(workspace.governance.policy.externalVaultAllowlist)
+      : async () => { throw new Error('External vault access is disabled. Re-run trusted workspaces with --allow-external-vaults.'); };
+    const proxyPreferences = {
         enabled: workspace.preferences.proxyEnabled,
         httpProxy: workspace.preferences.httpProxy,
         httpsProxy: workspace.preferences.httpsProxy,
         noProxy: workspace.preferences.noProxy,
+      };
+    let resolveResponse: NonNullable<CliRequestContext['resolveResponse']>;
+    const executeAndStore = async (
+      request: ApiRequest,
+      variables: Record<string, string>,
+      environmentId: string,
+      requestChain: string[] = [],
+      cookies: CookieRecord[] = cliCookies,
+      responses: StoredResponse[] = cliResponses,
+    ): Promise<{ result: HttpResponse; stored: StoredResponse }> => {
+      const result = await executeHttp(request, variables, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, {
+        environmentId,
+        cookies,
+        responses,
+        certificates: workspace.certificates,
+        readFile: templateFileReader,
+        externalSecret,
+        resolveResponse,
+        requestAncestors: requestAncestorNames(workspace.collections, request),
+        requestChain,
       });
+      const requestUrl = result.requestUrl ?? request.url;
+      if (request.transport.storeCookies) {
+        const updatedCookies = storeResponseCookies(cookies, requestUrl, result.setCookies ?? []);
+        cookies.splice(0, cookies.length, ...updatedCookies);
+      }
+      const stored: StoredResponse = { ...result, id: `cli-response-${crypto.randomUUID()}`, requestId: request.id, requestName: request.name, requestUrl, environmentId, receivedAt: new Date().toISOString(), requestSnapshot: createRequestSnapshot(request) };
+      const updatedResponses = retainResponseHistory(responses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
+      responses.splice(0, responses.length, ...updatedResponses);
+      cliCookies = cookies;
+      cliResponses = responses;
+      return { result, stored };
     };
+    resolveResponse = async ({ requestId, requestChain, cookies, responses }) => {
+      const dependencyCollection = workspace.collections.find((candidate) => candidate.requests.some((request) => request.id === requestId || request.name === requestId));
+      const dependency = dependencyCollection?.requests.find((request) => request.id === requestId || request.name === requestId);
+      if (!dependencyCollection || !dependency) throw new Error(`Could not find request ${requestId}`);
+      const configured = applyCollectionConfiguration(dependencyCollection, dependency, environment);
+      const { stored } = await executeAndStore(configured.request, environmentMap(configured.environment), configured.environment.id, [...new Set([...requestChain, dependency.id])], cookies, responses);
+      return stored;
+    };
+    const executeWorkspaceHttp = async (request: ApiRequest, variables: Record<string, string>) => (await executeAndStore(request, variables, environment.id)).result;
     const report = await runCollection(collection, environment, {
       iterations: Number(flag('--iterations') ?? 1), retries: Number(flag('--retries') ?? 0), bail: hasFlag('--bail'), delayMs: 0,
       testNamePattern,

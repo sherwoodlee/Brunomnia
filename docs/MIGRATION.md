@@ -109,7 +109,7 @@ Compatibility bounds remain explicit: Git credential setup uses the user's insta
 | Workspace migration | Complete | Versions 1–6 migrate to v7 collaboration/governance fields; malformed roles, policies, actors, audit events, revisions, and allowed storage modes are normalized safely |
 | Documentation and evidence | Complete | [Security and encrypted sync guide](SECURITY_AND_SYNC.md) and [Milestone 7 verification](QA_MILESTONE_7.md) |
 
-Compatibility bounds remain explicit: shared-file encryption uses one team passphrase rather than per-user public-key wrapping; synchronization is pull/push rather than real-time presence; server-mediated comments, per-resource Cloud Sync branches/history, offline merge UI, and automatic device discovery remain. Local roles are policy metadata and action checks, not strong identity authentication. Self-hosted SAML/OIDC login, SCIM provisioning, tamper-evident remote audit storage, provider SDK login flows, OS-keychain wrapping, script access to external providers, and headless external-vault parity remain later closure work.
+Compatibility bounds remain explicit: shared-file encryption uses one team passphrase rather than per-user public-key wrapping; synchronization is pull/push rather than real-time presence; server-mediated comments, per-resource Cloud Sync branches/history, offline merge UI, and automatic device discovery remain. Local roles are policy metadata and action checks, not strong identity authentication. Self-hosted SAML/OIDC login, SCIM provisioning, tamper-evident remote audit storage, provider SDK login flows, OS-keychain wrapping, and script access to external providers remain later closure work. Milestone 134 later closes explicitly granted HTTP/GraphQL CLI external-vault tags.
 
 ## Milestone 8 — MCP, AI, and service integrations (complete baseline)
 
@@ -1957,7 +1957,7 @@ Compatibility bounds remain explicit: Digest, NTLM, Netrc, and IAM remain transp
 | Executable coverage | Complete | All 118 Faker functions, advanced JSONPath selectors/failures, Base64 variants, timestamp aliases, explicit cookie URLs, File mediation, concurrent raw tags, destination enumeration/insertion, and shared HTTP/code-generation regressions pass |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [security boundaries](SECURITY_AND_SYNC.md), [parity ledger](PARITY.md), and [Milestone 131 verification](QA_MILESTONE_131.md); the dynamic-variables row is Complete |
 
-Compatibility bounds remain explicit: File tags are desktop-only and inherit the existing 5 MB approved-root safety ceiling. Milestone 133 later closes the missed pinned timestamp/OS/hash/prompt/request/response plus gRPC/realtime rendering gaps; the portable CLI still does not resolve external-vault or File tags. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: desktop File tags inherit the existing 5 MB approved-root safety ceiling. Milestone 133 later closes the missed pinned timestamp/OS/hash/prompt/request/response plus gRPC/realtime rendering gaps, and Milestone 134 later adds separately granted portable CLI File/external-vault rendering. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 132 — close gRPC endpoint and live-server parity (complete)
 
@@ -1986,9 +1986,24 @@ Compatibility bounds remain explicit: the public matrix is opt-in so ordinary of
 | Executable coverage | Complete | Focused TypeScript tests cover exact local behavior, dependent-response environment filtering, async direct gRPC, all realtime connection families, Socket.IO emits, and guided destinations; native coverage verifies the OS bridge |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), corrected [Milestone 131 verification](QA_MILESTONE_131.md), and added [Milestone 133 verification](QA_MILESTONE_133.md) |
 
-Compatibility bounds remain explicit: File tags remain desktop-only and the portable CLI still does not resolve File or external-vault tags. The XML DOM version intentionally differs from vulnerable pinned transitive choices without changing claimed XPath behavior. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: desktop File tags retain approved-root mediation; Milestone 134 later gives trusted portable CLI runs separate process-only File/external-vault grants. The XML DOM version intentionally differs from vulnerable pinned transitive choices without changing claimed XPath behavior. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 134 — remaining parity closure and release hardening
+## Milestone 134 — portable CLI template parity (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned headless audit | Complete | Pinned Inso loads an in-memory database, runs pre-request scripts, interpolates the mutated request for send, skips request plugins, executes transport, transforms the response, and runs after-response scripts; its CLI accepts data-folder and transport overrides at invocation time |
+| Shared async rendering | Complete | Brunomnia CLI HTTP/GraphQL execution now uses the same full request renderer as desktop execution for environment/Faker/UUID/time/OS/Base64/hash/JSONPath/cookie/request/response/File/external values before URL construction and transport policy checks |
+| Trusted File authority | Complete | `--allow-template-files` enables 5 MB UTF-8 reads for paths named by a trusted workspace; the broader `--allow-script-files` authority implies it, while imported workspace data cannot enable either flag |
+| External-vault adapters | Complete | `--allow-external-vaults` gates exact workspace-allowlisted AWS/GCP/Azure/HashiCorp references through direct official-CLI argument arrays, 30-second/10 MB process bounds, strict output parsing, and a 20 MB/256-entry in-memory cache |
+| Response and cookie continuity | Complete | CLI sends inject eligible cookies, retain Set-Cookie mutations, execute response-tag dependencies with recursion guards, and return the just-created response even when the configured saved-history limit is zero |
+| Rendered transport policy | Complete | Workspace certificate matching, Node Fetch custom-material refusal, and effective certificate-validation refusal occur after full URL rendering instead of evaluating unresolved template text |
+| Executable coverage | Complete | Pure adapter tests cover arguments, approval, parsing, UTF-8 rejection, caching, and aggregate eviction; a bundled localhost-only smoke proves File denial/grant, Node OS/hash/custom time, zero-history dependent response execution, and cookie continuity |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [security boundaries](SECURITY_AND_SYNC.md), [parity ledger](PARITY.md), CLI README guidance, and [Milestone 134 verification](QA_MILESTONE_134.md) |
+
+Compatibility bounds remain explicit: the CLI is still a `Baseline` capability. Interactive prompt tags, desktop-local `vault.*` state, plugin-provided tags, per-request insecure TLS, custom CA/client-certificate transport, streaming protocols, standalone unit-test-suite identity, remaining Inso commands/configuration flags, signed containers, and stronger portable script isolation remain open. External providers require the corresponding installed official CLI and ambient credential chain; no real provider credentials are used in automated tests. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 135 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

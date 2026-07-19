@@ -11,6 +11,7 @@ export type RequestRenderContext = {
   prompt?: TemplateContext['prompt'];
   resolveResponse?: TemplateContext['resolveResponse'];
   requestChain?: string[];
+  osInfo?: TemplateContext['osInfo'];
   customTag?: (name: string, args: string[]) => Promise<string | undefined>;
   externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
   readFile?: (path: string) => Promise<string>;
@@ -62,6 +63,7 @@ export const renderApiRequest = async (
     prompt: context.prompt,
     resolveResponse: context.resolveResponse,
     requestChain: context.requestChain,
+    osInfo: context.osInfo,
     customTag: context.customTag,
     externalSecret: context.externalSecret,
     readFile: context.readFile,
@@ -115,6 +117,7 @@ export const renderRequestValue = (
     prompt: prepared.context.prompt,
     resolveResponse: prepared.context.resolveResponse,
     requestChain: prepared.context.requestChain,
+    osInfo: prepared.context.osInfo,
     customTag: prepared.context.customTag,
     externalSecret: prepared.context.externalSecret,
     readFile: prepared.context.readFile,
@@ -138,6 +141,7 @@ export const renderRealtimeConnectionRequest = async (
     prompt: prepared.context.prompt,
     resolveResponse: prepared.context.resolveResponse,
     requestChain: prepared.context.requestChain,
+    osInfo: prepared.context.osInfo,
     customTag: prepared.context.customTag,
     externalSecret: prepared.context.externalSecret,
     readFile: prepared.context.readFile,

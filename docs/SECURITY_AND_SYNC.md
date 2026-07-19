@@ -37,11 +37,13 @@ Template syntax is:
 
 `scope` means AWS region, GCP project, or Azure vault name. `field` is used for HashiCorp KV responses. `version` is a provider version/stage where supported. Before request rendering can resolve a reference, an owner or admin must approve the exact provider/reference/scope/field/version tuple in **Security & Sync**. Changing any part of that tuple requires a new approval. The explicit **Test without revealing** action can check a reference and reports only its byte length.
 
-External tags cover HTTP, GraphQL, OAuth/schema requests, non-streaming collection runs, plugin-mediated HTTP, integrations, and generated client code. gRPC/stream tags and CLI provider parity remain open.
+External tags cover HTTP, GraphQL, OAuth/schema requests, non-streaming collection runs, plugin-mediated HTTP, integrations, generated client code, direct and interactive gRPC, and WebSocket/GraphQL-subscription/SSE/Socket.IO connection and outbound rendering. Portable CLI HTTP/GraphQL runs require `--allow-external-vaults` in addition to the same exact workspace reference allowlist. The CLI invokes the installed official provider executable directly with the ambient user/service credential chain, applies the same 30-second/10 MB process bounds, rejects malformed or option-shaped values, strictly decodes AWS binary secrets as UTF-8, and keeps at most 20 MB/256 entries in process memory. Workspace files cannot grant this process authority to themselves.
 
 ## Local File template tags
 
 The desktop `{% file '/absolute/path.txt' %}` tag reuses the device-local script file grant and allowed-folder list. The host canonicalizes both the requested file and each configured absolute root, rejects traversal and symlink escapes, requires a regular file, caps reads at 5 MB, and returns UTF-8 inspection text. The renderer never receives unrestricted filesystem authority. Browser development, disabled grants, missing roots, and out-of-root paths fail explicitly; File tags cannot write, list directories, or execute content.
+
+The trusted portable CLI has a separate `--allow-template-files` process grant; `--allow-script-files` implies it for compatibility with script-backed workspaces. The CLI does not consume desktop approved roots, so either flag lets the imported workspace name any readable path available to that operating-system process, still under the 5 MB UTF-8 read-only ceiling. Keep both flags absent for untrusted workspaces. They cannot be persisted in workspace data and grant no write, directory-listing, or execution API.
 
 ## Plaintext-secret guardrail
 

@@ -88,9 +88,10 @@ node bin/brunomnia.cjs generate collection examples/orders-api.yaml --output col
 node bin/brunomnia.cjs export spec examples/cli-workspace.json "CLI API" --output api.yaml
 node bin/brunomnia.cjs run test examples/cli-workspace.json "CLI Health" --allow-scripts --allow-script-files
 node bin/brunomnia.cjs run test examples/cli-workspace.json "CLI Health" --allow-scripts --allow-script-files --bail --reporter junit --output report.xml
+npm run test:cli-template-smoke
 ```
 
-The checked-in [CLI workspace fixture](examples/cli-workspace.json) is self-contained and does not make an internet request. CLI JavaScript is disabled unless `--allow-scripts` is present; the fixture's local attachment also requires `--allow-script-files`. Trusted scripts can make secondary HTTP requests only when `--allow-script-requests` is also present. Reporters are `dot`, `list`, `min`, `progress`, `spec`, `tap`, `json`, and `junit`; use `--output` to write the artifact instead of stdout. See [runner reports and CI](docs/RUNNER_REPORTS.md).
+The checked-in [CLI workspace fixture](examples/cli-workspace.json) is self-contained and does not make an internet request. CLI JavaScript is disabled unless `--allow-scripts` is present; the fixture's local attachment also requires `--allow-script-files`. Trusted scripts can make secondary HTTP requests only when `--allow-script-requests` is also present. Built-in File tags require `--allow-template-files` or the broader script-file grant, and approved external-vault tags require `--allow-external-vaults`; imported workspace preferences cannot enable either authority. The localhost-only template smoke proves denial/grant behavior, OS/hash/custom-time rendering, dependent responses, and cookie continuity without external network access. Reporters are `dot`, `list`, `min`, `progress`, `spec`, `tap`, `json`, and `junit`; use `--output` to write the artifact instead of stdout. See [runner reports and CI](docs/RUNNER_REPORTS.md).
 
 ## Verify it
 
