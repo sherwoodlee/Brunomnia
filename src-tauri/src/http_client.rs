@@ -8,7 +8,12 @@ use reqwest::{
     header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE},
     multipart, Certificate, Client, Method, RequestBuilder, Response, Version,
 };
-use std::{collections::BTreeMap, time::Instant};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::Mutex,
+    time::Instant,
+};
+use tokio::sync::oneshot;
 
 #[cfg(test)]
 use crate::client_identity::domain_matches;
@@ -27,6 +32,56 @@ enum RedirectMode {
     Disabled,
     Limited(usize),
     Unlimited,
+}
+
+#[derive(Default)]
+pub struct HttpCancellationState {
+    registry: Mutex<HttpCancellationRegistry>,
+}
+
+#[derive(Default)]
+struct HttpCancellationRegistry {
+    active: HashMap<String, oneshot::Sender<()>>,
+    pending: HashSet<String>,
+}
+
+impl HttpCancellationState {
+    pub fn cancel(&self, cancellation_id: &str) -> bool {
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("HTTP cancellation state lock poisoned");
+        if let Some(sender) = registry.active.remove(cancellation_id) {
+            return sender.send(()).is_ok();
+        }
+        if registry.pending.len() >= 1_024 {
+            registry.pending.clear();
+        }
+        registry.pending.insert(cancellation_id.to_string());
+        false
+    }
+
+    fn register(&self, cancellation_id: String) -> Option<oneshot::Receiver<()>> {
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("HTTP cancellation state lock poisoned");
+        if registry.pending.remove(&cancellation_id) {
+            return None;
+        }
+        let (sender, receiver) = oneshot::channel();
+        registry.active.insert(cancellation_id, sender);
+        Some(receiver)
+    }
+
+    fn finish(&self, cancellation_id: &str) {
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("HTTP cancellation state lock poisoned");
+        registry.active.remove(cancellation_id);
+        registry.pending.remove(cancellation_id);
+    }
 }
 
 fn redirect_mode(transport: &TransportConfig) -> RedirectMode {
@@ -513,6 +568,25 @@ pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, String>
     }
 }
 
+pub async fn send_cancellable(
+    input: HttpRequestInput,
+    cancellation_id: Option<String>,
+    state: &HttpCancellationState,
+) -> Result<HttpResponseOutput, String> {
+    let Some(cancellation_id) = cancellation_id.filter(|value| !value.is_empty()) else {
+        return send(input).await;
+    };
+    let Some(cancellation) = state.register(cancellation_id.clone()) else {
+        return Err("Request canceled.".into());
+    };
+    let result = tokio::select! {
+        result = send(input) => result,
+        _ = cancellation => Err("Request canceled.".into()),
+    };
+    state.finish(&cancellation_id);
+    result
+}
+
 pub(crate) fn flatten_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
     let mut output = BTreeMap::<String, String>::new();
     for (name, value) in headers {
@@ -552,6 +626,51 @@ mod tests {
                 ..Default::default()
             },
         }
+    }
+
+    #[tokio::test]
+    async fn signals_registered_http_cancellation_once() {
+        let state = HttpCancellationState::default();
+        let canceled = state.register("runner-item".into()).unwrap();
+
+        assert!(state.cancel("runner-item"));
+        assert!(canceled.await.is_ok());
+        assert!(!state.cancel("runner-item"));
+        assert!(state.register("runner-item".into()).is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancels_an_in_flight_http_exchange() {
+        use std::sync::Arc;
+        use tokio::{net::TcpListener, time::Duration};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (ready_sender, ready_receiver) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let _ = read_loopback_request(&mut socket).await;
+            let _ = ready_sender.send(());
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+        let mut input = body_test_input("none");
+        input.method = "GET".into();
+        input.url = format!("http://{address}/slow");
+        input.transport.timeout_ms = 0;
+        let state = Arc::new(HttpCancellationState::default());
+        let request_state = Arc::clone(&state);
+        let request = tokio::spawn(async move {
+            send_cancellable(input, Some("active-request".into()), request_state.as_ref()).await
+        });
+
+        ready_receiver.await.unwrap();
+        assert!(state.cancel("active-request"));
+        let result = tokio::time::timeout(Duration::from_secs(1), request)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.unwrap_err(), "Request canceled.");
+        server.abort();
     }
 
     async fn read_loopback_request<S>(stream: &mut S) -> (String, Vec<u8>)

@@ -30,6 +30,28 @@ describe('GraphQL request serialization', () => {
 });
 
 describe('native HTTP transport preferences', () => {
+  it('cancels an in-flight native request with the matching identity', async () => {
+    let rejectRequest: ((reason: Error) => void) | undefined;
+    tauri.invoke.mockImplementation((command: string) => {
+      if (command === 'send_http_request') return new Promise((_resolve, reject) => { rejectRequest = reject; });
+      if (command === 'cancel_http_request') {
+        rejectRequest?.(new Error('Request canceled.'));
+        return Promise.resolve(true);
+      }
+      return Promise.resolve(undefined);
+    });
+    const request = createBlankRequest('cancel-native');
+    request.url = 'https://example.test/slow';
+    const controller = new AbortController();
+
+    const pending = sendRequest(request, undefined, { signal: controller.signal, cancellationId: 'runner-1-0-request-1' });
+    await vi.waitFor(() => expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ cancellationId: 'runner-1-0-request-1' })));
+    controller.abort();
+
+    await expect(pending).rejects.toThrow('Request canceled.');
+    expect(tauri.invoke).toHaveBeenCalledWith('cancel_http_request', { cancellationId: 'runner-1-0-request-1' });
+  });
+
   it('adds the default User-Agent unless the request opts out or authors one', async () => {
     tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
     const request = createBlankRequest('user-agent-policy');

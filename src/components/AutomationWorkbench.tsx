@@ -9,6 +9,7 @@ import type {
   MockRoute,
   MockServer,
   RunnerItemResult,
+  RunnerLiveItem,
   Workspace,
   WorkbenchSection,
 } from '../types';
@@ -167,11 +168,14 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const [data, setData] = useState(runnerDraft?.data ?? '');
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<RunnerItemResult[]>([]);
+  const [liveItems, setLiveItems] = useState<RunnerLiveItem[]>([]);
   const [selectedResultId, setSelectedResultId] = useState('');
   const [error, setError] = useState('');
   const [oauthAuthorization, setOAuthAuthorization] = useState<OAuthAuthorizationStatus>();
   const [requestPlan, setRequestPlan] = useState<Array<{ id: string; enabled: boolean }>>(() => runnerDraft?.requestPlan ?? initialTarget.requests.map((request) => ({ id: request.id, enabled: true })));
   const cancelled = useRef(false);
+  const skippedKeys = useRef(new Set<string>());
+  const activeItem = useRef<{ key: string; cancel: () => void; signal: AbortSignal } | undefined>(undefined);
   const oauthFlowId = useRef('');
   const draggedRequestId = useRef('');
   const resolvedTarget = useMemo(() => resolveRunnerTarget(workspace, { collectionId, folderId: targetFolderId }), [collectionId, targetFolderId, workspace]);
@@ -195,6 +199,19 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
+  };
+
+  const isFinished = (status: RunnerLiveItem['status']) => status === 'completed' || status === 'failed' || status === 'canceled' || status === 'skipped';
+  const skipItem = (key: string) => {
+    skippedKeys.current.add(key);
+    if (activeItem.current?.key === key) activeItem.current.cancel();
+    setLiveItems((current) => current.map((item) => item.key === key && !isFinished(item.status) ? { ...item, status: 'skipped', errorMessage: 'Skipped by user.' } : item));
+  };
+  const cancelRun = () => {
+    cancelled.current = true;
+    activeItem.current?.cancel();
+    setLiveItems((current) => current.map((item) => isFinished(item.status) ? item : { ...item, status: 'canceled', errorMessage: 'Canceled by user.' }));
+    void cancelRunnerOAuthAuthorization();
   };
 
   useEffect(() => () => {
@@ -251,10 +268,11 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
     onRunnerStart?.();
     const requestIds = requestPlan.filter((item) => item.enabled).map((item) => item.id);
     if (!requestIds.length) { setError('Select at least one request for this run.'); return; }
-    setRunning(true); setResults([]); setSelectedResultId(''); setError(''); cancelled.current = false;
+    setRunning(true); setResults([]); setLiveItems([]); setSelectedResultId(''); setError(''); cancelled.current = false; skippedKeys.current.clear(); activeItem.current = undefined;
     try {
       let runnerCookies = [...workspace.cookies];
       let runnerResponses = [...workspace.responses];
+      let activeRunnerSignal: AbortSignal | undefined;
       const authorizeOAuth2 = async (request: ApiRequest, requestEnvironment: Environment | undefined): Promise<ApiRequest['auth']> => {
         if (!requestEnvironment) throw new Error('OAuth 2 browser authorization requires an active runner environment.');
         if (!isTauri()) throw new Error('Interactive OAuth 2 runner authorization requires the Tauri app.');
@@ -313,6 +331,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           authorizeOAuth2,
           requestChain: [...new Set([...requestChain, dependency.id])],
           resolveResponse,
+          signal: activeRunnerSignal,
         });
         const requestUrl = result.requestUrl ?? configured.request.url;
         if (configured.request.transport.storeCookies) {
@@ -342,7 +361,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       };
       const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
       const pluginCallbacks: PluginHostCallbacks = {
-        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, authorizeOAuth2, resolveResponse }),
+        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, authorizeOAuth2, resolveResponse, signal: activeRunnerSignal }),
         prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
         readClipboard: () => navigator.clipboard.readText(),
         writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -350,7 +369,13 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
       let latestRunnerResponseId = '';
       const report = await runCollection(collection, environment, {
-        iterations, retries, bail, requestIds, delayMs, scriptTimeoutMs: workspace.preferences.scriptTimeoutMs, environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id), dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current,
+        iterations, retries, bail, requestIds, delayMs, scriptTimeoutMs: workspace.preferences.scriptTimeoutMs, environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id), dataRows: parseRunnerData(data), shouldCancel: () => cancelled.current, shouldSkip: (key) => skippedKeys.current.has(key),
+        onLiveItems: setLiveItems,
+        onActiveItem: (key, cancel, signal) => {
+          activeRunnerSignal = signal;
+          activeItem.current = key && cancel && signal ? { key, cancel, signal } : undefined;
+          if (!key) latestRunnerResponseId = '';
+        },
         onResult: (result) => {
           if (latestRunnerResponseId) {
             const requestTestResults = result.tests.slice(0, 1_000).map((test) => ({ ...test, name: test.name.slice(0, 2_000), ...(test.error ? { error: test.error.slice(0, 20_000) } : {}) }));
@@ -360,7 +385,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           setResults((current) => [...current, result]);
           setSelectedResultId((current) => current || result.id);
         },
-      }, async (request, variables) => {
+      }, async (request, variables, execution) => {
         latestRunnerResponseId = '';
         const requestEnvironment = {
           id: environment.id, name: environment.name,
@@ -380,8 +405,8 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
             prompt: templatePrompt,
             resolveResponse,
             pluginRuntime,
-          })
-          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input), authorizeOAuth2, resolveResponse, onOAuth2Token: (updated) => onChangeWorkspace((current) => ({ ...current, collections: current.collections.map((candidate) => candidate.id === collection.id ? persistEffectiveAuthentication(candidate, request.id, updated.auth) : candidate) })) });
+          }, execution.signal)
+          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input), authorizeOAuth2, resolveResponse, signal: execution.signal, cancellationId: `${execution.key}-${execution.attempt}`, onOAuth2Token: (updated) => onChangeWorkspace((current) => ({ ...current, collections: current.collections.map((candidate) => candidate.id === collection.id ? persistEffectiveAuthentication(candidate, request.id, updated.auth) : candidate) })) });
         const requestUrl = result.requestUrl ?? request.url;
         if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
         const stored = {
@@ -427,6 +452,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
             vault: workspace.preferences.enableVaultInScripts ? vault : {},
             authorizeOAuth2,
             resolveResponse,
+            signal: activeRunnerSignal,
           });
           const state = applyScriptSubresponse(runnerCookies, runnerResponses, subrequest, subresponse, undefined, environment.id, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv, selectedEnvironment.id, collection.activeSubEnvironmentId ?? '');
           runnerCookies = state.cookies;
@@ -434,28 +460,57 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           return subresponse;
         } : undefined,
       }));
+      setLiveItems(report.liveItems ?? []);
       onChangeWorkspace((current) => ({ ...current, cookies: runnerCookies, responses: runnerResponses, pluginData: pluginState.data, runnerReports: [report, ...current.runnerReports].slice(0, 30) }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
+      activeItem.current = undefined;
       setRunning(false);
     }
   };
 
   const visibleResults = results.length ? results : latestReport?.results ?? [];
-  const passed = visibleResults.filter((result) => result.passed).length;
+  const visibleLiveItems = liveItems.length ? liveItems : latestReport?.liveItems?.length ? latestReport.liveItems : visibleResults.map((result): RunnerLiveItem => ({
+    key: result.key ?? result.id,
+    iteration: result.iteration,
+    requestId: result.requestId,
+    requestName: result.requestName,
+    requestUrl: result.request?.url ?? '',
+    status: result.passed ? 'completed' : 'failed',
+    attempt: result.attempt,
+    statusCode: result.status,
+    statusMessage: result.response?.statusText,
+    responseTime: result.durationMs,
+    responseSize: result.response?.sizeBytes,
+    errorMessage: result.error,
+    tests: result.tests,
+  }));
+  const liveCount = (status: RunnerLiveItem['status']) => visibleLiveItems.filter((item) => item.status === status).length;
+  const finishedCount = liveCount('completed') + liveCount('failed');
+  const resultForItem = (item: RunnerLiveItem) => [...visibleResults].reverse().find((result) => result.key === item.key || (!result.key && result.requestId === item.requestId && result.iteration === item.iteration));
+  const responseStats = (item: RunnerLiveItem) => [
+    item.responseTime === undefined ? '' : `${Math.round(item.responseTime)} ms`,
+    item.responseSize === undefined ? '' : item.responseSize < 1024 ? `${item.responseSize} B` : `${(item.responseSize / 1024).toFixed(item.responseSize < 10_240 ? 1 : 0)} KiB`,
+  ].filter(Boolean).join(' · ') || '—';
+  const testSummary = (item: RunnerLiveItem) => {
+    const tests = item.tests ?? [];
+    const failed = tests.filter((test) => !test.passed).length;
+    if (tests.length) return failed ? `${tests.length - failed} passed · ${failed} failed` : `${tests.length} passed`;
+    return item.errorMessage || 'No tests';
+  };
   const selectedResult = visibleResults.find((result) => result.id === selectedResultId);
   return (
     <section className="automation-workbench runner-workbench">
       <AutomationHeader eyebrow="Test" title={targetFolder ? `Runner · ${targetFolder.name}` : 'Collection runner'} subtitle="Run requests in order with iteration data, scripts, assertions, delays, and retries.">
         {latestReport && !running ? <button className="secondary-action" onClick={() => downloadReport('json')} type="button">Export JSON</button> : null}
         {latestReport && !running ? <button className="secondary-action" onClick={() => downloadReport('junit')} type="button">Export JUnit</button> : null}
-        {running ? <button className="danger-action" onClick={() => { cancelled.current = true; void cancelRunnerOAuthAuthorization(); }} type="button">Cancel run</button>
+        {running ? <button className="danger-action" onClick={cancelRun} type="button">Cancel run</button>
           : <button className="primary-action" disabled={!collection} onClick={() => void start()} type="button">{targetFolder ? 'Run folder' : 'Run collection'}</button>}
       </AutomationHeader>
       <div className="runner-grid">
         <aside className="runner-config">
-          <label>Collection<select aria-label="Runner collection" disabled={Boolean(runnerTarget?.collectionId)} value={collection?.id ?? ''} onChange={(event) => setCollectionId(event.target.value)}>{workspace.collections.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.requests.length}</option>)}</select></label>
+          <label>Collection<select aria-label="Runner collection" disabled={Boolean(runnerTarget?.collectionId)} value={collection?.id ?? ''} onChange={(event) => { setCollectionId(event.target.value); setResults([]); setLiveItems([]); setSelectedResultId(''); }}>{workspace.collections.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.requests.length}</option>)}</select></label>
           {targetFolder ? <label>Folder<input aria-label="Runner folder" disabled value={targetFolder.name} /></label> : null}
           <label>Environment<select aria-label="Runner environment" value={environment.id} onChange={(event) => setEnvironmentId(event.target.value)}>{workspace.environments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <fieldset className="runner-plan"><legend>Request order</legend>{requestPlan.map((item, index) => {
@@ -471,13 +526,20 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           <p>Dataset values override environment variables for each iteration.</p>
         </aside>
         <div className="runner-results">
-          <header><div><small>{running ? 'Run in progress' : latestReport ? `Last run · ${new Date(latestReport.finishedAt).toLocaleString()}` : 'Ready to run'}</small><h2>{collection?.name ?? 'No collection'}</h2></div><div className="runner-stats"><strong>{visibleResults.length}</strong><span>Total attempts</span><strong className="ok">{passed}</strong><span>Passed</span><strong className={visibleResults.length - passed ? 'bad' : ''}>{visibleResults.length - passed}</strong><span>Failed</span></div></header>
-          <div className="runner-table"><div className="runner-table-head"><span>Request</span><span>Iteration</span><span>Attempt</span><span>Status</span><span>Duration</span><span>Result</span></div>{visibleResults.map((result) => <article aria-pressed={selectedResult?.id === result.id} className={selectedResult?.id === result.id ? 'selected' : ''} key={result.id} onClick={() => setSelectedResultId(result.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedResultId(result.id); } }} role="button" tabIndex={0}><span><strong>{result.requestName}</strong><small>{result.tests.map((test) => test.name).join(', ') || result.error || 'HTTP response'}</small></span><span>{result.iteration}</span><span>{result.attempt}</span><span>{result.status || 'ERR'}</span><span>{result.durationMs} ms</span><span className={result.passed ? 'ok' : 'bad'}>{result.passed ? 'PASS' : 'FAIL'}</span></article>)}{!visibleResults.length ? <div className="empty-state compact"><Icon name="history" size={28} /><strong>No runner results</strong><span>Start the selected collection to build a local report.</span></div> : null}</div>
+          <header><div><small>{running ? 'Run in progress' : latestReport ? `Last run · ${new Date(latestReport.finishedAt).toLocaleString()}` : 'Ready to run'}</small><h2>{collection?.name ?? 'No collection'}</h2></div><div className="runner-stats"><strong>{visibleLiveItems.length}</strong><span>Planned</span><strong className="active">{liveCount('running')}</strong><span>Running</span><strong className="ok">{finishedCount}</strong><span>Finished</span><strong>{liveCount('skipped')}</strong><span>Skipped</span><strong>{liveCount('canceled')}</strong><span>Canceled</span></div></header>
+          <div className="runner-table"><div className="runner-table-head"><span>Request</span><span>Iteration</span><span>Attempt</span><span>Status</span><span>Response</span><span>Tests / error</span><span>Action</span></div>{visibleLiveItems.map((item) => {
+            const result = resultForItem(item);
+            const selected = selectedResult?.id === result?.id;
+            const statusLabel = item.statusCode && item.statusCode > 0 ? `${item.statusCode}${item.statusMessage ? ` ${item.statusMessage}` : ''}` : item.status.toUpperCase();
+            const statusTone = item.statusCode && item.statusCode > 0 ? item.statusCode < 300 ? 'http-success' : item.statusCode < 400 ? 'http-warning' : 'http-error' : item.status;
+            const select = () => { if (result) setSelectedResultId(result.id); };
+            return <article aria-pressed={selected} className={selected ? 'selected' : ''} key={item.key} onClick={select} onKeyDown={(event) => { if (result && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); select(); } }} role={result ? 'button' : undefined} tabIndex={result ? 0 : undefined}><span><strong>{item.requestName}</strong><small title={item.requestUrl}>{item.requestUrl || 'Prepared request'}</small></span><span>{item.iteration}</span><span>{item.attempt ?? '—'}</span><span className={`runner-status status-${statusTone}`}>{statusLabel}</span><span>{responseStats(item)}</span><span title={testSummary(item)}>{testSummary(item)}</span><span>{running && !isFinished(item.status) ? <button className="runner-skip" onClick={(event) => { event.stopPropagation(); skipItem(item.key); }} type="button">Skip</button> : '—'}</span></article>;
+          })}{!visibleLiveItems.length ? <div className="empty-state compact"><Icon name="history" size={28} /><strong>No runner results</strong><span>Start the selected collection to build a local report.</span></div> : null}</div>
           {selectedResult ? <section className="runner-response-detail"><header><div><small>Attempt evidence</small><strong>{selectedResult.requestName} · iteration {selectedResult.iteration}, attempt {selectedResult.attempt}</strong></div><button aria-label="Close attempt evidence" onClick={() => setSelectedResultId('')} type="button">Close</button></header>{selectedResult.request ? <div className="runner-request-content"><div><small>Request</small><strong>{selectedResult.request.method} · {selectedResult.request.protocol}</strong><code title={selectedResult.request.url}>{selectedResult.request.url}{selectedResult.request.urlTruncated ? '…' : ''}</code></div><details><summary>{selectedResult.request.headers.length} configured headers{selectedResult.request.headersTruncated ? ' · truncated' : ''}</summary><pre>{selectedResult.request.headers.map((header) => `${header.name}: ${header.value}`).join('\n') || '(no configured headers)'}</pre></details><div><small>{selectedResult.request.bodyMode} body</small><strong>{selectedResult.request.bodySummary}</strong><span>{selectedResult.request.bodySizeEstimated ? 'Approximately ' : ''}{selectedResult.request.bodySizeBytes.toLocaleString()} payload bytes · {selectedResult.request.storedBytes.toLocaleString()} snapshot bytes</span></div></div> : null}{selectedResult.response ? <div className="runner-response-content"><div className="runner-response-meta"><span><strong>{selectedResult.status}</strong> {selectedResult.response.statusText}{selectedResult.response.statusTextTruncated ? '…' : ''}</span><span>{selectedResult.response.sizeBytes.toLocaleString()} response bytes</span><span>{selectedResult.durationMs} ms</span></div><details><summary>{Object.keys(selectedResult.response.headers).length} response headers{selectedResult.response.headersTruncated ? ' · truncated' : ''}</summary><pre>{Object.entries(selectedResult.response.headers).map(([name, value]) => `${name}: ${value}`).join('\n') || '(no response headers)'}</pre></details><div className="runner-body-preview"><small>Response body preview · {selectedResult.response.storedBytes.toLocaleString()} snapshot bytes{selectedResult.response.bodyTruncated ? ' · truncated' : ''}</small><pre>{selectedResult.response.bodyPreview || '(empty response body)'}</pre></div></div> : <p>{selectedResult.error || 'No response was returned for this attempt.'}</p>}</section> : null}
         </div>
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}
-      {oauthAuthorization ? <OAuthAuthorizationDialog onCancel={() => { cancelled.current = true; void cancelRunnerOAuthAuthorization(); }} status={oauthAuthorization} /> : null}
+      {oauthAuthorization ? <OAuthAuthorizationDialog onCancel={cancelRun} status={oauthAuthorization} /> : null}
     </section>
   );
 }

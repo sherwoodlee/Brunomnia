@@ -779,8 +779,27 @@ export type ScriptRunResult = {
   localVariables?: Record<string, string>;
 };
 
+export type RunnerItemStatus = 'pending' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
+
+export type RunnerLiveItem = {
+  key: string;
+  iteration: number;
+  requestId: string;
+  requestName: string;
+  requestUrl: string;
+  status: RunnerItemStatus;
+  attempt?: number;
+  statusCode?: number;
+  statusMessage?: string;
+  responseTime?: number;
+  responseSize?: number;
+  errorMessage?: string;
+  tests?: ScriptTestResult[];
+};
+
 export type RunnerItemResult = {
   id: string;
+  key?: string;
   requestId: string;
   requestName: string;
   iteration: number;
@@ -835,6 +854,11 @@ export type RunnerReport = {
   failed: number;
   cancelled: boolean;
   bailed?: boolean;
+  planned?: number;
+  completed?: number;
+  skipped?: number;
+  canceled?: number;
+  liveItems?: RunnerLiveItem[];
   results: RunnerItemResult[];
 };
 

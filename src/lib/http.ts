@@ -35,12 +35,23 @@ export type SendRequestContext = {
   skipOAuth2Acquisition?: boolean;
   onOAuth2Token?: (request: ApiRequest) => void;
   authorizeOAuth2?: (request: ApiRequest, environment: Environment | undefined) => Promise<ApiRequest['auth']>;
+  signal?: AbortSignal;
+  cancellationId?: string;
   pluginRuntime?: {
     beforeRequest: (request: ApiRequest) => Promise<ApiRequest>;
     afterResponse: (request: ApiRequest, response: HttpResponse) => Promise<HttpResponse>;
     templateTag: (name: string, args: string[], request: ApiRequest) => Promise<string | undefined>;
   };
 };
+
+const abortError = (signal: AbortSignal) => signal.reason instanceof Error ? signal.reason : new DOMException('Request canceled.', 'AbortError');
+const throwIfAborted = (signal?: AbortSignal) => { if (signal?.aborted) throw abortError(signal); };
+const abortableDelay = (milliseconds: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+  throwIfAborted(signal);
+  const onAbort = () => { window.clearTimeout(timeout); reject(signal ? abortError(signal) : new DOMException('Request canceled.', 'AbortError')); };
+  const timeout = window.setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, milliseconds);
+  signal?.addEventListener('abort', onAbort, { once: true });
+});
 
 const serializeGraphqlBody = (request: ApiRequest, variablesSource: string) => {
   let parsedVariables: unknown = {};
@@ -91,6 +102,7 @@ const signingBody = (request: ApiRequest, variables: Record<string, string>) => 
 };
 
 export const sendRequest = async (request: ApiRequest, environment: Environment | undefined, context: SendRequestContext = {}): Promise<HttpResponse> => {
+  throwIfAborted(context.signal);
   const variables = { ...environmentMap(environment), ...(context.vault ?? {}) };
   let hooked = context.pluginRuntime ? await context.pluginRuntime.beforeRequest(request) : request;
   if (!context.skipOAuth2Acquisition && hooked.auth.type === 'oauth2' && !hooked.auth.disabled) {
@@ -117,6 +129,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     resolveResponse: renderContext.resolveResponse,
     requestChain: renderContext.requestChain,
   });
+  throwIfAborted(context.signal);
   const followRedirects = resolveFollowRedirects(prepared.transport, context.followRedirects ?? true);
   const timeoutMs = resolveRequestTimeout(prepared.transport, context.requestTimeoutMs ?? 30_000);
   const validateCertificates = resolveCertificateValidation(prepared.transport, context.validateCertificates ?? true);
@@ -164,57 +177,68 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     return { ...output, timeline: buildResponseTimeline(prepared, url, output, context.maxTimelineDataSizeKB ?? 10, graphqlPayload) };
   };
 
+  throwIfAborted(context.signal);
   if (isTauri()) {
     headers = applyDefaultAcceptHeader(headers);
     headers = applyDefaultUserAgentHeader(headers, prepared.disableUserAgentHeader);
     const body = prepared.protocol === 'graphql'
       ? graphqlPayload!
       : prepared.body;
-    const output = await invoke<HttpResponse>('send_http_request', {
-      input: {
-        method: prepared.method,
-        url,
-        headers,
-        bodyMode: prepared.protocol === 'graphql' ? 'json' : prepared.bodyMode,
-        body,
-        formBody: prepared.formBody,
-        multipartBody: prepared.multipartBody,
-        binaryBody: prepared.binaryBody,
-        transport: applyWorkspaceCertificates({
-          ...prepared.transport,
-          followRedirects,
-          timeoutMs,
-          validateCertificates,
-          ...proxy,
-          preferredHttpVersion: context.preferredHttpVersion ?? 'default',
-          maxRedirects: context.maxRedirects ?? 10,
-        }, url, context.certificates),
-        auth: {
-          authType: prepared.auth.type,
-          disabled: prepared.auth.disabled,
-          username: prepared.auth.username,
-          password: prepared.auth.password,
-          ntlmDomain: prepared.auth.ntlmDomain,
-          ntlmWorkstation: prepared.auth.ntlmWorkstation,
-          netrc: prepared.auth.netrc,
+    const cancellationId = context.signal ? context.cancellationId ?? `http-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}` : undefined;
+    const cancel = () => { if (cancellationId) void invoke('cancel_http_request', { cancellationId }).catch(() => undefined); };
+    context.signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      const output = await invoke<HttpResponse>('send_http_request', {
+        cancellationId,
+        input: {
+          method: prepared.method,
+          url,
+          headers,
+          bodyMode: prepared.protocol === 'graphql' ? 'json' : prepared.bodyMode,
+          body,
+          formBody: prepared.formBody,
+          multipartBody: prepared.multipartBody,
+          binaryBody: prepared.binaryBody,
+          transport: applyWorkspaceCertificates({
+            ...prepared.transport,
+            followRedirects,
+            timeoutMs,
+            validateCertificates,
+            ...proxy,
+            preferredHttpVersion: context.preferredHttpVersion ?? 'default',
+            maxRedirects: context.maxRedirects ?? 10,
+          }, url, context.certificates),
+          auth: {
+            authType: prepared.auth.type,
+            disabled: prepared.auth.disabled,
+            username: prepared.auth.username,
+            password: prepared.auth.password,
+            ntlmDomain: prepared.auth.ntlmDomain,
+            ntlmWorkstation: prepared.auth.ntlmWorkstation,
+            netrc: prepared.auth.netrc,
+          },
         },
-      },
-    });
-    return finish(withTimeline(decodeHttpResponseBody(output)));
+      });
+      return finish(withTimeline(decodeHttpResponseBody(output)));
+    } finally {
+      context.signal?.removeEventListener('abort', cancel);
+    }
   }
 
   if (new URL(url).hostname === 'api.acme.dev') {
-    await new Promise((resolve) => window.setTimeout(resolve, 380));
+    await abortableDelay(380, context.signal);
     return finish(withTimeline(mockResponse()));
   }
 
   const startedAt = performance.now();
+  const timeoutSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  const signal = context.signal && timeoutSignal ? AbortSignal.any([context.signal, timeoutSignal]) : context.signal ?? timeoutSignal;
   const response = await fetch(url, {
     method: prepared.method,
     headers: Object.fromEntries(headers.filter((header) => header.enabled).map((header) => [header.name, header.value])),
     body: browserBody(prepared),
     redirect: followRedirects ? 'follow' : 'manual',
-    signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
+    signal,
     credentials: prepared.transport.sendCookies ? 'include' : 'omit',
   });
   const bytes = new Uint8Array(await response.arrayBuffer());

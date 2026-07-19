@@ -22,6 +22,8 @@ const xmlText = (value: unknown) => cleanText(value).replaceAll('&', '&amp;').re
 const xmlAttribute = (value: unknown) => xmlText(value).replaceAll('"', '&quot;').replaceAll("'", '&apos;').replaceAll('\t', '&#9;').replaceAll('\n', '&#10;').replaceAll('\r', '&#13;');
 const seconds = (milliseconds: number) => (Math.max(0, milliseconds) / 1000).toFixed(3);
 const resultLabel = (result: RunnerItemResult) => `${result.requestName} (iteration ${result.iteration}, attempt ${result.attempt})`;
+const controlItems = (report: RunnerReport) => (report.liveItems ?? []).filter((item) => item.status === 'skipped' || item.status === 'canceled');
+const controlLabel = (item: ReturnType<typeof controlItems>[number]) => `${item.requestName} (iteration ${item.iteration})`;
 const runDuration = (report: RunnerReport) => {
   const duration = Date.parse(report.finishedAt) - Date.parse(report.startedAt);
   return Number.isFinite(duration) && duration >= 0 ? duration : report.results.reduce((total, result) => total + Math.max(0, result.durationMs), 0);
@@ -36,7 +38,7 @@ const failureDetails = (result: RunnerItemResult) => {
   return 'The runner marked this attempt as failed.';
 };
 
-const summary = (report: RunnerReport) => `${report.passed} passed, ${report.failed} failed, ${report.total} total${report.testNamePattern === undefined ? '' : `, ${report.matchedTests ?? report.results.reduce((total, result) => total + result.tests.length, 0)} matched tests`}${report.cancelled ? ', cancelled' : ''}${report.bailed ? ', bailed' : ''} (${runDuration(report)} ms)`;
+const summary = (report: RunnerReport) => `${report.passed} passed, ${report.failed} failed, ${report.total} total${report.skipped ? `, ${report.skipped} skipped` : ''}${report.canceled ? `, ${report.canceled} canceled` : ''}${report.testNamePattern === undefined ? '' : `, ${report.matchedTests ?? report.results.reduce((total, result) => total + result.tests.length, 0)} matched tests`}${report.cancelled ? ', cancelled' : ''}${report.bailed ? ', bailed' : ''} (${runDuration(report)} ms)`;
 
 const specReport = (report: RunnerReport) => {
   const lines = [report.collectionName];
@@ -44,13 +46,15 @@ const specReport = (report: RunnerReport) => {
     lines.push(`  ${result.passed ? '✓' : '✖'} ${resultLabel(result)} (${result.durationMs} ms)`);
     if (!result.passed) cleanText(failureDetails(result)).split('\n').forEach((detail) => lines.push(`    ${detail}`));
   });
+  controlItems(report).forEach((item) => lines.push(`  - ${controlLabel(item)} (${item.status})`));
   lines.push('', summary(report));
   return `${lines.join('\n')}\n`;
 };
 
 const tapLine = (value: string) => cleanText(value).replace(/\r?\n/g, ' ');
 const tapReport = (report: RunnerReport) => {
-  const lines = ['TAP version 13', `1..${report.total}`];
+  const controls = controlItems(report);
+  const lines = ['TAP version 13', `1..${report.total + controls.length}`];
   report.results.forEach((result, index) => {
     lines.push(`${result.passed ? 'ok' : 'not ok'} ${index + 1} - ${tapLine(resultLabel(result))}`);
     if (!result.passed) {
@@ -61,11 +65,14 @@ const tapReport = (report: RunnerReport) => {
       lines.push('  ...');
     }
   });
+  controls.forEach((item, index) => lines.push(`ok ${report.results.length + index + 1} - ${tapLine(controlLabel(item))} # SKIP ${item.status}`));
   lines.push(`# ${summary(report)}`);
   return `${lines.join('\n')}\n`;
 };
 
 const junitReport = (report: RunnerReport) => {
+  const controls = controlItems(report);
+  const testCount = report.total + controls.length;
   const errors = report.results.filter((result) => Boolean(result.error)).length;
   const failures = report.results.filter((result) => !result.passed && !result.error).length;
   const cases = report.results.map((result) => {
@@ -75,11 +82,15 @@ const junitReport = (report: RunnerReport) => {
     if (result.error) return `    <testcase ${attributes}>\n      <error type="runner" message="${xmlAttribute(result.error)}">${details}</error>\n    </testcase>`;
     return `    <testcase ${attributes}>\n      <failure type="assertion" message="${xmlAttribute(failureDetails(result).split('\n')[0])}">${details}</failure>\n    </testcase>`;
   });
+  const skippedCases = controls.map((item) => `    <testcase name="${xmlAttribute(controlLabel(item))}" classname="${xmlAttribute(report.collectionName)}" time="0.000">
+      <skipped message="${xmlAttribute(item.errorMessage || item.status)}" />
+    </testcase>`);
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<testsuites name="${xmlAttribute(report.collectionName)}" tests="${report.total}" failures="${failures}" errors="${errors}" time="${seconds(runDuration(report))}">`,
-    `  <testsuite name="${xmlAttribute(report.collectionName)}" id="${xmlAttribute(report.id)}" tests="${report.total}" failures="${failures}" errors="${errors}" skipped="0" time="${seconds(runDuration(report))}" timestamp="${xmlAttribute(report.startedAt)}">`,
+    `<testsuites name="${xmlAttribute(report.collectionName)}" tests="${testCount}" failures="${failures}" errors="${errors}" time="${seconds(runDuration(report))}">`,
+    `  <testsuite name="${xmlAttribute(report.collectionName)}" id="${xmlAttribute(report.id)}" tests="${testCount}" failures="${failures}" errors="${errors}" skipped="${controls.length}" time="${seconds(runDuration(report))}" timestamp="${xmlAttribute(report.startedAt)}">`,
     ...cases,
+    ...skippedCases,
     '  </testsuite>',
     '</testsuites>',
     '',
@@ -92,13 +103,13 @@ const reportContents = (report: RunnerReport, reporter: RunnerReporter) => {
   if (reporter === 'tap') return tapReport(report);
   if (reporter === 'spec') return specReport(report);
   if (reporter === 'min') return `${summary(report)}\n`;
-  if (reporter === 'dot') return `${report.results.map((result) => result.passed ? '.' : '!').join('')}\n${summary(report)}\n`;
+  if (reporter === 'dot') return `${report.results.map((result) => result.passed ? '.' : '!').join('')}${controlItems(report).map((item) => item.status === 'skipped' ? 's' : 'c').join('')}\n${summary(report)}\n`;
   if (reporter === 'progress') {
     const width = 20;
     const complete = report.total ? Math.round((report.passed / report.total) * width) : 0;
     return `[${'='.repeat(complete)}${'-'.repeat(width - complete)}] ${summary(report)}\n`;
   }
-  return `${report.results.map((result) => `${result.passed ? 'PASS' : 'FAIL'} ${cleanText(resultLabel(result))} ${result.durationMs} ms${result.passed ? '' : ` — ${cleanText(failureDetails(result)).replace(/\r?\n/g, '; ')}`}`).join('\n')}\n${summary(report)}\n`;
+  return `${[...report.results.map((result) => `${result.passed ? 'PASS' : 'FAIL'} ${cleanText(resultLabel(result))} ${result.durationMs} ms${result.passed ? '' : ` — ${cleanText(failureDetails(result)).replace(/\r?\n/g, '; ')}`}`), ...controlItems(report).map((item) => `${item.status.toUpperCase()} ${cleanText(controlLabel(item))}`)].join('\n')}\n${summary(report)}\n`;
 };
 
 export const parseRunnerReporter = (value: string | undefined, fallback: RunnerReporter = 'json'): RunnerReporter => {

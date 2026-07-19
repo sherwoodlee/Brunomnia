@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { CookieRecord, Protocol, StoredResponse } from '../types';
-import { connectStream } from './protocol';
+import { connectStream, runStreamSample } from './protocol';
 import { sendSocketIoMessage } from './socketIo';
 
 const tauri = vi.hoisted(() => ({ channels: [] as Array<{ onmessage?: (message: unknown) => void }>, invoke: vi.fn() }));
@@ -37,6 +37,18 @@ const requestFor = (protocol: Protocol) => {
 };
 
 describe('native realtime User-Agent policy', () => {
+  it('disconnects an active runner stream when its signal aborts', async () => {
+    const request = requestFor('sse');
+    const controller = new AbortController();
+    const pending = runStreamSample(request, { id: 'environment', name: 'Environment', variables: [] }, 30_000, 'default', 10, true, 30_000, true, undefined, [], undefined, {}, controller.signal);
+    await vi.waitFor(() => expect(tauri.invoke).toHaveBeenCalledWith('connect_sse', expect.anything()));
+
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(tauri.invoke).toHaveBeenCalledWith('disconnect_sse', { sessionId: expect.stringMatching(/^runner-stream-/) });
+  });
+
   it.each(['websocket', 'sse', 'socketio', 'graphql'] as const)('adds the default for %s connections', async (protocol) => {
     await connectStream(requestFor(protocol), undefined, `session-${protocol}`, vi.fn());
 

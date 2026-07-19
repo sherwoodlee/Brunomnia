@@ -169,8 +169,20 @@ fn workspace_catalog_restore_backup(
 }
 
 #[tauri::command]
-async fn send_http_request(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
-    http_client::send(input).await
+async fn send_http_request(
+    input: HttpRequestInput,
+    cancellation_id: Option<String>,
+    state: State<'_, http_client::HttpCancellationState>,
+) -> Result<HttpResponseOutput, String> {
+    http_client::send_cancellable(input, cancellation_id, state.inner()).await
+}
+
+#[tauri::command]
+fn cancel_http_request(
+    cancellation_id: String,
+    state: State<'_, http_client::HttpCancellationState>,
+) -> bool {
+    state.cancel(&cancellation_id)
 }
 
 #[tauri::command]
@@ -753,6 +765,7 @@ async fn stop_mock_server(
 pub fn run() {
     tauri::Builder::default()
         .manage(streaming::StreamingState::default())
+        .manage(http_client::HttpCancellationState::default())
         .manage(grpc_client::GrpcSessionState::default())
         .manage(mock_server::MockServerState::default())
         .manage(oauth2_callback::OAuthCallbackState::default())
@@ -773,6 +786,7 @@ pub fn run() {
             workspace_catalog_restore_backup,
             template_os_info,
             send_http_request,
+            cancel_http_request,
             oauth2_authorize,
             oauth2_cancel,
             open_external_url,

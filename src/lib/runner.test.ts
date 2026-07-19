@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { Workspace } from '../types';
-import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, discardRunnerDraftEntries, parseRunnerData, resolveRunnerTarget, runCollection, runnerDraftKey, validateTestNamePattern } from './runner';
+import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, buildRunnerItemKey, discardRunnerDraftEntries, parseRunnerData, resolveRunnerTarget, runCollection, runnerDraftKey, validateTestNamePattern } from './runner';
 
 describe('collection runner', () => {
   it('resolves workspace and nested folder runner targets', () => {
@@ -158,6 +158,101 @@ describe('collection runner', () => {
     expect(report.total).toBe(2);
   });
 
+  it('publishes pending, running, and completed live-item evidence', async () => {
+    const request = createBlankRequest('live');
+    const snapshots: string[][] = [];
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], onLiveItems: (items) => snapshots.push(items.map((item) => item.status)) },
+      async (_activeRequest, _variables, execution) => {
+        expect(execution).toMatchObject({ key: buildRunnerItemKey(1, 0, request.id), attempt: 1 });
+        expect(execution.signal.aborted).toBe(false);
+        return { status: 201, statusText: 'Created', headers: {}, body: '{}', durationMs: 12, sizeBytes: 2, requestUrl: 'https://example.test/rendered' };
+      },
+      async (_script, activeRequest, environment, response) => ({ request: activeRequest, environment, logs: [], tests: response ? [{ name: 'created', passed: true }] : [] }),
+    );
+
+    expect(snapshots[0]).toEqual(['pending']);
+    expect(snapshots).toContainEqual(['running']);
+    expect(snapshots.at(-1)).toEqual(['completed']);
+    expect(report).toMatchObject({ planned: 1, completed: 1, skipped: 0, canceled: 0 });
+    expect(report.liveItems?.[0]).toMatchObject({ status: 'completed', statusCode: 201, statusMessage: 'Created', responseTime: 12, responseSize: 2, requestUrl: 'https://example.test/rendered', tests: [{ name: 'created', passed: true }] });
+  });
+
+  it('skips queued items without executing or counting them as failures', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    const skippedKey = buildRunnerItemKey(1, 1, second.id);
+    const seen: string[] = [];
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], shouldSkip: (key) => key === skippedKey },
+      async (request) => { seen.push(request.id); return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    );
+
+    expect(seen).toEqual(['first']);
+    expect(report).toMatchObject({ total: 1, passed: 1, failed: 0, skipped: 1, canceled: 0 });
+    expect(report.liveItems?.map((item) => item.status)).toEqual(['completed', 'skipped']);
+  });
+
+  it('aborts an active skipped item and continues with the queue', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    const firstKey = buildRunnerItemKey(1, 0, first.id);
+    let skipped = false;
+    let cancelActive: (() => void) | undefined;
+    const seen: string[] = [];
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second] },
+      { id: 'env', name: 'Env', variables: [] },
+      {
+        iterations: 1, retries: 0, delayMs: 0, dataRows: [],
+        shouldSkip: (key) => key === firstKey && skipped,
+        onActiveItem: (key, cancel) => { cancelActive = key === firstKey ? cancel : undefined; },
+      },
+      async (request, _variables, execution) => {
+        seen.push(request.id);
+        if (request.id !== first.id) return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 };
+        return new Promise((_resolve, reject) => {
+          execution.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          queueMicrotask(() => { skipped = true; cancelActive?.(); });
+        });
+      },
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    );
+
+    expect(seen).toEqual(['first', 'second']);
+    expect(report).toMatchObject({ total: 1, passed: 1, failed: 0, skipped: 1, cancelled: false });
+    expect(report.liveItems?.map((item) => item.status)).toEqual(['skipped', 'completed']);
+  });
+
+  it('aborts the active request and cancels every unfinished item', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    let stopped = false;
+    let cancelActive: (() => void) | undefined;
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second] },
+      { id: 'env', name: 'Env', variables: [] },
+      {
+        iterations: 1, retries: 1, delayMs: 0, dataRows: [],
+        shouldCancel: () => stopped,
+        onActiveItem: (key, cancel) => { cancelActive = key ? cancel : undefined; },
+      },
+      async (_request, _variables, execution) => new Promise((_resolve, reject) => {
+        execution.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        queueMicrotask(() => { stopped = true; cancelActive?.(); });
+      }),
+      async (_script, activeRequest, environment) => ({ request: activeRequest, environment, logs: [], tests: [] }),
+    );
+
+    expect(report).toMatchObject({ total: 0, passed: 0, failed: 0, canceled: 2, cancelled: true });
+    expect(report.liveItems?.map((item) => item.status)).toEqual(['canceled', 'canceled']);
+  });
+
   it('bails only after retries are exhausted', async () => {
     const first = createBlankRequest('first');
     const second = createBlankRequest('second');
@@ -175,6 +270,7 @@ describe('collection runner', () => {
     expect(report.failed).toBe(2);
     expect(report.bailed).toBe(true);
     expect(report.cancelled).toBe(false);
+    expect(report.liveItems?.map((item) => item.status)).toEqual(['completed', 'skipped', 'skipped', 'skipped']);
   });
 
   it('continues when a retry recovers under bail mode', async () => {
@@ -253,6 +349,8 @@ describe('collection runner', () => {
     expect(snapshot?.bodySizeBytes).toBe(new TextEncoder().encode('{"password":"hidden"}').byteLength);
     expect(JSON.stringify(snapshot)).not.toContain('top-secret');
     expect(JSON.stringify(snapshot)).not.toContain('hidden');
+    expect(report.liveItems?.[0].requestUrl).toContain('access_token=%5Bredacted%5D');
+    expect(JSON.stringify(report.liveItems)).not.toContain('access_token=secret');
   });
 
   it('passes iteration data and request-local variables through scripts and request rendering', async () => {

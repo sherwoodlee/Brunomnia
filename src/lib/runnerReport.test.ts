@@ -70,6 +70,27 @@ describe('runner report artifacts', () => {
     expect(JSON.parse(createRunnerReportArtifact(filtered, 'json').contents).report).toMatchObject({ testNamePattern: '^body', matchedTests: 1 });
   });
 
+  it('preserves skipped and canceled live items across reporters', () => {
+    const controlled: RunnerReport = {
+      ...report,
+      skipped: 1,
+      canceled: 1,
+      cancelled: true,
+      liveItems: [
+        { key: 'skip', iteration: 1, requestId: 'skip', requestName: 'Skip me', requestUrl: '', status: 'skipped', errorMessage: 'Skipped by user.' },
+        { key: 'cancel', iteration: 1, requestId: 'cancel', requestName: 'Cancel me', requestUrl: '', status: 'canceled', errorMessage: 'Canceled by user.' },
+      ],
+    };
+
+    expect(createRunnerReportArtifact(controlled, 'min').contents).toContain('1 skipped, 1 canceled');
+    expect(createRunnerReportArtifact(controlled, 'dot').contents).toMatch(/^\.!!sc\n/);
+    expect(createRunnerReportArtifact(controlled, 'tap').contents).toContain('1..5');
+    expect(createRunnerReportArtifact(controlled, 'tap').contents).toContain('# SKIP canceled');
+    const junit = createRunnerReportArtifact(controlled, 'junit').contents;
+    expect(junit).toContain('tests="5" failures="1" errors="1" skipped="2"');
+    expect(junit).toContain('<skipped message="Skipped by user." />');
+  });
+
   it('rejects unknown reporter names with the supported inventory', () => {
     expect(parseRunnerReporter(undefined, 'spec')).toBe('spec');
     expect(parseRunnerReporter('tap')).toBe('tap');

@@ -214,9 +214,12 @@ export const runStreamSample = async (
   cookies: CookieRecord[] = [],
   certificates?: WorkspaceCertificates,
   renderContext: RequestSendRenderContext = {},
+  signal?: AbortSignal,
 ): Promise<HttpResponse> => {
   if (!isStreamingRequest(request)) throw new Error('Stream sampling only supports WebSocket, Socket.IO, SSE, and GraphQL subscription requests.');
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new DOMException('Request canceled.', 'AbortError');
   const preparedRequest = await renderRealtimeConnectionRequest(request, environment, renderContext);
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new DOMException('Request canceled.', 'AbortError');
   const sessionId = `runner-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   const messages: StreamMessage[] = [];
   let resolveIncoming: (() => void) | undefined;
@@ -226,8 +229,19 @@ export const runStreamSample = async (
     messages.push(message);
     if (message.direction === 'incoming' && (request.protocol !== 'graphql' || message.kind === 'next' || message.kind === 'error' || message.kind === 'complete')) resolveIncoming?.();
   };
-  await connectStream(preparedRequest, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies, certificates);
+  let rejectAbort: ((reason: unknown) => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = reject; });
+  const onAbort = () => {
+    void disconnectStream(request.protocol, sessionId).catch(() => undefined);
+    rejectAbort?.(signal?.reason instanceof Error ? signal.reason : new DOMException('Request canceled.', 'AbortError'));
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  let sampleTimeout: ReturnType<typeof setTimeout> | undefined;
   try {
+    await Promise.race([
+      connectStream(preparedRequest, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies, certificates),
+      aborted,
+    ]);
     if (preparedRequest.protocol === 'websocket') {
       const startupFrame = request.renderBodyTemplates !== false
         ? await renderRequestValue(request.body, request, environment, renderContext)
@@ -237,9 +251,12 @@ export const runStreamSample = async (
     if (preparedRequest.protocol === 'socketio') await (await import('./socketIo')).sendSocketIoMessage(request, environment, sessionId, onEvent, renderContext);
     await Promise.race([
       firstIncoming,
-      new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(100, Math.min(30_000, windowMs)))),
+      new Promise<void>((resolve) => { sampleTimeout = setTimeout(resolve, Math.max(100, Math.min(30_000, windowMs))); }),
+      aborted,
     ]);
   } finally {
+    if (sampleTimeout !== undefined) clearTimeout(sampleTimeout);
+    signal?.removeEventListener('abort', onAbort);
     await disconnectStream(request.protocol, sessionId).catch(() => undefined);
   }
   const body = JSON.stringify(messages.map(({ direction, kind, text, timestamp }) => ({ direction, kind, text, timestamp })), null, 2);

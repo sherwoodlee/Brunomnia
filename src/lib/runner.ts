@@ -4,6 +4,7 @@ import type {
   Environment,
   HttpResponse,
   RunnerItemResult,
+  RunnerLiveItem,
   RunnerReport,
   RunnerRequestSnapshot,
   RunnerResponseSnapshot,
@@ -14,7 +15,9 @@ import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from '
 import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, type ScriptEnvironmentScopes } from './resources';
 import type { ScriptRunOptions } from './scriptSandbox';
 
-export type RequestExecutor = (request: ApiRequest, variables: Record<string, string>) => Promise<HttpResponse>;
+export type RunnerExecutionContext = { key: string; attempt: number; signal: AbortSignal };
+
+export type RequestExecutor = (request: ApiRequest, variables: Record<string, string>, execution: RunnerExecutionContext) => Promise<HttpResponse>;
 export type ScriptExecutor = (
   script: string,
   request: ApiRequest,
@@ -37,6 +40,9 @@ export type RunnerOptions = {
   testNamePattern?: string;
   bail?: boolean;
   shouldCancel?: () => boolean;
+  shouldSkip?: (key: string) => boolean;
+  onLiveItems?: (items: RunnerLiveItem[]) => void;
+  onActiveItem?: (key: string | undefined, cancel?: () => void, signal?: AbortSignal) => void;
   onResult?: (result: RunnerItemResult) => void;
 };
 
@@ -80,7 +86,12 @@ export const resolveRunnerTarget = (workspace: Workspace, target?: RunnerTarget)
 
 const runId = () => `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
-const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const wait = (milliseconds: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (signal?.aborted) { reject(signal.reason); return; }
+  const onAbort = () => { clearTimeout(timeout); reject(signal?.reason); };
+  const timeout = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, milliseconds);
+  signal?.addEventListener('abort', onAbort, { once: true });
+});
 const boundedInteger = (value: number, minimum: number, maximum: number) => {
   if (!Number.isFinite(value)) return minimum;
   return Math.max(minimum, Math.min(maximum, Math.floor(value)));
@@ -103,6 +114,10 @@ export const RUNNER_REQUEST_PER_RESULT_BYTES = 16_000;
 export const RUNNER_REQUEST_REPORT_BYTES = 500_000;
 const RUNNER_RESPONSE_BODY_BYTES = 16_000;
 const RUNNER_RESPONSE_HEADERS = 64;
+
+export const buildRunnerItemKey = (iteration: number, index: number, requestId: string) => `${iteration}-${index}-${requestId}`;
+
+const runnerItemFinished = (status: RunnerLiveItem['status']) => status === 'completed' || status === 'failed' || status === 'canceled' || status === 'skipped';
 
 type ResponseSnapshotBudget = { remaining: number };
 
@@ -255,6 +270,33 @@ export const runCollection = async (
   const plannedRequests = options.requestIds === undefined
     ? collection.requests
     : [...new Set(options.requestIds)].flatMap((id) => requestsById.get(id) ?? []);
+  const liveItems = Array.from({ length: iterations }, (_, iteration) => plannedRequests.map((request, index): RunnerLiveItem => ({
+    key: buildRunnerItemKey(iteration + 1, index, request.id),
+    iteration: iteration + 1,
+    requestId: request.id,
+    requestName: request.name,
+    requestUrl: request.url,
+    status: 'pending',
+  }))).flat();
+  const publishLiveItems = () => options.onLiveItems?.(liveItems.map((item) => ({ ...item, tests: item.tests?.map((test) => ({ ...test })) })));
+  const updateLiveItem = (key: string, patch: Partial<RunnerLiveItem>) => {
+    const index = liveItems.findIndex((item) => item.key === key);
+    if (index < 0) return;
+    const current = liveItems[index];
+    const status = patch.status && !runnerItemFinished(current.status) ? patch.status : current.status;
+    liveItems[index] = { ...current, ...patch, status };
+    publishLiveItems();
+  };
+  const finishUnfinished = (status: 'canceled' | 'skipped', errorMessage: string) => {
+    let changed = false;
+    liveItems.forEach((item, index) => {
+      if (runnerItemFinished(item.status)) return;
+      liveItems[index] = { ...item, status, errorMessage };
+      changed = true;
+    });
+    if (changed) publishLiveItems();
+  };
+  publishLiveItems();
   const configuredGlobalScopes = options.environmentScopes;
   const globalsAreBase = configuredGlobalScopes?.globalsAreBase ?? true;
   let baseGlobalVariables = { ...(configuredGlobalScopes?.baseGlobals.values ?? environmentMap(environment)) };
@@ -272,107 +314,206 @@ export const runCollection = async (
 
   outer: for (let iteration = 0; iteration < iterations; iteration += 1) {
     const iterationData = options.dataRows[iteration % Math.max(1, options.dataRows.length)] ?? {};
-    for (const originalRequest of plannedRequests) {
-      if (options.shouldCancel?.()) { cancelled = true; break outer; }
-      for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
-        const configured = applyCollectionConfiguration(collection, originalRequest, environment);
-        let request = structuredClone(configured.request);
-        let response: HttpResponse | undefined;
-        let tests: RunnerItemResult['tests'] = [];
-        let error: string | undefined;
-        let requestVariables: Record<string, string> = {};
-        const started = Date.now();
-        try {
-          const scriptFolders = configured.folders.map((folder) => ({ id: folder.id, name: folder.name, environment: { ...(folderVariables.get(folder.id) ?? {}) }, disabled: [...(folderDisabled.get(folder.id) ?? [])] }));
-          const scriptScopes: ScriptRunOptions = {
-            baseGlobals: baseGlobalVariables,
-            baseGlobalDisabled,
-            globalDisabled,
-            globalsAreBase,
-            baseEnvironment,
-            baseEnvironmentDisabled,
-            collectionVariables,
-            collectionDisabled,
-            collectionVariablesAreBase,
-            folders: scriptFolders,
-          };
-          const preRequest = await executeScript(request.preRequestScript, request, globalVariables, undefined, options.scriptTimeoutMs ?? 10_000, {}, iterationData, scriptScopes);
-          request = preRequest.request;
-          baseGlobalVariables = preRequest.baseGlobals ?? (globalsAreBase ? preRequest.environment : baseGlobalVariables);
-          globalVariables = preRequest.environment;
-          baseGlobalDisabled = preRequest.baseGlobalDisabled ?? baseGlobalDisabled;
-          globalDisabled = preRequest.globalDisabled ?? globalDisabled;
-          baseEnvironment = preRequest.baseEnvironment ?? (collectionVariablesAreBase ? preRequest.collectionVariables : undefined) ?? baseEnvironment;
-          collectionVariables = collectionVariablesAreBase ? baseEnvironment : preRequest.collectionVariables ?? collectionVariables;
-          baseEnvironmentDisabled = preRequest.baseEnvironmentDisabled ?? baseEnvironmentDisabled;
-          collectionDisabled = preRequest.collectionDisabled ?? collectionDisabled;
-          preRequest.folders?.forEach((folder) => { folderVariables.set(folder.id, folder.environment); folderDisabled.set(folder.id, new Set(folder.disabled ?? [])); });
-          const localVariables = preRequest.localVariables ?? {};
-          requestVariables = {};
-          const applyScope = (scope: Record<string, string>, disabled: string[]) => { disabled.forEach((name) => delete requestVariables[name]); Object.assign(requestVariables, scope); };
-          applyScope(baseGlobalVariables, baseGlobalDisabled);
-          if (!globalsAreBase) applyScope(globalVariables, globalDisabled);
-          applyScope(baseEnvironment, baseEnvironmentDisabled);
-          if (!collectionVariablesAreBase) applyScope(collectionVariables, collectionDisabled);
-          scriptFolders.forEach((folder) => {
-            folderDisabled.get(folder.id)?.forEach((name) => delete requestVariables[name]);
-            Object.assign(requestVariables, folderVariables.get(folder.id) ?? {});
-          });
-          Object.assign(requestVariables, iterationData, localVariables);
-          response = await executeRequest(request, requestVariables);
-          const afterResponse = await executeScript(request.tests, request, globalVariables, response, options.scriptTimeoutMs ?? 10_000, localVariables, iterationData, {
-            baseGlobals: baseGlobalVariables,
-            baseGlobalDisabled,
-            globalDisabled,
-            globalsAreBase,
-            baseEnvironment,
-            baseEnvironmentDisabled,
-            collectionVariables,
-            collectionDisabled,
-            collectionVariablesAreBase,
-            folders: scriptFolders.map((folder) => ({ ...folder, environment: { ...(folderVariables.get(folder.id) ?? {}) }, disabled: [...(folderDisabled.get(folder.id) ?? [])] })),
-            testNamePattern,
-          });
-          baseGlobalVariables = afterResponse.baseGlobals ?? (globalsAreBase ? afterResponse.environment : baseGlobalVariables);
-          globalVariables = afterResponse.environment;
-          baseGlobalDisabled = afterResponse.baseGlobalDisabled ?? baseGlobalDisabled;
-          globalDisabled = afterResponse.globalDisabled ?? globalDisabled;
-          baseEnvironment = afterResponse.baseEnvironment ?? (collectionVariablesAreBase ? afterResponse.collectionVariables : undefined) ?? baseEnvironment;
-          collectionVariables = collectionVariablesAreBase ? baseEnvironment : afterResponse.collectionVariables ?? collectionVariables;
-          baseEnvironmentDisabled = afterResponse.baseEnvironmentDisabled ?? baseEnvironmentDisabled;
-          collectionDisabled = afterResponse.collectionDisabled ?? collectionDisabled;
-          afterResponse.folders?.forEach((folder) => { folderVariables.set(folder.id, folder.environment); folderDisabled.set(folder.id, new Set(folder.disabled ?? [])); });
-          tests = [...preRequest.tests, ...afterResponse.tests];
-        } catch (caught) {
-          error = caught instanceof Error ? caught.message : String(caught);
-        }
-        const passed = !error && response !== undefined && response.status > 0 && response.status < 400 && tests.every((test) => test.passed);
-        const retainResult = testNamePattern === undefined || tests.length > 0 || !passed;
-        const result: RunnerItemResult = {
-          id: runId(),
-          requestId: request.id,
-          requestName: request.name,
-          iteration: iteration + 1,
-          attempt,
-          status: response?.status ?? 0,
-          durationMs: response?.durationMs ?? Date.now() - started,
-          passed,
-          error,
-          tests,
-          request: retainResult ? captureRunnerRequest(request, requestVariables, response?.requestUrl, requestSnapshotBudget) : undefined,
-          response: retainResult && response ? captureRunnerResponse(response, responseSnapshotBudget) : undefined,
-        };
-        if (retainResult) {
-          results.push(result);
-          options.onResult?.(result);
-        }
-        if (passed || attempt > retries) {
-          if (!passed && options.bail) { bailed = true; break outer; }
-          break;
-        }
-        if (options.delayMs > 0) await wait(options.delayMs);
+    for (const [requestIndex, originalRequest] of plannedRequests.entries()) {
+      const key = buildRunnerItemKey(iteration + 1, requestIndex, originalRequest.id);
+      if (options.shouldCancel?.()) {
+        cancelled = true;
+        finishUnfinished('canceled', 'Canceled by user.');
+        break outer;
       }
-      if (options.delayMs > 0) await wait(options.delayMs);
+      if (options.shouldSkip?.(key)) {
+        updateLiveItem(key, { status: 'skipped', errorMessage: 'Skipped by user.' });
+        continue;
+      }
+
+      const controller = new AbortController();
+      const interruption = (): 'canceled' | 'skipped' | undefined => {
+        if (options.shouldSkip?.(key)) return 'skipped';
+        if (options.shouldCancel?.() || controller.signal.aborted) return 'canceled';
+        return undefined;
+      };
+      options.onActiveItem?.(key, () => controller.abort(), controller.signal);
+      let itemFinished = false;
+      try {
+        for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
+          const beforeAttempt = interruption();
+          if (beforeAttempt) {
+            cancelled ||= beforeAttempt === 'canceled';
+            updateLiveItem(key, { status: beforeAttempt, attempt, errorMessage: beforeAttempt === 'skipped' ? 'Skipped by user.' : 'Canceled by user.' });
+            itemFinished = true;
+            break;
+          }
+
+          updateLiveItem(key, { status: 'running', attempt, errorMessage: undefined });
+          const configured = applyCollectionConfiguration(collection, originalRequest, environment);
+          let request = structuredClone(configured.request);
+          let response: HttpResponse | undefined;
+          let tests: RunnerItemResult['tests'] = [];
+          let error: string | undefined;
+          let requestVariables: Record<string, string> = {};
+          const started = Date.now();
+          try {
+            const scriptFolders = configured.folders.map((folder) => ({ id: folder.id, name: folder.name, environment: { ...(folderVariables.get(folder.id) ?? {}) }, disabled: [...(folderDisabled.get(folder.id) ?? [])] }));
+            const scriptScopes: ScriptRunOptions = {
+              baseGlobals: baseGlobalVariables,
+              baseGlobalDisabled,
+              globalDisabled,
+              globalsAreBase,
+              baseEnvironment,
+              baseEnvironmentDisabled,
+              collectionVariables,
+              collectionDisabled,
+              collectionVariablesAreBase,
+              folders: scriptFolders,
+            };
+            const preRequest = await executeScript(request.preRequestScript, request, globalVariables, undefined, options.scriptTimeoutMs ?? 10_000, {}, iterationData, scriptScopes);
+            const afterPreRequest = interruption();
+            if (afterPreRequest) throw new Error(afterPreRequest);
+            request = preRequest.request;
+            baseGlobalVariables = preRequest.baseGlobals ?? (globalsAreBase ? preRequest.environment : baseGlobalVariables);
+            globalVariables = preRequest.environment;
+            baseGlobalDisabled = preRequest.baseGlobalDisabled ?? baseGlobalDisabled;
+            globalDisabled = preRequest.globalDisabled ?? globalDisabled;
+            baseEnvironment = preRequest.baseEnvironment ?? (collectionVariablesAreBase ? preRequest.collectionVariables : undefined) ?? baseEnvironment;
+            collectionVariables = collectionVariablesAreBase ? baseEnvironment : preRequest.collectionVariables ?? collectionVariables;
+            baseEnvironmentDisabled = preRequest.baseEnvironmentDisabled ?? baseEnvironmentDisabled;
+            collectionDisabled = preRequest.collectionDisabled ?? collectionDisabled;
+            preRequest.folders?.forEach((folder) => { folderVariables.set(folder.id, folder.environment); folderDisabled.set(folder.id, new Set(folder.disabled ?? [])); });
+            const localVariables = preRequest.localVariables ?? {};
+            requestVariables = {};
+            const applyScope = (scope: Record<string, string>, disabled: string[]) => { disabled.forEach((name) => delete requestVariables[name]); Object.assign(requestVariables, scope); };
+            applyScope(baseGlobalVariables, baseGlobalDisabled);
+            if (!globalsAreBase) applyScope(globalVariables, globalDisabled);
+            applyScope(baseEnvironment, baseEnvironmentDisabled);
+            if (!collectionVariablesAreBase) applyScope(collectionVariables, collectionDisabled);
+            scriptFolders.forEach((folder) => {
+              folderDisabled.get(folder.id)?.forEach((name) => delete requestVariables[name]);
+              Object.assign(requestVariables, folderVariables.get(folder.id) ?? {});
+            });
+            Object.assign(requestVariables, iterationData, localVariables);
+            response = await executeRequest(request, requestVariables, { key, attempt, signal: controller.signal });
+            const afterRequest = interruption();
+            if (afterRequest) throw new Error(afterRequest);
+            const afterResponse = await executeScript(request.tests, request, globalVariables, response, options.scriptTimeoutMs ?? 10_000, localVariables, iterationData, {
+              baseGlobals: baseGlobalVariables,
+              baseGlobalDisabled,
+              globalDisabled,
+              globalsAreBase,
+              baseEnvironment,
+              baseEnvironmentDisabled,
+              collectionVariables,
+              collectionDisabled,
+              collectionVariablesAreBase,
+              folders: scriptFolders.map((folder) => ({ ...folder, environment: { ...(folderVariables.get(folder.id) ?? {}) }, disabled: [...(folderDisabled.get(folder.id) ?? [])] })),
+              testNamePattern,
+            });
+            const afterTests = interruption();
+            if (afterTests) throw new Error(afterTests);
+            baseGlobalVariables = afterResponse.baseGlobals ?? (globalsAreBase ? afterResponse.environment : baseGlobalVariables);
+            globalVariables = afterResponse.environment;
+            baseGlobalDisabled = afterResponse.baseGlobalDisabled ?? baseGlobalDisabled;
+            globalDisabled = afterResponse.globalDisabled ?? globalDisabled;
+            baseEnvironment = afterResponse.baseEnvironment ?? (collectionVariablesAreBase ? afterResponse.collectionVariables : undefined) ?? baseEnvironment;
+            collectionVariables = collectionVariablesAreBase ? baseEnvironment : afterResponse.collectionVariables ?? collectionVariables;
+            baseEnvironmentDisabled = afterResponse.baseEnvironmentDisabled ?? baseEnvironmentDisabled;
+            collectionDisabled = afterResponse.collectionDisabled ?? collectionDisabled;
+            afterResponse.folders?.forEach((folder) => { folderVariables.set(folder.id, folder.environment); folderDisabled.set(folder.id, new Set(folder.disabled ?? [])); });
+            tests = [...preRequest.tests, ...afterResponse.tests];
+          } catch (caught) {
+            const control = interruption();
+            if (control) {
+              cancelled ||= control === 'canceled';
+              updateLiveItem(key, {
+                status: control,
+                attempt,
+                requestName: request.name,
+                requestUrl: redactSensitiveQuery(response?.requestUrl ?? request.url),
+                statusCode: response?.status,
+                statusMessage: response?.statusText,
+                responseTime: response?.durationMs ?? Date.now() - started,
+                responseSize: response?.sizeBytes,
+                errorMessage: control === 'skipped' ? 'Skipped by user.' : 'Canceled by user.',
+                tests,
+              });
+              itemFinished = true;
+              break;
+            }
+            error = caught instanceof Error ? caught.message : String(caught);
+          }
+          const passed = !error && response !== undefined && response.status > 0 && response.status < 400 && tests.every((test) => test.passed);
+          const retainResult = testNamePattern === undefined || tests.length > 0 || !passed;
+          const result: RunnerItemResult = {
+            id: runId(),
+            key,
+            requestId: request.id,
+            requestName: request.name,
+            iteration: iteration + 1,
+            attempt,
+            status: response?.status ?? 0,
+            durationMs: response?.durationMs ?? Date.now() - started,
+            passed,
+            error,
+            tests,
+            request: retainResult ? captureRunnerRequest(request, requestVariables, response?.requestUrl, requestSnapshotBudget) : undefined,
+            response: retainResult && response ? captureRunnerResponse(response, responseSnapshotBudget) : undefined,
+          };
+          if (retainResult) {
+            results.push(result);
+            options.onResult?.(result);
+          }
+          const exhausted = passed || attempt > retries;
+          const liveStatus = error || !response ? 'failed' : 'completed';
+          updateLiveItem(key, {
+            status: exhausted ? liveStatus : 'running',
+            attempt,
+            requestName: request.name,
+            requestUrl: redactSensitiveQuery(response?.requestUrl ?? request.url),
+            statusCode: response?.status,
+            statusMessage: response?.statusText,
+            responseTime: result.durationMs,
+            responseSize: response?.sizeBytes,
+            errorMessage: error,
+            tests,
+          });
+          if (exhausted) {
+            itemFinished = true;
+            if (!passed && options.bail) {
+              bailed = true;
+              finishUnfinished('skipped', 'Skipped after the runner bailed.');
+            }
+            break;
+          }
+          if (options.delayMs > 0) {
+            try {
+              await wait(options.delayMs, controller.signal);
+            } catch {
+              const control = interruption() ?? 'canceled';
+              cancelled ||= control === 'canceled';
+              updateLiveItem(key, { status: control, attempt: attempt + 1, errorMessage: control === 'skipped' ? 'Skipped by user.' : 'Canceled by user.' });
+              itemFinished = true;
+              break;
+            }
+          }
+        }
+        if (bailed) break outer;
+        if (cancelled) {
+          finishUnfinished('canceled', 'Canceled by user.');
+          break outer;
+        }
+        if (!itemFinished) updateLiveItem(key, { status: 'failed', errorMessage: 'The runner stopped before this item completed.' });
+        if (liveItems.find((item) => item.key === key)?.status === 'skipped') continue;
+        if (options.delayMs > 0) {
+          try {
+            await wait(options.delayMs, controller.signal);
+          } catch {
+            cancelled = true;
+            finishUnfinished('canceled', 'Canceled by user.');
+            break outer;
+          }
+        }
+      } finally {
+        options.onActiveItem?.(undefined);
+      }
     }
   }
 
@@ -392,6 +533,11 @@ export const runCollection = async (
     failed: results.filter((result) => !result.passed).length,
     cancelled,
     bailed,
+    planned: liveItems.length,
+    completed: liveItems.filter((item) => item.status === 'completed').length,
+    skipped: liveItems.filter((item) => item.status === 'skipped').length,
+    canceled: liveItems.filter((item) => item.status === 'canceled').length,
+    liveItems,
     results,
   };
 };
