@@ -9,7 +9,8 @@ type RunnerCliDialogProps = {
   workspace: Workspace;
   workspaceId: string;
   collectionId: string;
-  environmentId: string;
+  globalEnvironmentId: string;
+  collectionEnvironmentId?: string;
   requestIds: string[];
   iterations: number;
   retries: number;
@@ -20,7 +21,7 @@ type RunnerCliDialogProps = {
   onClose: () => void;
 };
 
-export function RunnerCliDialog({ workspace, workspaceId, collectionId, environmentId, requestIds, iterations, retries, delayMs, bail, hasData, dataFileName, onClose }: RunnerCliDialogProps) {
+export function RunnerCliDialog({ workspace, workspaceId, collectionId, globalEnvironmentId, collectionEnvironmentId, requestIds, iterations, retries, delayMs, bail, hasData, dataFileName, onClose }: RunnerCliDialogProps) {
   const projectBacked = workspace.project.mode !== 'local' && Boolean(workspace.project.path);
   const native = isTauri();
   const [workspacePath, setWorkspacePath] = useState(native ? '' : projectBacked ? workspace.project.path : '');
@@ -54,14 +55,15 @@ export function RunnerCliDialog({ workspace, workspaceId, collectionId, environm
   const command = useMemo(() => buildRunnerCliCommand({
     workspacePath: workspacePath || '<workspace-or-project-path>',
     collectionId,
-    environmentId,
+    globalEnvironmentId,
+    collectionEnvironmentId,
     requestIds,
     iterations,
     retries,
     delayMs,
     dataPath: hasData ? dataPath || '<iteration-data-path>' : undefined,
     bail,
-  }), [bail, collectionId, dataPath, delayMs, environmentId, hasData, iterations, requestIds, retries, workspacePath]);
+  }), [bail, collectionEnvironmentId, collectionId, dataPath, delayMs, globalEnvironmentId, hasData, iterations, requestIds, retries, workspacePath]);
   const ready = Boolean(workspacePath) && (!hasData || Boolean(dataPath)) && requestIds.length > 0 && !resolvingPath;
 
   const copy = async () => {

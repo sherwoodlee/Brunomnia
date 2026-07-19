@@ -59,7 +59,7 @@ try {
     ...structuredClone(baseRequest),
     id,
     name,
-    url: `http://127.0.0.1:${address.port}/${path}?row={{ row }}&region={{ region }}`,
+    url: `http://127.0.0.1:${address.port}/${path}?row={{ row }}&region={{ region }}&global={{ globalChoice }}&collection={{ collectionChoice }}`,
     preRequestScript: '',
     tests: '',
   });
@@ -74,6 +74,9 @@ try {
     ...source.collections[0],
     id: 'preview-collection',
     name: 'Preview collection',
+    environment: [{ id: 'preview-collection-base-row', name: 'collectionChoice', value: 'base', enabled: true }],
+    subEnvironments: [{ id: 'preview-collection-selected', name: 'Selected collection environment', variables: [{ id: 'preview-collection-selected-row', name: 'collectionChoice', value: 'selected', enabled: true }] }],
+    activeSubEnvironmentId: 'preview-collection-selected',
     requests: [
       request('request-first', 'First', 'first'),
       second,
@@ -87,7 +90,11 @@ try {
     ],
     resourceOrder: ['request-first', 'folder-selected', 'request-second', 'folder-nested', 'request-third', 'request-slow', 'folder-empty'],
   };
-  const environment = { id: 'preview-environment', name: 'Preview environment', variables: [] };
+  const environment = { id: 'preview-environment', name: 'Preview environment', variables: [{ id: 'preview-global-default-row', name: 'globalChoice', value: 'default', enabled: true }] };
+  const selectedGlobals = { id: 'preview-selected-globals', name: 'Selected globals', variables: [{ id: 'preview-global-selected-row', name: 'globalChoice', value: 'selected', enabled: true }] };
+  const globalFile = join(temporary, 'global-environment.yaml');
+  const brunomniaGlobalFile = join(temporary, 'brunomnia-global-environment.yaml');
+  const v5GlobalFile = join(temporary, 'v5-global-environment.yaml');
   await mkdir(join(temporary, '.brunomnia'), { recursive: true });
   await mkdir(join(temporary, 'collections'));
   await mkdir(join(temporary, 'environments'));
@@ -96,6 +103,19 @@ try {
   }));
   await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
   await writeFile(join(temporary, 'environments', 'preview.yaml'), stringify(environment));
+  await writeFile(join(temporary, 'environments', 'selected.yaml'), stringify(selectedGlobals));
+  await writeFile(globalFile, stringify({
+    _type: 'export', __export_format: 4,
+    resources: [
+      { _id: 'wrk_globals', _type: 'workspace', name: 'Standalone globals', scope: 'environment' },
+      { _id: 'env_globals', _type: 'environment', parentId: 'wrk_globals', name: 'Base Environment', data: { globalChoice: 'file' } },
+    ],
+  }));
+  await writeFile(brunomniaGlobalFile, stringify({ id: 'file-brunomnia', name: 'Brunomnia globals', variables: [{ id: 'file-brunomnia-row', name: 'globalChoice', value: 'brunomnia', enabled: true }] }));
+  await writeFile(v5GlobalFile, stringify({
+    type: 'environment.insomnia.rest/5.0', schema_version: '5.1', name: 'V5 globals', meta: { id: 'v5-globals-document' },
+    environment: { name: 'Base Environment', meta: { id: 'v5-globals' }, data: { globalChoice: 'v5' }, subEnvironments: [] },
+  }));
   await writeFile(join(temporary, '.insorc'), stringify({
     options: { workingDir: temporary, ci: true, verbose: true, printOptions: false },
     scripts: {
@@ -106,7 +126,8 @@ try {
 
   const output = await run([
     'run', 'collection', collection.id, '--config', join(temporary, '.insorc'),
-    '--env', environment.id,
+    '--globals', selectedGlobals.name,
+    '--env', 'preview-collection-selected',
     '--item', 'folder-selected',
     '--item', 'request-first',
     '--requestNamePattern', '^(Third|First)$',
@@ -125,8 +146,8 @@ try {
     'request-third', 'request-first', 'request-third', 'request-first',
   ]);
   assert.deepEqual(arrivals.map((arrival) => arrival.path), [
-    '/third?row=1&region=override', '/first?row=1&region=override',
-    '/third?row=2&region=override', '/first?row=2&region=override',
+    '/third?row=1&region=override&global=selected&collection=selected', '/first?row=1&region=override&global=selected&collection=selected',
+    '/third?row=2&region=override&global=selected&collection=selected', '/first?row=2&region=override&global=selected&collection=selected',
   ]);
   const scriptedResults = artifact.report.results.filter((result) => result.requestId === 'request-third');
   assert.equal(scriptedResults.length, 2);
@@ -138,6 +159,28 @@ try {
     assert.equal(typeof result.tests[1].durationMs, 'number');
   });
   for (let index = 1; index < arrivals.length; index += 1) assert.ok(arrivals[index].at - arrivals[index - 1].at >= 20, 'request delay was not applied');
+  const fileGlobals = JSON.parse(await run([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-first',
+    '--globals', globalFile, '--env', 'Selected collection environment',
+    '--env-var', 'row=file', '--env-var', 'region=file', '--reporter', 'json',
+  ]));
+  assert.deepEqual(fileGlobals.report.results.map((result) => [result.requestId, result.status]), [['request-first', 200]]);
+  assert.equal(arrivals.at(-1).path, '/first?row=file&region=file&global=file&collection=selected');
+  for (const [file, label, globalChoice] of [[brunomniaGlobalFile, 'brunomnia', 'brunomnia'], [v5GlobalFile, 'v5', 'v5']]) {
+    const fileOutput = JSON.parse(await run([
+      'run', 'collection', collection.id, '-w', temporary, '--item', 'request-first',
+      '-g', file, '-e', 'Selected collection environment',
+      '--env-var', `row=${label}`, '--env-var', `region=${label}`, '--reporter', 'json',
+    ]));
+    assert.deepEqual(fileOutput.report.results.map((result) => [result.requestId, result.status]), [['request-first', 200]]);
+    assert.equal(arrivals.at(-1).path, `/first?row=${label}&region=${label}&global=${globalChoice}&collection=selected`);
+  }
+  const rejectedGlobals = await runFailure(['run', 'collection', collection.id, '-w', temporary, '--globals', 'missing', '--item', 'request-first']);
+  assert.equal(rejectedGlobals.code, 1);
+  assert.match(rejectedGlobals.stderr, /No global environment found/);
+  const rejectedEnvironment = await runFailure(['run', 'collection', collection.id, '-w', temporary, '--env', 'missing', '--item', 'request-first']);
+  assert.equal(rejectedEnvironment.code, 1);
+  assert.match(rejectedEnvironment.stderr, /No collection environment found/);
   const rejected = await runFailure(['run', 'test', join(process.cwd(), 'examples', 'cli-workspace.json'), 'CLI Health', '--env-var', 'region=override']);
   assert.equal(rejected.code, 1);
   assert.match(rejected.stderr, /--env-var is only available for run collection/);
@@ -196,7 +239,7 @@ try {
   const missingScript = await runFailure(['script', '--config', join(temporary, '.insorc'), 'missing']);
   assert.equal(missingScript.code, 1);
   assert.match(missingScript.stderr, /Available scripts: preview, invalid/);
-  console.log('CLI runner preview smoke passed: config scripts, config, CI fallback, working directory, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  console.log('CLI runner preview smoke passed: global and collection environment selection, standalone global files, config scripts, config, CI fallback, working directory, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });

@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import vm from 'node:vm';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, parseAllDocuments } from 'yaml';
 import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openapi';
 import { createBlankRequest } from '../src/data/seed';
 import { buildHeaders, buildRequestUrl, environmentMap } from '../src/lib/request';
@@ -11,7 +11,7 @@ import { renderApiRequest } from '../src/lib/requestRender';
 import { parseRunnerData, runCollection, validateTestNamePattern } from '../src/lib/runner';
 import { createRunnerReportArtifact, parseRunnerReporter } from '../src/lib/runnerReport';
 import type { ApiDesign, ApiRequest, AuthConfig, CookieRecord, Environment, HttpResponse, RunnerItemResult, RunnerReport, ScriptRunResult, StoredResponse, Workspace } from '../src/types';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from '../src/lib/resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, requestAncestorNames, scriptEnvironmentScopes, variableScope } from '../src/lib/resources';
 import { hydrateScriptFileReferences, prepareScriptSubrequest, type ScriptFileBudget, type ScriptFileReference, type ScriptRunOptions } from '../src/lib/scriptSandbox';
 import { createScriptExpect } from '../src/lib/scriptExpect';
 import { createScriptModules } from '../src/lib/scriptModules';
@@ -25,7 +25,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
-import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, type RunnerInsoConfig } from '../src/lib/runnerCli';
+import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, type RunnerInsoConfig } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -78,6 +78,72 @@ const loadWorkspace = async (path: string): Promise<Workspace> => {
   const parsed = input.isDirectory() ? await loadSplitProject(path) : JSON.parse(await loadText(path)) as unknown;
   try { return migrateWorkspace(parsed); }
   catch { return fail('The input is not a Brunomnia workspace.'); }
+};
+const runnerEnvironmentRows = (value: unknown, prefix: string) => {
+  const record = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return Object.entries(record).slice(0, 1_000).map(([name, rowValue], index) => ({
+    id: `${prefix}-${index}`,
+    name: name.slice(0, 500),
+    value: (typeof rowValue === 'string' ? rowValue : JSON.stringify(rowValue) ?? String(rowValue)).slice(0, 1_000_000),
+    enabled: true,
+    valueType: rowValue !== null && typeof rowValue === 'object' ? 'json' as const : 'string' as const,
+  }));
+};
+const loadRunnerGlobalEnvironments = async (path: string): Promise<Environment[]> => {
+  const bytes = await readFile(path);
+  if (bytes.byteLength > 20_000_000) throw new Error(`Global environment file '${path}' exceeds 20 MB.`);
+  const documents = parseAllDocuments(bytes.toString('utf8')).filter((document) => document.errors.length === 0).map((document) => document.toJSON() as unknown);
+  const first = documents[0];
+  const firstRecord = first && typeof first === 'object' && !Array.isArray(first) ? first as Record<string, unknown> : {};
+  const directValues = Array.isArray(firstRecord.environments) ? firstRecord.environments : Array.isArray(firstRecord.variables) ? [firstRecord] : [];
+  const direct = directValues.flatMap((value, environmentIndex): Environment[] => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const environment = value as Record<string, unknown>;
+    const id = String(environment.id ?? `global-brunomnia-${environmentIndex}`).slice(0, 500);
+    const variables = Array.isArray(environment.variables) ? environment.variables.flatMap((rowValue, rowIndex) => {
+      if (!rowValue || typeof rowValue !== 'object' || Array.isArray(rowValue)) return [];
+      const row = rowValue as Record<string, unknown>;
+      return [{ id: String(row.id ?? `${id}-${rowIndex}`).slice(0, 500), name: String(row.name ?? '').slice(0, 500), value: String(row.value ?? '').slice(0, 1_000_000), enabled: row.enabled !== false, valueType: row.valueType === 'json' ? 'json' as const : 'string' as const }];
+    }).slice(0, 1_000) : [];
+    return [{ id, name: String(environment.name ?? `Environment ${environmentIndex + 1}`).slice(0, 500), variables, ...(typeof environment.parentId === 'string' ? { parentId: environment.parentId.slice(0, 500) } : {}) }];
+  }).slice(0, 100);
+  if (direct.length) return direct;
+  const resources = Array.isArray(firstRecord.resources) ? firstRecord.resources : [];
+  const v4 = resources.filter((value): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value) && (value as Record<string, unknown>)._type === 'environment')).slice(0, 100);
+  if (v4.length) {
+    const ids = new Set(v4.map((environment) => String(environment._id ?? '')));
+    return v4.map((environment, index) => {
+      const rawPairs = Array.isArray(environment.kvPairData) ? environment.kvPairData : [];
+      const pairs = rawPairs.flatMap((value, pairIndex) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+        const pair = value as Record<string, unknown>;
+        const pairValue = pair.value;
+        return [{ id: String(pair.id ?? `global-v4-${index}-${pairIndex}`).slice(0, 500), name: String(pair.name ?? '').slice(0, 500), value: (typeof pairValue === 'string' ? pairValue : JSON.stringify(pairValue) ?? String(pairValue ?? '')).slice(0, 1_000_000), enabled: pair.enabled !== false, valueType: pair.type === 'json' ? 'json' as const : 'string' as const }];
+      }).slice(0, 1_000);
+      const id = String(environment._id ?? `global-v4-${index}`).slice(0, 500);
+      const parentId = String(environment.parentId ?? '').slice(0, 500);
+      return { id, name: String(environment.name ?? `Environment ${index + 1}`).slice(0, 500), variables: environment.environmentType === 'kv' && pairs.length ? pairs : runnerEnvironmentRows(environment.data, `global-v4-${index}`), ...(ids.has(parentId) ? { parentId } : {}) };
+    });
+  }
+  const v5 = documents.flatMap((value, documentIndex): Environment[] => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const document = value as Record<string, unknown>;
+    if (!String(document.type ?? '').startsWith('environment.')) return [];
+    const root = document.environment && typeof document.environment === 'object' && !Array.isArray(document.environment) ? document.environment as Record<string, unknown> : {};
+    const metadata = root.meta && typeof root.meta === 'object' && !Array.isArray(root.meta) ? root.meta as Record<string, unknown> : {};
+    const baseId = String(metadata.id ?? `global-v5-${documentIndex}`).slice(0, 500);
+    const environments: Environment[] = [{ id: baseId, name: String(root.name ?? 'Base Environment').slice(0, 500), variables: runnerEnvironmentRows(root.data, `${baseId}-base`) }];
+    if (Array.isArray(root.subEnvironments)) root.subEnvironments.slice(0, 99).forEach((value, environmentIndex) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+      const environment = value as Record<string, unknown>;
+      const environmentMetadata = environment.meta && typeof environment.meta === 'object' && !Array.isArray(environment.meta) ? environment.meta as Record<string, unknown> : {};
+      const id = String(environmentMetadata.id ?? `${baseId}-${environmentIndex}`).slice(0, 500);
+      environments.push({ id, name: String(environment.name ?? `Environment ${environmentIndex + 1}`).slice(0, 500), variables: runnerEnvironmentRows(environment.data, `${id}-data`), parentId: baseId });
+    });
+    return environments;
+  }).slice(0, 100);
+  if (v5.length) return v5;
+  throw new Error(`No global environment found in ${path}.`);
 };
 
 type LoadedRunnerInsoConfig = RunnerInsoConfig & { filePath?: string };
@@ -608,8 +674,8 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
-  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [--requestTimeout MS] [same options except --item/--env-var/--delay-request]
+  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
+  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [same options except --item/--env-var/--delay-request]
   brunomnia script <name> [arguments...] [--config <path>]
 
 Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the collection, suite, or API-spec identifier positionally.
@@ -692,12 +758,15 @@ const main = async () => {
       : undefined) ?? fail(subject === 'test' ? 'Provide a test suite or API specification name or ID.' : 'Provide a collection name or ID.');
     const suites = subject === 'test' ? selectUnitTestSuites(workspace, identifier) : [];
     if (subject === 'test' && !suites.length) fail(`No test suites were found for '${identifier}'.`);
-    const collection = subject === 'test'
+    const sourceCollection = subject === 'test'
       ? workspace.collections.find((candidate) => candidate.id === suites[0].collectionId) ?? fail(`The selected test suite's collection was not found.`)
       : workspace.collections.find((candidate) => candidate.id === identifier || candidate.name === identifier) ?? fail(`Collection '${identifier}' was not found.`);
-    const environmentIdentifier = firstFlag('--env', '-e') ?? workspace.activeEnvironmentId;
-    const selectedEnvironment: Environment = workspace.environments.find((candidate) => candidate.id === environmentIdentifier || candidate.name === environmentIdentifier) ?? workspace.environments[0] ?? fail('The workspace has no environment.');
-    const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
+    const collection = selectRunnerCollectionEnvironment(sourceCollection, firstFlag('--env', '-e'));
+    const globalIdentifier = firstFlag('--globals', '-g');
+    const globalPath = globalIdentifier ? await stat(globalIdentifier).catch(() => undefined) : undefined;
+    const globalEnvironments = globalPath?.isFile() ? await loadRunnerGlobalEnvironments(globalIdentifier!) : workspace.environments;
+    const environment = selectRunnerGlobalEnvironment(globalEnvironments, globalPath?.isFile() ? globalEnvironments[0]?.id ?? '' : workspace.activeEnvironmentId, globalPath?.isFile() ? undefined : globalIdentifier);
+    const selectedEnvironment = environment;
     const dataPath = firstFlag('--iteration-data', '--data', '-d');
     const requestedRequests = flagValues('--item', '--request', '-i');
     const environmentOverrides = flagValues('--env-var');
@@ -800,7 +869,7 @@ const main = async () => {
       report = await runCollection(collection, environment, {
         iterations, retries, bail: hasFlag('--bail') || hasFlag('-b'), delayMs,
         scriptTimeoutMs,
-        environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
+        environmentScopes: scriptEnvironmentScopes(globalEnvironments, selectedEnvironment.id),
         dataRows,
         ...(requestedRequests.length || requestedRequestNamePattern !== undefined ? { requestIds } : {}),
         onResult: (result) => {
@@ -821,7 +890,7 @@ const main = async () => {
       const startedAt = new Date().toISOString();
       const results: RunnerItemResult[] = [];
       const pattern = testNamePattern === undefined ? undefined : new RegExp(testNamePattern);
-      const globalScopes = scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id);
+      const globalScopes = scriptEnvironmentScopes(globalEnvironments, selectedEnvironment.id);
       const collectionScopes = collectionEnvironmentScopes(collection);
       let bailed = false;
       outer: for (let iteration = 0; iteration < iterations; iteration += 1) {

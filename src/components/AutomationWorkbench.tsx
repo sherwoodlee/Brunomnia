@@ -617,7 +617,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}
       {showDataDialog ? <RunnerDataDialog data={data} fileBytesBase64={dataFileBytesBase64} fileEncoding={dataFileEncoding} fileName={dataFileName} onApply={(nextData, nextFileName, nextFileEncoding, nextFileBytesBase64, rowCount) => { setData(nextData); setDataFileName(nextFileName); setDataFileEncoding(nextFileEncoding); setDataFileBytesBase64(nextFileBytesBase64); setIterations(rowCount); setIterationsDraft(String(rowCount)); }} onClear={() => { setData(''); setDataFileName(''); setDataFileEncoding('utf-8'); setDataFileBytesBase64(''); }} onClose={() => setShowDataDialog(false)} /> : null}
-      {showCliDialog && collection ? <RunnerCliDialog bail={bail} collectionId={collection.id} dataFileName={dataFileName} delayMs={delayMs} environmentId={selectedEnvironment.id} hasData={Boolean(data.trim())} iterations={iterations} onClose={() => setShowCliDialog(false)} requestIds={selectedRequestIds} retries={retries} workspace={workspace} workspaceId={workspaceId} /> : null}
+      {showCliDialog && collection ? <RunnerCliDialog bail={bail} collectionEnvironmentId={collection.activeSubEnvironmentId} collectionId={collection.id} dataFileName={dataFileName} delayMs={delayMs} globalEnvironmentId={selectedEnvironment.id} hasData={Boolean(data.trim())} iterations={iterations} onClose={() => setShowCliDialog(false)} requestIds={selectedRequestIds} retries={retries} workspace={workspace} workspaceId={workspaceId} /> : null}
       {oauthAuthorization ? <OAuthAuthorizationDialog onCancel={cancelRun} status={oauthAuthorization} /> : null}
     </section>
   );

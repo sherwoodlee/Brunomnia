@@ -1,11 +1,12 @@
-import type { Collection } from '../types';
-import { orderedCollectionChildren } from './resources';
+import type { Collection, Environment } from '../types';
+import { orderedCollectionChildren, resolveEnvironment } from './resources';
 import { normalizeRequestTimeout } from './transport';
 
 export type RunnerCliCommandOptions = {
   workspacePath: string;
   collectionId: string;
-  environmentId: string;
+  globalEnvironmentId: string;
+  collectionEnvironmentId?: string;
   requestIds: string[];
   iterations: number;
   retries: number;
@@ -15,7 +16,7 @@ export type RunnerCliCommandOptions = {
 };
 
 const runnerCliValueOptions = new Set([
-  '--env', '-e', '--requestNamePattern', '--request-name-pattern', '--testNamePattern', '--test-name-pattern', '-t',
+  '--env', '-e', '--globals', '-g', '--requestNamePattern', '--request-name-pattern', '--testNamePattern', '--test-name-pattern', '-t',
   '--item', '--request', '-i', '--requestTimeout', '--request-timeout', '--env-var', '--iteration-count', '--iterations', '-n',
   '--retries', '--delay-request', '--delay', '--iteration-data', '--data', '-d', '--script-timeout', '--reporter', '-r',
   '--output', '-o', '--workingDir', '--working-dir', '-w', '--config',
@@ -38,6 +39,23 @@ export const runnerCliPositionalArguments = (values: string[]) => {
     positionals.push(value);
   }
   return positionals;
+};
+
+export const selectRunnerGlobalEnvironment = (environments: Environment[], activeId: string, identifier?: string) => {
+  const selected = identifier
+    ? environments.find((environment) => environment.id === identifier || environment.name === identifier)
+    : environments.find((environment) => environment.id === activeId) ?? environments[0];
+  if (!selected) throw new Error(identifier
+    ? `No global environment found with ID or name "${identifier}".`
+    : 'The workspace has no global environment.');
+  return resolveEnvironment(environments, selected.id) ?? selected;
+};
+
+export const selectRunnerCollectionEnvironment = (collection: Collection, identifier?: string) => {
+  if (!identifier) return collection;
+  const selected = (collection.subEnvironments ?? []).find((environment) => environment.id === identifier || environment.name === identifier);
+  if (!selected) throw new Error(`No collection environment found with ID or name "${identifier}".`);
+  return { ...collection, activeSubEnvironmentId: selected.id };
 };
 
 export type RunnerInsoConfig = {
@@ -225,9 +243,10 @@ export const buildRunnerCliCommand = (options: RunnerCliCommandOptions) => {
     options.collectionId,
     '--workingDir',
     options.workspacePath,
-    '--env',
-    options.environmentId,
+    '--globals',
+    options.globalEnvironmentId,
   ];
+  if (options.collectionEnvironmentId) command.push('--env', options.collectionEnvironmentId);
   options.requestIds.forEach((requestId) => command.push('--item', requestId));
   const iterations = boundedInteger(options.iterations, 1, 1_000);
   const retries = boundedInteger(options.retries, 0, 10);
