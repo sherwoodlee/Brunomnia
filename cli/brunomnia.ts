@@ -24,7 +24,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
-import { applyRunnerEnvironmentOverrides } from '../src/lib/runnerCli';
+import { applyRunnerEnvironmentOverrides, runnerRequestIdsMatchingPattern } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -557,7 +557,7 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-i, --request <name-or-id>]... [--env-var <key=value>]... [-n, --iterations N] [--retries N] [--delay-request MS] [-d, --data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
+  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --request <name-or-id>]... [--env-var <key=value>]... [-n, --iterations N] [--retries N] [--delay-request MS] [-d, --data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
   brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [same options except --request/--delay-request]
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
@@ -615,7 +615,7 @@ const main = async () => {
     if (subject === 'test' && requestedRequests.length) fail('--request is only available for run collection.');
     if (subject === 'test' && environmentOverrides.length) fail('--env-var is only available for run collection.');
     if (subject === 'test' && requestedDelay !== undefined) fail('--delay-request is only available for run collection.');
-    const requestIds = requestedRequests.map((requestIdentifier) => {
+    const selectedRequestIds = requestedRequests.map((requestIdentifier) => {
       const idMatch = collection.requests.find((request) => request.id === requestIdentifier);
       if (idMatch) return idMatch.id;
       const nameMatches = collection.requests.filter((request) => request.name === requestIdentifier);
@@ -623,8 +623,16 @@ const main = async () => {
       if (nameMatches.length > 1) return fail(`Request name '${requestIdentifier}' is ambiguous in collection '${collection.name}'. Use its ID.`);
       return nameMatches[0].id;
     });
-    const requestedTestNamePattern = flag('--testNamePattern') ?? flag('-t') ?? flag('--test-name-pattern');
-    if (subject === 'collection' && requestedTestNamePattern !== undefined) fail('--testNamePattern is only available for run test.');
+    const explicitRequestNamePattern = firstFlag('--requestNamePattern', '--request-name-pattern');
+    const explicitTestNamePattern = firstFlag('--testNamePattern', '--test-name-pattern');
+    if (subject === 'test' && explicitRequestNamePattern !== undefined) fail('--requestNamePattern is only available for run collection.');
+    if (subject === 'collection' && explicitTestNamePattern !== undefined) fail('--testNamePattern is only available for run test.');
+    const requestedRequestNamePattern = subject === 'collection' ? explicitRequestNamePattern ?? flag('-t') : undefined;
+    const requestedTestNamePattern = subject === 'test' ? explicitTestNamePattern ?? flag('-t') : undefined;
+    const requestIds = requestedRequestNamePattern === undefined
+      ? selectedRequestIds
+      : runnerRequestIdsMatchingPattern(collection.requests, requestedRequests.length ? selectedRequestIds : undefined, requestedRequestNamePattern);
+    if (requestedRequestNamePattern !== undefined && !requestIds.length) fail('No requests identified; nothing to run.');
     const testNamePattern = subject === 'test' ? validateTestNamePattern(requestedTestNamePattern) : undefined;
     let cliCookies = [...workspace.cookies];
     let cliResponses = [...workspace.responses];
@@ -710,7 +718,7 @@ const main = async () => {
         scriptTimeoutMs,
         environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
         dataRows,
-        ...(requestedRequests.length ? { requestIds } : {}),
+        ...(requestedRequests.length || requestedRequestNamePattern !== undefined ? { requestIds } : {}),
         onResult: (result) => {
           const responseIndex = cliResponses.findIndex((response) => response.requestId === result.requestId);
           if (responseIndex < 0) return;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, quotePosixShellArgument } from './runnerCli';
+import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, quotePosixShellArgument, runnerRequestIdsMatchingPattern, validateRunnerRequestNamePattern } from './runnerCli';
 
 describe('Runner CLI command preview', () => {
   it('preserves selected request order and every execution control', () => {
@@ -43,5 +43,19 @@ describe('Runner CLI command preview', () => {
     ]);
     expect(applyRunnerEnvironmentOverrides([], ['missing=', 'flag'])).toEqual([{ missing: '', flag: '' }]);
     expect(applyRunnerEnvironmentOverrides(rows, [])).toBe(rows);
+  });
+
+  it('filters the full or selected request plan with an Inso-style name pattern', () => {
+    const requests = [
+      { id: 'first', name: 'Get first' },
+      { id: 'second', name: 'Post second' },
+      { id: 'third', name: 'Get third' },
+    ];
+    expect(runnerRequestIdsMatchingPattern(requests, undefined, '^Get ')).toEqual(['first', 'third']);
+    expect(runnerRequestIdsMatchingPattern(requests, ['third', 'second', 'first'], '^Get ')).toEqual(['third', 'first']);
+    expect(runnerRequestIdsMatchingPattern(requests, ['missing', 'second'], '^Get ')).toEqual([]);
+    expect(validateRunnerRequestNamePattern('^Post (?:first|second)$')).toBe('^Post (?:first|second)$');
+    expect(() => validateRunnerRequestNamePattern('[')).toThrow(/Invalid request name pattern/);
+    expect(() => validateRunnerRequestNamePattern('x'.repeat(1_001))).toThrow(/1,000 characters/);
   });
 });

@@ -26,6 +26,29 @@ export const applyRunnerEnvironmentOverrides = (rows: Record<string, string>[], 
   return (rows.length ? rows : [{}]).map((row) => ({ ...row, ...overrides }));
 };
 
+export const validateRunnerRequestNamePattern = (value: string) => {
+  if (value.length > 1_000) throw new Error('Request name pattern exceeds 1,000 characters.');
+  try {
+    new RegExp(value);
+  } catch (error) {
+    throw new Error(`Invalid request name pattern: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return value;
+};
+
+export const runnerRequestIdsMatchingPattern = (
+  requests: { id: string; name: string }[],
+  selectedIds: string[] | undefined,
+  value: string,
+) => {
+  const pattern = new RegExp(validateRunnerRequestNamePattern(value));
+  const requestsById = new Map(requests.map((request) => [request.id, request]));
+  const candidates = selectedIds === undefined
+    ? requests
+    : selectedIds.flatMap((id) => requestsById.get(id) ?? []);
+  return candidates.filter((request) => pattern.test(request.name)).map((request) => request.id);
+};
+
 const boundedInteger = (value: number, minimum: number, maximum: number) => {
   if (!Number.isFinite(value)) return minimum;
   return Math.max(minimum, Math.min(maximum, Math.floor(value)));

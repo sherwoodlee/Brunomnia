@@ -80,7 +80,9 @@ try {
     'run', 'collection', temporary, collection.id,
     '--env', environment.id,
     '--request', 'request-third',
+    '--request', 'request-second',
     '--request', 'request-first',
+    '--requestNamePattern', '^(Third|First)$',
     '--iterations', '2',
     '--delay-request', '35',
     '--data', join(temporary, 'iterations.csv'),
@@ -111,7 +113,13 @@ try {
   const rejected = await runFailure(['run', 'test', join(process.cwd(), 'examples', 'cli-workspace.json'), 'CLI Health', '--env-var', 'region=override']);
   assert.equal(rejected.code, 1);
   assert.match(rejected.stderr, /--env-var is only available for run collection/);
-  console.log('CLI runner preview smoke passed: split project, selected order, data, environment overrides, delay, and assertion evidence.');
+  const rejectedPattern = await runFailure(['run', 'test', join(process.cwd(), 'examples', 'cli-workspace.json'), 'CLI Health', '--requestNamePattern', '^First$']);
+  assert.equal(rejectedPattern.code, 1);
+  assert.match(rejectedPattern.stderr, /--requestNamePattern is only available for run collection/);
+  const rejectedEmptyPlan = await runFailure(['run', 'collection', temporary, collection.id, '--requestNamePattern', '^Missing$']);
+  assert.equal(rejectedEmptyPlan.code, 1);
+  assert.match(rejectedEmptyPlan.stderr, /No requests identified; nothing to run/);
+  console.log('CLI runner preview smoke passed: split project, request-name filtering, selected order, data, environment overrides, delay, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });
