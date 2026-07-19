@@ -2337,7 +2337,21 @@ Compatibility bounds remain explicit: this document represents Brunomnia's proje
 
 Compatibility bounds remain explicit: this milestone changes document navigation, not the API-design engine's existing scope. Full Spectral functions, remote/package ruleset extension, multi-file references, and richer tooling remain. Mock-server/route and test-suite resources still do not participate in the shared strip, and collection workspaces remain represented by their request/folder documents rather than a separate collection tab. Collections and API specification design stay `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 160 — remaining parity closure and release hardening
+## Milestone 160 — mock server and route document tabs (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned mock audit | Complete | Pinned `inferTabType` maps mock-server workspaces to `mockServer` and route resources to `mockRoute`; route tabs carry method tags and both flow through ordinary resource navigation |
+| Typed mock resources | Complete baseline | Every local mock server and route ID is a valid typed document reference; current names/methods drive fixed tab labels, and deleted routes reconcile from open/history/closed state |
+| Shared lifecycle | Complete | Server and route tabs coexist with all prior document types and share temporary replacement/promotion, active history, cycling, drag order, middle/final/all/other close, reopen, and dashboard behavior |
+| Targeted workbench | Complete baseline | The native local-mock workbench derives its server and optional route from the active tab; server documents show route navigation without silently selecting a route, while route documents expose the full editable response pane |
+| Resource navigation | Complete | Server selector, route list, create-from-response, new/AI route creation, route deletion, activity rail, command palette, dashboard cards, and response-pane Go to mock actions open or activate the correct resource tab |
+| Mutation continuity | Complete | Route field/header/body/overwrite edits promote temporary route documents; creating a route follows one-temporary-tab replacement semantics, deletion activates its server, and live native route synchronization remains scoped per server |
+| Executable evidence | Complete baseline | Focused typed-tab/response-to-route regressions, strict React/TypeScript compilation, full frontend/native suites, CLI/audit gates, and a rebuilt macOS app verify the milestone without rendered Browser QA |
+
+Compatibility bounds remain explicit: this milestone changes mock navigation, not the existing local mock engine's named Liquid/Faker/AI/hosting bounds. Pinned hosted/self-host deployment workflows and exact runtime identity remain outside Brunomnia's local-only baseline. Test-suite resources still do not participate in the shared strip, collection workspaces remain represented by request/folder documents, and raw-JSON environment editing remains. Collections and Mock servers stay `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 161 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

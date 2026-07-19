@@ -150,4 +150,17 @@ describe('request document tabs', () => {
     ]);
     expect(reconcileRequestTabState(parsed, [{ id: 'design_two', type: 'document' }]).tabs).toEqual([{ requestId: 'design_two', type: 'document', temporary: true }]);
   });
+
+  it('persists mock servers and routes and reconciles deleted routes', () => {
+    let state = openDocumentTab(emptyRequestTabState(), 'mock_server', 'mockServer', true);
+    state = openDocumentTab(state, 'mock_route', 'mockRoute');
+    expect(parseRequestTabState(JSON.stringify(state)).tabs).toEqual([
+      { requestId: 'mock_server', type: 'mockServer', temporary: false },
+      { requestId: 'mock_route', type: 'mockRoute', temporary: true },
+    ]);
+    expect(reconcileRequestTabState(state, [{ id: 'mock_server', type: 'mockServer' }])).toEqual({
+      tabs: [{ requestId: 'mock_server', type: 'mockServer', temporary: false }],
+      activeRequestId: 'mock_server', history: [], closed: [], dashboard: false,
+    });
+  });
 });

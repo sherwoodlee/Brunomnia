@@ -114,6 +114,10 @@ const workspaceDocumentReferences = (workspace: Workspace, workspaceId: string):
     ...(collection.folders ?? []).map((folder): DocumentTabReference => ({ id: runnerDocumentId(workspaceId, folder.id), type: 'runner' })),
   ]),
   ...workspace.apiDesigns.map((design): DocumentTabReference => ({ id: design.id, type: 'document' })),
+  ...workspace.mockServers.flatMap((server): DocumentTabReference[] => [
+    { id: server.id, type: 'mockServer' },
+    ...server.routes.map((route): DocumentTabReference => ({ id: route.id, type: 'mockRoute' })),
+  ]),
   { id: runnerDocumentId(workspaceId), type: 'runner' },
   { id: environmentDocumentId(workspaceId), type: 'environment' },
 ];
@@ -597,12 +601,12 @@ type ProjectDashboardProps = {
   onAddRequest: () => void;
   onOpenDesign: (designId: string) => void;
   onOpenEnvironment: () => void;
+  onOpenMockServer: (serverId: string) => void;
   onOpenRequest: (requestId: string) => void;
-  onOpenMocks: () => void;
   onReopenRequest: () => void;
 };
 
-function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onOpenDesign, onOpenEnvironment, onOpenMocks, onOpenRequest, onReopenRequest }: ProjectDashboardProps) {
+function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onOpenDesign, onOpenEnvironment, onOpenMockServer, onOpenRequest, onReopenRequest }: ProjectDashboardProps) {
   const requestCount = workspace.collections.reduce((total, collection) => total + collection.requests.length, 0);
   return <section aria-labelledby="project-dashboard-title" className="project-dashboard">
     <header>
@@ -631,7 +635,7 @@ function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onOpenDes
           </button>;
         })}
         {workspace.apiDesigns.map((design) => <button key={design.id} onClick={() => onOpenDesign(design.id)} type="button"><Icon name="grid" size={19} /><span><strong>{design.name}</strong><small>API design</small></span><Icon name="chevron-right" size={14} /></button>)}
-        {workspace.mockServers.map((server) => <button key={server.id} onClick={onOpenMocks} type="button"><Icon name="spark" size={19} /><span><strong>{server.name}</strong><small>{server.routes.length} route{server.routes.length === 1 ? '' : 's'} · 127.0.0.1:{server.port}</small></span><Icon name="chevron-right" size={14} /></button>)}
+        {workspace.mockServers.map((server) => <button key={server.id} onClick={() => onOpenMockServer(server.id)} type="button"><Icon name="spark" size={19} /><span><strong>{server.name}</strong><small>{server.routes.length} route{server.routes.length === 1 ? '' : 's'} · 127.0.0.1:{server.port}</small></span><Icon name="chevron-right" size={14} /></button>)}
       </div>
     </section>
   </section>;
@@ -643,6 +647,7 @@ type DocumentTabView = {
   name: string;
   temporary: boolean;
   request?: ApiRequest;
+  method?: string;
 };
 
 type DocumentTabStripProps = {
@@ -719,7 +724,7 @@ function DocumentTabStrip({ documents, activeDocumentId, canReopenDocument, pinn
       const pinned = document.type === 'request' && pinnedIds.has(document.id);
       const editableName = document.type === 'request' || document.type === 'folder';
       return <div aria-haspopup="menu" aria-selected={activeDocument} className={`document-tab${activeDocument ? ' active' : ''}${document.temporary ? ' temporary' : ''}${draggedDocumentId === document.id ? ' is-dragging' : ''}${dropClass}`} draggable key={document.id} onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); onCloseDocument(document.id); } }} onClick={() => onSelectDocument(document.id, document.type)} onContextMenu={(event) => { event.preventDefault(); openDocumentMenu(document.id, event.clientX, event.clientY); }} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('button,input')) onPromoteDocument(document.id); }} onDragEnd={clearDocumentDrag} onDragOver={(event) => dropOnDocument(event, document.id, false)} onDragStart={(event) => beginDocumentDrag(event, document.id)} onDrop={(event) => dropOnDocument(event, document.id, true)} onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') onSelectDocument(document.id, document.type); else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); openDocumentMenu(document.id, bounds.left, bounds.bottom); } }} role="tab" tabIndex={0} title={document.temporary ? 'Temporary tab · Double-click to keep open' : document.name}>
-        {document.request ? <span className={`method method-${methodClass(document.request.method)} protocol-${document.request.protocol}`}>{protocolLabel(document.request)}</span> : <Icon name={document.type === 'runner' ? 'play' : document.type === 'environment' ? 'braces' : document.type === 'document' ? 'grid' : 'folder'} size={14} />}
+        {document.request ? <span className={`method method-${methodClass(document.request.method)} protocol-${document.request.protocol}`}>{protocolLabel(document.request)}</span> : document.method ? <span className={`method method-${methodClass(document.method)}`}>{document.method}</span> : <Icon name={document.type === 'runner' ? 'play' : document.type === 'environment' ? 'braces' : document.type === 'document' ? 'grid' : document.type === 'mockServer' ? 'spark' : 'folder'} size={14} />}
         {activeDocument && editableName ? <input aria-label={`${document.type === 'folder' ? 'Folder' : 'Request'} name`} onChange={(event) => onRenameDocument(document.id, document.type, event.target.value)} onClick={(event) => event.stopPropagation()} spellCheck={false} value={document.name} /> : <span className="document-tab-name">{document.name}</span>}
         {document.temporary ? <button aria-label={`Keep ${document.name} tab open`} onClick={(event) => { event.stopPropagation(); onPromoteDocument(document.id); }} title="Keep tab open" type="button"><Icon name="check" size={11} /></button> : null}
         {activeDocument && document.type === 'request' ? <button aria-label={pinned ? 'Unpin request' : 'Pin request'} className={pinned ? 'active' : ''} onClick={(event) => { event.stopPropagation(); onToggleRequestPin(document.id); }} title={pinned ? 'Unpin request' : 'Pin request'} type="button"><Icon name="pin" size={13} /></button> : null}
@@ -1311,7 +1316,6 @@ export default function App() {
   const [scriptTests, setScriptTests] = useState<Array<{ name: string; passed: boolean; error?: string }>>([]);
   const [scriptLogs, setScriptLogs] = useState<string[]>([]);
   const [runningMocks, setRunningMocks] = useState<Record<string, RunningMock>>({});
-  const [focusedMock, setFocusedMock] = useState<{ serverId: string; routeId: string }>();
   const [projectSyncError, setProjectSyncError] = useState('');
   const [templatePrompt, setTemplatePrompt] = useState<PendingTemplatePrompt>();
   const [vaultSession, setVaultSession] = useState<VaultSession>({ unlocked: false, passphrase: '', entries: [] });
@@ -1411,7 +1415,7 @@ export default function App() {
       return;
     }
     try { window.localStorage.setItem(requestTabsStorageKey(activeWorkspaceId), JSON.stringify(state)); } catch {}
-  }, [activeWorkspaceId, hydrated, requestDocumentState, workspace.activeRequestId, workspace.apiDesigns, workspace.collections]);
+  }, [activeWorkspaceId, hydrated, requestDocumentState, workspace.activeRequestId, workspace.apiDesigns, workspace.collections, workspace.mockServers]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspaceId || (workspaceRecovery?.kind === 'workspace-backup' && workspaceRecovery.workspaceId === activeWorkspaceId)) return;
@@ -1456,6 +1460,14 @@ export default function App() {
     [runnerDocumentId(activeWorkspaceId), undefined] as const,
     ...workspace.collections.flatMap((collection) => (collection.folders ?? []).map((folder) => [runnerDocumentId(activeWorkspaceId, folder.id), { collectionId: collection.id, folderId: folder.id }] as const)),
   ]), [activeWorkspaceId, workspace.collections]);
+  const mockTargetsById = useMemo(() => {
+    const targets = new Map<string, { server: MockServer; route?: MockServer['routes'][number] }>();
+    workspace.mockServers.forEach((server) => {
+      targets.set(server.id, { server });
+      server.routes.forEach((route) => targets.set(route.id, { server, route }));
+    });
+    return targets;
+  }, [workspace.mockServers]);
   const validDocumentReferences = useMemo(() => workspaceDocumentReferences(workspace, activeWorkspaceId), [activeWorkspaceId, workspace]);
   const activeRequestDocumentState = requestDocumentState.workspaceId === activeWorkspaceId
     ? requestDocumentState.state
@@ -1477,6 +1489,11 @@ export default function App() {
       const design = workspace.apiDesigns.find((candidate) => candidate.id === tab.requestId);
       return design ? [{ id: design.id, type: 'document', name: design.name, temporary: tab.temporary }] : [];
     }
+    if (tab.type === 'mockServer' || tab.type === 'mockRoute') {
+      const target = mockTargetsById.get(tab.requestId);
+      if (!target || (tab.type === 'mockServer' && target.route) || (tab.type === 'mockRoute' && !target.route)) return [];
+      return [{ id: tab.requestId, type: tab.type, name: target.route?.name ?? target.server.name, temporary: tab.temporary, ...(target.route ? { method: target.route.method } : {}) }];
+    }
     const folder = foldersById.get(tab.requestId)?.folder;
     return folder ? [{ id: folder.id, type: 'folder', name: folder.name, temporary: tab.temporary }] : [];
   });
@@ -1486,6 +1503,7 @@ export default function App() {
   const isRunnerDocument = activeDocumentTab?.type === 'runner' && runnerTargetsById.has(activeDocumentTab.requestId);
   const isEnvironmentDocument = activeDocumentTab?.type === 'environment' && activeDocumentTab.requestId === environmentDocumentId(activeWorkspaceId);
   const activeDesignDocument = activeDocumentTab?.type === 'document' ? workspace.apiDesigns.find((design) => design.id === activeDocumentTab.requestId) : undefined;
+  const activeMockDocument = activeDocumentTab?.type === 'mockServer' || activeDocumentTab?.type === 'mockRoute' ? mockTargetsById.get(activeDocumentTab.requestId) : undefined;
   const isRequestDocument = activeDocumentTab?.type === 'request';
   const isRequestDashboard = activeRequestDocumentState.dashboard && openDocumentTabs.length === 0;
   useEffect(() => {
@@ -1820,6 +1838,16 @@ export default function App() {
     const id = uid('design');
     setWorkspace((current) => ({ ...current, apiDesigns: [...current.apiDesigns, { id, name: 'Untitled API', contents: 'openapi: 3.1.0\ninfo:\n  title: Untitled API\n  version: 1.0.0\npaths: {}\n', ruleset: '' }] }));
     openWorkspaceDocument(id, 'document');
+  };
+
+  const openMockDocument = (serverId = workspace.mockServers[0]?.id, routeId?: string) => {
+    if (serverId) {
+      openWorkspaceDocument(routeId ?? serverId, routeId ? 'mockRoute' : 'mockServer');
+      return;
+    }
+    const id = uid('mock');
+    setWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, { id, name: 'Local mock', host: '127.0.0.1', port: 4010, routes: [] }] }));
+    openWorkspaceDocument(id, 'mockServer');
   };
 
   const promoteRequestDocument = (requestId: string) => {
@@ -2526,7 +2554,6 @@ export default function App() {
       ...(activeOAuthFlowId ? [import('./lib/oauth2').then(({ cancelOAuth2Authorization }) => cancelOAuth2Authorization(activeOAuthFlowId))] : []),
     ]);
     setRunningMocks({});
-    setFocusedMock(undefined);
     setStreamStatus('disconnected');
     setStreamMessages([]);
     setStreamSessionView(undefined);
@@ -2836,7 +2863,7 @@ export default function App() {
     return <Suspense fallback={<div className="dialog-loading">Loading automation…</div>}><AutomationWorkbench
     activeEnvironment={activeEnvironment}
     designTargetId={section === 'design' ? activeDesignDocument?.id : undefined}
-    focusedMock={focusedMock}
+    mockTarget={section === 'mocks' && activeMockDocument ? { serverId: activeMockDocument.server.id, routeId: activeMockDocument.route?.id } : undefined}
     onChangeWorkspace={(updater) => setWorkspace(updater)}
     onDesignChange={section === 'design' && activeDesignDocument ? () => promoteRequestDocument(activeDesignDocument.id) : undefined}
     onOpenCollection={(collection) => {
@@ -2847,6 +2874,8 @@ export default function App() {
         applyRequestDocumentState(openRequestTab(state, collection.requests[0].id));
       }
     }}
+    onMockChange={section === 'mocks' && activeMockDocument ? () => promoteRequestDocument(activeRequestDocumentState.activeRequestId) : undefined}
+    onOpenMock={openMockDocument}
     onOpenDesign={openDesignDocument}
     onRunnerStart={section === 'runner' ? () => promoteRequestDocument(activeRequestDocumentState.activeRequestId) : undefined}
     onStartMock={(serverId, runningMock) => setRunningMocks((current) => ({ ...current, [serverId]: runningMock }))}
@@ -2959,7 +2988,7 @@ export default function App() {
             <button aria-label="History" className={workbenchSection === 'requests' && sidebarMode === 'history' ? 'active' : ''} onClick={() => { setWorkbenchSection('requests'); setSidebarMode('history'); }} type="button"><Icon name="history" /></button>
             <button aria-label="Scripts" onClick={() => { setWorkbenchSection('requests'); setRequestTab('scripts'); }} type="button"><Icon name="code" /></button>
             <button aria-label="Collection Runner" className={isRunnerDocument ? 'active' : ''} onClick={() => openRunnerDocument()} type="button"><Icon name="database" /></button>
-            <button aria-label="Mock servers" className={workbenchSection === 'mocks' ? 'active' : ''} onClick={() => setWorkbenchSection('mocks')} type="button"><Icon name="spark" /></button>
+            <button aria-label="Mock servers" className={activeMockDocument ? 'active' : ''} onClick={() => openMockDocument()} type="button"><Icon name="spark" /></button>
             <button aria-label="Git Sync" className={workbenchSection === 'git' ? 'active' : ''} onClick={() => setWorkbenchSection('git')} type="button"><Icon name="code" /></button>
             <button aria-label="Plugins" className={workbenchSection === 'plugins' ? 'active' : ''} onClick={() => setWorkbenchSection('plugins')} type="button"><Icon name="braces" /></button>
             <button aria-label="Security & Sync" className={workbenchSection === 'security' ? 'active' : ''} onClick={() => setWorkbenchSection('security')} type="button"><Icon name="lock" /></button>
@@ -2994,7 +3023,7 @@ export default function App() {
           onAddRequest={addRequest}
           onOpenDesign={openDesignDocument}
           onOpenEnvironment={openEnvironmentDocument}
-          onOpenMocks={() => setWorkbenchSection('mocks')}
+          onOpenMockServer={(serverId) => openMockDocument(serverId)}
           onOpenRequest={(requestId) => openRequestDocument(requestId)}
           onReopenRequest={reopenRequestDocument}
           workspace={workspace}
@@ -3008,7 +3037,7 @@ export default function App() {
           onDuplicate={(environmentId) => { promoteRequestDocument(environmentDocumentId(activeWorkspaceId)); duplicateEnvironment(environmentId); }}
           onMove={(move) => { promoteRequestDocument(environmentDocumentId(activeWorkspaceId)); moveEnvironment(move); }}
           onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))}
-        /> : activeDesignDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('design')}</section> : activeFolderDocument ? <FolderDocumentPanel
+        /> : activeDesignDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('design')}</section> : activeMockDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('mocks')}</section> : activeFolderDocument ? <FolderDocumentPanel
           collection={activeFolderDocument.collection}
           cookies={workspace.cookies}
           documentTabStrip={renderDocumentTabStrip()}
@@ -3076,7 +3105,7 @@ export default function App() {
             onDeleteStreamSession={() => void deleteSelectedStreamSession()}
             onDownloadResponse={downloadResponseBody}
             onExportResponseDiagnostic={exportResponseDiagnostic}
-            onOpenMock={(serverId, routeId) => { setFocusedMock({ serverId, routeId }); setWorkbenchSection('mocks'); }}
+            onOpenMock={(serverId, routeId) => openMockDocument(serverId, routeId)}
             onApplyResponseFilter={applyResponseFilter}
             onChangeResponsePreviewMode={changeResponsePreviewMode}
             onSelectResponse={(id) => { const saved = activeResponseHistory.find((candidate) => candidate.id === id); if (saved) selectSavedResponse(saved); }}
@@ -3114,7 +3143,7 @@ export default function App() {
         <span>{vaultSession.unlocked ? `Vault: ${vaultSession.entries.length} unlocked` : 'Vault: locked'}</span>
         <span>Local-only</span>
         <span>UTF-8</span>
-        <span>{workbenchSection === 'requests' ? isRequestDashboard ? 'Project' : activeDesignDocument ? 'API Design' : isEnvironmentDocument ? 'Environment' : activeFolderDocument ? 'Folder' : isRunnerDocument ? 'Runner' : protocolLabel(active.request) : titleCase(workbenchSection)}</span>
+        <span>{workbenchSection === 'requests' ? isRequestDashboard ? 'Project' : activeDesignDocument ? 'API Design' : activeMockDocument?.route ? 'Mock Route' : activeMockDocument ? 'Mock Server' : isEnvironmentDocument ? 'Environment' : activeFolderDocument ? 'Folder' : isRunnerDocument ? 'Runner' : protocolLabel(active.request) : titleCase(workbenchSection)}</span>
       </footer>
 
       {configuredCollection ? <CollectionDialog collection={configuredCollection} onChange={updateCollection} onClose={() => setCollectionEditor(undefined)} /> : null}
@@ -3135,7 +3164,7 @@ export default function App() {
       {showImport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading import tools…</div></div>}><ImportDialog onApply={applyImport} onClose={() => setShowImport(false)} onFetchUrl={fetchImportUrl} /></Suspense> : null}
       {showExport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading export tools…</div></div>}><ExportDialog onClose={() => setShowExport(false)} workspace={workspace} /></Suspense> : null}
       {showCodeGeneration ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading code generator…</div></div>}><CodeGenerationDialog generate={generateCode} onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /></Suspense> : null}
-      {showPalette ? <Suspense fallback={<div className="dialog-loading">Loading commands…</div>}><CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => openDesignDocument()} onEnvironment={openEnvironmentDocument} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => setWorkbenchSection('mocks')} onPreferences={() => setWorkbenchSection('preferences')} onRunner={() => openRunnerDocument()} /></Suspense> : null}
+      {showPalette ? <Suspense fallback={<div className="dialog-loading">Loading commands…</div>}><CommandPalette onAddCollection={addCollection} onAddRequest={addRequest} onClose={() => setShowPalette(false)} onDesign={() => openDesignDocument()} onEnvironment={openEnvironmentDocument} onExport={() => setShowExport(true)} onImport={() => setShowImport(true)} onMocks={() => openMockDocument()} onPreferences={() => setWorkbenchSection('preferences')} onRunner={() => openRunnerDocument()} /></Suspense> : null}
     </main>
   );
 }

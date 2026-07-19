@@ -42,7 +42,9 @@ type AutomationWorkbenchProps = {
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
   onOpenCollection: (collection: Collection) => void;
   runningMocks: Record<string, RunningMock>;
-  focusedMock?: { serverId: string; routeId: string };
+  mockTarget?: { serverId: string; routeId?: string };
+  onMockChange?: () => void;
+  onOpenMock?: (serverId: string, routeId?: string) => void;
   onStartMock: (serverId: string, runningMock: RunningMock) => void;
   onStopMock: (serverId: string) => void;
   templatePrompt: SendRequestContext['prompt'];
@@ -480,7 +482,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   );
 }
 
-function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, runningMocks, focusedMock, onStartMock, onStopMock, templatePrompt }: AutomationWorkbenchProps) {
+function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, runningMocks, mockTarget, onMockChange, onOpenMock, onStartMock, onStopMock, templatePrompt }: AutomationWorkbenchProps) {
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
     certificates: workspace.certificates,
     prompt: templatePrompt,
@@ -490,8 +492,6 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     requestAncestors: requestAncestorNames(workspace.collections, request),
     ...context,
   });
-  const [activeId, setActiveId] = useState(workspace.mockServers[0]?.id ?? '');
-  const [activeRouteId, setActiveRouteId] = useState(workspace.mockServers[0]?.routes[0]?.id ?? '');
   const [error, setError] = useState('');
   const [showAi, setShowAi] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -503,8 +503,8 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
   const [generating, setGenerating] = useState(false);
   const mockSyncTimeouts = useRef<Record<string, number>>({});
   const latestMockServers = useRef<Record<string, MockServer>>({});
-  const server = workspace.mockServers.find((candidate) => candidate.id === activeId) ?? workspace.mockServers[0];
-  const route = server?.routes.find((candidate) => candidate.id === activeRouteId) ?? server?.routes[0];
+  const server = mockTarget ? workspace.mockServers.find((candidate) => candidate.id === mockTarget.serverId) : workspace.mockServers[0];
+  const route = mockTarget?.routeId ? server?.routes.find((candidate) => candidate.id === mockTarget.routeId) : mockTarget ? undefined : server?.routes[0];
   const activeRun = server ? runningMocks[server.id] : undefined;
   const activeRequest = useMemo(() => findActiveRequest(workspace), [workspace]);
   const latestResponse = useMemo(() => findLatestResponseForActiveRequest(workspace), [workspace]);
@@ -514,16 +514,9 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     try { return buildMockAiContext(workspace, aiContextSource); } catch { return undefined; }
   }, [aiContextSource, aiSpecContext, workspace]);
 
-  useEffect(() => {
-    if (!focusedMock) return;
-    const focusedServer = workspace.mockServers.find((candidate) => candidate.id === focusedMock.serverId);
-    if (!focusedServer || !focusedServer.routes.some((candidate) => candidate.id === focusedMock.routeId)) return;
-    setActiveId(focusedMock.serverId);
-    setActiveRouteId(focusedMock.routeId);
-  }, [focusedMock, workspace.mockServers]);
-
-  const updateServer = (patch: Partial<MockServer>) => {
+  const updateServer = (patch: Partial<MockServer>, promote = true) => {
     if (!server) return;
+    if (promote) onMockChange?.();
     onChangeWorkspace((current) => ({ ...current, mockServers: current.mockServers.map((candidate) => candidate.id === server.id ? { ...candidate, ...patch } : candidate) }));
   };
   const updateRoute = (patch: Partial<MockRoute>) => {
@@ -571,7 +564,7 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
       const input = composeMockAiInput(aiPrompt, selectedAiContext);
       const generated = await generateMockWithAi(workspace.ai, input, aiPort, activeEnvironment, { preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
       onChangeWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, generated] }));
-      setActiveId(generated.id); setActiveRouteId(generated.routes[0]?.id ?? ''); setShowAi(false); setAiPrompt('');
+      onOpenMock?.(generated.id, generated.routes[0]?.id); setShowAi(false); setAiPrompt('');
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setGenerating(false); }
   };
@@ -593,8 +586,8 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     setError('');
     try {
       const created = createMockRouteFromResponse(latestResponse);
-      updateServer({ routes: [...server.routes, created] });
-      setActiveRouteId(created.id);
+      updateServer({ routes: [...server.routes, created] }, false);
+      onOpenMock?.(server.id, created.id);
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
   };
   const overwriteRouteFromLatestResponse = () => {
@@ -608,13 +601,13 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
 
   if (!server) return <AutomationEmpty title="No mock servers" action="Create local mock" onAction={() => {
     const created: MockServer = { id: uid('mock'), name: 'Local mock', host: '127.0.0.1', port: 4010, routes: [] };
-    onChangeWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, created] })); setActiveId(created.id);
+    onChangeWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, created] })); onOpenMock?.(created.id);
   }} />;
 
   return (
     <section className="automation-workbench mock-workbench">
       <AutomationHeader eyebrow="Mock" title="Local mock servers" subtitle="Serve deterministic scenarios from this device with no account or hosted dependency.">
-        <select aria-label="Mock server" value={server.id} onChange={(event) => { setActiveId(event.target.value); const next = workspace.mockServers.find((candidate) => candidate.id === event.target.value); setActiveRouteId(next?.routes[0]?.id ?? ''); }}>{workspace.mockServers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+        <select aria-label="Mock server" value={server.id} onChange={(event) => onOpenMock?.(event.target.value)}>{workspace.mockServers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         <button className="secondary-action" disabled={!workspace.ai.enabled || !workspace.ai.mockGeneration} onClick={() => setShowAi((current) => !current)} type="button">AI generate</button>
         <button className="secondary-action" disabled={!latestResponse} onClick={createRouteFromLatestResponse} title={latestResponse ? `Create a route from ${latestResponse.status} ${latestResponse.statusText}` : 'Send the active request first'} type="button">Response → route</button>
         <button className={activeRun ? 'danger-action' : 'primary-action'} onClick={() => void toggleServer()} type="button">{activeRun ? 'Stop server' : 'Start server'}</button>
@@ -631,19 +624,19 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
         </div> : null}
         <div className="mock-grid">
         <aside className="mock-routes">
-          <header><strong>Routes</strong><button onClick={() => { const created: MockRoute = { id: uid('route'), name: 'New scenario', enabled: true, method: 'GET', path: '/resource', status: 200, headers: [], body: '{}', delayMs: 0 }; updateServer({ routes: [...server.routes, created] }); setActiveRouteId(created.id); }} type="button"><Icon name="plus" size={14} /> New route</button></header>
-          <div>{server.routes.map((item) => <button className={route?.id === item.id ? 'active' : ''} key={item.id} onClick={() => setActiveRouteId(item.id)} type="button"><span className={`method method-${item.method.toLowerCase()}`}>{item.method}</span><span><strong>{item.path}</strong><small>{item.status} · {item.name}</small></span><i className={item.enabled ? 'enabled' : ''} /></button>)}</div>
+          <header><strong>Routes</strong><button onClick={() => { const created: MockRoute = { id: uid('route'), name: 'New scenario', enabled: true, method: 'GET', path: '/resource', status: 200, headers: [], body: '{}', delayMs: 0 }; updateServer({ routes: [...server.routes, created] }, false); onOpenMock?.(server.id, created.id); }} type="button"><Icon name="plus" size={14} /> New route</button></header>
+          <div>{server.routes.map((item) => <button className={route?.id === item.id ? 'active' : ''} key={item.id} onClick={() => onOpenMock?.(server.id, item.id)} type="button"><span className={`method method-${item.method.toLowerCase()}`}>{item.method}</span><span><strong>{item.path}</strong><small>{item.status} · {item.name}</small></span><i className={item.enabled ? 'enabled' : ''} /></button>)}</div>
         </aside>
         {route ? <div className="mock-route-editor">
           <div className="mock-route-bar"><select aria-label="Mock method" value={route.method} onChange={(event) => updateRoute({ method: event.target.value as MockRoute['method'] })}>{['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE'].map((method) => <option key={method}>{method}</option>)}</select><input aria-label="Mock route path" value={route.path} onChange={(event) => updateRoute({ path: event.target.value })} /><label>Status<input aria-label="Mock status" min="100" max="599" type="number" value={route.status} onChange={(event) => updateRoute({ status: Number(event.target.value) })} /></label><label>Delay<input aria-label="Mock delay" min="0" max="30000" type="number" value={route.delayMs} onChange={(event) => updateRoute({ delayMs: Number(event.target.value) })} /></label></div>
-          <div className="mock-route-meta"><input aria-label="Mock route name" value={route.name} onChange={(event) => updateRoute({ name: event.target.value })} /><label><input checked={route.enabled} type="checkbox" onChange={(event) => updateRoute({ enabled: event.target.checked })} /> Route enabled</label><button className="mock-response-action" disabled={!latestResponse} onClick={overwriteRouteFromLatestResponse} title={latestResponse ? 'Replace status, headers, and body from the latest response' : 'Send the active request first'} type="button"><Icon name="history" size={14} /> Use latest response</button><button onClick={() => updateServer({ routes: server.routes.filter((candidate) => candidate.id !== route.id) })} type="button"><Icon name="trash" size={14} /> Delete</button></div>
+          <div className="mock-route-meta"><input aria-label="Mock route name" value={route.name} onChange={(event) => updateRoute({ name: event.target.value })} /><label><input checked={route.enabled} type="checkbox" onChange={(event) => updateRoute({ enabled: event.target.checked })} /> Route enabled</label><button className="mock-response-action" disabled={!latestResponse} onClick={overwriteRouteFromLatestResponse} title={latestResponse ? 'Replace status, headers, and body from the latest response' : 'Send the active request first'} type="button"><Icon name="history" size={14} /> Use latest response</button><button onClick={() => { updateServer({ routes: server.routes.filter((candidate) => candidate.id !== route.id) }, false); onOpenMock?.(server.id); }} type="button"><Icon name="trash" size={14} /> Delete</button></div>
           <div className="mock-header-editor">
             <header><strong>Response headers</strong><button onClick={() => updateRoute({ headers: [...route.headers, { id: uid('mock-header'), name: '', value: '', enabled: true }] })} type="button"><Icon name="plus" size={13} /> Add header</button></header>
             {route.headers.map((header) => <div className="mock-header-row" key={header.id}><input aria-label="Enable mock response header" checked={header.enabled} type="checkbox" onChange={(event) => updateRoute({ headers: route.headers.map((candidate) => candidate.id === header.id ? { ...candidate, enabled: event.target.checked } : candidate) })} /><input aria-label="Mock response header name" placeholder="Header" value={header.name} onChange={(event) => updateRoute({ headers: route.headers.map((candidate) => candidate.id === header.id ? { ...candidate, name: event.target.value } : candidate) })} /><input aria-label="Mock response header value" placeholder="Value" value={header.value} onChange={(event) => updateRoute({ headers: route.headers.map((candidate) => candidate.id === header.id ? { ...candidate, value: event.target.value } : candidate) })} /><button aria-label="Remove mock response header" onClick={() => updateRoute({ headers: route.headers.filter((candidate) => candidate.id !== header.id) })} type="button"><Icon name="trash" size={13} /></button></div>)}
             {!route.headers.length ? <span>No response headers configured.</span> : null}
           </div>
           <CodeEditor ariaLabel="Mock response body" value={route.body} onChange={(body) => updateRoute({ body })} />
-        </div> : <AutomationEmpty title="No routes" action="Add route" onAction={() => { const created: MockRoute = { id: uid('route'), name: 'New scenario', enabled: true, method: 'GET', path: '/resource', status: 200, headers: [], body: '{}', delayMs: 0 }; updateServer({ routes: [created] }); setActiveRouteId(created.id); }} />}
+        </div> : <AutomationEmpty title={server.routes.length ? 'Select a route' : 'No routes'} action={server.routes.length ? 'Open first route' : 'Add route'} onAction={() => { if (server.routes[0]) { onOpenMock?.(server.id, server.routes[0].id); return; } const created: MockRoute = { id: uid('route'), name: 'New scenario', enabled: true, method: 'GET', path: '/resource', status: 200, headers: [], body: '{}', delayMs: 0 }; updateServer({ routes: [created] }, false); onOpenMock?.(server.id, created.id); }} />}
         <aside className="mock-inspector"><div className={`mock-status-card${activeRun ? ' running' : ''}`}><i /><small>{activeRun ? 'Running locally · edits apply live' : 'Server stopped'}</small><strong>{activeRun?.baseUrl ?? `http://${server.host}:${server.port}`}</strong><span>{server.routes.filter((item) => item.enabled).length} enabled routes</span></div><h3>Dynamic tokens</h3><code>{'{{$timestamp}}'}</code><code>{'{{$randomUUID}}'}</code><code>{'{{request.path.id}}'}</code><h3>Request-aware output</h3><code>{"{{ req.headers['X-Client'] }}"}</code><code>{'{{ req.queryParams.id }}'}</code><code>{'{{ req.queryParams.tag[0] }}'}</code><code>{'{{ req.pathSegments[0] }}'}</code><code>{'{{ req.body.name | default: "Guest" }}'}</code><code>{'{{ req.body.tags.0 }}'}</code><h3>Control tags</h3><code>{'{% assign greeting = "Hello" %}'}</code><code>{'{% if req.queryParams.role == "admin" %}allowed{% elsif req.queryParams.role contains "edit" %}limited{% else %}denied{% endif %}'}</code><code>{'{% unless req.body.disabled %}enabled{% endunless %}'}</code><code>{'{% raw %}{{ unchanged }}{% endraw %}'}</code><h3>Faker values</h3><code>{'{{ faker.randomUUID }}'}</code><code>{'{{ faker.randomFullName }}'}</code><code>{'{{ faker.randomExampleEmail }}'}</code><code>{'{{ faker.isoTimestamp }}'}</code><p>All 118 documented Faker names render locally. Conditions support LiquidJS comparisons, <code>contains</code>, <code>not</code>, right-associative <code>and</code>/<code>or</code>, and <code>elsif</code>. JSON, form, and multipart bodies are parsed inside a 1 MB request inspection limit. Repeated pairs preserve order and use zero-based bracket or dotted indices; path values percent-decode without changing +. Undefined variables render empty. Unsupported tags, filters, malformed controls, and exceeded render limits return a structured 500 response.</p></aside>
         </div>
       </div>
