@@ -16,7 +16,7 @@ import type { ArtifactImport } from './lib/interchange/types';
 import { applyPluginTheme, createPluginRuntime, describePlugin, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
 import { plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
 import { defaultPreferences, shortcutMatches } from './lib/preferences';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, keyboardWorkspaceResourceMove, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWorkspaceFolder, environmentAncestors, folderAncestors, folderPath, keyboardWorkspaceResourceMove, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
 import type { WorkspaceResourceKeyboardAction, WorkspaceResourceMove } from './lib/resources';
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
@@ -1008,9 +1008,10 @@ type FolderDialogProps = {
   onChange: (folder: RequestFolder) => void;
   onClose: () => void;
   onDelete: () => void;
+  onDuplicate: () => void;
 };
 
-function FolderDialog({ collection, folder, environment, cookies, responses, requestContext, showPasswords, onChange, onClose, onDelete }: FolderDialogProps) {
+function FolderDialog({ collection, folder, environment, cookies, responses, requestContext, showPasswords, onChange, onClose, onDelete, onDuplicate }: FolderDialogProps) {
   const [tab, setTab] = useState<'variables' | 'headers' | 'auth' | 'scripts' | 'docs'>('variables');
   const authRequest = createBlankRequest(`folder-auth-${folder.id}`);
   authRequest.auth = folder.auth ?? authRequest.auth;
@@ -1026,7 +1027,7 @@ function FolderDialog({ collection, folder, environment, cookies, responses, req
       {tab === 'scripts' ? <div className="folder-script-grid"><section><header>Pre-request · root to request</header><CodeEditor ariaLabel="Folder pre-request script" onChange={(preRequestScript) => onChange({ ...folder, preRequestScript })} value={folder.preRequestScript} /></section><section><header>After-response · request to root</header><CodeEditor ariaLabel="Folder after-response script" onChange={(tests) => onChange({ ...folder, tests })} value={folder.tests} /></section></div> : null}
       {tab === 'docs' ? <div className="request-docs-editor"><header><strong>Folder documentation</strong><small>Markdown source</small></header><textarea aria-label="Folder documentation" onChange={(event) => onChange({ ...folder, documentation: event.target.value })} value={folder.documentation} /><section><small>Preview</small><pre>{folder.documentation || 'No documentation yet.'}</pre></section></div> : null}
     </div>
-    <footer><button className="danger-action" onClick={onDelete} type="button">Delete folder</button><span className="footer-spacer" /><button className="secondary-button" onClick={onClose} type="button">Done</button></footer>
+    <footer><button className="danger-action" onClick={onDelete} type="button">Delete folder</button><button className="secondary-button" onClick={onDuplicate} type="button"><Icon name="copy" size={13} /> Duplicate folder</button><span className="footer-spacer" /><button className="secondary-button" onClick={onClose} type="button">Done</button></footer>
   </section></div>;
 }
 
@@ -1491,6 +1492,15 @@ export default function App() {
       if (!folder) return collection;
       return { ...collection, folders: (collection.folders ?? []).filter((candidate) => candidate.id !== folderId).map((candidate) => candidate.parentId === folderId ? { ...candidate, parentId: folder.parentId } : candidate), requests: collection.requests.map((request) => request.folderId === folderId ? { ...request, folderId: folder.parentId } : request), resourceOrder: (collection.resourceOrder ?? []).filter((id) => id !== folderId) };
     }) }));
+    setFolderEditor(undefined);
+  };
+
+  const duplicateFolder = (collectionId: string, folderId: string) => {
+    const folder = workspace.collections.find((collection) => collection.id === collectionId)?.folders?.find((candidate) => candidate.id === folderId);
+    if (!folder) return;
+    const name = window.prompt('Duplicate folder as', `${folder.name} copy`)?.trim();
+    if (!name) return;
+    setWorkspace((current) => duplicateWorkspaceFolder(current, collectionId, folderId, name, uid));
     setFolderEditor(undefined);
   };
 
@@ -2573,7 +2583,7 @@ export default function App() {
 
       {showEnvironment ? <EnvironmentDialog activeId={workspace.activeEnvironmentId} environments={workspace.environments} onAdd={addEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} onDelete={deleteEnvironment} onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))} /> : null}
       {configuredCollection ? <CollectionDialog collection={configuredCollection} onChange={updateCollection} onClose={() => setCollectionEditor(undefined)} /> : null}
-      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={activeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
+      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={activeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} onDuplicate={() => duplicateFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
       {showSendOptions ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSendOptions(false)}>
         <section aria-labelledby="send-options-title" aria-modal="true" className="modal send-options-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
           <header><div><small>Request scheduling</small><h2 id="send-options-title">Send options</h2></div><button aria-label="Close" className="icon-button subtle" onClick={() => setShowSendOptions(false)} type="button"><Icon name="x" /></button></header>

@@ -141,6 +141,59 @@ const folderSubtree = (collection: Collection, rootId: string): Set<string> => {
   return ids;
 };
 
+export const duplicateWorkspaceFolder = (
+  workspace: Workspace,
+  collectionId: string,
+  folderId: string,
+  name: string,
+  createId: (kind: string) => string = (kind) => `${kind}-${crypto.randomUUID()}`,
+): Workspace => {
+  const collection = workspace.collections.find((candidate) => candidate.id === collectionId);
+  const root = (collection?.folders ?? []).find((folder) => folder.id === folderId);
+  if (!collection || !root || !name.trim()) return workspace;
+  const subtreeIds = folderSubtree(collection, folderId);
+  const folders = (collection.folders ?? []).filter((folder) => subtreeIds.has(folder.id));
+  const requests = collection.requests.filter((request) => request.folderId && subtreeIds.has(request.folderId));
+  const folderIds = new Map(folders.map((folder) => [folder.id, createId('folder')]));
+  const requestIds = new Map(requests.map((request) => [request.id, createId('request')]));
+  const duplicatedFolders = folders.map((folder) => ({
+    ...structuredClone(folder),
+    id: folderIds.get(folder.id)!,
+    name: folder.id === folderId ? name.trim() : folder.name,
+    parentId: folder.id === folderId ? root.parentId : folderIds.get(folder.parentId) ?? root.parentId,
+    headers: folder.headers.map((row) => ({ ...row, id: createId('header') })),
+    environment: folder.environment.map((row) => ({ ...row, id: createId('variable') })),
+    source: undefined,
+  }));
+  const duplicatedRequests = requests.map((request) => {
+    const copy = structuredClone(request);
+    copy.id = requestIds.get(request.id)!;
+    copy.folderId = folderIds.get(request.folderId ?? '') ?? '';
+    copy.pathParams = copy.pathParams.map((row) => ({ ...row, id: createId('path') }));
+    copy.params = copy.params.map((row) => ({ ...row, id: createId('parameter') }));
+    copy.headers = copy.headers.map((row) => ({ ...row, id: createId('header') }));
+    copy.formBody = copy.formBody.map((row) => ({ ...row, id: createId('form') }));
+    copy.multipartBody = copy.multipartBody.map((row) => ({ ...row, id: createId('multipart') }));
+    copy.grpc.metadata = copy.grpc.metadata.map((row) => ({ ...row, id: createId('metadata') }));
+    copy.socketIo.args = copy.socketIo.args.map((argument) => ({ ...argument, id: createId('socket-argument') }));
+    copy.socketIo.eventListeners = copy.socketIo.eventListeners.map((listener) => ({ ...listener, id: createId('socket-listener') }));
+    copy.source = undefined;
+    return copy;
+  });
+  const order = collectionResourceOrder(collection);
+  const duplicatedOrder = order.filter((id) => subtreeIds.has(id) || requestIds.has(id)).map((id) => folderIds.get(id) ?? requestIds.get(id)!).filter(Boolean);
+  const lastSubtreeIndex = order.reduce((last, id, index) => subtreeIds.has(id) || requestIds.has(id) ? index : last, -1);
+  order.splice(lastSubtreeIndex + 1, 0, ...duplicatedOrder);
+  return {
+    ...workspace,
+    collections: workspace.collections.map((candidate) => candidate.id !== collectionId ? candidate : sortCollectionResources({
+      ...candidate,
+      folders: [...(candidate.folders ?? []), ...duplicatedFolders],
+      requests: [...candidate.requests, ...duplicatedRequests],
+    }, order)),
+  };
+};
+
 export const moveWorkspaceResource = (workspace: Workspace, move: WorkspaceResourceMove): Workspace => {
   if (move.kind === 'collection') {
     if (move.collectionId === move.targetCollectionId) return workspace;

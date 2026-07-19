@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
 import type { Collection, Environment, RequestFolder } from '../types';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, folderAncestors, keyboardWorkspaceResourceMove, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes } from './resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWorkspaceFolder, folderAncestors, keyboardWorkspaceResourceMove, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes } from './resources';
 
 const row = (id: string, name: string, value: string) => ({ id, name, value, enabled: true });
 
@@ -190,5 +190,33 @@ describe('resource hierarchy', () => {
     expect(movedCollection.collections.map((collection) => collection.id)).toEqual(['target', 'source']);
     expect(keyboardWorkspaceResourceMove(workspace, { kind: 'request', collectionId: 'source', resourceId: 'second' }, 'down')).toBeUndefined();
     expect(keyboardWorkspaceResourceMove(workspace, { kind: 'folder', collectionId: 'source', resourceId: 'folder' }, 'outdent')).toBeUndefined();
+  });
+
+  it('duplicates a complete folder subtree with fresh local identities', () => {
+    const workspace = cloneSeedWorkspace();
+    const request = createBlankRequest('request');
+    request.folderId = 'child';
+    request.source = { format: 'konnect-route', sourceId: 'remote-request' };
+    request.socketIo.args = [{ id: 'argument', value: '1', mode: 'json' }];
+    workspace.collections = [{
+      id: 'collection', name: 'Collection', expanded: true, requests: [request],
+      folders: [
+        { id: 'root', name: 'Root', parentId: '', expanded: true, headers: [row('header', 'X-Test', 'yes')], environment: [], preRequestScript: '', tests: '', documentation: '', source: { format: 'konnect-route-folder', sourceId: 'remote-folder' } },
+        { id: 'child', name: 'Child', parentId: 'root', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+      ],
+      resourceOrder: ['root', 'child', 'request'],
+    }];
+    let sequence = 0;
+    const duplicated = duplicateWorkspaceFolder(workspace, 'collection', 'root', 'Root copy', (kind) => `${kind}-${sequence++}`);
+    const copyRoot = duplicated.collections[0].folders?.find((folder) => folder.name === 'Root copy')!;
+    const copyChild = duplicated.collections[0].folders?.find((folder) => folder.parentId === copyRoot.id)!;
+    const copyRequest = duplicated.collections[0].requests.find((candidate) => candidate.id !== 'request')!;
+    expect(copyRoot).toMatchObject({ parentId: '', source: undefined });
+    expect(copyRoot.headers[0].id).not.toBe('header');
+    expect(copyChild).toMatchObject({ name: 'Child', source: undefined });
+    expect(copyRequest).toMatchObject({ folderId: copyChild.id, source: undefined });
+    expect(copyRequest.socketIo.args[0].id).not.toBe('argument');
+    expect(duplicated.collections[0].resourceOrder).toEqual(['root', 'child', 'request', copyRoot.id, copyChild.id, copyRequest.id]);
+    expect(duplicateWorkspaceFolder(workspace, 'collection', 'missing', 'Copy')).toBe(workspace);
   });
 });

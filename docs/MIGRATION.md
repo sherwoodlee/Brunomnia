@@ -2143,7 +2143,19 @@ Compatibility bounds remain explicit: the pinned parser deliberately ignores uns
 
 Compatibility bounds remain explicit: keyboard moves operate one resource at a time and do not add multi-select/bulk tree actions. Rendered interaction and assistive-technology QA remain omitted by standing direction, so this milestone claims source semantics, focusable controls, shortcut metadata, pure move evidence, full regression suites, and packaged-app verification rather than observed focus visuals. Richer resource actions, environment-tree ordering, collected-data breadth, legacy-version reconstruction, byte-exact wire diagnostic export, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete.
 
-## Milestone 145 — remaining parity closure and release hardening
+## Milestone 145 — deep folder duplication (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Descendant duplication | Complete | Folder settings duplicate the selected root, every nested folder, and every descendant request while retaining hierarchy and behavior |
+| Fresh identities | Complete | Folder/request IDs plus folder rows, request path/query/header/form/multipart rows, gRPC metadata, and Socket.IO argument/listener IDs regenerate without collisions |
+| Source detachment | Complete | Duplicated folders and requests drop import/Konnect source metadata so synchronization cannot mutate or delete the local copies |
+| Mixed order | Complete | The copied subtree retains its internal persisted order and is inserted immediately after the complete original subtree without disturbing unrelated siblings |
+| Executable evidence | Complete | A deterministic pure regression proves hierarchy, request placement, fresh row/protocol IDs, source detachment, adjacent order, and invalid-target no-op behavior; strict TypeScript proves folder-dialog wiring |
+
+Compatibility bounds remain explicit: duplication stays within the current collection, matching the ordinary pinned folder action; cross-workspace copy/move continues through existing drag/settings paths rather than this command. Multi-select/bulk resource actions, request pinning/new-tab state, environment-tree ordering, collected-data breadth, legacy-version reconstruction, byte-exact wire diagnostics, and arbitrary mixed-order compatibility exports remain. Collections stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 146 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

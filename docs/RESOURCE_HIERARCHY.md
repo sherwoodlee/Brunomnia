@@ -6,6 +6,8 @@ Milestone 10 adds nested request resources and inherited environments without an
 
 Use the **+** action on a collection or folder to create a folder. Open a folder's settings to rename or move it and to configure variables, headers, authentication, pre-request scripts, after-response scripts, or documentation. Requests can be assigned from the folder selector above the request tabs.
 
+**Duplicate folder** in folder settings copies the complete descendant folder/request subtree beside the original. Every folder, request, editable row, gRPC metadata row, Socket.IO argument, and Socket.IO listener receives a fresh ID while names, request behavior, configuration, and internal order remain intact. Imported or Konnect-managed source metadata is removed from the copies so later synchronization cannot treat user-created duplicates as remote-owned resources.
+
 ### Ordering and moving resources
 
 Milestone 24 adds persistent pointer drag/drop to the collection tree:
