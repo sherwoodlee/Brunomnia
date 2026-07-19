@@ -37,20 +37,25 @@ describe('native HTTP transport preferences', () => {
     request.headers = [];
 
     await sendRequest(request, undefined);
-    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ headers: [expect.objectContaining({ name: 'User-Agent', value: 'brunomnia/0.1.0', enabled: true })] }) }));
+    expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ headers: expect.arrayContaining([
+      expect.objectContaining({ name: 'Accept', value: '*/*', enabled: true }),
+      expect.objectContaining({ name: 'User-Agent', value: 'brunomnia/0.1.0', enabled: true }),
+    ]) }) }));
 
     request.disableUserAgentHeader = true;
     await sendRequest(request, undefined);
-    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual([]);
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual([expect.objectContaining({ name: 'Accept', value: '*/*' })]);
 
     request.disableUserAgentHeader = false;
     request.headers = [{ id: 'custom-agent', name: 'user-agent', value: 'custom/2.0', enabled: true }];
     await sendRequest(request, undefined);
-    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual([expect.objectContaining({ value: 'custom/2.0' })]);
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Accept' }), expect.objectContaining({ value: 'custom/2.0' })]));
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toHaveLength(2);
 
     request.headers[0].enabled = false;
     await sendRequest(request, undefined);
-    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual([expect.objectContaining({ value: 'custom/2.0', enabled: false })]);
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Accept' }), expect.objectContaining({ value: 'custom/2.0', enabled: false })]));
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toHaveLength(2);
   });
 
   it('applies or bypasses body template rendering across multipart metadata', async () => {

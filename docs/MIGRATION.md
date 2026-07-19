@@ -1849,14 +1849,28 @@ Compatibility bounds remain explicit: Insomnia v5 cannot carry its database-back
 | Shared request model | Complete | Workspace v33 moves the legacy nested gRPC field to top-level `disableUserAgentHeader`, removes the stale nested value, and preserves explicit opt-out across local, project, catalog, history, and import paths |
 | HTTP and CLI execution | Complete | Native Tauri and Node CLI HTTP/GraphQL sends add `brunomnia/0.1.0` by default, retain enabled custom values, and suppress the default for either explicit opt-out or disabled authored rows; browser Fetch remains untouched |
 | Realtime execution | Complete | WebSocket, GraphQL subscription, SSE, and Socket.IO polling/upgrade inputs share the same policy without adding plugin hook behavior absent from pinned Insomnia |
-| Account-free authoring | Complete | Regular and bulk header editors expose the read-only default toggle; deleting the last authored User-Agent enables suppression rather than silently restoring the product header |
+| Account-free authoring | Complete | Regular edit exposes the read-only default toggle, bulk edit remains authored text only, and deleting the last authored User-Agent through either mode enables suppression rather than silently restoring the product header |
 | Interchange | Complete | Insomnia v4/v5 import/export preserves the request-level field for ordinary, WebSocket, Socket.IO, and gRPC resources, and Buf reflection reads the same field |
 | Executable coverage | Complete | Focused helper, native HTTP, browser exclusion, all four realtime routes, gRPC, migration, and v4/v5 round-trip regressions cover default/custom/disabled/removed cases |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 124 verification](QA_MILESTONE_124.md) |
 
 Compatibility bounds remain explicit: browser Fetch controls its own User-Agent, as required by the web platform. Pinned Insomnia realtime connect routes bypass plugin request/response hooks, so streaming hooks are not a parity requirement. Ledger rows stay Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 125 — remaining parity closure and release hardening
+## Milestone 125 — calculated HTTP Accept and Host headers (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned regular HTTP headers show read-only `Accept: */*`, calculated Host, and conditional User-Agent rows; bulk returns authored enabled text before rendering any calculated rows |
+| Default Accept execution | Complete | Native Tauri and CLI HTTP/GraphQL sends add `Accept: */*` only when no enabled authored Accept exists, preserving custom, empty, and disabled-row semantics |
+| Calculated Host presentation | Complete | Regular HTTP/GraphQL authoring shows the runtime-calculated Host placeholder without persisting or overriding transport URL authority |
+| Bulk/editor continuity | Complete | Calculated rows never enter bulk text or authored request state; final User-Agent removal still writes request-level suppression in either editor mode |
+| Browser boundary | Complete | Browser Fetch retains its browser-managed Accept behavior and receives no synthetic JavaScript header |
+| Executable coverage | Complete | Pure calculated-row/default tests plus native HTTP and browser exclusions cover absent, enabled, disabled, custom, protocol, and non-mutation cases |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 125 verification](QA_MILESTONE_125.md) |
+
+Compatibility bounds remain explicit: WebSocket and Socket.IO calculated handshake rows require transport-level extension parity before they can be claimed. Ledger rows stay Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 126 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

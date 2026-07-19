@@ -7700,6 +7700,20 @@ var init_userAgent = __esm({
   }
 });
 
+// src/lib/calculatedHeaders.ts
+var DEFAULT_ACCEPT_HEADER, isHeaderNamed, applyDefaultAcceptHeader;
+var init_calculatedHeaders = __esm({
+  "src/lib/calculatedHeaders.ts"() {
+    init_userAgent();
+    DEFAULT_ACCEPT_HEADER = "*/*";
+    isHeaderNamed = (header, name) => header.name.toLowerCase() === name;
+    applyDefaultAcceptHeader = (headers) => {
+      if (headers.some((header) => header.enabled && isHeaderNamed(header, "accept"))) return headers;
+      return [...headers, { id: "default-accept", name: "Accept", value: DEFAULT_ACCEPT_HEADER, enabled: true }];
+    };
+  }
+});
+
 // src/lib/http.ts
 var init_http = __esm({
   "src/lib/http.ts"() {
@@ -7713,6 +7727,7 @@ var init_http = __esm({
     init_responseBytes();
     init_transport();
     init_userAgent();
+    init_calculatedHeaders();
   }
 });
 
@@ -11992,6 +12007,7 @@ var migrateWorkspace = (value) => {
 
 // cli/brunomnia.ts
 init_userAgent();
+init_calculatedHeaders();
 var args = process.argv.slice(2);
 var flag = (name) => {
   const index = args.indexOf(name);
@@ -12517,7 +12533,7 @@ var executeHttp = async (request, variables, requestTimeoutMs = 3e4, proxyPrefer
     body = Buffer.from(request.binaryBody.dataBase64, "base64");
     if (!headers.some((header) => header.enabled && header.name.toLowerCase() === "content-type")) headers.push({ id: "cli-binary", name: "Content-Type", value: request.binaryBody.mimeType, enabled: true });
   }
-  headers = applyDefaultUserAgentHeader(headers, request.disableUserAgentHeader);
+  headers = applyDefaultUserAgentHeader(applyDefaultAcceptHeader(headers), request.disableUserAgentHeader);
   const started = performance.now();
   const timeoutMs = resolveRequestTimeout(request.transport, requestTimeoutMs);
   if (resolveProxyTransport(request.transport, url, proxyPreferences).proxyMode === "custom") {

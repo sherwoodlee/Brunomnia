@@ -25,9 +25,15 @@ The toggle is device-local and applies when another request opens. **Regular Edi
 
 Packaged desktop HTTP/GraphQL requests, WebSocket handshakes, GraphQL subscriptions, SSE connections, Socket.IO polling/upgrades, and CLI HTTP/GraphQL runs send `User-Agent: brunomnia/0.1.0` when the request has no authored User-Agent row. Browser-development Fetch does not attempt to set this forbidden browser-controlled header.
 
-When no authored row exists, the regular and bulk header editors show the default as read-only with an enable switch. Turning it off persists the request-level `disableUserAgentHeader` policy. Any authored case-insensitive User-Agent row suppresses the default; an enabled row sends its custom value, while one or more disabled authored rows intentionally send no User-Agent. Deleting the final authored User-Agent row leaves the read-only default disabled so removal cannot silently start sending the product header.
+When no authored row exists, **Regular Edit** shows the default as read-only with an enable switch. Turning it off persists the request-level `disableUserAgentHeader` policy. **Bulk Edit** contains only authored enabled rows, matching Insomnia; removing the final authored User-Agent there still leaves the regular read-only default disabled. Any authored case-insensitive User-Agent row suppresses the default; an enabled row sends its custom value, while one or more disabled authored rows intentionally send no User-Agent. Deleting the final authored User-Agent row leaves the read-only default disabled so removal cannot silently start sending the product header.
 
 Workspace v33 stores the suppression policy on every request and migrates the earlier gRPC-only field without leaving a duplicate nested value. Insomnia v4 JSON and v5 YAML imports/exports preserve the same top-level field for HTTP, WebSocket, Socket.IO, and gRPC resources. The Buf registry control uses this shared request policy.
+
+## Calculated HTTP headers
+
+The regular HTTP and GraphQL header editor also shows read-only `Accept: */*` and `Host: <calculated at runtime>` rows. Host remains transport-calculated from the final URL unless the user authors an explicit Host row. Native Tauri and CLI HTTP/GraphQL sends add `Accept: */*` only when no enabled authored Accept exists; a disabled authored row therefore reveals the default again, while an enabled empty or custom value remains authoritative. Browser Fetch already supplies its platform default and receives no synthetic row in JavaScript.
+
+Calculated Accept, Host, and User-Agent rows are presentation-only and never enter the saved authored-header list, bulk text, imports, exports, code generation, or request history. This preserves exact regular/bulk transitions without manufacturing workspace diffs.
 
 ## Editor and request layout preferences
 

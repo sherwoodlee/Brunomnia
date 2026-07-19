@@ -474,8 +474,6 @@ kbd {
 .bulk-key-value-stack .editor-toolbar button { background: transparent; border: 0; color: var(--muted); font-size: 10px; padding: 6px 8px; }
 .bulk-key-value-stack .editor-toolbar button:hover { color: var(--text); }
 .bulk-regular-editor { min-height: 0; overflow: auto; }
-.bulk-default-header { align-items: center; background: color-mix(in srgb, var(--surface) 80%, var(--accent) 20%); border-bottom: 1px solid var(--border-soft); color: var(--muted); display: grid; font: 11px var(--font-mono); gap: 12px; grid-template-columns: 20px minmax(120px, .7fr) minmax(190px, 1.1fr) minmax(150px, .8fr); padding: 9px 14px; }
-.bulk-default-header input { accent-color: var(--accent); }
 .add-row { align-items: center; background: transparent; border: 0; color: var(--muted); display: flex; font-size: 11px; gap: 5px; margin-top: 8px; padding: 6px 4px; }
 .add-row:hover { color: var(--text); }
 

@@ -22,7 +22,8 @@ import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
 import type { AppliedResponseMockTarget } from './lib/mockRouteFromResponse';
 import type { OAuthAuthorizationStatus } from './components/OAuthAuthorizationDialog';
 import { withoutOAuth2RuntimeCredentials } from './lib/oauth2Tokens';
-import { BRUNOMNIA_USER_AGENT, hasAuthoredUserAgentHeader, userAgentDisabledAfterHeaderChange } from './lib/userAgent';
+import { userAgentDisabledAfterHeaderChange } from './lib/userAgent';
+import { calculatedRequestHeaders, type CalculatedHeader } from './lib/calculatedHeaders';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -167,8 +168,8 @@ const findRequest = (workspace: Workspace): { request: ApiRequest; collectionId:
 type KeyValueEditorProps = {
   rows: KeyValue[];
   onChange: (rows: KeyValue[]) => void;
-  readOnlyRows?: KeyValue[];
-  onReadOnlyEnabledChange?: (row: KeyValue, enabled: boolean) => void;
+  readOnlyRows?: CalculatedHeader[];
+  onReadOnlyEnabledChange?: (row: CalculatedHeader, enabled: boolean) => void;
   namePlaceholder?: string;
   valuePlaceholder?: string;
   detailed?: boolean;
@@ -197,13 +198,7 @@ function KeyValueEditor({
       </div>
       {readOnlyRows.map((row) => (
         <div className="kv-row read-only" key={row.id}>
-          <input
-            aria-label={`Enable default ${row.name}`}
-            checked={row.enabled}
-            className="kv-check"
-            onChange={(event) => onReadOnlyEnabledChange?.(row, event.target.checked)}
-            type="checkbox"
-          />
+          {row.canDisable ? <input aria-label={`Enable default ${row.name}`} checked={row.enabled} className="kv-check" onChange={(event) => onReadOnlyEnabledChange?.(row, event.target.checked)} type="checkbox" /> : <span />}
           <input aria-label={namePlaceholder} readOnly spellCheck={false} value={row.name} />
           {detailed ? <textarea aria-label={valuePlaceholder} readOnly rows={1} spellCheck={false} value={row.value} /> : <input aria-label={valuePlaceholder} readOnly spellCheck={false} value={row.value} />}
           {detailed ? <input aria-label="Description" readOnly value={row.description ?? ''} /> : null}
@@ -599,12 +594,11 @@ function RequestPanel({
   onToggleBulkParametersEditor,
 }: RequestPanelProps) {
   const streamProtocol = isStreamingRequest(request);
-  const hasUserAgentHeader = hasAuthoredUserAgentHeader(request.headers);
   const changeHeaders = (headers: KeyValue[]) => onChange({
     headers,
     disableUserAgentHeader: userAgentDisabledAfterHeaderChange(request.headers, headers, request.disableUserAgentHeader),
   });
-  const defaultUserAgentRow: KeyValue = { id: 'default-user-agent', name: 'User-Agent', value: BRUNOMNIA_USER_AGENT, enabled: !request.disableUserAgentHeader, description: 'Added automatically' };
+  const calculatedHeaders = calculatedRequestHeaders(request);
   const actionLabel = streamProtocol
     ? streamStatus === 'connected' ? 'Disconnect' : streamStatus === 'reconnecting' ? 'Stop reconnecting' : streamStatus === 'connecting' ? 'Connecting' : 'Connect'
     : request.protocol === 'grpc' ? 'Invoke' : 'Send';
@@ -691,7 +685,7 @@ function RequestPanel({
           </div>
         ) : null}
         {activeTab === 'headers' && request.protocol !== 'grpc' ? (
-          <div className="editor-stack bulk-key-value-stack"><div className="editor-toolbar"><span>Request headers</span><button onClick={onToggleBulkHeaderEditor} type="button">{useBulkHeaderEditor ? 'Regular Edit' : 'Bulk Edit'}</button></div>{useBulkHeaderEditor ? <>{!hasUserAgentHeader ? <div className="bulk-default-header"><input aria-label="Enable default User-Agent" checked={!request.disableUserAgentHeader} onChange={(event) => onChange({ disableUserAgentHeader: !event.target.checked })} type="checkbox" /><code>User-Agent</code><code>{BRUNOMNIA_USER_AGENT}</code><span>Default read-only header</span></div> : null}<BulkKeyValueEditor ariaLabel="Bulk request headers" rows={request.headers} onChange={changeHeaders} /></> : <div className="bulk-regular-editor"><KeyValueEditor detailed readOnlyRows={hasUserAgentHeader ? [] : [defaultUserAgentRow]} rows={request.headers} onChange={changeHeaders} onReadOnlyEnabledChange={(_row, enabled) => onChange({ disableUserAgentHeader: !enabled })} namePlaceholder="Header" /></div>}</div>
+          <div className="editor-stack bulk-key-value-stack"><div className="editor-toolbar"><span>Request headers</span><button onClick={onToggleBulkHeaderEditor} type="button">{useBulkHeaderEditor ? 'Regular Edit' : 'Bulk Edit'}</button></div>{useBulkHeaderEditor ? <BulkKeyValueEditor ariaLabel="Bulk request headers" rows={request.headers} onChange={changeHeaders} /> : <div className="bulk-regular-editor"><KeyValueEditor detailed readOnlyRows={calculatedHeaders} rows={request.headers} onChange={changeHeaders} onReadOnlyEnabledChange={(row, enabled) => { if (row.name.toLowerCase() === 'user-agent') onChange({ disableUserAgentHeader: !enabled }); }} namePlaceholder="Header" /></div>}</div>
         ) : null}
         {activeTab === 'headers' && request.protocol === 'grpc' ? (
           <KeyValueEditor rows={request.grpc.metadata} onChange={(metadata) => onChange({ grpc: { ...request.grpc, metadata } })} namePlaceholder="Metadata" />
