@@ -50,7 +50,7 @@ try {
   assert.ok(fileRequest, 'CLI template smoke workspace has no File-tag request.');
   const originalBody = fileRequest.body;
   await writeFile(workspacePath, JSON.stringify(workspace));
-  const baseArgs = ['bin/brunomnia.cjs', 'run', 'test', workspacePath, 'CLI Template Smoke', '--allow-scripts', '--reporter', 'json'];
+  const baseArgs = ['bin/brunomnia.cjs', 'run', 'test', workspacePath, 'CLI Template Smoke', '--ci', '--allow-scripts', '--reporter', 'json'];
   const denied = await run(baseArgs);
   assert.equal(denied.code, 1, `File-denial smoke unexpectedly exited ${denied.code}. ${denied.stderr}`);
   const deniedReport = JSON.parse(denied.stdout);
@@ -86,7 +86,7 @@ try {
   assert.equal(allowedReport.report.matchedTests, 1);
   const scriptFile = await run([
     'bin/brunomnia.cjs', 'run', 'collection', join(root, 'examples', 'cli-workspace.json'), 'CLI Health',
-    '--item', 'cli-health-request', '--allow-scripts', '--allow-script-files', '-f', join(root, 'examples'), '--reporter', 'json',
+    '--ci', '--item', 'cli-health-request', '--allow-scripts', '--allow-script-files', '-f', join(root, 'examples'), '--reporter', 'json',
   ]);
   assert.equal(scriptFile.code, 0, `Granted script-file smoke exited ${scriptFile.code}. ${scriptFile.stderr}\n${scriptFile.stdout}`);
   const scriptFileReport = JSON.parse(scriptFile.stdout);

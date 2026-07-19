@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, validateRunnerRequestNamePattern } from './runnerCli';
+import { applyRunnerEnvironmentOverrides, buildRunnerCliCommand, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, quotePosixShellArgument, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, selectRunnerResource, validateRunnerRequestNamePattern } from './runnerCli';
 
 describe('Runner CLI command preview', () => {
   it('preserves selected request order and every execution control', () => {
@@ -116,13 +116,17 @@ describe('Runner CLI command preview', () => {
       { id: 'child', name: 'Team', parentId: 'base', variables: [{ id: 'child-row', name: 'shared', value: 'team', enabled: true }] },
     ];
     expect(selectRunnerGlobalEnvironment(globals, 'base', 'Team')).toMatchObject({ id: 'child', variables: [{ value: 'team' }] });
+    expect(selectRunnerGlobalEnvironment(globals, 'base', 'chi')).toMatchObject({ id: 'child' });
     expect(() => selectRunnerGlobalEnvironment(globals, 'base', 'missing')).toThrow(/No global environment/);
     const collection = {
       id: 'collection', name: 'Collection', expanded: true, requests: [], environment: [],
       subEnvironments: [{ id: 'local', name: 'Local', variables: [] }], activeSubEnvironmentId: '',
     };
     expect(selectRunnerCollectionEnvironment(collection, 'Local').activeSubEnvironmentId).toBe('local');
+    expect(selectRunnerCollectionEnvironment(collection, 'loc').activeSubEnvironmentId).toBe('local');
     expect(() => selectRunnerCollectionEnvironment(collection, 'missing')).toThrow(/No collection environment/);
+    expect(selectRunnerResource([{ id: 'collection-orders', name: 'Orders' }], 'collection-o', 'collection').id).toBe('collection-orders');
+    expect(() => selectRunnerResource([{ id: 'one-alpha', name: 'One' }, { id: 'one-beta', name: 'Two' }], 'one-', 'collection')).toThrow(/Multiple collections matched/);
   });
 
   it('keeps only bounded pinned config options and script strings', () => {

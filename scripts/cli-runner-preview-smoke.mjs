@@ -235,7 +235,7 @@ paths:
   assert.equal(cleanExport['x-visible'], 'retained-root');
   assert.equal(cleanExport.paths['/health'].get['x-kong-plugin'], undefined);
   assert.equal(cleanExport.paths['/health'].get['x-visible'], 'retained-operation');
-  const designLint = await run(['lint', 'spec', apiDesign.id, '-w', temporary]);
+  const designLint = await run(['lint', 'spec', 'preview-api-d', '-w', temporary]);
   assert.match(designLint, /1 operations · 0 issues/);
   const ciLint = await run(['lint', 'spec', '-w', temporary, '--ci']);
   assert.match(ciLint, /1 operations · 0 issues/);
@@ -247,9 +247,9 @@ paths:
   assert.match(discoveredLintFailure.stdout, /API info needs a description/);
 
   const output = await run([
-    'run', 'collection', collection.id, '--config', join(temporary, '.insorc'),
-    '--globals', selectedGlobals.name,
-    '--env', 'preview-collection-selected',
+    'run', 'collection', 'preview-c', '--config', join(temporary, '.insorc'),
+    '--globals', 'preview-selected-g',
+    '--env', 'preview-collection-s',
     '--item', 'folder-selected',
     '--item', 'request-first',
     '--requestNamePattern', '^(Third|First)$',
@@ -456,10 +456,10 @@ paths:
   assert.equal(plaintextReport.proxy.httpsProxy, fullReportProxy);
   assert.deepEqual(plaintextReport.stats.requests, { total: 1, failed: 0 });
   assert.equal(typeof plaintextReport.timing.responseAverage, 'number');
-  const rejected = await runFailure(['run', 'test', join(process.cwd(), 'examples', 'cli-workspace.json'), 'CLI Health', '--env-var', 'region=override']);
+  const rejected = await runFailure(['run', 'test', join(process.cwd(), 'examples', 'cli-workspace.json'), 'CLI Health', '--ci', '--env-var', 'region=override']);
   assert.equal(rejected.code, 1);
   assert.match(rejected.stderr, /--env-var is only available for run collection/);
-  const rejectedPattern = await runFailure(['run', 'test', join(process.cwd(), 'examples', 'cli-workspace.json'), 'CLI Health', '--requestNamePattern', '^First$']);
+  const rejectedPattern = await runFailure(['run', 'test', join(process.cwd(), 'examples', 'cli-workspace.json'), 'CLI Health', '--ci', '--requestNamePattern', '^First$']);
   assert.equal(rejectedPattern.code, 1);
   assert.match(rejectedPattern.stderr, /--requestNamePattern is only available for run collection/);
   const rejectedEmptyPlan = await runFailure(['run', 'collection', collection.id, '-w', temporary, '--requestNamePattern', '^Missing$']);
@@ -514,7 +514,22 @@ paths:
   const missingScript = await runFailure(['script', '--config', join(temporary, '.insorc'), 'missing']);
   assert.equal(missingScript.code, 1);
   assert.match(missingScript.stderr, /Available scripts: preview, invalid/);
-  console.log('CLI runner preview smoke passed: pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  await writeFile(join(temporary, 'non-interactive.insorc'), stringify({ options: { workingDir: temporary, ci: false } }));
+  collection.subEnvironments.push({ id: 'preview-collection-secondary', name: 'Secondary collection environment', variables: [] });
+  await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
+  const arrivalsBeforeEnvironmentRefusals = arrivals.length;
+  const rejectedCiEnvironment = await runFailure([
+    'run', 'collection', 'preview-c', '-w', temporary, '--ci', '--item', 'request-first',
+  ]);
+  assert.equal(rejectedCiEnvironment.code, 1);
+  assert.match(rejectedCiEnvironment.stderr, /Multiple collection environments found in CI mode \(Selected collection environment, Secondary collection environment\).*--env <identifier>/);
+  const rejectedNonInteractiveEnvironment = await runFailure([
+    'run', 'collection', 'preview-c', '--config', join(temporary, 'non-interactive.insorc'), '--item', 'request-first',
+  ]);
+  assert.equal(rejectedNonInteractiveEnvironment.code, 1);
+  assert.match(rejectedNonInteractiveEnvironment.stderr, /Collection environment selection requires an interactive terminal.*--env <identifier> or --ci/);
+  assert.equal(arrivals.length, arrivalsBeforeEnvironmentRefusals, 'environment refusal happened after transport');
+  console.log('CLI runner preview smoke passed: prefix IDs, deterministic non-interactive environment selection and refusal, pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await close(secureServer).catch(() => undefined);

@@ -61,9 +61,16 @@ export const runnerCliVariadicOptionValues = (values: string[], ...names: string
   return output;
 };
 
+export const selectRunnerResource = <Resource extends { id: string; name: string }>(resources: Resource[], identifier: string, entity: string) => {
+  const matches = resources.filter((resource) => resource.id.startsWith(identifier) || resource.name === identifier);
+  if (!matches.length) throw new Error(`No ${entity} found with ID prefix or name "${identifier}".`);
+  if (matches.length > 1) throw new Error(`Multiple ${entity}s matched ID prefix or name "${identifier}".`);
+  return matches[0];
+};
+
 export const selectRunnerGlobalEnvironment = (environments: Environment[], activeId: string, identifier?: string) => {
   const selected = identifier
-    ? environments.find((environment) => environment.id === identifier || environment.name === identifier)
+    ? selectRunnerResource(environments, identifier, 'global environment')
     : environments.find((environment) => environment.id === activeId) ?? environments[0];
   if (!selected) throw new Error(identifier
     ? `No global environment found with ID or name "${identifier}".`
@@ -73,8 +80,7 @@ export const selectRunnerGlobalEnvironment = (environments: Environment[], activ
 
 export const selectRunnerCollectionEnvironment = (collection: Collection, identifier?: string) => {
   if (!identifier) return collection;
-  const selected = (collection.subEnvironments ?? []).find((environment) => environment.id === identifier || environment.name === identifier);
-  if (!selected) throw new Error(`No collection environment found with ID or name "${identifier}".`);
+  const selected = selectRunnerResource(collection.subEnvironments ?? [], identifier, 'collection environment');
   return { ...collection, activeSubEnvironmentId: selected.id };
 };
 

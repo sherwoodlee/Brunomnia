@@ -3,6 +3,7 @@ import { access, mkdir, readFile, readdir, realpath, stat, writeFile } from 'nod
 import { spawn } from 'node:child_process';
 import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { rootCertificates } from 'node:tls';
 import vm from 'node:vm';
 import { Agent, EnvHttpProxyAgent, fetch as undiciFetch } from 'undici';
@@ -28,7 +29,7 @@ import { cookieHeaderForUrl, storeResponseCookies } from '../src/lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../src/lib/responseHistory';
 import { orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
-import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, type RunnerInsoConfig } from '../src/lib/runnerCli';
+import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, selectRunnerResource, type RunnerInsoConfig } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -49,6 +50,28 @@ const cliWorkingDirectoryBase = async (workingDir?: string) => workingDir
 const fail = (message: string, code = 1): never => {
   console.error(message);
   process.exit(code);
+};
+const cliCollectionEnvironmentIdentifier = async (collection: Workspace['collections'][number], identifier: string | undefined, ci: boolean) => {
+  if (identifier) return identifier;
+  const environments = collection.subEnvironments ?? [];
+  if (!environments.length) return undefined;
+  if (ci) {
+    if (environments.length === 1) return environments[0].id;
+    fail(`Multiple collection environments found in CI mode (${environments.map((environment) => environment.name).join(', ')}). Select one using --env <identifier>.`);
+  }
+  if (!process.stdin.isTTY || !process.stderr.isTTY) fail('Collection environment selection requires an interactive terminal. Use --env <identifier> or --ci for non-interactive execution.');
+  const activeIndex = Math.max(0, environments.findIndex((environment) => environment.id === collection.activeSubEnvironmentId));
+  console.error(`Select a collection environment for ${collection.name}:`);
+  environments.forEach((environment, index) => console.error(`  ${index + 1}) ${environment.name} (${environment.id.slice(0, 14)})`));
+  const readline = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = (await readline.question(`Environment [${activeIndex + 1}]: `)).trim();
+    const selectedIndex = answer ? Number(answer) - 1 : activeIndex;
+    if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= environments.length) fail('Select a valid collection environment number.');
+    return environments[selectedIndex].id;
+  } finally {
+    readline.close();
+  }
 };
 const loadText = async (path: string) => readFile(path, 'utf8').catch((error) => fail(`Unable to read ${path}: ${error.message}`));
 const scriptFileMime = (path: string) => ({
@@ -835,14 +858,14 @@ const executeHttp = async (
 
 const usage = `Brunomnia CLI
 
-  brunomnia lint spec <design-name-id-or-file> [-w <workspace-or-project>] [-r, --ruleset <spectral-yaml>] [--json]
+  brunomnia lint spec <design-name-id-prefix-or-file> [-w <workspace-or-project>] [-r, --ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
-  brunomnia export spec <design-name-or-id> -w <workspace-or-project> [-s, --skipAnnotations] [--output <file>]
-  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--includeFullData <redact|plaintext> --acceptRisk] [-f, --dataFolders <folder...>] [--httpProxy URL] [--httpsProxy URL] [--noProxy HOSTS] [--disableCertValidation] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
-  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-g, --globals <name-id-or-file>] [-e, --env <name-or-id>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [-f, --dataFolders <folder...>] [-k, --disableCertValidation] [same transport/trust options]
+  brunomnia export spec <design-name-or-id-prefix> -w <workspace-or-project> [-s, --skipAnnotations] [--output <file>]
+  brunomnia run collection <workspace-or-project> <collection-name-or-id-prefix> [-g, --globals <name-id-prefix-or-file>] [-e, --env <name-or-id-prefix>] [-t, --requestNamePattern <regex>] [-i, --item <name-or-id>]... [--requestTimeout MS] [--env-var <key=value>]... [-n, --iteration-count N] [--retries N] [--delay-request MS] [-d, --iteration-data <json-or-csv>] [-b, --bail] [--reporter <name>] [--output <file>] [--includeFullData <redact|plaintext> --acceptRisk] [-f, --dataFolders <folder...>] [--httpProxy URL] [--httpsProxy URL] [--noProxy HOSTS] [--disableCertValidation] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
+  brunomnia run test <workspace> <suite-name-or-id-prefix|spec-name-or-id-prefix> [-g, --globals <name-id-prefix-or-file>] [-e, --env <name-or-id-prefix>] [-t, --testNamePattern <regex>] [--requestTimeout MS] [-f, --dataFolders <folder...>] [-k, --disableCertValidation] [same transport/trust options]
   brunomnia script <name> [arguments...] [--config <path>]
 
-Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the collection, suite, or API-spec identifier positionally.
+Pinned input shape: use -w, --workingDir <workspace-or-project> and provide only the collection, suite, or API-spec identifier positionally. Use --env or --ci for non-interactive runs when collection sub-environments exist.
 Config: --config <path> or discovered .insorc/.json/.yaml/.yml/package.json supports workingDir, ci, verbose, printOptions, and bounded script definitions.
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
@@ -880,7 +903,7 @@ const main = async () => {
     } else {
       const workspace = await loadWorkspace(workingDir ?? fail('Provide an OpenAPI file or use --workingDir with a stored API design.'));
       const design = identifier
-        ? workspace.apiDesigns.find((candidate) => candidate.id === identifier || candidate.name === identifier)
+        ? selectRunnerResource(workspace.apiDesigns, identifier, 'API design')
         : config.options.ci ? workspace.apiDesigns[0] : undefined;
       if (!design) fail(identifier ? `Design '${identifier}' was not found.` : 'Provide a design name or ID.');
       contents = design.contents;
@@ -910,7 +933,7 @@ const main = async () => {
     const workingDir = cliWorkingDir ?? config.options.workingDir;
     const workspace = await loadWorkspace(workingDir ?? positionals[0] ?? fail('Provide a workspace file or use --workingDir.'));
     const identifier = positionals[workingDir ? 0 : 1] ?? fail('Provide a design name or ID.');
-    const design = workspace.apiDesigns.find((candidate) => candidate.id === identifier || candidate.name === identifier) ?? fail(`Design '${identifier}' was not found.`);
+    const design = selectRunnerResource(workspace.apiDesigns, identifier, 'API design');
     const contents = exportOpenApiSpecification(design.contents, hasFlag('--skipAnnotations') || hasFlag('--skip-annotations') || hasFlag('-s'));
     const output = firstFlag('--output', '-o');
     if (output) {
@@ -967,8 +990,9 @@ const main = async () => {
     if (subject === 'test' && !suites.length) fail(`No test suites were found for '${identifier}'.`);
     const sourceCollection = subject === 'test'
       ? workspace.collections.find((candidate) => candidate.id === suites[0].collectionId) ?? fail(`The selected test suite's collection was not found.`)
-      : workspace.collections.find((candidate) => candidate.id === identifier || candidate.name === identifier) ?? fail(`Collection '${identifier}' was not found.`);
-    const collection = selectRunnerCollectionEnvironment(sourceCollection, firstFlag('--env', '-e'));
+      : selectRunnerResource(workspace.collections, identifier, 'collection');
+    const collectionEnvironmentIdentifier = await cliCollectionEnvironmentIdentifier(sourceCollection, firstFlag('--env', '-e'), ci);
+    const collection = selectRunnerCollectionEnvironment(sourceCollection, collectionEnvironmentIdentifier);
     const globalIdentifier = firstFlag('--globals', '-g');
     const globalPath = globalIdentifier ? await stat(globalIdentifier).catch(() => undefined) : undefined;
     const globalEnvironments = globalPath?.isFile() ? await loadRunnerGlobalEnvironments(globalIdentifier!) : workspace.environments;
