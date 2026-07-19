@@ -6,7 +6,8 @@ import { sendRequest as sendHttpRequest, type SendRequestContext } from './lib/h
 import { storeResponseCookies } from './lib/cookies';
 import { connectStream, disconnectStream, isStreamingRequest, sendWebSocketMessage } from './lib/protocol';
 import { fetchGraphqlSchema } from './lib/graphql';
-import { environmentMap, formatBytes, mockResponse, normalizeHttpMethod, resolveTemplate } from './lib/request';
+import { environmentMap, formatBytes, mockResponse, normalizeHttpMethod } from './lib/request';
+import { renderRequestValue } from './lib/requestRender';
 import type { WorkspaceCatalogEntry, WorkspaceCatalogSnapshot, WorkspaceRecovery } from './lib/workspaceCatalog';
 import { applyScriptSubresponse, runBrowserScript, type ScriptRunOptions } from './lib/scriptSandbox';
 import type { RunningMock } from './lib/mock';
@@ -15,7 +16,7 @@ import type { ArtifactImport } from './lib/interchange/types';
 import { applyPluginTheme, createPluginRuntime, describePlugin, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
 import { plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
 import { defaultPreferences, shortcutMatches } from './lib/preferences';
-import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
+import { applyCollectionConfiguration, collectionEnvironmentScopes, environmentAncestors, folderAncestors, folderPath, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
 import type { WorkspaceResourceMove } from './lib/resources';
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
@@ -25,6 +26,7 @@ import { withoutOAuth2RuntimeCredentials } from './lib/oauth2Tokens';
 import { userAgentDisabledAfterHeaderChange } from './lib/userAgent';
 import { calculatedRequestHeaders, type CalculatedHeader } from './lib/calculatedHeaders';
 import type { ClientCodeSnippet, ClientCodeTarget } from './lib/codegen';
+import type { TemplatePromptInput } from './lib/templates';
 import {
   CodeEditor,
   GraphqlEditor,
@@ -75,6 +77,7 @@ const IntegrationWorkbench = lazy(() => import('./components/IntegrationWorkbenc
 const PreferencesWorkbench = lazy(() => import('./components/PreferencesWorkbench').then((module) => ({ default: module.PreferencesWorkbench })));
 const CodeGenerationDialog = lazy(() => import('./components/CodeGenerationDialog').then((module) => ({ default: module.CodeGenerationDialog })));
 const TemplateTagDialog = lazy(() => import('./components/TemplateTagDialog').then((module) => ({ default: module.TemplateTagDialog })));
+const TemplatePromptDialog = lazy(() => import('./components/TemplatePromptDialog').then((module) => ({ default: module.TemplatePromptDialog })));
 const ResponseBodyPreview = lazy(() => import('./components/ResponseBodyPreview'));
 const MockResponseExtractor = lazy(() => import('./components/MockResponseExtractor').then((module) => ({ default: module.MockResponseExtractor })));
 
@@ -93,6 +96,7 @@ const protocols: { value: Protocol; label: string }[] = [
 const protocolLabel = (request: ApiRequest) => request.protocol === 'http' ? request.method
   : request.protocol === 'websocket' ? 'WS' : request.protocol === 'socketio' ? 'IO' : request.protocol.toUpperCase();
 const methodClass = (method: string) => methods.includes(method as HttpMethod) ? method.toLowerCase() : 'custom';
+type PendingTemplatePrompt = { id: string; input: TemplatePromptInput; resolve: (value: string | null) => void };
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const workspaceCatalogApi = () => import('./lib/workspaceCatalog');
@@ -1049,6 +1053,7 @@ export default function App() {
   const [runningMocks, setRunningMocks] = useState<Record<string, RunningMock>>({});
   const [focusedMock, setFocusedMock] = useState<{ serverId: string; routeId: string }>();
   const [projectSyncError, setProjectSyncError] = useState('');
+  const [templatePrompt, setTemplatePrompt] = useState<PendingTemplatePrompt>();
   const [vaultSession, setVaultSession] = useState<VaultSession>({ unlocked: false, passphrase: '', entries: [] });
   const streamSession = useRef<string | undefined>(undefined);
   const streamProtocol = useRef<Protocol | undefined>(undefined);
@@ -1060,6 +1065,28 @@ export default function App() {
   const scheduledTimer = useRef<number | undefined>(undefined);
   const scheduledResolve = useRef<(() => void) | undefined>(undefined);
   const oauthFlowId = useRef('');
+  const templateResponseResolver = useRef<SendRequestContext['resolveResponse']>(undefined);
+  const templatePromptQueue = useRef<PendingTemplatePrompt[]>([]);
+  const activeTemplatePrompt = useRef<PendingTemplatePrompt | undefined>(undefined);
+
+  const requestTemplatePrompt = useCallback((input: TemplatePromptInput) => new Promise<string | null>((resolve) => {
+    const pending = { id: uid('template-prompt'), input, resolve };
+    if (activeTemplatePrompt.current) {
+      templatePromptQueue.current.push(pending);
+      return;
+    }
+    activeTemplatePrompt.current = pending;
+    setTemplatePrompt(pending);
+  }), []);
+
+  const resolveTemplatePrompt = useCallback((value: string | null) => {
+    const current = activeTemplatePrompt.current;
+    if (!current) return;
+    current.resolve(value);
+    const next = templatePromptQueue.current.shift();
+    activeTemplatePrompt.current = next;
+    setTemplatePrompt(next);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1145,9 +1172,12 @@ export default function App() {
   const templateFileReader = workspace.preferences.allowScriptFileAccess && isTauri() ? readTemplateFile : undefined;
   const sendRequest = useCallback((request: ApiRequest, environment: Environment | undefined, context: SendRequestContext = {}) => sendHttpRequest(request, environment, {
     certificates: workspace.certificates,
+    prompt: requestTemplatePrompt,
     readFile: templateFileReader,
+    requestAncestors: requestAncestorNames(workspace.collections, request),
+    resolveResponse: templateResponseResolver.current,
     ...context,
-  }), [templateFileReader, workspace.certificates]);
+  }), [requestTemplatePrompt, templateFileReader, workspace.certificates, workspace.collections]);
   const activeResponseHistory = useMemo(() => visibleResponseHistory(
     workspace.responses,
     active?.request.id ?? '',
@@ -1299,6 +1329,57 @@ export default function App() {
   };
   const unlockedVault = useMemo(() => vaultVariables(vaultSession), [vaultSession]);
   const externalSecretResolver = useCallback((input: ExternalSecretInput) => resolveAuthorizedExternalSecret(workspace, input), [workspace]);
+  templateResponseResolver.current = async ({ requestId, requestChain, cookies, responses }) => {
+    if (!activeEnvironment) throw new Error('Select an environment before resending a dependent request.');
+    const collection = workspace.collections.find((candidate) => candidate.requests.some((request) => request.id === requestId || request.name === requestId));
+    const sourceRequest = collection?.requests.find((request) => request.id === requestId || request.name === requestId);
+    if (!collection || !sourceRequest) throw new Error(`Could not find request ${requestId}`);
+    const configured = applyCollectionConfiguration(collection, sourceRequest, activeEnvironment);
+    const result = await sendHttpRequest(configured.request, configured.environment, {
+      certificates: workspace.certificates,
+      cookies,
+      externalSecret: externalSecretResolver,
+      filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
+      followRedirects: workspace.preferences.followRedirects,
+      maxRedirects: workspace.preferences.maxRedirects,
+      maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
+      preferredHttpVersion: workspace.preferences.preferredHttpVersion,
+      prompt: requestTemplatePrompt,
+      proxy: proxyPreferences,
+      readFile: templateFileReader,
+      requestAncestors: requestAncestorNames(workspace.collections, sourceRequest),
+      requestChain: [...new Set([...requestChain, sourceRequest.id])],
+      requestTimeoutMs: workspace.preferences.requestTimeoutMs,
+      resolveResponse: templateResponseResolver.current,
+      responses,
+      validateAuthCertificates: workspace.preferences.validateAuthCertificates,
+      validateCertificates: workspace.preferences.validateCertificates,
+      vault: unlockedVault,
+    });
+    const receivedAt = new Date().toISOString();
+    const storedResponse: StoredResponse = {
+      ...result,
+      id: uid('response'),
+      requestId: sourceRequest.id,
+      requestName: sourceRequest.name,
+      requestUrl: result.requestUrl ?? configured.request.url,
+      environmentId: configured.environment.id,
+      receivedAt,
+      requestSnapshot: createRequestSnapshot(sourceRequest),
+    };
+    if (configured.request.transport.storeCookies) {
+      const updatedCookies = storeResponseCookies(cookies, storedResponse.requestUrl, result.setCookies ?? []);
+      cookies.splice(0, cookies.length, ...updatedCookies);
+    }
+    const updatedResponses = retainResponseHistory(responses, storedResponse, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
+    responses.splice(0, responses.length, ...updatedResponses);
+    setWorkspace((current) => ({
+      ...current,
+      cookies: configured.request.transport.storeCookies ? [...cookies] : current.cookies,
+      responses: [...responses],
+    }));
+    return storedResponse;
+  };
 
   useEffect(() => {
     if (!hydrated || !active || activeStreaming) return;
@@ -1433,12 +1514,26 @@ export default function App() {
   };
 
   const loadActiveGrpcSchema = async (): Promise<GrpcSchema | undefined> => {
-    if (!active || active.request.protocol !== 'grpc' || grpcSchemaLoading) return grpcSchemas[active?.request.id ?? ''];
-    const targetRequest = active.request;
+    if (!active || !activeEnvironment || active.request.protocol !== 'grpc' || grpcSchemaLoading) return grpcSchemas[active?.request.id ?? ''];
+    const collection = workspace.collections.find((candidate) => candidate.id === active.collectionId);
+    if (!collection) return undefined;
+    const configured = applyCollectionConfiguration(collection, active.request, activeEnvironment);
+    const targetRequest = configured.request;
     setGrpcSchemaLoading(true);
     try {
       const { loadGrpcSchema } = await import('./lib/grpc');
-      const schema = await loadGrpcSchema(targetRequest, activeEnvironment, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspace.certificates);
+      const schema = await loadGrpcSchema(targetRequest, configured.environment, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspace.certificates, {
+        cookies: [...workspace.cookies],
+        responses: [...workspace.responses],
+        filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
+        vault: unlockedVault,
+        externalSecret: externalSecretResolver,
+        readFile: templateFileReader,
+        prompt: requestTemplatePrompt,
+        requestAncestors: requestAncestorNames(workspace.collections, targetRequest),
+        resolveResponse: templateResponseResolver.current,
+        pluginRuntime: createPersistentTemplatePluginRuntime(configured.environment),
+      });
       const service = schema.services.find((candidate) => candidate.fullName === targetRequest.grpc.service) ?? schema.services[0];
       const method = service?.methods.find((candidate) => candidate.name === targetRequest.grpc.method) ?? service?.methods[0];
       setGrpcSchemas((current) => ({ ...current, [targetRequest.id]: schema }));
@@ -1465,7 +1560,7 @@ export default function App() {
     const targetRequest = applyCollectionConfiguration(collection, active.request, activeEnvironment).request;
     setGraphqlSchemaLoading(true);
     try {
-      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader });
+      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: [...workspace.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, targetRequest), resolveResponse: templateResponseResolver.current, pluginRuntime: createPersistentTemplatePluginRuntime(activeEnvironment) });
       setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => ({ ...collection, requests: collection.requests.map((request) => request.id === targetRequest.id ? { ...request, graphql: { ...request.graphql, schema, schemaEndpoint: targetRequest.url, schemaFetchedAt: new Date().toISOString() } } : request) })) }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1508,8 +1603,8 @@ export default function App() {
   };
 
   const oauthRequestContext = (): SendRequestContext => ({
-    cookies: workspace.cookies,
-    responses: workspace.responses,
+    cookies: [...workspace.cookies],
+    responses: [...workspace.responses],
     preferredHttpVersion: workspace.preferences.preferredHttpVersion,
     maxRedirects: workspace.preferences.maxRedirects,
     followRedirects: workspace.preferences.followRedirects,
@@ -1523,6 +1618,14 @@ export default function App() {
     vault: unlockedVault,
     externalSecret: externalSecretResolver,
     readFile: templateFileReader,
+    prompt: requestTemplatePrompt,
+    resolveResponse: templateResponseResolver.current,
+  });
+
+  const realtimeRequestContext = (request: ApiRequest, pluginRuntime?: SendRequestContext['pluginRuntime']): SendRequestContext => ({
+    ...oauthRequestContext(),
+    pluginRuntime,
+    requestAncestors: requestAncestorNames(workspace.collections, request),
   });
 
   const persistOAuth2Auth = (
@@ -1570,6 +1673,48 @@ export default function App() {
     auth ??= await authorizeOAuth2WithStatus(request, environment);
     if (auth !== request.auth) persistOAuth2Auth(collectionId, request.id, auth);
     return { ...request, auth };
+  };
+
+  const createRealtimePluginContext = (environment: Environment) => {
+    const state: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
+    const callbacks: PluginHostCallbacks = {
+      network: (pluginRequest) => sendRequest(pluginRequest, environment, { ...oauthRequestContext(), authorizeOAuth2: authorizeOAuth2WithStatus }),
+      prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
+      readClipboard: () => navigator.clipboard.readText(),
+      writeClipboard: (value) => navigator.clipboard.writeText(value),
+    };
+    const runtime = createPluginRuntime(workspace.plugins, state, callbacks);
+    const flush = () => {
+      state.notifications.forEach((notification) => onStreamEvent({ id: uid('event'), direction: 'system', kind: 'plugin', text: `${notification.title}: ${notification.message}`, timestamp: new Date().toISOString() }));
+      setWorkspace((current) => ({ ...current, pluginData: state.data }));
+    };
+    return { runtime, flush };
+  };
+
+  const createPersistentTemplatePluginRuntime = (environment: Environment): NonNullable<SendRequestContext['pluginRuntime']> => {
+    const state: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
+    const callbacks: PluginHostCallbacks = {
+      network: (pluginRequest) => sendRequest(pluginRequest, environment, { ...oauthRequestContext(), authorizeOAuth2: authorizeOAuth2WithStatus }),
+      prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
+      readClipboard: () => navigator.clipboard.readText(),
+      writeClipboard: (value) => navigator.clipboard.writeText(value),
+    };
+    const runtime = createPluginRuntime(workspace.plugins, state, callbacks);
+    let notificationIndex = 0;
+    return {
+      beforeRequest: async (request) => request,
+      afterResponse: async (_request, response) => response,
+      templateTag: async (name, args, request) => {
+        try {
+          return await runtime.templateTag(name, args, request);
+        } finally {
+          const nextNotifications = state.notifications.slice(notificationIndex);
+          notificationIndex = state.notifications.length;
+          if (nextNotifications.length) setScriptLogs((current) => [...current, ...nextNotifications.map((notification) => `[plugin] ${notification.title}: ${notification.message}`)]);
+          setWorkspace((current) => ({ ...current, pluginData: state.data }));
+        }
+      },
+    };
   };
 
   const cancelActiveOAuthAuthorization = async () => {
@@ -1673,8 +1818,9 @@ export default function App() {
           current.preferences.filterResponsesByEnv,
         ),
       }));
+      const realtimePlugins = createRealtimePluginContext(executionEnvironment);
       try {
-        const metadata = await connectStream(request, { ...executionEnvironment, variables: [...executionEnvironment.variables, ...Object.entries(unlockedVault).map(([name, value]) => ({ id: `vault-${name}`, name, value, enabled: true }))] }, sessionId, onStreamEvent, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, workspace.cookies, workspace.certificates);
+        const metadata = await connectStream(request, executionEnvironment, sessionId, onStreamEvent, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, workspace.cookies, workspace.certificates, realtimeRequestContext(request, realtimePlugins.runtime));
         setStreamSessionView((current) => current?.id === sessionId ? applyStreamConnectionMetadata([current], sessionId, metadata)[0] : current);
         setWorkspace((current) => ({ ...current, streamSessions: applyStreamConnectionMetadata(current.streamSessions, sessionId, metadata) }));
         if (streamSession.current !== sessionId) {
@@ -1686,6 +1832,7 @@ export default function App() {
         const message = error instanceof Error ? error.message : String(error);
         onStreamEvent({ id: uid('event'), sessionId, direction: 'system', kind: 'error', text: message, timestamp: new Date().toISOString() });
       } finally {
+        realtimePlugins.flush();
         setIsSending(false);
       }
       return;
@@ -1699,7 +1846,7 @@ export default function App() {
     let scriptResponses = [...workspace.responses];
     const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const pluginCallbacks: PluginHostCallbacks = {
-      network: (pluginRequest) => sendRequest(pluginRequest, executionEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, authorizeOAuth2: authorizeOAuth2WithStatus }),
+      network: (pluginRequest) => sendRequest(pluginRequest, executionEnvironment, { cookies: scriptCookies, responses: scriptResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, authorizeOAuth2: authorizeOAuth2WithStatus }),
       prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
       readClipboard: () => navigator.clipboard.readText(),
       writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -1796,14 +1943,25 @@ export default function App() {
         const output = await invokeGrpc(callRequest, {
           ...executionEnvironment,
           variables: Object.entries({ ...requestVariables, ...unlockedVault }).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
-        }, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspace.certificates);
+        }, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspace.certificates, {
+          cookies: scriptCookies,
+          responses: scriptResponses,
+          filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
+          vault: unlockedVault,
+          externalSecret: externalSecretResolver,
+          readFile: templateFileReader,
+          prompt: requestTemplatePrompt,
+          requestAncestors: requestAncestorNames(workspace.collections, executableRequest),
+          resolveResponse: templateResponseResolver.current,
+          pluginRuntime,
+        });
         const body = JSON.stringify({ status: output.status, callType: output.callType, messages: output.messages }, null, 2);
         result = await pluginRuntime.afterResponse(executableRequest, { status: 200, statusText: `gRPC ${output.status}`, headers: { 'grpc-call-type': output.callType }, body, durationMs: output.durationMs, sizeBytes: new Blob([body]).size });
       } else {
         result = await sendRequest(executableRequest, {
           ...executionEnvironment,
           variables: Object.entries(requestVariables).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
-        }, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, onOAuth2Token: (updated) => persistOAuth2Auth(collection.id, request.id, updated.auth), authorizeOAuth2: authorizeOAuth2WithStatus });
+        }, { cookies: scriptCookies, responses: scriptResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, onOAuth2Token: (updated) => persistOAuth2Auth(collection.id, request.id, updated.auth), authorizeOAuth2: authorizeOAuth2WithStatus });
       }
       const afterResponse = await runScript(executableRequest.tests, executableRequest, result, preRequest.localVariables, preRequest);
       setScriptTests(afterResponse.tests);
@@ -1856,6 +2014,11 @@ export default function App() {
 
   const stopWorkspaceRuntime = async () => {
     cancelScheduledSends();
+    activeTemplatePrompt.current?.resolve(null);
+    templatePromptQueue.current.forEach((pending) => pending.resolve(null));
+    activeTemplatePrompt.current = undefined;
+    templatePromptQueue.current = [];
+    setTemplatePrompt(undefined);
     const sessionId = streamSession.current;
     const protocol = streamProtocol.current;
     const activeOAuthFlowId = oauthFlowId.current;
@@ -2014,12 +2177,25 @@ export default function App() {
     try {
       if (active.request.protocol === 'socketio') {
         const configured = applyCollectionConfiguration(activeCollection, active.request, activeEnvironment);
+        const realtimePlugins = createRealtimePluginContext(configured.environment);
         const { sendSocketIoMessage } = await import('./lib/socketIo');
-        await sendSocketIoMessage(configured.request, configured.environment, streamSession.current, onStreamEvent);
+        try {
+          await sendSocketIoMessage(configured.request, configured.environment, streamSession.current, onStreamEvent, realtimeRequestContext(configured.request, realtimePlugins.runtime));
+        } finally {
+          realtimePlugins.flush();
+        }
       } else if (active.request.protocol === 'websocket' && streamDraft.trim()) {
-        const message = streamDraft;
-        setStreamDraft('');
-        await sendWebSocketMessage(streamSession.current, message, streamFrameKind, onStreamEvent);
+        const configured = applyCollectionConfiguration(activeCollection, active.request, activeEnvironment);
+        const realtimePlugins = createRealtimePluginContext(configured.environment);
+        try {
+          const message = streamFrameKind === 'text'
+            ? await renderRequestValue(streamDraft, configured.request, configured.environment, realtimeRequestContext(configured.request, realtimePlugins.runtime))
+            : streamDraft;
+          setStreamDraft('');
+          await sendWebSocketMessage(streamSession.current, message, streamFrameKind, onStreamEvent);
+        } finally {
+          realtimePlugins.flush();
+        }
       }
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
@@ -2031,8 +2207,13 @@ export default function App() {
     if (!streamSession.current || streamProtocol.current !== 'socketio' || streamStatus !== 'connected' || !active || !activeCollection || !activeEnvironment) return;
     try {
       const configured = applyCollectionConfiguration(activeCollection, active.request, activeEnvironment);
+      const realtimePlugins = createRealtimePluginContext(configured.environment);
       const { setSocketIoListener } = await import('./lib/socketIo');
-      await setSocketIoListener(streamSession.current, resolveTemplate(eventName, environmentMap(configured.environment)), enabled);
+      try {
+        await setSocketIoListener(streamSession.current, await renderRequestValue(eventName, configured.request, configured.environment, realtimeRequestContext(configured.request, realtimePlugins.runtime)), enabled);
+      } finally {
+        realtimePlugins.flush();
+      }
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       onStreamEvent({ id: uid('event'), direction: 'system', kind: 'error', text, timestamp: new Date().toISOString() });
@@ -2091,7 +2272,7 @@ export default function App() {
     request.bodyMode = 'none';
     request.preRequestScript = '';
     request.tests = '';
-    const result = await sendRequest(request, activeEnvironment, { cookies: workspace.cookies, responses: workspace.responses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv });
+    const result = await sendRequest(request, activeEnvironment, { cookies: [...workspace.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv });
     if (result.status < 200 || result.status >= 300) throw new Error(`Import URL returned ${result.status} ${result.statusText}.`);
     if (result.sizeBytes > 20_000_000) throw new Error('The import exceeds the 20 MB local conversion limit.');
     return result.body;
@@ -2136,8 +2317,8 @@ export default function App() {
     const initialPluginData = JSON.stringify(pluginState.data);
     const pluginCallbacks: PluginHostCallbacks = {
       network: (pluginRequest) => sendRequest(pluginRequest, codegenConfiguration.environment, {
-        cookies: workspace.cookies,
-        responses: workspace.responses,
+        cookies: [...workspace.cookies],
+        responses: [...workspace.responses],
         preferredHttpVersion: workspace.preferences.preferredHttpVersion,
         maxRedirects: workspace.preferences.maxRedirects,
         followRedirects: workspace.preferences.followRedirects,
@@ -2160,12 +2341,14 @@ export default function App() {
       const { generateClientCodeWithAuth } = await import('./lib/codegen');
       const snippet = await generateClientCodeWithAuth(target, request, variables, {}, {
         cookies: workspace.cookies,
+        environmentId: codegenConfiguration.environment.id,
         responses: workspace.preferences.filterResponsesByEnv
           ? workspace.responses.filter((response) => response.environmentId === codegenConfiguration.environment.id)
           : workspace.responses,
         pluginRuntime,
         externalSecret: externalSecretResolver,
         readFile: templateFileReader,
+        requestAncestors: requestAncestorNames(workspace.collections, request),
       });
       return {
         ...snippet,
@@ -2269,7 +2452,7 @@ export default function App() {
             onSocketIoListenerToggle={(eventName, enabled) => void toggleSocketIoListener(eventName, enabled)}
             onTabChange={setRequestTab}
             request={active.request}
-            requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, authorizeOAuth2: authorizeOAuth2WithStatus }}
+            requestContext={{ cookies: [...workspace.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, active.request), resolveResponse: templateResponseResolver.current, authorizeOAuth2: authorizeOAuth2WithStatus, pluginRuntime: createPersistentTemplatePluginRuntime(activeEnvironment) }}
             scheduledSendLabel={scheduledSendLabel}
             showPasswords={workspace.preferences.showPasswords}
             storedResponses={workspace.responses}
@@ -2329,7 +2512,7 @@ export default function App() {
             streamSession={streamSessionView}
             streamStatus={streamStatus}
           />
-        </div> : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : (
+        </div> : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} templatePrompt={requestTemplatePrompt} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={activeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : (
           <Suspense fallback={<div className="dialog-loading">Loading automation…</div>}><AutomationWorkbench
             activeEnvironment={activeEnvironment}
             focusedMock={focusedMock}
@@ -2347,6 +2530,7 @@ export default function App() {
             })}
             runningMocks={runningMocks}
             section={workbenchSection}
+            templatePrompt={requestTemplatePrompt}
             vault={unlockedVault}
             workspace={workspace}
           /></Suspense>
@@ -2366,7 +2550,7 @@ export default function App() {
 
       {showEnvironment ? <EnvironmentDialog activeId={workspace.activeEnvironmentId} environments={workspace.environments} onAdd={addEnvironment} onChange={updateEnvironment} onClose={() => setShowEnvironment(false)} onDelete={deleteEnvironment} onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))} /> : null}
       {configuredCollection ? <CollectionDialog collection={configuredCollection} onChange={updateCollection} onClose={() => setCollectionEditor(undefined)} /> : null}
-      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={activeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, authorizeOAuth2: authorizeOAuth2WithStatus }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
+      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={activeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
       {showSendOptions ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSendOptions(false)}>
         <section aria-labelledby="send-options-title" aria-modal="true" className="modal send-options-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
           <header><div><small>Request scheduling</small><h2 id="send-options-title">Send options</h2></div><button aria-label="Close" className="icon-button subtle" onClick={() => setShowSendOptions(false)} type="button"><Icon name="x" /></button></header>
@@ -2379,6 +2563,7 @@ export default function App() {
         </section>
       </div> : null}
       {oauthAuthorization ? <Suspense fallback={null}><OAuthAuthorizationDialog onCancel={() => void cancelActiveOAuthAuthorization()} status={oauthAuthorization} /></Suspense> : null}
+      {templatePrompt ? <Suspense fallback={null}><TemplatePromptDialog input={templatePrompt.input} key={templatePrompt.id} onResolve={resolveTemplatePrompt} /></Suspense> : null}
       {showImport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading import tools…</div></div>}><ImportDialog onApply={applyImport} onClose={() => setShowImport(false)} onFetchUrl={fetchImportUrl} /></Suspense> : null}
       {showExport ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading export tools…</div></div>}><ExportDialog onClose={() => setShowExport(false)} workspace={workspace} /></Suspense> : null}
       {showCodeGeneration ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading code generator…</div></div>}><CodeGenerationDialog generate={generateCode} onClose={() => setShowCodeGeneration(false)} request={codegenConfiguration.request} variables={environmentMap(codegenConfiguration.environment)} /></Suspense> : null}

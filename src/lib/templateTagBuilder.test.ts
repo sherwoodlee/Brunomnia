@@ -6,9 +6,12 @@ describe('guided template tag builder', () => {
   it('builds pinned local and external tag syntax with escaped arguments', () => {
     expect(buildTemplateTag('environment', { name: 'baseUrl' })).toBe('{{ baseUrl }}');
     expect(buildTemplateTag('faker', { name: 'randomFullName' })).toBe('{{ faker.randomFullName }}');
+    expect(buildTemplateTag('now', { format: 'custom', formatTemplate: 'yyyy-MM-dd' })).toBe("{% now 'custom', 'yyyy-MM-dd' %}");
+    expect(buildTemplateTag('os', { function: 'userInfo', path: '$.username' })).toBe("{% os 'userInfo', '$.username' %}");
     expect(buildTemplateTag('base64', { operation: 'encode', encoding: 'url', value: "one's" })).toBe("{% base64 'encode', 'url', 'one\\'s' %}");
     expect(buildTemplateTag('cookie', { url: 'https://api.example.com', name: 'session' })).toBe("{% cookie 'https://api.example.com', 'session' %}");
     expect(buildTemplateTag('external', { provider: 'hashicorp', reference: 'secret/orders', scope: '', field: 'token', version: 'latest' })).toBe("{% external 'hashicorp', 'secret/orders', '', 'token', 'latest' %}");
+    expect(buildTemplateTag('prompt', { title: 'Password', label: 'Value', value: '', storageKey: 'login', maskText: 'true', saveLastValue: 'false' })).toBe("{% prompt 'Password', 'Value', '', 'login', 'true', 'false' %}");
   });
 
   it('enumerates editable request destinations and inserts without mutating the source', () => {
@@ -32,5 +35,24 @@ describe('guided template tag builder', () => {
   it('rejects destinations removed while the dialog was open', () => {
     expect(() => insertTemplateTag(createBlankRequest('missing'), 'header:missing', '{{ value }}', 'append')).toThrow("destination 'header:missing' is no longer available");
     expect(() => insertTemplateTag(createBlankRequest('missing'), 'unknown:missing', '{{ value }}', 'append')).toThrow("destination 'unknown:missing' is no longer available");
+  });
+
+  it('targets realtime and Buf registry fields rendered during execution', () => {
+    const websocket = createBlankRequest('websocket-tags');
+    websocket.protocol = 'websocket';
+    expect(templateTagDestinations(websocket)).toContainEqual({ id: 'body', label: 'WebSocket message' });
+
+    const socketIo = createBlankRequest('socketio-tags');
+    socketIo.protocol = 'socketio';
+    socketIo.socketIo.args = [{ id: 'argument', mode: 'json', value: '{}' }];
+    socketIo.socketIo.eventListeners = [{ id: 'listener', eventName: 'orders', description: '', enabled: true }];
+    expect(templateTagDestinations(socketIo).map((item) => item.id)).toEqual(expect.arrayContaining(['socketio:path', 'socketio:eventName', 'socketio-arg:argument', 'socketio-listener:listener']));
+    expect(insertTemplateTag(socketIo, 'socketio-arg:argument', '{{ payload }}', 'replace').socketIo.args[0].value).toBe('{{ payload }}');
+    expect(insertTemplateTag(socketIo, 'socketio-listener:listener', '.updated', 'append').socketIo.eventListeners[0].eventName).toBe('orders.updated');
+
+    const grpc = createBlankRequest('grpc-buf-tags');
+    grpc.protocol = 'grpc';
+    expect(templateTagDestinations(grpc).map((item) => item.id)).toEqual(expect.arrayContaining(['grpc:reflectionApiUrl', 'grpc:reflectionApiKey', 'grpc:reflectionApiModule']));
+    expect(insertTemplateTag(grpc, 'grpc:reflectionApiModule', '{{ module }}', 'replace').grpc.reflectionApiModule).toBe('{{ module }}');
   });
 });

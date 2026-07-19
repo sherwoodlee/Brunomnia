@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
-import type { StoredResponse } from '../types';
+import type { CookieRecord, StoredResponse } from '../types';
 import { fetchOAuth2Token, graphqlBody, sendRequest } from './http';
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -299,22 +299,44 @@ describe('native HTTP transport preferences', () => {
     ]);
   });
 
-  it('filters response template history to the active environment when enabled', async () => {
+  it('selects response template history from the active environment', async () => {
     tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
     const request = createBlankRequest('filtered-response-history');
     request.url = 'https://example.test/status';
-    request.headers = [{ id: 'history-header', name: 'X-History', value: "{% response 'body', 'source-request' %}", enabled: true }];
+    request.headers = [{ id: 'history-header', name: 'X-History', value: "{% response 'raw', 'source-request' %}", enabled: true }];
     const stored = (id: string, environmentId: string, body: string): StoredResponse => ({
       id, environmentId, body, requestId: 'source-request', requestName: 'Source', requestUrl: 'https://example.test/source', receivedAt: `2026-07-17T00:00:0${id}.000Z`, status: 200, statusText: 'OK', headers: {}, durationMs: 1, sizeBytes: body.length,
     });
 
     await sendRequest(request, { id: 'development', name: 'Development', variables: [] }, {
       responses: [stored('2', 'production', 'production-value'), stored('1', 'development', 'development-value')],
-      filterResponsesByEnv: true,
+      filterResponsesByEnv: false,
     });
 
     expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({
       input: expect.objectContaining({ headers: expect.arrayContaining([expect.objectContaining({ value: 'development-value' })]) }),
     }));
+  });
+
+  it('shares dependent response and cookie side effects with the parent send', async () => {
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2, setCookies: [], httpVersion: 'HTTP/1.1' });
+    const request = createBlankRequest('dependent-state');
+    request.url = 'https://example.test/parent';
+    request.headers = [{ id: 'dependency', name: 'X-Dependency', value: "{% response 'body', 'dependency', '$.id', 'always' %}", enabled: true }];
+    const resolveResponse = vi.fn(async (input: { cookies: CookieRecord[]; responses: StoredResponse[] }) => {
+      const stored: StoredResponse = { id: 'dependency-response', requestId: 'dependency', requestName: 'Dependency', requestUrl: 'https://example.test/dependency', environmentId: 'development', receivedAt: new Date().toISOString(), status: 200, statusText: 'OK', headers: {}, body: '{"id":"dep-1"}', durationMs: 1, sizeBytes: 14 };
+      input.responses.push(stored);
+      input.cookies.push({ id: 'dependent-cookie', name: 'session', value: 'shared', domain: 'example.test', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: new Date().toISOString() });
+      return stored;
+    });
+
+    await sendRequest(request, { id: 'development', name: 'Development', variables: [] }, { cookies: [], responses: [], resolveResponse });
+
+    expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({
+      headers: expect.arrayContaining([
+        expect.objectContaining({ name: 'X-Dependency', value: 'dep-1' }),
+        expect.objectContaining({ name: 'Cookie', value: 'session=shared' }),
+      ]),
+    }) }));
   });
 });

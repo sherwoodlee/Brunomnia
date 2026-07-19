@@ -9,7 +9,8 @@ import { decodeHttpResponseBody, responseBodyFromBytes, responseCharset } from '
 import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
 import { applyDefaultUserAgentHeader } from './userAgent';
 import { applyDefaultAcceptHeader } from './calculatedHeaders';
-import { renderApiRequest } from './requestRender';
+import { renderApiRequest, type RequestRenderContext } from './requestRender';
+import { clearTemplatePromptValuesForRequest } from './templates';
 
 export type SendRequestContext = {
   cookies?: CookieRecord[];
@@ -27,6 +28,10 @@ export type SendRequestContext = {
   vault?: Record<string, string>;
   externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
   readFile?: (path: string) => Promise<string>;
+  requestAncestors?: RequestRenderContext['requestAncestors'];
+  prompt?: RequestRenderContext['prompt'];
+  resolveResponse?: RequestRenderContext['resolveResponse'];
+  requestChain?: RequestRenderContext['requestChain'];
   skipOAuth2Acquisition?: boolean;
   onOAuth2Token?: (request: ApiRequest) => void;
   authorizeOAuth2?: (request: ApiRequest, environment: Environment | undefined) => Promise<ApiRequest['auth']>;
@@ -98,23 +103,28 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
       context.onOAuth2Token?.(hooked);
     }
   }
-  const renderContext = context.filterResponsesByEnv
-    ? { ...context, responses: (context.responses ?? []).filter((response) => response.environmentId === environment?.id) }
-    : context;
+  const renderContext = context;
   const prepared = await renderApiRequest(hooked, variables, {
     cookies: renderContext.cookies,
     responses: renderContext.responses,
+    environmentId: environment?.id,
     customTag: renderContext.pluginRuntime ? (name, args) => renderContext.pluginRuntime!.templateTag(name, args, hooked) : undefined,
     externalSecret: renderContext.externalSecret,
     readFile: renderContext.readFile,
+    requestAncestors: renderContext.requestAncestors,
+    renderPurpose: 'send',
+    prompt: renderContext.prompt,
+    resolveResponse: renderContext.resolveResponse,
+    requestChain: renderContext.requestChain,
   });
   const followRedirects = resolveFollowRedirects(prepared.transport, context.followRedirects ?? true);
   const timeoutMs = resolveRequestTimeout(prepared.transport, context.requestTimeoutMs ?? 30_000);
   const validateCertificates = resolveCertificateValidation(prepared.transport, context.validateCertificates ?? true);
   const graphqlPayload = prepared.protocol === 'graphql' ? graphqlBody(prepared, variables) : undefined;
-  const finish = async (response: HttpResponse) => context.pluginRuntime
-    ? context.pluginRuntime.afterResponse(prepared, response)
-    : response;
+  const finish = async (response: HttpResponse) => {
+    clearTemplatePromptValuesForRequest(request.id);
+    return context.pluginRuntime ? context.pluginRuntime.afterResponse(prepared, response) : response;
+  };
   let url = buildRequestUrl(prepared, variables);
   const proxy = resolveProxyTransport(prepared.transport, url, context.proxy);
   let headers = buildHeaders(prepared, variables);

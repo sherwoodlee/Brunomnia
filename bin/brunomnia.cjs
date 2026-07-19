@@ -7846,6 +7846,7 @@ var init_templates = __esm({
 // src/lib/requestRender.ts
 var init_requestRender = __esm({
   "src/lib/requestRender.ts"() {
+    init_request();
     init_templates();
   }
 });
@@ -7864,6 +7865,7 @@ var init_http = __esm({
     init_userAgent();
     init_calculatedHeaders();
     init_requestRender();
+    init_templates();
   }
 });
 

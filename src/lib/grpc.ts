@@ -1,9 +1,11 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import type { ApiRequest, Environment, GrpcSchema, StreamMessage, WorkspaceCertificates } from '../types';
+import type { SendRequestContext } from './http';
 import { applyWorkspaceCertificates } from './certificates';
 import { grpcProtoSource } from './grpcProto';
 import { environmentMap, resolveTemplate } from './request';
 import { resolveCertificateValidation, resolveRequestTimeout } from './transport';
+import { renderTemplate } from './templates';
 
 export type GrpcCallOutput = {
   status: string;
@@ -126,6 +128,47 @@ export const previewGrpcSchema = (protoText: string): GrpcSchema => {
 
 const mockGrpcSchema = (request: ApiRequest): GrpcSchema => previewGrpcSchema(grpcProtoSource(request.grpc));
 
+const renderGrpcRequest = async (request: ApiRequest, environment: Environment | undefined, context: SendRequestContext, renderPurpose: 'send' | 'preview' = 'send') => {
+  const variables = { ...environmentMap(environment), ...(context.vault ?? {}) };
+  const templateContext = {
+    variables,
+    cookies: context.cookies ?? [],
+    responses: context.responses ?? [],
+    environmentId: environment?.id,
+    request,
+    requestAncestors: context.requestAncestors,
+    renderPurpose,
+    prompt: context.prompt,
+    resolveResponse: context.resolveResponse,
+    requestChain: context.requestChain,
+    readFile: context.readFile,
+    externalSecret: context.externalSecret,
+    customTag: context.pluginRuntime ? (name: string, args: string[]) => context.pluginRuntime!.templateTag(name, args, request) : undefined,
+  };
+  const render = (value: string) => renderTemplate(value, templateContext);
+  return {
+    ...request,
+    url: await render(request.url),
+    grpc: {
+      ...request.grpc,
+      service: await render(request.grpc.service),
+      method: await render(request.grpc.method),
+      protoText: await render(request.grpc.protoText),
+      input: await render(request.grpc.input),
+      metadata: await Promise.all(request.grpc.metadata.map(async (item) => ({ ...item, name: await render(item.name), value: await render(item.value) }))),
+      reflectionApiUrl: await render(request.grpc.reflectionApiUrl),
+      reflectionApiKey: await render(request.grpc.reflectionApiKey),
+      reflectionApiModule: await render(request.grpc.reflectionApiModule),
+    },
+    transport: {
+      ...request.transport,
+      proxyUrl: await render(request.transport.proxyUrl),
+      proxyExclusions: await render(request.transport.proxyExclusions),
+      clientCertificateDomains: await render(request.transport.clientCertificateDomains),
+    },
+  };
+};
+
 const grpcCallInput = (
   request: ApiRequest,
   environment: Environment | undefined,
@@ -150,7 +193,8 @@ const grpcCallInput = (
   };
 };
 
-export const loadGrpcSchema = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000, validateCertificates = true, certificates?: WorkspaceCertificates): Promise<GrpcSchema> => {
+export const loadGrpcSchema = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000, validateCertificates = true, certificates?: WorkspaceCertificates, renderContext: SendRequestContext = {}): Promise<GrpcSchema> => {
+  request = await renderGrpcRequest(request, environment, renderContext);
   const variables = environmentMap(environment);
   const endpoint = resolveTemplate(request.url, variables);
   const reflectionApi = {
@@ -182,7 +226,8 @@ export const loadGrpcSchema = async (request: ApiRequest, environment?: Environm
   });
 };
 
-export const invokeGrpc = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000, validateCertificates = true, certificates?: WorkspaceCertificates): Promise<GrpcCallOutput> => {
+export const invokeGrpc = async (request: ApiRequest, environment?: Environment, requestTimeoutMs = 30_000, validateCertificates = true, certificates?: WorkspaceCertificates, renderContext: SendRequestContext = {}): Promise<GrpcCallOutput> => {
+  request = await renderGrpcRequest(request, environment, renderContext);
   if (!isTauri()) {
     await new Promise((resolve) => window.setTimeout(resolve, 420));
     return {
@@ -208,7 +253,9 @@ export const startGrpcSession = async (
   requestTimeoutMs = 30_000,
   validateCertificates = true,
   certificates?: WorkspaceCertificates,
+  renderContext: SendRequestContext = {},
 ): Promise<GrpcSessionStartOutput> => {
+  request = await renderGrpcRequest(request, environment, renderContext);
   const service = request.grpc.service;
   const method = request.grpc.method;
   if (!service || !method || !request.grpc.descriptorSetBase64) throw new Error('Load a gRPC schema and select a method first.');
@@ -249,8 +296,24 @@ export const startGrpcSession = async (
   };
 };
 
-export const sendGrpcSessionMessage = async (sessionId: string, messageJson: string, environment?: Environment) => {
-  const resolved = resolveTemplate(messageJson, environmentMap(environment));
+export const sendGrpcSessionMessage = async (sessionId: string, messageJson: string, environment?: Environment, request?: ApiRequest, renderContext: SendRequestContext = {}) => {
+  const resolved = request
+    ? await renderTemplate(messageJson, {
+      variables: { ...environmentMap(environment), ...(renderContext.vault ?? {}) },
+      cookies: renderContext.cookies ?? [],
+      responses: renderContext.responses ?? [],
+      environmentId: environment?.id,
+      request,
+      requestAncestors: renderContext.requestAncestors,
+      renderPurpose: 'send',
+      prompt: renderContext.prompt,
+      resolveResponse: renderContext.resolveResponse,
+      requestChain: renderContext.requestChain,
+      readFile: renderContext.readFile,
+      externalSecret: renderContext.externalSecret,
+      customTag: renderContext.pluginRuntime ? (name: string, args: string[]) => renderContext.pluginRuntime!.templateTag(name, args, request) : undefined,
+    })
+    : resolveTemplate(messageJson, environmentMap(environment));
   if (isTauri()) {
     await invoke('grpc_send_message', { sessionId, messageJson: resolved });
     return;

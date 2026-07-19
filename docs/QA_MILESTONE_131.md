@@ -4,6 +4,10 @@ Date: 2026-07-19 (America/Los_Angeles)
 
 Scope: close the pinned Cookies, chaining, and dynamic variables row with the exact Faker/JSONPath engines, confined File tags, full response-filter selectors, and guided request-field insertion.
 
+## Correction notice
+
+A deeper pinned-source audit after this record found that Milestone 131's `Complete` claim omitted custom date-fns timestamps, the full OS/hash/prompt/request/response contracts, and direct gRPC/realtime propagation. [Milestone 133](QA_MILESTONE_133.md) corrects those gaps and supersedes this record for the row's exact-completion evidence; the original gate results below remain the historical M131 results.
+
 ## Source audit
 
 - Kong/insomnia `develop` commit `5143b4103030f45293c67b96f4a780398c511d75` remains the pinned clean-room reference.
@@ -43,4 +47,4 @@ Rendered interaction QA is omitted by standing direction. No screenshot, DOM, co
 
 ## Acceptance boundary
 
-This milestone completes the pinned Cookies, chaining, and dynamic variables ledger row. File tags remain desktop-only under Brunomnia's explicit 5 MB approved-root bound. gRPC/stream execution and the portable CLI do not yet resolve external-vault or File tags. Existing unrelated `Baseline` and `Early baseline` rows remain; Brunomnia is not declared feature-complete.
+Milestone 131 established the exact Faker/JSONPath/File foundation but did not by itself complete every pinned local-tag behavior. Milestone 133 closes the audited omissions. File tags remain desktop-only under Brunomnia's explicit 5 MB approved-root bound, and the portable CLI does not resolve external-vault or File tags. Existing unrelated `Baseline` and `Early baseline` rows remain; Brunomnia is not declared feature-complete.

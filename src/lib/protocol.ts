@@ -15,6 +15,7 @@ import { cookieHeaderForUrl } from './cookies';
 import { isGraphqlSubscriptionRequest } from './graphql';
 import { graphqlBody } from './http';
 import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
+import { renderRealtimeConnectionRequest, renderRequestValue, type RequestSendRenderContext } from './requestRender';
 import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
 import { applyDefaultUserAgentHeader } from './userAgent';
 
@@ -102,11 +103,14 @@ export const connectStream = async (
   proxy?: ProxyPreferences,
   cookies: CookieRecord[] = [],
   certificates?: WorkspaceCertificates,
+  renderContext: RequestSendRenderContext = {},
 ): Promise<StreamConnectionMetadata> => {
   if (request.protocol === 'socketio') {
     const { connectSocketIo } = await import('./socketIo');
-    return connectSocketIo(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies, certificates);
+    return connectSocketIo(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies, certificates, renderContext);
   }
+  request = await renderRealtimeConnectionRequest(request, environment, renderContext);
+  const requestCookies = renderContext.cookies ?? cookies;
   const variables = environmentMap(environment);
   const graphqlSubscription = isGraphqlSubscriptionRequest(request);
   if (request.protocol === 'graphql' && !graphqlSubscription) throw new Error('Only GraphQL subscription operations use the streaming transport.');
@@ -118,8 +122,8 @@ export const connectStream = async (
   }
   const url = graphqlSubscription ? graphqlSubscriptionUrl(resolvedUrl) : resolvedUrl;
   const headers = graphqlSubscription
-    ? graphqlSubscriptionHeaders(streamHeaders(request, environment, url, cookies))
-    : streamHeaders(request, environment, url, cookies);
+    ? graphqlSubscriptionHeaders(streamHeaders(request, environment, url, requestCookies))
+    : streamHeaders(request, environment, url, requestCookies);
   const input = {
     sessionId,
     url,
@@ -209,8 +213,10 @@ export const runStreamSample = async (
   proxy?: ProxyPreferences,
   cookies: CookieRecord[] = [],
   certificates?: WorkspaceCertificates,
+  renderContext: RequestSendRenderContext = {},
 ): Promise<HttpResponse> => {
   if (!isStreamingRequest(request)) throw new Error('Stream sampling only supports WebSocket, Socket.IO, SSE, and GraphQL subscription requests.');
+  const preparedRequest = await renderRealtimeConnectionRequest(request, environment, renderContext);
   const sessionId = `runner-stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   const messages: StreamMessage[] = [];
   let resolveIncoming: (() => void) | undefined;
@@ -220,12 +226,15 @@ export const runStreamSample = async (
     messages.push(message);
     if (message.direction === 'incoming' && (request.protocol !== 'graphql' || message.kind === 'next' || message.kind === 'error' || message.kind === 'complete')) resolveIncoming?.();
   };
-  await connectStream(request, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies, certificates);
+  await connectStream(preparedRequest, environment, sessionId, onEvent, preferredHttpVersion, maxRedirects, followRedirects, requestTimeoutMs, validateCertificates, proxy, cookies, certificates);
   try {
-    const variables = environmentMap(environment);
-    const startupFrame = resolveTemplate(request.body, variables);
-    if (request.protocol === 'websocket' && startupFrame.trim()) await sendWebSocketMessage(sessionId, startupFrame, 'text', onEvent);
-    if (request.protocol === 'socketio') await (await import('./socketIo')).sendSocketIoMessage(request, environment, sessionId, onEvent);
+    if (preparedRequest.protocol === 'websocket') {
+      const startupFrame = request.renderBodyTemplates !== false
+        ? await renderRequestValue(request.body, request, environment, renderContext)
+        : request.body;
+      if (startupFrame.trim()) await sendWebSocketMessage(sessionId, startupFrame, 'text', onEvent);
+    }
+    if (preparedRequest.protocol === 'socketio') await (await import('./socketIo')).sendSocketIoMessage(request, environment, sessionId, onEvent, renderContext);
     await Promise.race([
       firstIncoming,
       new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(100, Math.min(30_000, windowMs)))),
@@ -235,12 +244,12 @@ export const runStreamSample = async (
   }
   const body = JSON.stringify(messages.map(({ direction, kind, text, timestamp }) => ({ direction, kind, text, timestamp })), null, 2);
   return {
-    status: request.protocol === 'sse' ? 200 : 101,
-    statusText: request.protocol === 'websocket' ? 'WebSocket sample' : request.protocol === 'socketio' ? 'Socket.IO sample' : request.protocol === 'graphql' ? 'GraphQL subscription sample' : 'SSE sample',
+    status: preparedRequest.protocol === 'sse' ? 200 : 101,
+    statusText: preparedRequest.protocol === 'websocket' ? 'WebSocket sample' : preparedRequest.protocol === 'socketio' ? 'Socket.IO sample' : preparedRequest.protocol === 'graphql' ? 'GraphQL subscription sample' : 'SSE sample',
     headers: { 'content-type': 'application/json', 'x-brunomnia-stream-events': String(messages.length) },
     body,
     durationMs: Math.round(performance.now() - started),
     sizeBytes: new Blob([body]).size,
-    requestUrl: resolveTemplate(request.url, environmentMap(environment)),
+    requestUrl: buildRequestUrl(preparedRequest, environmentMap(environment)),
   };
 };

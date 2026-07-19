@@ -306,6 +306,12 @@ export const applyCollectionConfiguration = (collection: Collection, request: Ap
   };
 };
 
+export const requestAncestorNames = (collections: Collection[], request: ApiRequest): string[] => {
+  const collection = collections.find((candidate) => candidate.requests.some((item) => item.id === request.id));
+  if (!collection) return [];
+  return [...folderAncestors(collection, request.folderId)].reverse().map((folder) => folder.name).concat(collection.name);
+};
+
 export const persistEffectiveAuthentication = (
   collection: Collection,
   requestId: string,

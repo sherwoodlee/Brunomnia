@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { cancelGrpcSession, commitGrpcSession, formatGrpcError, grpcConnectionErrorDetails, loadGrpcSchema, sendGrpcSessionMessage, startGrpcSession } from './grpc';
+import { cancelGrpcSession, commitGrpcSession, formatGrpcError, grpcConnectionErrorDetails, invokeGrpc, loadGrpcSchema, sendGrpcSessionMessage, startGrpcSession } from './grpc';
 
 const tauri = vi.hoisted(() => ({ channels: [] as Array<{ onmessage?: (message: unknown) => void }>, invoke: vi.fn() }));
 
@@ -152,6 +152,59 @@ describe('gRPC schema loading', () => {
       ['grpc_commit_session', { sessionId: 'session-2' }],
       ['grpc_cancel_session', { sessionId: 'session-2' }],
     ]);
+  });
+
+  it('renders local tags in schema, call, and session-message fields', async () => {
+    const request = createBlankRequest('grpc-local-tags');
+    request.protocol = 'grpc';
+    request.url = "grpcs://{% base64 'encode', 'host' %}:50051";
+    request.grpc.descriptorSource = 'proto';
+    request.grpc.protoText = "message {% base64 'encode', 'Name' %} {}";
+    request.grpc.service = "{% base64 'encode', 'Service' %}";
+    request.grpc.method = "{% base64 'encode', 'Method' %}";
+    request.grpc.descriptorSetBase64 = 'descriptor';
+    request.grpc.input = "{\"digest\":\"{% hash 'md5', 'hex', 'hello' %}\"}";
+    request.grpc.metadata = [{ id: 'metadata', name: 'x-digest', value: "{% hash 'md5', 'hex', 'metadata' %}", enabled: true }];
+
+    await loadGrpcSchema(request);
+    await invokeGrpc(request);
+    await sendGrpcSessionMessage('session-tags', "{\"digest\":\"{% hash 'md5', 'hex', 'message' %}\"}", undefined, request);
+
+    expect(tauri.invoke.mock.calls[0]).toEqual(['grpc_load_schema', { input: expect.objectContaining({
+      endpoint: 'grpcs://aG9zdA==:50051',
+      protoText: 'message TmFtZQ== {}',
+      metadata: [expect.objectContaining({ value: '9f81f3c07476a0d97f6793673dd8e475' })],
+    }) }]);
+    expect(tauri.invoke.mock.calls[1]).toEqual(['send_grpc_request', { input: expect.objectContaining({
+      service: 'U2VydmljZQ==',
+      method: 'TWV0aG9k',
+      messagesJson: '{"digest":"5d41402abc4b2a76b9719d911017c592"}',
+    }) }]);
+    expect(tauri.invoke.mock.calls[2]).toEqual(['grpc_send_message', {
+      sessionId: 'session-tags',
+      messageJson: '{"digest":"78e731027d8fd50ed642340b7c9a63b3"}',
+    }]);
+  });
+
+  it('renders granted custom tags for schema and interactive messages without hooks', async () => {
+    const request = createBlankRequest('grpc-plugin-tags');
+    request.protocol = 'grpc';
+    request.url = "grpcs://{% plugin_value 'host' %}:50051";
+    const beforeRequest = vi.fn();
+    const afterResponse = vi.fn();
+    const pluginRuntime = {
+      beforeRequest,
+      afterResponse,
+      templateTag: vi.fn(async (_name: string, args: string[]) => `plugin-${args[0]}`),
+    };
+
+    await loadGrpcSchema(request, undefined, 30_000, true, undefined, { pluginRuntime });
+    await sendGrpcSessionMessage('grpc-plugin-message', "{\"value\":\"{% plugin_value 'message' %}\"}", undefined, request, { pluginRuntime });
+
+    expect(tauri.invoke.mock.calls[0]?.[1].input.endpoint).toBe('grpcs://plugin-host:50051');
+    expect(tauri.invoke).toHaveBeenLastCalledWith('grpc_send_message', { sessionId: 'grpc-plugin-message', messageJson: '{"value":"plugin-message"}' });
+    expect(beforeRequest).not.toHaveBeenCalled();
+    expect(afterResponse).not.toHaveBeenCalled();
   });
 });
 

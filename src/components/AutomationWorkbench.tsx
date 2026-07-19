@@ -15,11 +15,11 @@ import type {
 import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
 import { parseRunnerData, runCollection } from '../lib/runner';
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
-import { persistEffectiveAuthentication, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
+import { applyCollectionConfiguration, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
 import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
 import { readDesktopScriptFile, readDesktopTemplateFile } from '../lib/scriptFiles';
 import { storeResponseCookies } from '../lib/cookies';
-import { sendRequest as sendHttpRequest } from '../lib/http';
+import { sendRequest as sendHttpRequest, type SendRequestContext } from '../lib/http';
 import { createPluginRuntime, type PluginHostCallbacks, type PluginRunState } from '../lib/plugins';
 import { startMockServer, stopMockServer, updateMockServer, type RunningMock } from '../lib/mock';
 import { isStreamingRequest, runStreamSample } from '../lib/protocol';
@@ -45,6 +45,7 @@ type AutomationWorkbenchProps = {
   focusedMock?: { serverId: string; routeId: string };
   onStartMock: (serverId: string, runningMock: RunningMock) => void;
   onStopMock: (serverId: string) => void;
+  templatePrompt: SendRequestContext['prompt'];
 };
 
 const workspaceProxyPreferences = (workspace: Workspace) => ({
@@ -132,12 +133,14 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection }: Aut
   );
 }
 
-function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace }: AutomationWorkbenchProps) {
+function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, templatePrompt }: AutomationWorkbenchProps) {
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
     certificates: workspace.certificates,
+    prompt: templatePrompt,
     readFile: workspace.preferences.allowScriptFileAccess && isTauri()
       ? (path) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)
       : undefined,
+    requestAncestors: requestAncestorNames(workspace.collections, request),
     ...context,
   });
   const [collectionId, setCollectionId] = useState(workspace.collections[0]?.id ?? '');
@@ -266,9 +269,45 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           }
         }
       };
+      let resolveResponse: NonNullable<SendRequestContext['resolveResponse']>;
+      resolveResponse = async ({ requestId, requestChain, cookies, responses }) => {
+        const dependencyCollection = workspace.collections.find((candidate) => candidate.requests.some((request) => request.id === requestId || request.name === requestId));
+        const dependency = dependencyCollection?.requests.find((request) => request.id === requestId || request.name === requestId);
+        if (!dependencyCollection || !dependency) throw new Error(`Could not find request ${requestId}`);
+        const configured = applyCollectionConfiguration(dependencyCollection, dependency, environment);
+        const result = await sendRequest(configured.request, configured.environment, {
+          cookies,
+          responses,
+          preferredHttpVersion: workspace.preferences.preferredHttpVersion,
+          maxRedirects: workspace.preferences.maxRedirects,
+          followRedirects: workspace.preferences.followRedirects,
+          requestTimeoutMs: workspace.preferences.requestTimeoutMs,
+          validateCertificates: workspace.preferences.validateCertificates,
+          validateAuthCertificates: workspace.preferences.validateAuthCertificates,
+          proxy: workspaceProxyPreferences(workspace),
+          maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
+          filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
+          vault,
+          externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input),
+          authorizeOAuth2,
+          requestChain: [...new Set([...requestChain, dependency.id])],
+          resolveResponse,
+        });
+        const requestUrl = result.requestUrl ?? configured.request.url;
+        if (configured.request.transport.storeCookies) {
+          const updatedCookies = storeResponseCookies(cookies, requestUrl, result.setCookies ?? []);
+          cookies.splice(0, cookies.length, ...updatedCookies);
+        }
+        const stored = { ...result, id: uid('response'), requestId: dependency.id, requestName: dependency.name, requestUrl, environmentId: configured.environment.id, receivedAt: new Date().toISOString(), requestSnapshot: createRequestSnapshot(dependency) };
+        const updatedResponses = retainResponseHistory(responses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
+        responses.splice(0, responses.length, ...updatedResponses);
+        runnerCookies = cookies;
+        runnerResponses = responses;
+        return stored;
+      };
       const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
       const pluginCallbacks: PluginHostCallbacks = {
-        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, authorizeOAuth2 }),
+        network: (pluginRequest) => sendRequest(pluginRequest, environment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, authorizeOAuth2, resolveResponse }),
         prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
         readClipboard: () => navigator.clipboard.readText(),
         writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -283,8 +322,21 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
           variables: Object.entries(variables).map(([name, value]) => ({ id: `runner-${name}`, name, value, enabled: true })),
         };
         const result = isStreamingRequest(request)
-          ? await runStreamSample(request, requestEnvironment, streamWindowMs, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspaceProxyPreferences(workspace), runnerCookies, workspace.certificates)
-          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input), authorizeOAuth2, onOAuth2Token: (updated) => onChangeWorkspace((current) => ({ ...current, collections: current.collections.map((candidate) => candidate.id === collection.id ? persistEffectiveAuthentication(candidate, request.id, updated.auth) : candidate) })) });
+          ? await runStreamSample(request, requestEnvironment, streamWindowMs, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspaceProxyPreferences(workspace), runnerCookies, workspace.certificates, {
+            cookies: runnerCookies,
+            responses: runnerResponses,
+            filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
+            vault,
+            externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input),
+            readFile: workspace.preferences.allowScriptFileAccess && isTauri()
+              ? (path) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)
+              : undefined,
+            requestAncestors: requestAncestorNames(workspace.collections, request),
+            prompt: templatePrompt,
+            resolveResponse,
+            pluginRuntime,
+          })
+          : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input), authorizeOAuth2, resolveResponse, onOAuth2Token: (updated) => onChangeWorkspace((current) => ({ ...current, collections: current.collections.map((candidate) => candidate.id === collection.id ? persistEffectiveAuthentication(candidate, request.id, updated.auth) : candidate) })) });
         const requestUrl = result.requestUrl ?? request.url;
         if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
         const stored = { ...result, id: uid('response'), requestId: request.id, requestName: request.name, requestUrl, environmentId: environment.id, receivedAt: new Date().toISOString(), requestSnapshot: createRequestSnapshot(request) };
@@ -314,6 +366,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
             filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
             vault: workspace.preferences.enableVaultInScripts ? vault : {},
             authorizeOAuth2,
+            resolveResponse,
           });
           const state = applyScriptSubresponse(runnerCookies, runnerResponses, subrequest, subresponse, undefined, environment.id, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
           runnerCookies = state.cookies;
@@ -368,12 +421,14 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   );
 }
 
-function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, runningMocks, focusedMock, onStartMock, onStopMock }: AutomationWorkbenchProps) {
+function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, runningMocks, focusedMock, onStartMock, onStopMock, templatePrompt }: AutomationWorkbenchProps) {
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
     certificates: workspace.certificates,
+    prompt: templatePrompt,
     readFile: workspace.preferences.allowScriptFileAccess && isTauri()
       ? (path) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)
       : undefined,
+    requestAncestors: requestAncestorNames(workspace.collections, request),
     ...context,
   });
   const [activeId, setActiveId] = useState(workspace.mockServers[0]?.id ?? '');

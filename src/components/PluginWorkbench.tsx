@@ -1,6 +1,6 @@
 import { isTauri } from '@tauri-apps/api/core';
 import { useEffect, useMemo, useState } from 'react';
-import { sendRequest as sendHttpRequest } from '../lib/http';
+import { sendRequest as sendHttpRequest, type SendRequestContext } from '../lib/http';
 import {
   applyPluginTheme,
   describePlugin,
@@ -16,12 +16,16 @@ import {
 } from '../lib/plugins';
 import { readLocalPluginSource } from '../lib/project';
 import { readDesktopTemplateFile } from '../lib/scriptFiles';
+import { applyCollectionConfiguration, requestAncestorNames, resolveEnvironment } from '../lib/resources';
+import { storeResponseCookies } from '../lib/cookies';
+import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
 import type { PluginPermission, PluginRecord, Workspace } from '../types';
 import { Icon } from './Icon';
 
 type PluginWorkbenchProps = {
   workspace: Workspace;
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
+  templatePrompt: SendRequestContext['prompt'];
 };
 
 const blankDescriptor: PluginDescriptor = { templates: [], actions: [], themes: [] };
@@ -31,12 +35,14 @@ const activeRequest = (workspace: Workspace) => workspace.collections
   .flatMap((collection) => collection.requests)
   .find((request) => request.id === workspace.activeRequestId);
 
-export function PluginWorkbench({ workspace, onChangeWorkspace }: PluginWorkbenchProps) {
+export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }: PluginWorkbenchProps) {
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
     certificates: workspace.certificates,
+    prompt: templatePrompt,
     readFile: workspace.preferences.allowScriptFileAccess && isTauri()
       ? (path) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)
       : undefined,
+    requestAncestors: requestAncestorNames(workspace.collections, request),
     ...context,
   });
   const [selectedId, setSelectedId] = useState(workspace.plugins[0]?.id ?? '');
@@ -89,6 +95,46 @@ export function PluginWorkbench({ workspace, onChangeWorkspace }: PluginWorkbenc
     return () => { cancelled = true; };
   }, [selected]);
 
+  let resolveResponse: NonNullable<SendRequestContext['resolveResponse']>;
+  resolveResponse = async ({ requestId, requestChain, cookies, responses }) => {
+    const dependencyCollection = workspace.collections.find((candidate) => candidate.requests.some((item) => item.id === requestId || item.name === requestId));
+    const dependency = dependencyCollection?.requests.find((item) => item.id === requestId || item.name === requestId);
+    const selectedEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
+    const environment = selectedEnvironment ? resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment : undefined;
+    if (!dependencyCollection || !dependency) throw new Error(`Could not find request ${requestId}`);
+    if (!environment) throw new Error('Select an environment before resending a dependent request.');
+    const configured = applyCollectionConfiguration(dependencyCollection, dependency, environment);
+    const result = await sendRequest(configured.request, configured.environment, {
+      cookies,
+      responses,
+      preferredHttpVersion: workspace.preferences.preferredHttpVersion,
+      maxRedirects: workspace.preferences.maxRedirects,
+      followRedirects: workspace.preferences.followRedirects,
+      requestTimeoutMs: workspace.preferences.requestTimeoutMs,
+      validateCertificates: workspace.preferences.validateCertificates,
+      validateAuthCertificates: workspace.preferences.validateAuthCertificates,
+      proxy: proxyPreferences,
+      maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
+      filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
+      requestChain: [...new Set([...requestChain, dependency.id])],
+      resolveResponse,
+    });
+    const requestUrl = result.requestUrl ?? configured.request.url;
+    const stored = { ...result, id: `response-${crypto.randomUUID()}`, requestId: dependency.id, requestName: dependency.name, requestUrl, environmentId: configured.environment.id, receivedAt: new Date().toISOString(), requestSnapshot: createRequestSnapshot(dependency) };
+    if (configured.request.transport.storeCookies) {
+      const updatedCookies = storeResponseCookies(cookies, requestUrl, result.setCookies ?? []);
+      cookies.splice(0, cookies.length, ...updatedCookies);
+    }
+    const updatedResponses = retainResponseHistory(responses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
+    responses.splice(0, responses.length, ...updatedResponses);
+    onChangeWorkspace((current) => ({
+      ...current,
+      cookies: configured.request.transport.storeCookies ? [...cookies] : current.cookies,
+      responses: [...responses],
+    }));
+    return stored;
+  };
+
   const install = () => run('Reviewing plugin', async () => {
     validatePluginSource(installSource);
     const id = uid();
@@ -118,8 +164,8 @@ export function PluginWorkbench({ workspace, onChangeWorkspace }: PluginWorkbenc
 
   const callbacks: PluginHostCallbacks = {
     network: async (pluginRequest) => sendRequest(pluginRequest, workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId), {
-      cookies: workspace.cookies,
-      responses: workspace.responses,
+      cookies: [...workspace.cookies],
+      responses: [...workspace.responses],
       preferredHttpVersion: workspace.preferences.preferredHttpVersion,
       maxRedirects: workspace.preferences.maxRedirects,
       followRedirects: workspace.preferences.followRedirects,
@@ -129,6 +175,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace }: PluginWorkbenc
       proxy: proxyPreferences,
       maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
       filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
+      resolveResponse,
     }),
     prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
     readClipboard: async () => navigator.clipboard.readText(),

@@ -1,6 +1,6 @@
 import type { ApiRequest, AuthConfig, KeyValue } from '../types';
 
-export type TemplateTagKind = 'environment' | 'faker' | 'uuid' | 'now' | 'base64' | 'hash' | 'jsonpath' | 'cookie' | 'response' | 'request' | 'prompt' | 'file' | 'external';
+export type TemplateTagKind = 'environment' | 'faker' | 'uuid' | 'now' | 'os' | 'base64' | 'hash' | 'jsonpath' | 'cookie' | 'response' | 'request' | 'prompt' | 'file' | 'external';
 export type TemplateTagInsertMode = 'append' | 'replace';
 export type TemplateTagDestination = { id: string; label: string };
 
@@ -11,14 +11,15 @@ export const buildTemplateTag = (kind: TemplateTagKind, values: Record<string, s
   if (kind === 'environment') return `{{ ${values.name.trim()} }}`;
   if (kind === 'faker') return `{{ faker.${values.name || 'randomUUID'} }}`;
   if (kind === 'uuid') return tag('uuid', [values.version || 'v4']);
-  if (kind === 'now') return tag('now', [values.format || 'iso-8601']);
+  if (kind === 'now') return tag('now', [values.format || 'iso-8601', values.formatTemplate || '']);
+  if (kind === 'os') return tag('os', [values.function || 'arch', values.path || '']);
   if (kind === 'base64') return tag('base64', [values.operation || 'encode', values.encoding || 'normal', values.value || '']);
   if (kind === 'hash') return tag('hash', [values.algorithm || 'sha256', values.output || 'hex', values.value || '']);
   if (kind === 'jsonpath') return tag('jsonpath', [values.value || '{}', values.path || '$']);
   if (kind === 'cookie') return values.url ? tag('cookie', [values.url, values.name || '']) : tag('cookie', [values.name || '']);
-  if (kind === 'response') return tag('response', [values.attribute || 'body', values.request || '', values.path || '']);
-  if (kind === 'request') return tag('request', [values.attribute || 'url']);
-  if (kind === 'prompt') return tag('prompt', [values.message || 'Enter a value', values.value || '']);
+  if (kind === 'response') return tag('response', [values.attribute || 'body', values.request || '', values.path || '', values.resendBehavior || 'never', values.maxAge || '60']);
+  if (kind === 'request') return tag('request', [values.attribute || 'url', values.name || '', values.folderIndex || '0']);
+  if (kind === 'prompt') return tag('prompt', [values.title || '', values.label || '', values.value || '', values.storageKey || '', values.maskText || 'false', values.saveLastValue || 'true']);
   if (kind === 'file') return tag('file', [values.path || '']);
   return tag('external', [values.provider || 'aws', values.reference || '', values.scope || '', values.field || '', values.version || '']);
 };
@@ -50,7 +51,7 @@ export const templateTagDestinations = (request: ApiRequest): TemplateTagDestina
   { id: 'name', label: 'Request name' },
   { id: 'url', label: 'Request URL' },
   ...(request.protocol === 'graphql' ? [{ id: 'graphql:variables', label: 'GraphQL variables' }] : []),
-  ...(request.protocol === 'http' && (request.bodyMode === 'json' || request.bodyMode === 'text') ? [{ id: 'body', label: 'Request body' }] : []),
+  ...((request.protocol === 'http' && (request.bodyMode === 'json' || request.bodyMode === 'text')) || request.protocol === 'websocket' ? [{ id: 'body', label: request.protocol === 'websocket' ? 'WebSocket message' : 'Request body' }] : []),
   ...rowDestinations('path', 'Path parameter', request.pathParams),
   ...rowDestinations('query', 'Query parameter', request.params),
   ...rowDestinations('header', 'Header', request.headers),
@@ -68,11 +69,20 @@ export const templateTagDestinations = (request: ApiRequest): TemplateTagDestina
   { id: 'transport:proxyUrl', label: 'Transport · proxy URL' },
   { id: 'transport:proxyExclusions', label: 'Transport · proxy exclusions' },
   { id: 'transport:clientCertificateDomains', label: 'Transport · client certificate domains' },
+  ...(request.protocol === 'socketio' ? [
+    { id: 'socketio:path', label: 'Socket.IO path' },
+    { id: 'socketio:eventName', label: 'Socket.IO event name' },
+    ...request.socketIo.args.map((arg, index) => ({ id: `socketio-arg:${arg.id}`, label: `Socket.IO argument ${index + 1}` })),
+    ...request.socketIo.eventListeners.map((listener, index) => ({ id: `socketio-listener:${listener.id}`, label: `Socket.IO listener ${index + 1}` })),
+  ] : []),
   ...(request.protocol === 'grpc' ? [
     { id: 'grpc:service', label: 'gRPC service' },
     { id: 'grpc:method', label: 'gRPC method' },
     { id: 'grpc:protoText', label: 'gRPC proto source' },
     { id: 'grpc:input', label: 'gRPC input' },
+    { id: 'grpc:reflectionApiUrl', label: 'gRPC Buf registry URL' },
+    { id: 'grpc:reflectionApiKey', label: 'gRPC Buf registry API key' },
+    { id: 'grpc:reflectionApiModule', label: 'gRPC Buf registry module' },
     ...rowDestinations('grpc-metadata', 'gRPC metadata', request.grpc.metadata),
   ] : []),
 ];
@@ -118,8 +128,20 @@ export const insertTemplateTag = (
     const field = id as 'proxyUrl' | 'proxyExclusions' | 'clientCertificateDomains';
     return { ...request, transport: { ...request.transport, [field]: inserted(request.transport[field], value, mode) } };
   }
-  if (kind === 'grpc' && ['service', 'method', 'protoText', 'input'].includes(id)) {
-    const field = id as 'service' | 'method' | 'protoText' | 'input';
+  if (kind === 'socketio' && ['path', 'eventName'].includes(id)) {
+    const field = id as 'path' | 'eventName';
+    return { ...request, socketIo: { ...request.socketIo, [field]: inserted(request.socketIo[field], value, mode) } };
+  }
+  if (kind === 'socketio-arg') {
+    if (!request.socketIo.args.some((arg) => arg.id === id)) throw new Error(`Template tag destination '${destination}' is no longer available.`);
+    return { ...request, socketIo: { ...request.socketIo, args: request.socketIo.args.map((arg) => arg.id === id ? { ...arg, value: inserted(arg.value, value, mode) } : arg) } };
+  }
+  if (kind === 'socketio-listener') {
+    if (!request.socketIo.eventListeners.some((listener) => listener.id === id)) throw new Error(`Template tag destination '${destination}' is no longer available.`);
+    return { ...request, socketIo: { ...request.socketIo, eventListeners: request.socketIo.eventListeners.map((listener) => listener.id === id ? { ...listener, eventName: inserted(listener.eventName, value, mode) } : listener) } };
+  }
+  if (kind === 'grpc' && ['service', 'method', 'protoText', 'input', 'reflectionApiUrl', 'reflectionApiKey', 'reflectionApiModule'].includes(id)) {
+    const field = id as 'service' | 'method' | 'protoText' | 'input' | 'reflectionApiUrl' | 'reflectionApiKey' | 'reflectionApiModule';
     return { ...request, grpc: { ...request.grpc, [field]: inserted(request.grpc[field], value, mode) } };
   }
   if (kind === 'grpc-metadata' || kind === 'grpc-metadata-name') return { ...request, grpc: { ...request.grpc, metadata: updateRows(request.grpc.metadata, id, kind.endsWith('-name') ? 'name' : 'value', value, mode, destination) } };

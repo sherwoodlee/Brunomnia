@@ -12,6 +12,7 @@ mod plugin;
 mod project;
 mod secure_store;
 mod streaming;
+mod template_os;
 mod workspace_store;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -170,6 +171,11 @@ fn workspace_catalog_restore_backup(
 #[tauri::command]
 async fn send_http_request(input: HttpRequestInput) -> Result<HttpResponseOutput, String> {
     http_client::send(input).await
+}
+
+#[tauri::command]
+fn template_os_info() -> Value {
+    template_os::info()
 }
 
 #[tauri::command]
@@ -765,6 +771,7 @@ pub fn run() {
             workspace_catalog_list_trash,
             workspace_catalog_restore_trash,
             workspace_catalog_restore_backup,
+            template_os_info,
             send_http_request,
             oauth2_authorize,
             oauth2_cancel,

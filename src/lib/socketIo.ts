@@ -3,6 +3,7 @@ import type { ApiRequest, CookieRecord, Environment, KeyValue, PreferredHttpVers
 import { cookieHeaderForUrl } from './cookies';
 import { streamTransportConfig } from './protocol';
 import { buildHeaders, buildRequestUrl, environmentMap, resolveTemplate } from './request';
+import { renderRealtimeConnectionRequest, renderRequestValue, type RequestSendRenderContext } from './requestRender';
 import type { ProxyPreferences } from './transport';
 import { applyDefaultUserAgentHeader } from './userAgent';
 
@@ -41,7 +42,10 @@ export const connectSocketIo = async (
   proxy?: ProxyPreferences,
   cookies: CookieRecord[] = [],
   certificates?: WorkspaceCertificates,
+  renderContext: RequestSendRenderContext = {},
 ): Promise<StreamConnectionMetadata> => {
+  request = await renderRealtimeConnectionRequest(request, environment, renderContext);
+  cookies = renderContext.cookies ?? cookies;
   const variables = environmentMap(environment);
   const url = buildRequestUrl(request, variables);
   let headers = resolvedHeaders(request, environment);
@@ -113,10 +117,16 @@ export const sendSocketIoMessage = async (
   environment: Environment | undefined,
   sessionId: string,
   onEvent: (message: StreamMessage) => void,
+  renderContext: RequestSendRenderContext = {},
 ) => {
-  const variables = environmentMap(environment);
-  const eventName = resolveTemplate(request.socketIo.eventName, variables).trim() || 'message';
-  const args = socketIoArgs(request, environment);
+  const eventName = (await renderRequestValue(request.socketIo.eventName, request, environment, renderContext)).trim() || 'message';
+  const args = await Promise.all(request.socketIo.args.slice(0, 100).map(async (arg) => {
+    const value = await renderRequestValue(arg.value, request, environment, renderContext);
+    if (arg.mode === 'json') {
+      try { return JSON.parse(value); } catch { return value; }
+    }
+    return value;
+  }));
   if (isTauri()) {
     await invoke('send_socket_io_message', { sessionId, eventName, args, ack: request.socketIo.ack });
   } else {

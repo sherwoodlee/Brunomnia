@@ -86,12 +86,14 @@ export type ClientCodeSnippet = {
 export type ClientCodeGenerationContext = {
   cookies?: CookieRecord[];
   responses?: StoredResponse[];
+  environmentId?: string;
   pluginRuntime?: {
     beforeRequest: (request: ApiRequest) => Promise<ApiRequest>;
     templateTag: (name: string, args: string[], request: ApiRequest) => Promise<string | undefined>;
   };
   externalSecret?: RequestRenderContext['externalSecret'];
   readFile?: RequestRenderContext['readFile'];
+  requestAncestors?: RequestRenderContext['requestAncestors'];
 };
 
 type MaterializedRequest = {
@@ -999,9 +1001,12 @@ export const generateClientCodeWithAuth = async (
   const rendered = await renderApiRequest(request, variables, {
     cookies: context.cookies,
     responses: context.responses,
+    environmentId: context.environmentId,
     customTag: context.pluginRuntime ? (name, args) => context.pluginRuntime!.templateTag(name, args, request) : undefined,
     externalSecret: context.externalSecret,
     readFile: context.readFile,
+    requestAncestors: context.requestAncestors,
+    renderPurpose: 'preview',
   });
   const effectiveRequest = context.pluginRuntime ? await context.pluginRuntime.beforeRequest(rendered) : rendered;
   const prepared = withCookieJar(materialize(effectiveRequest, {}), effectiveRequest, context.cookies);

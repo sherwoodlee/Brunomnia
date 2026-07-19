@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ApiRequest, CookieRecord, StoredResponse } from '../types';
 import { fakerFunctionNames } from '../lib/faker';
 import { buildTemplateTag, insertTemplateTag, templateTagDestinations, type TemplateTagInsertMode, type TemplateTagKind } from '../lib/templateTagBuilder';
+import { clearTemplatePromptValues } from '../lib/templates';
 import { Icon } from './Icon';
 
 type TemplateTagDialogProps = {
@@ -18,6 +19,7 @@ const kinds: Array<{ id: TemplateTagKind; label: string }> = [
   { id: 'faker', label: 'Faker value' },
   { id: 'uuid', label: 'UUID' },
   { id: 'now', label: 'Timestamp' },
+  { id: 'os', label: 'Operating system' },
   { id: 'base64', label: 'Base64' },
   { id: 'hash', label: 'Hash' },
   { id: 'jsonpath', label: 'JSONPath' },
@@ -33,14 +35,15 @@ const defaultsForKind = (kind: TemplateTagKind): Record<string, string> => {
   if (kind === 'environment') return { name: '' };
   if (kind === 'faker') return { name: 'randomUUID' };
   if (kind === 'uuid') return { version: 'v4' };
-  if (kind === 'now') return { format: 'iso-8601' };
+  if (kind === 'now') return { format: 'iso-8601', formatTemplate: '' };
+  if (kind === 'os') return { function: 'arch', path: '' };
   if (kind === 'base64') return { encoding: 'normal', operation: 'encode', value: '' };
   if (kind === 'hash') return { algorithm: 'sha256', output: 'hex', value: '' };
   if (kind === 'jsonpath') return { path: '$', value: '' };
   if (kind === 'cookie') return { name: '', url: '' };
-  if (kind === 'response') return { attribute: 'body', path: '', request: '' };
-  if (kind === 'request') return { attribute: 'url' };
-  if (kind === 'prompt') return { message: '', value: '' };
+  if (kind === 'response') return { attribute: 'body', maxAge: '60', path: '', request: '', resendBehavior: 'never' };
+  if (kind === 'request') return { attribute: 'url', folderIndex: '0', name: '' };
+  if (kind === 'prompt') return { label: '', maskText: 'false', saveLastValue: 'true', storageKey: '', title: '', value: '' };
   if (kind === 'file') return { path: '' };
   return { field: '', provider: 'aws', reference: '', scope: '', version: '' };
 };
@@ -54,6 +57,7 @@ export function TemplateTagDialog({ cookies, request, responses, variableNames, 
   const valid = (kind !== 'environment' || Boolean(values.name.trim()))
     && (kind !== 'cookie' || Boolean(values.name.trim()))
     && (kind !== 'response' || Boolean(values.request?.trim()))
+    && (kind !== 'prompt' || Boolean(values.title?.trim()))
     && (kind !== 'file' || Boolean(values.path.trim()))
     && (kind !== 'external' || Boolean(values.reference?.trim()));
   const update = (name: string, value: string) => setValues((current) => ({ ...current, [name]: value }));
@@ -73,14 +77,15 @@ export function TemplateTagDialog({ cookies, request, responses, variableNames, 
         {kind === 'environment' ? <label>Variable<select onChange={(event) => update('name', event.target.value)} value={values.name}>{<option value="">Choose variable</option>}{variableNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label> : null}
         {kind === 'faker' ? <label>Function<select onChange={(event) => update('name', event.target.value)} value={values.name || 'randomUUID'}>{fakerFunctionNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label> : null}
         {kind === 'uuid' ? select('Version', 'version', [['v4', 'Version 4'], ['v1', 'Version 1']]) : null}
-        {kind === 'now' ? select('Format', 'format', [['iso-8601', 'ISO-8601'], ['millis', 'Milliseconds'], ['unix', 'Unix seconds']]) : null}
+        {kind === 'now' ? <>{select('Format', 'format', [['iso-8601', 'ISO-8601'], ['millis', 'Milliseconds'], ['unix', 'Unix seconds'], ['custom', 'Custom format']])}{values.format === 'custom' ? text('date-fns format', 'formatTemplate', 'yyyy-MM-dd HH:mm:ss') : null}</> : null}
+        {kind === 'os' ? <>{select('Function', 'function', [['arch', 'Architecture'], ['cpus', 'CPUs'], ['freemem', 'Free memory'], ['hostname', 'Hostname'], ['platform', 'Platform'], ['release', 'Release'], ['userInfo', 'User information']])}{['cpus', 'userInfo'].includes(values.function) ? text('JSONPath filter', 'path', '$.username') : null}</> : null}
         {kind === 'base64' ? <>{select('Action', 'operation', [['encode', 'Encode'], ['decode', 'Decode']])}{select('Kind', 'encoding', [['normal', 'Normal'], ['url', 'URL safe'], ['hex', 'Hex']])}{text('Value', 'value', 'Text or encoded value')}</> : null}
-        {kind === 'hash' ? <>{select('Algorithm', 'algorithm', [['sha1', 'SHA-1'], ['sha256', 'SHA-256'], ['sha384', 'SHA-384'], ['sha512', 'SHA-512']])}{select('Output', 'output', [['hex', 'Hex'], ['base64', 'Base64']])}{text('Value', 'value', 'Value to hash')}</> : null}
+        {kind === 'hash' ? <>{select('Algorithm', 'algorithm', [['md5', 'MD5'], ['sha1', 'SHA-1'], ['sha256', 'SHA-256'], ['sha512', 'SHA-512']])}{select('Output', 'output', [['hex', 'Hex'], ['base64', 'Base64']])}{text('Value', 'value', 'Value to hash')}</> : null}
         {kind === 'jsonpath' ? <>{text('JSON', 'value', '{"items":[]}')}{text('JSONPath', 'path', '$.items[0]')}</> : null}
         {kind === 'cookie' ? <>{text('URL (optional)', 'url', 'Defaults to request URL')}<label>Cookie<select onChange={(event) => update('name', event.target.value)} value={values.name}><option value="">Choose cookie</option>{cookies.map((cookie) => <option key={cookie.id} value={cookie.name}>{cookie.name} · {cookie.domain}{cookie.path}</option>)}</select></label></> : null}
-        {kind === 'response' ? <><label>Request<select onChange={(event) => update('request', event.target.value)} value={values.request ?? ''}><option value="">Choose stored response</option>{responses.map((response) => <option key={response.id} value={response.requestId}>{response.requestName} · {response.status}</option>)}</select></label>{select('Attribute', 'attribute', [['body', 'Body'], ['statusCode', 'Status code'], ['header', 'Header'], ['url', 'Request URL']])}{text(values.attribute === 'header' ? 'Header name' : 'JSONPath (optional)', 'path', values.attribute === 'header' ? 'Location' : '$.id')}</> : null}
-        {kind === 'request' ? select('Attribute', 'attribute', [['url', 'URL'], ['name', 'Name'], ['method', 'Method'], ['body', 'Body']]) : null}
-        {kind === 'prompt' ? <>{text('Message', 'message', 'Enter a value')}{text('Default value', 'value')}</> : null}
+        {kind === 'response' ? <><label>Request<select onChange={(event) => update('request', event.target.value)} value={values.request ?? ''}><option value="">Choose stored response</option>{responses.map((response) => <option key={response.id} value={response.requestId}>{response.requestName} · {response.status}</option>)}</select></label>{select('Attribute', 'attribute', [['body', 'Body attribute'], ['raw', 'Raw body'], ['header', 'Header'], ['url', 'Request URL']])}{!['raw', 'url'].includes(values.attribute) ? text(values.attribute === 'header' ? 'Header name' : 'JSONPath or XPath', 'path', values.attribute === 'header' ? 'Location' : '$.id') : null}{select('Trigger behavior', 'resendBehavior', [['never', 'Never'], ['no-history', 'No history'], ['when-expired', 'When expired'], ['always', 'Always']])}{values.resendBehavior === 'when-expired' ? text('Max age (seconds)', 'maxAge', '60') : null}</> : null}
+        {kind === 'request' ? <>{select('Attribute', 'attribute', [['name', 'Name'], ['folder', 'Folder'], ['url', 'URL'], ['parameter', 'Query parameter'], ['header', 'Header'], ['cookie', 'Cookie'], ['oauth2', 'OAuth 2 access token'], ['oauth2-identity', 'OAuth 2 identity token'], ['oauth2-refresh', 'OAuth 2 refresh token']])}{['parameter', 'header', 'cookie'].includes(values.attribute) ? text('Name', 'name') : null}{values.attribute === 'folder' ? text('Parent index', 'folderIndex', '0') : null}</> : null}
+        {kind === 'prompt' ? <>{text('Title', 'title', 'Credentials')}{text('Label', 'label', 'Enter a value')}{text('Default value', 'value')}{text('Storage key (optional)', 'storageKey')}<label className="preference-toggle"><input checked={values.maskText === 'true'} onChange={(event) => update('maskText', String(event.target.checked))} type="checkbox" /> Mask text</label><label className="preference-toggle"><input checked={values.saveLastValue !== 'false'} onChange={(event) => update('saveLastValue', String(event.target.checked))} type="checkbox" /> Default to last value</label><button className="secondary-button" onClick={clearTemplatePromptValues} type="button">Clear saved prompt values</button></> : null}
         {kind === 'file' ? <>{text('Approved file path', 'path', '/absolute/path/to/file.txt')}<p>File tags require the desktop file grant and a path inside an allowed data folder.</p></> : null}
         {kind === 'external' ? <>{select('Provider', 'provider', [['aws', 'AWS Secrets Manager'], ['gcp', 'Google Secret Manager'], ['azure', 'Azure Key Vault'], ['hashicorp', 'HashiCorp Vault']])}{text('Reference', 'reference')}{text('Scope', 'scope', 'Region, project, vault URL, or vault name')}{text('Field', 'field')}{text('Version', 'version')}</> : null}
       </div>

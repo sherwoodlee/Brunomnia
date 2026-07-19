@@ -1952,12 +1952,12 @@ Compatibility bounds remain explicit: Digest, NTLM, Netrc, and IAM remain transp
 | Exact Faker engine | Complete | The shared renderer lazily loads Faker 9.7 and maps all 118 pinned names to the same modules/functions, preserving output categories, locale corpus, distributions, image strings, and date behavior without network calls |
 | Full JSONPath Plus | Complete | Dynamic tags, stored-response chaining, and response-preview filters use JSONPath Plus 10.4 safe predicates, unions, slices, recursive descent, type selectors, and expressions; tags select the first match while previews retain every match |
 | Confined File tags | Complete | Desktop File tags reuse the off-by-default file grant, canonical allowed roots, symlink/traversal rejection, regular-file checks, 5 MB bound, and UTF-8 decoding across primary/plugin/integration sends, OAuth/schema traffic, collection runs, and generated code |
-| Guided builder | Complete | The account-free Tags dialog builds thirteen built-in/external families and appends or replaces compatible syntax across names/values for URL, body, parameters, headers, form/multipart, authentication, transport, GraphQL variables, and gRPC fields |
+| Guided builder | Complete | The account-free Tags dialog builds fourteen built-in/external families and appends or replaces compatible syntax across names/values for HTTP, WebSocket, Socket.IO, Buf registry, and gRPC execution fields |
 | Shared safety | Complete | Concurrent field rendering uses independent parser state; JSONPath expressions use the package safe evaluator, File access exposes one mediated read callback, and browser/ungranted/out-of-root access fails explicitly |
 | Executable coverage | Complete | All 118 Faker functions, advanced JSONPath selectors/failures, Base64 variants, timestamp aliases, explicit cookie URLs, File mediation, concurrent raw tags, destination enumeration/insertion, and shared HTTP/code-generation regressions pass |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [security boundaries](SECURITY_AND_SYNC.md), [parity ledger](PARITY.md), and [Milestone 131 verification](QA_MILESTONE_131.md); the dynamic-variables row is Complete |
 
-Compatibility bounds remain explicit: File tags are desktop-only and inherit the existing 5 MB approved-root safety ceiling. gRPC/stream execution and the portable CLI do not yet resolve external-vault or File tags. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: File tags are desktop-only and inherit the existing 5 MB approved-root safety ceiling. Milestone 133 later closes the missed pinned timestamp/OS/hash/prompt/request/response plus gRPC/realtime rendering gaps; the portable CLI still does not resolve external-vault or File tags. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 132 — close gRPC endpoint and live-server parity (complete)
 
@@ -1973,7 +1973,22 @@ Compatibility bounds remain explicit: File tags are desktop-only and inherit the
 
 Compatibility bounds remain explicit: the public matrix is opt-in so ordinary offline test runs remain deterministic. Pinned Insomnia keeps gRPC messages transient and does not install its HTTP/HTTPS proxy agent on gRPC channels, so persisted call history and custom gRPC proxying are not parity requirements. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 133 — remaining parity closure and release hardening
+## Milestone 133 — exact local template-tag correction (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Corrective upstream audit | Complete | A second pass over pinned `local-template-tags.ts`, realtime interpolation, and gRPC send paths found behavior omitted by Milestone 131: date-fns custom formats, the full OS contract, MD5, six prompt arguments, broad request fields, raw/XPath/large-integer/multi-result response extraction, resend rules, and non-HTTP rendering |
+| Exact local engines | Complete | date-fns 3.6, JSON BigInt 1.0, XPath 0.0.34, a patched non-vulnerable XML DOM, Web Crypto SHA, js-md5, and a native seven-function OS bridge reproduce the observable pinned contracts without hosted services |
+| Prompt and response behavior | Complete | A queued masked dialog supports preview defaults, explicit/implicit storage keys, save-last-value behavior, request-scoped clearing, active-environment response selection, raw/header/url/body fields, JSONPath/XPath, preserved large integers, multiple JSONPath results, and guarded dependent resends |
+| Protocol propagation | Complete | Direct gRPC schema/call/session messages and WebSocket, GraphQL subscription, SSE, and Socket.IO connection/outbound paths now use the same async renderer as HTTP, including runner execution and mediated File/external secrets |
+| Guided builder | Complete | OS, MD5, custom time, six prompt arguments, complete request/response controls, realtime payload/listener fields, and Buf registry fields form fourteen account-free families and destinations |
+| Dependency safety | Complete | Production dependency audit reports no known vulnerabilities; the XML DOM uses patched 0.8.13 instead of vulnerable pinned 0.9.8/0.8.11 releases while preserving the required DOM/XPath behavior |
+| Executable coverage | Complete | Focused TypeScript tests cover exact local behavior, dependent-response environment filtering, async direct gRPC, all realtime connection families, Socket.IO emits, and guided destinations; native coverage verifies the OS bridge |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), corrected [Milestone 131 verification](QA_MILESTONE_131.md), and added [Milestone 133 verification](QA_MILESTONE_133.md) |
+
+Compatibility bounds remain explicit: File tags remain desktop-only and the portable CLI still does not resolve File or external-vault tags. The XML DOM version intentionally differs from vulnerable pinned transitive choices without changing claimed XPath behavior. Other ledger rows remain Baseline or Early baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 134 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

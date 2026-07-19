@@ -67,6 +67,7 @@ export function GrpcEditor({
         requestContext.requestTimeoutMs,
         requestContext.validateCertificates,
         requestContext.certificates,
+        requestContext,
       );
       if (sessionId.current === nextSessionId) {
         setSessionCallType(result.callType);
@@ -82,7 +83,7 @@ export function GrpcEditor({
     if (!sessionId.current) return;
     try {
       setSessionError('');
-      await sendGrpcSessionMessage(sessionId.current, grpc.input, environment);
+      await sendGrpcSessionMessage(sessionId.current, grpc.input, environment, request, requestContext);
     } catch (error) {
       setSessionError(formatGrpcError(error, 'call'));
     }
