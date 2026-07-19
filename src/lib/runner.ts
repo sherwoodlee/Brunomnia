@@ -39,6 +39,7 @@ export type RunnerOptions = {
   requestIds?: string[];
   testNamePattern?: string;
   bail?: boolean;
+  flowStepLimit?: number;
   shouldCancel?: () => boolean;
   shouldSkip?: (key: string) => boolean;
   onLiveItems?: (items: RunnerLiveItem[]) => void;
@@ -261,6 +262,7 @@ export const runCollection = async (
   const results: RunnerItemResult[] = [];
   let cancelled = false;
   let bailed = false;
+  let flowError: string | undefined;
   const responseSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_RESPONSE_REPORT_BYTES };
   const requestSnapshotBudget: ResponseSnapshotBudget = { remaining: RUNNER_REQUEST_REPORT_BYTES };
   const iterations = boundedInteger(options.iterations, 1, 1000);
@@ -270,6 +272,7 @@ export const runCollection = async (
   const plannedRequests = options.requestIds === undefined
     ? collection.requests
     : [...new Set(options.requestIds)].flatMap((id) => requestsById.get(id) ?? []);
+  const flowStepLimit = boundedInteger(options.flowStepLimit ?? plannedRequests.length + 10_000, 1, 100_000);
   const liveItems = Array.from({ length: iterations }, (_, iteration) => plannedRequests.map((request, index): RunnerLiveItem => ({
     key: buildRunnerItemKey(iteration + 1, index, request.id),
     iteration: iteration + 1,
@@ -314,8 +317,36 @@ export const runCollection = async (
 
   outer: for (let iteration = 0; iteration < iterations; iteration += 1) {
     const iterationData = options.dataRows[iteration % Math.max(1, options.dataRows.length)] ?? {};
-    for (const [requestIndex, originalRequest] of plannedRequests.entries()) {
+    let requestIndex = 0;
+    let flowSteps = 0;
+    let nextRequestIdOrName = '';
+    const lastRequestNameIndex = (target: string) => {
+      for (let index = plannedRequests.length - 1; index >= 0; index -= 1) if (plannedRequests[index].name.trim() === target.trim()) return index;
+      return -1;
+    };
+    const matchesNextRequest = (request: ApiRequest, index: number, target: string) => request.id === target
+      || (request.name.trim() === target.trim() && index === lastRequestNameIndex(target));
+    while (requestIndex < plannedRequests.length) {
+      const originalRequest = plannedRequests[requestIndex];
       const key = buildRunnerItemKey(iteration + 1, requestIndex, originalRequest.id);
+      flowSteps += 1;
+      if (flowSteps > flowStepLimit) {
+        flowError = `Runner request flow exceeded the ${flowStepLimit}-step safety limit in iteration ${iteration + 1}.`;
+        const result: RunnerItemResult = { id: runId(), key, requestId: originalRequest.id, requestName: originalRequest.name, iteration: iteration + 1, attempt: 0, status: 0, durationMs: 0, passed: false, error: flowError, tests: [] };
+        results.push(result);
+        options.onResult?.(result);
+        updateLiveItem(key, { status: 'failed', errorMessage: flowError });
+        finishUnfinished('skipped', 'Skipped after the runner flow safety limit was exceeded.');
+        break outer;
+      }
+      if (nextRequestIdOrName) {
+        if (matchesNextRequest(originalRequest, requestIndex, nextRequestIdOrName)) nextRequestIdOrName = '';
+        else {
+          updateLiveItem(key, { status: 'skipped', errorMessage: `Skipped while seeking '${nextRequestIdOrName}'.` });
+          requestIndex += 1;
+          continue;
+        }
+      }
       if (options.shouldCancel?.()) {
         cancelled = true;
         finishUnfinished('canceled', 'Canceled by user.');
@@ -323,6 +354,7 @@ export const runCollection = async (
       }
       if (options.shouldSkip?.(key)) {
         updateLiveItem(key, { status: 'skipped', errorMessage: 'Skipped by user.' });
+        requestIndex += 1;
         continue;
       }
 
@@ -334,6 +366,7 @@ export const runCollection = async (
       };
       options.onActiveItem?.(key, () => controller.abort(), controller.signal);
       let itemFinished = false;
+      let itemNextRequestIdOrName = '';
       try {
         for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
           const beforeAttempt = interruption();
@@ -365,6 +398,7 @@ export const runCollection = async (
               collectionDisabled,
               collectionVariablesAreBase,
               folders: scriptFolders,
+              executionLocation: [collection.name, ...configured.folders.map((folder) => folder.name), request.name],
             };
             const preRequest = await executeScript(request.preRequestScript, request, globalVariables, undefined, options.scriptTimeoutMs ?? 10_000, {}, iterationData, scriptScopes);
             const afterPreRequest = interruption();
@@ -391,6 +425,19 @@ export const runCollection = async (
               Object.assign(requestVariables, folderVariables.get(folder.id) ?? {});
             });
             Object.assign(requestVariables, iterationData, localVariables);
+            itemNextRequestIdOrName = preRequest.execution?.nextRequestIdOrName ?? '';
+            if (preRequest.execution?.skipRequest) {
+              updateLiveItem(key, {
+                status: 'skipped',
+                attempt,
+                requestName: request.name,
+                requestUrl: redactSensitiveQuery(request.url),
+                errorMessage: 'Skipped by pre-request script.',
+                tests: preRequest.tests,
+              });
+              itemFinished = true;
+              break;
+            }
             response = await executeRequest(request, requestVariables, { key, attempt, signal: controller.signal });
             const afterRequest = interruption();
             if (afterRequest) throw new Error(afterRequest);
@@ -406,6 +453,8 @@ export const runCollection = async (
               collectionVariablesAreBase,
               folders: scriptFolders.map((folder) => ({ ...folder, environment: { ...(folderVariables.get(folder.id) ?? {}) }, disabled: [...(folderDisabled.get(folder.id) ?? [])] })),
               testNamePattern,
+              execution: preRequest.execution,
+              executionLocation: [collection.name, ...configured.folders.map((folder) => folder.name), request.name],
             });
             const afterTests = interruption();
             if (afterTests) throw new Error(afterTests);
@@ -419,6 +468,7 @@ export const runCollection = async (
             collectionDisabled = afterResponse.collectionDisabled ?? collectionDisabled;
             afterResponse.folders?.forEach((folder) => { folderVariables.set(folder.id, folder.environment); folderDisabled.set(folder.id, new Set(folder.disabled ?? [])); });
             tests = [...preRequest.tests, ...afterResponse.tests];
+            itemNextRequestIdOrName = afterResponse.execution?.nextRequestIdOrName ?? itemNextRequestIdOrName;
           } catch (caught) {
             const control = interruption();
             if (control) {
@@ -438,6 +488,7 @@ export const runCollection = async (
               itemFinished = true;
               break;
             }
+            itemNextRequestIdOrName = '';
             error = caught instanceof Error ? caught.message : String(caught);
           }
           const passed = !error && response !== undefined && response.status > 0 && response.status < 400 && tests.every((test) => test.passed);
@@ -501,8 +552,7 @@ export const runCollection = async (
           break outer;
         }
         if (!itemFinished) updateLiveItem(key, { status: 'failed', errorMessage: 'The runner stopped before this item completed.' });
-        if (liveItems.find((item) => item.key === key)?.status === 'skipped') continue;
-        if (options.delayMs > 0) {
+        if (liveItems.find((item) => item.key === key)?.status !== 'skipped' && options.delayMs > 0) {
           try {
             await wait(options.delayMs, controller.signal);
           } catch {
@@ -514,6 +564,8 @@ export const runCollection = async (
       } finally {
         options.onActiveItem?.(undefined);
       }
+      nextRequestIdOrName = itemNextRequestIdOrName;
+      if (!nextRequestIdOrName || !matchesNextRequest(originalRequest, requestIndex, nextRequestIdOrName)) requestIndex += 1;
     }
   }
 
@@ -537,6 +589,7 @@ export const runCollection = async (
     completed: liveItems.filter((item) => item.status === 'completed').length,
     skipped: liveItems.filter((item) => item.status === 'skipped').length,
     canceled: liveItems.filter((item) => item.status === 'canceled').length,
+    flowError,
     liveItems,
     results,
   };

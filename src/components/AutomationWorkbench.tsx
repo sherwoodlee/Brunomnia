@@ -461,6 +461,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
         } : undefined,
       }));
       setLiveItems(report.liveItems ?? []);
+      if (report.flowError) setError(report.flowError);
       onChangeWorkspace((current) => ({ ...current, cookies: runnerCookies, responses: runnerResponses, pluginData: pluginState.data, runnerReports: [report, ...current.runnerReports].slice(0, 30) }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));

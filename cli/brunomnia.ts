@@ -87,7 +87,12 @@ const runNodeScript = async (
   const maxSubrequests = Math.min(20, Math.max(1, options.maxSubrequests ?? 5));
   const fileReferences: ScriptFileReference[] = [];
   const fileBudget: ScriptFileBudget = { files: 0, bytes: 0 };
-  if (!source.trim()) return { request, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
+  const execution = {
+    location: (options.execution?.location ?? options.executionLocation ?? [...folders.map((folder) => folder.name), request.name]).map((part) => String(part).slice(0, 1_000)).slice(0, 100),
+    skipRequest: Boolean(options.execution?.skipRequest),
+    nextRequestIdOrName: String(options.execution?.nextRequestIdOrName ?? '').slice(0, 10_000),
+  };
+  if (!source.trim()) return { request, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests, execution };
   const mergedVariables = () => {
     const values: Record<string, string> = {};
     const applyScope = (scope: Record<string, string>, disabled: string[] = []) => {
@@ -304,6 +309,15 @@ const runNodeScript = async (
       getByName: (name: string) => { const folder = [...folders].reverse().find((item) => item.name === name); return folder ? { id: folder.id, name: folder.name, environment: variableApi(folder.environment, folder.disabled) } : undefined; },
       getEnvironments: () => [...folders].reverse().map((folder) => variableApi(folder.environment, folder.disabled)),
     },
+    execution: {
+      location: new Proxy(execution.location, { get: (target, property, receiver) => property === 'current' ? target[target.length - 1] || '' : Reflect.get(target, property, receiver) }),
+      skipRequest: () => { execution.skipRequest = true; },
+      setNextRequest: (requestIdOrName: unknown) => {
+        const next = String(requestIdOrName ?? '');
+        if (next.length > 10_000) throw new Error('Next request name or ID exceeds 10,000 characters.');
+        execution.nextRequestIdOrName = next;
+      },
+    },
     request,
     response: responseFacade(response),
     replaceIn: (value: unknown) => String(value).replace(/{{\s*([^{}]+?)\s*}}/g, (match, name: string) => mergedVariables()[name] ?? match),
@@ -401,7 +415,7 @@ const runNodeScript = async (
     request.body = requestBody;
   }
   const hydratedRequest = await hydrateScriptFileReferences(request, fileReferences, options.readFile, fileBudget);
-  return { request: hydratedRequest, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests };
+  return { request: hydratedRequest, environment, baseGlobals, baseGlobalDisabled, globalDisabled, collectionVariables, baseEnvironment, baseEnvironmentDisabled, collectionDisabled, folders, localVariables, logs, tests, execution };
 };
 
 type CliRequestContext = {

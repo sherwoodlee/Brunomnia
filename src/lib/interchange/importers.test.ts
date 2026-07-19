@@ -42,7 +42,7 @@ describe('artifact import adapters', () => {
       item: [{ name: 'Orders', item: [{
         name: 'Create',
         event: [
-          { listen: 'prerequest', script: { exec: ["pm.globals.set('global', 'yes');", "pm.collectionVariables.set('collection', 'yes');", "pm.variables.set('local', pm.iterationData.get('row'));", "pm.sendRequest('https://example.com', () => {});"] } },
+          { listen: 'prerequest', script: { exec: ["pm.globals.set('global', 'yes');", "pm.collectionVariables.set('collection', 'yes');", "pm.variables.set('local', pm.iterationData.get('row'));", "pm.execution.skipRequest();", "postman.setNextRequest('next-request');", "pm.sendRequest('https://example.com', () => {});"] } },
           { listen: 'test', script: { exec: ["pm.test('created', () => pm.response.to.have.status(201));"] } },
         ],
         request: {
@@ -60,6 +60,8 @@ describe('artifact import adapters', () => {
     expect(result.collections[0].requests[0].preRequestScript).toContain("insomnia.globals.set('global'");
     expect(result.collections[0].requests[0].preRequestScript).toContain("insomnia.collectionVariables.set('collection'");
     expect(result.collections[0].requests[0].preRequestScript).toContain("insomnia.variables.set('local', insomnia.iterationData.get('row'))");
+    expect(result.collections[0].requests[0].preRequestScript).toContain('insomnia.execution.skipRequest()');
+    expect(result.collections[0].requests[0].preRequestScript).toContain("insomnia.execution.setNextRequest('next-request')");
     expect(result.collections[0].requests[0].preRequestScript).toContain("insomnia.sendRequest('https://example.com'");
     expect(result.collections[0].requests[0].tests).toContain("insomnia.test('created'");
     expect(result.collections[0].requests[0].tests).toContain('insomnia.expect(insomnia.response.status).toBe(201)');

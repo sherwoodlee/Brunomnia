@@ -60,6 +60,25 @@ describe('script sandbox source validation', () => {
     expect(output.tests).toEqual([{ name: 'keep: status', passed: true }]);
   });
 
+  it('exposes bounded execution location, skip, and next-request controls', async () => {
+    const output = await runWorkerSource(`
+      insomnia.test('execution location', () => {
+        insomnia.expect(insomnia.execution.location).to.deep.equal(['Brunomnia', 'Collection', 'Orders', 'Request']);
+        insomnia.expect(insomnia.execution.location.current).to.equal('Request');
+      });
+      insomnia.execution.skipRequest();
+      insomnia.execution.setNextRequest('request-next');
+    `, { executionLocation: ['Brunomnia', 'Collection', 'Orders', 'Request'] });
+
+    expect(output).toMatchObject({
+      ok: true,
+      execution: { location: ['Brunomnia', 'Collection', 'Orders', 'Request'], skipRequest: true, nextRequestIdOrName: 'request-next' },
+      tests: [{ name: 'execution location', passed: true }],
+    });
+    const oversized = await runWorkerSource("insomnia.execution.setNextRequest('x'.repeat(10001));");
+    expect(oversized).toMatchObject({ ok: false, error: expect.stringContaining('10,000 characters') });
+  });
+
   it('rejects dynamic module imports, including comment-separated calls', () => {
     expect(() => validateScriptSource("import('https://example.com/module.js')")).toThrow(/Module imports/);
     expect(() => validateScriptSource("import /* hidden */ ('https://example.com/module.js')")).toThrow(/Module imports/);

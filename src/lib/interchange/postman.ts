@@ -19,6 +19,8 @@ const translatePostmanScript = (source: string) => source
   .replace(/\bpm\.variables\./g, 'insomnia.variables.')
   .replace(/\bpm\.iterationData\./g, 'insomnia.iterationData.')
   .replace(/\bpm\.vault\./g, 'insomnia.vault.')
+  .replace(/\bpm\.execution\./g, 'insomnia.execution.')
+  .replace(/\bpostman\.setNextRequest\s*\(/g, 'insomnia.execution.setNextRequest(')
   .replace(/\bpm\.sendRequest\s*\(/g, 'insomnia.sendRequest(')
   .replace(/\bpm\.response\.code\b/g, 'insomnia.response.status')
   .replace(/\bpm\.response\.responseTime\b/g, 'insomnia.response.responseTime')

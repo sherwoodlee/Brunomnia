@@ -763,6 +763,12 @@ export type ScriptTestResult = {
   error?: string;
 };
 
+export type ScriptExecutionState = {
+  location: string[];
+  skipRequest: boolean;
+  nextRequestIdOrName: string;
+};
+
 export type ScriptRunResult = {
   request: ApiRequest;
   environment: Record<string, string>;
@@ -777,6 +783,7 @@ export type ScriptRunResult = {
   logs: string[];
   tests: ScriptTestResult[];
   localVariables?: Record<string, string>;
+  execution?: ScriptExecutionState;
 };
 
 export type RunnerItemStatus = 'pending' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
@@ -858,6 +865,7 @@ export type RunnerReport = {
   completed?: number;
   skipped?: number;
   canceled?: number;
+  flowError?: string;
   liveItems?: RunnerLiveItem[];
   results: RunnerItemResult[];
 };

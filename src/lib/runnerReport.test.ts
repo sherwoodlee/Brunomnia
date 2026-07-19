@@ -70,6 +70,12 @@ describe('runner report artifacts', () => {
     expect(JSON.parse(createRunnerReportArtifact(filtered, 'json').contents).report).toMatchObject({ testNamePattern: '^body', matchedTests: 1 });
   });
 
+  it('surfaces bounded request-flow failures in text and JSON reports', () => {
+    const constrained = { ...report, flowError: 'Runner request flow exceeded the safety limit.' };
+    expect(createRunnerReportArtifact(constrained, 'min').contents).toContain(', flow error');
+    expect(JSON.parse(createRunnerReportArtifact(constrained, 'json').contents).report.flowError).toContain('safety limit');
+  });
+
   it('preserves skipped and canceled live items across reporters', () => {
     const controlled: RunnerReport = {
       ...report,

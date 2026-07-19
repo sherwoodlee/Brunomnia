@@ -35,6 +35,8 @@ export type ScriptRunOptions = {
   maxSubrequestBytes?: number;
   readFile?: (path: string) => Promise<FilePayload>;
   testNamePattern?: string;
+  execution?: ScriptRunResult['execution'];
+  executionLocation?: string[];
 };
 
 type WorkerOutput = {
@@ -55,6 +57,7 @@ type WorkerOutput = {
   tests: ScriptRunResult['tests'];
   localVariables: Record<string, string>;
   fileReferences: ScriptFileReference[];
+  execution: NonNullable<ScriptRunResult['execution']>;
 };
 
 type WorkerSubrequest = {
@@ -326,6 +329,14 @@ self.onmessage = async ({ data }) => {
   const tests = [];
   const pendingTests = [];
   const fileReferences = [];
+  const executionLocation = new Proxy(
+    (Array.isArray(state.execution?.location) ? state.execution.location : state.executionLocation || []).map((part) => String(part).slice(0, 1000)).slice(0, 100),
+    { get: (target, property, receiver) => property === 'current' ? target[target.length - 1] || '' : Reflect.get(target, property, receiver) },
+  );
+  const executionState = {
+    skipRequest: Boolean(state.execution?.skipRequest),
+    nextRequestIdOrName: String(state.execution?.nextRequestIdOrName || '').slice(0, 10000),
+  };
   let subrequestCount = 0;
   const constructors = [Function, (async () => {}).constructor, (function* () {}).constructor, (async function* () {}).constructor];
   constructors.forEach((constructor) => {
@@ -618,6 +629,15 @@ self.onmessage = async ({ data }) => {
     localVars: localApi,
     iterationData: iterationApi,
     parentFolders,
+    execution: {
+      location: executionLocation,
+      skipRequest: () => { executionState.skipRequest = true; },
+      setNextRequest: (requestIdOrName) => {
+        const next = String(requestIdOrName ?? '');
+        if (next.length > 10000) throw new Error('Next request name or ID exceeds 10,000 characters.');
+        executionState.nextRequestIdOrName = next;
+      },
+    },
     request: state.request,
     response: responseFacade(state.response),
     send,
@@ -691,6 +711,8 @@ self.onmessage = async ({ data }) => {
       const testNamePattern = undefined;
       const pendingTests = undefined;
       const fileReferences = undefined;
+      const executionLocation = undefined;
+      const executionState = undefined;
       const Function = undefined;
       const WebAssembly = undefined;
       const WebTransport = undefined;
@@ -706,12 +728,14 @@ const sandboxSuffix = `
     await runUserScript();
     await Promise.all(pendingTests);
     cleanupRequest();
-    const output = { type: 'result', ok: true, request: state.request, environment: state.environment, baseGlobals: state.baseGlobals, baseGlobalDisabled: state.baseGlobalDisabled, globalDisabled: state.globalDisabled, collectionVariables: state.collectionVariables, baseEnvironment: state.baseEnvironment, baseEnvironmentDisabled: state.baseEnvironmentDisabled, collectionDisabled: state.collectionDisabled, folders: state.folders, localVariables: state.localVariables, fileReferences, logs, tests };
+    const execution = { location: Array.from(executionLocation), skipRequest: executionState.skipRequest, nextRequestIdOrName: executionState.nextRequestIdOrName };
+    const output = { type: 'result', ok: true, request: state.request, environment: state.environment, baseGlobals: state.baseGlobals, baseGlobalDisabled: state.baseGlobalDisabled, globalDisabled: state.globalDisabled, collectionVariables: state.collectionVariables, baseEnvironment: state.baseEnvironment, baseEnvironmentDisabled: state.baseEnvironmentDisabled, collectionDisabled: state.collectionDisabled, folders: state.folders, localVariables: state.localVariables, fileReferences, logs, tests, execution };
     if (JSON.stringify(output).length > 20000000) hostPostMessage({ type: 'result', ok: false, error: 'Script result exceeds the 20 MB bridge limit.' });
     else hostPostMessage(output);
   } catch (error) {
     cleanupRequest();
-    const output = { type: 'result', ok: false, error: error instanceof Error ? error.message : String(error), request: state.request, environment: state.environment, baseGlobals: state.baseGlobals, baseGlobalDisabled: state.baseGlobalDisabled, globalDisabled: state.globalDisabled, collectionVariables: state.collectionVariables, baseEnvironment: state.baseEnvironment, baseEnvironmentDisabled: state.baseEnvironmentDisabled, collectionDisabled: state.collectionDisabled, folders: state.folders, localVariables: state.localVariables, fileReferences, logs, tests };
+    const execution = { location: Array.from(executionLocation), skipRequest: executionState.skipRequest, nextRequestIdOrName: executionState.nextRequestIdOrName };
+    const output = { type: 'result', ok: false, error: error instanceof Error ? error.message : String(error), request: state.request, environment: state.environment, baseGlobals: state.baseGlobals, baseGlobalDisabled: state.baseGlobalDisabled, globalDisabled: state.globalDisabled, collectionVariables: state.collectionVariables, baseEnvironment: state.baseEnvironment, baseEnvironmentDisabled: state.baseEnvironmentDisabled, collectionDisabled: state.collectionDisabled, folders: state.folders, localVariables: state.localVariables, fileReferences, logs, tests, execution };
     if (JSON.stringify(output).length > 20000000) hostPostMessage({ type: 'result', ok: false, error: 'Script result exceeds the 20 MB bridge limit.' });
     else hostPostMessage(output);
   }
@@ -742,7 +766,12 @@ export const runBrowserScript = async (
   const baseEnvironment = { ...(options.baseEnvironment ?? (collectionVariablesAreBase ? options.collectionVariables : {})) };
   const collectionVariables = collectionVariablesAreBase ? baseEnvironment : { ...(options.collectionVariables ?? {}) };
   const folders = structuredClone(options.folders ?? []);
-  if (!script.trim()) return { request: structuredClone(request), environment: globalVariables, baseGlobals, baseGlobalDisabled: [...(options.baseGlobalDisabled ?? [])], globalDisabled: [...(options.globalDisabled ?? [])], collectionVariables, baseEnvironment, baseEnvironmentDisabled: [...(options.baseEnvironmentDisabled ?? [])], collectionDisabled: [...(options.collectionDisabled ?? [])], folders, localVariables: { ...localVariables }, logs: [], tests: [] };
+  const execution = {
+    location: (options.execution?.location ?? options.executionLocation ?? [...folders.map((folder) => folder.name), request.name]).map((part) => String(part).slice(0, 1_000)).slice(0, 100),
+    skipRequest: Boolean(options.execution?.skipRequest),
+    nextRequestIdOrName: String(options.execution?.nextRequestIdOrName ?? '').slice(0, 10_000),
+  };
+  if (!script.trim()) return { request: structuredClone(request), environment: globalVariables, baseGlobals, baseGlobalDisabled: [...(options.baseGlobalDisabled ?? [])], globalDisabled: [...(options.globalDisabled ?? [])], collectionVariables, baseEnvironment, baseEnvironmentDisabled: [...(options.baseEnvironmentDisabled ?? [])], collectionDisabled: [...(options.collectionDisabled ?? [])], folders, localVariables: { ...localVariables }, logs: [], tests: [], execution };
   validateScriptSource(script);
   const blob = new Blob([buildScriptWorkerSource(script)], { type: 'text/javascript' });
   const workerUrl = URL.createObjectURL(blob);
@@ -805,6 +834,8 @@ export const runBrowserScript = async (
           localVariables,
           iterationData,
           testNamePattern: options.testNamePattern,
+          execution,
+          executionLocation: execution.location,
           vault: options.vault ?? {},
           permissions: { network: Boolean(options.sendRequest), sendById: Boolean(options.sendRequestById), files: Boolean(options.readFile), vault: Boolean(options.vault), maxSubrequests },
         },
@@ -812,7 +843,7 @@ export const runBrowserScript = async (
     });
     if (!output.ok) throw new Error(output.error || 'Script execution failed.');
     const hydratedRequest = await hydrateScriptFileReferences(output.request, output.fileReferences ?? [], options.readFile, fileBudget);
-    return { request: hydratedRequest, environment: output.environment, baseGlobals: output.baseGlobals, baseGlobalDisabled: output.baseGlobalDisabled, globalDisabled: output.globalDisabled, collectionVariables: output.collectionVariables, baseEnvironment: output.baseEnvironment, baseEnvironmentDisabled: output.baseEnvironmentDisabled, collectionDisabled: output.collectionDisabled, folders: output.folders, localVariables: output.localVariables, logs: output.logs, tests: output.tests };
+    return { request: hydratedRequest, environment: output.environment, baseGlobals: output.baseGlobals, baseGlobalDisabled: output.baseGlobalDisabled, globalDisabled: output.globalDisabled, collectionVariables: output.collectionVariables, baseEnvironment: output.baseEnvironment, baseEnvironmentDisabled: output.baseEnvironmentDisabled, collectionDisabled: output.collectionDisabled, folders: output.folders, localVariables: output.localVariables, logs: output.logs, tests: output.tests, execution: output.execution };
   } finally {
     worker.terminate();
     URL.revokeObjectURL(workerUrl);

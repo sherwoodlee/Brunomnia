@@ -2513,6 +2513,7 @@ export default function App() {
         collectionVariables: collectionScopes.environment.values,
         collectionDisabled: collectionScopes.environment.disabled,
         collectionVariablesAreBase: collectionScopes.environmentIsBase,
+        executionLocation: [workspace.name, collection.name, ...configured.folders.map((folder) => folder.name), request.name],
       };
       const runScript = (
         source: string,
@@ -2530,6 +2531,7 @@ export default function App() {
         collectionVariables: previous?.collectionVariables ?? initialScriptScopes.collectionVariables,
         collectionDisabled: previous?.collectionDisabled ?? initialScriptScopes.collectionDisabled,
         folders: previous?.folders ?? scriptFolderVariables(configured.folders),
+        execution: previous?.execution,
         readFile: workspace.preferences.allowScriptFileAccess && isTauri()
           ? async (path) => {
             const { readDesktopScriptFile } = await import('./lib/scriptFiles');
@@ -2567,6 +2569,13 @@ export default function App() {
       const requestVariables = mergedScriptVariables(preRequest, initialScriptScopes);
       setScriptLogs(preRequest.logs);
       persistScriptState(collection.id, preRequest);
+      if (preRequest.execution?.skipRequest) {
+        const message = 'Request skipped by pre-request script.';
+        setScriptTests(preRequest.tests);
+        setResponse({ status: 0, statusText: 'Request skipped', headers: {}, body: message, durationMs: 0, sizeBytes: message.length });
+        setWorkspace((current) => ({ ...current, cookies: scriptCookies, responses: scriptResponses, pluginData: pluginState.data }));
+        return;
+      }
       let result: HttpResponse;
       if (executableRequest.protocol === 'grpc') {
         executableRequest = await pluginRuntime.beforeRequest(executableRequest);

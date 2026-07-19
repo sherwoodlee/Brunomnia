@@ -253,6 +253,158 @@ describe('collection runner', () => {
     expect(report.liveItems?.map((item) => item.status)).toEqual(['canceled', 'canceled']);
   });
 
+  it('uses script-directed request IDs to skip forward in the current iteration', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    const third = createBlankRequest('third');
+    const seen: string[] = [];
+    const locations: string[][] = [];
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second, third] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
+      async (request) => { seen.push(request.id); return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, request, environment, response, _timeout, _local, _iteration, options) => {
+        locations.push(options?.executionLocation ?? []);
+        const execution = response
+          ? options?.execution
+          : { location: options?.executionLocation ?? [], skipRequest: false, nextRequestIdOrName: request.id === first.id ? third.id : '' };
+        return { request, environment, logs: [], tests: [], execution };
+      },
+    );
+
+    expect(seen).toEqual(['first', 'third']);
+    expect(report.results.map((result) => result.requestId)).toEqual(['first', 'third']);
+    expect(report.liveItems?.map((item) => item.status)).toEqual(['completed', 'skipped', 'completed']);
+    expect(locations).toContainEqual(['Collection', first.name]);
+  });
+
+  it('targets the last request when script flow selects a duplicate name', async () => {
+    const first = createBlankRequest('first');
+    const duplicateOne = { ...createBlankRequest('duplicate-one'), name: 'Duplicate' };
+    const duplicateTwo = { ...createBlankRequest('duplicate-two'), name: 'Duplicate' };
+    const seen: string[] = [];
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, duplicateOne, duplicateTwo] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
+      async (request) => { seen.push(request.id); return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, request, environment, response, _timeout, _local, _iteration, options) => ({
+        request, environment, logs: [], tests: [],
+        execution: response ? options?.execution : { location: [], skipRequest: false, nextRequestIdOrName: request.id === first.id ? 'Duplicate' : '' },
+      }),
+    );
+
+    expect(seen).toEqual(['first', 'duplicate-two']);
+    expect(report.liveItems?.map((item) => item.status)).toEqual(['completed', 'skipped', 'completed']);
+  });
+
+  it('marks the remaining plan skipped when a script target cannot be found', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    const seen: string[] = [];
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
+      async (request) => { seen.push(request.id); return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, request, environment, response, _timeout, _local, _iteration, options) => ({
+        request, environment, logs: [], tests: [],
+        execution: response ? options?.execution : { location: [], skipRequest: false, nextRequestIdOrName: request.id === first.id ? 'missing-request' : '' },
+      }),
+    );
+
+    expect(seen).toEqual(['first']);
+    expect(report.liveItems?.map((item) => item.status)).toEqual(['completed', 'skipped']);
+    expect(report.liveItems?.[1].errorMessage).toContain("seeking 'missing-request'");
+  });
+
+  it('applies script-directed flow only after retry resolution', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    const third = createBlankRequest('third');
+    const seen: string[] = [];
+    let calls = 0;
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second, third] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 1, delayMs: 0, dataRows: [] },
+      async (request) => { seen.push(request.id); return { status: request.id === first.id && ++calls === 1 ? 500 : 200, statusText: 'Result', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, request, environment, response, _timeout, _local, _iteration, options) => ({
+        request, environment, logs: [], tests: [],
+        execution: response ? options?.execution : { location: [], skipRequest: false, nextRequestIdOrName: request.id === first.id ? third.id : '' },
+      }),
+    );
+
+    expect(seen).toEqual(['first', 'first', 'third']);
+    expect(report.results.map((result) => result.status)).toEqual([500, 200, 200]);
+    expect(report.liveItems?.map((item) => item.status)).toEqual(['completed', 'skipped', 'completed']);
+  });
+
+  it('repeats the current request while scripts target that same item', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    let firstExecutions = 0;
+    const seen: string[] = [];
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
+      async (request) => { seen.push(request.id); return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, request, environment, response, _timeout, _local, _iteration, options) => {
+        if (!response && request.id === first.id) firstExecutions += 1;
+        return {
+          request, environment, logs: [], tests: [],
+          execution: response ? options?.execution : { location: [], skipRequest: false, nextRequestIdOrName: request.id === first.id && firstExecutions === 1 ? first.id : '' },
+        };
+      },
+    );
+
+    expect(seen).toEqual(['first', 'first', 'second']);
+    expect(report.results.map((result) => result.requestId)).toEqual(['first', 'first', 'second']);
+    expect(report.liveItems?.map((item) => item.status)).toEqual(['completed', 'completed']);
+  });
+
+  it('honors pre-request script skip while retaining its next-request target', async () => {
+    const first = createBlankRequest('first');
+    const second = createBlankRequest('second');
+    const third = createBlankRequest('third');
+    const seen: string[] = [];
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [first, second, third] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [] },
+      async (request) => { seen.push(request.id); return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, request, environment, response, _timeout, _local, _iteration, options) => ({
+        request, environment, logs: [], tests: [],
+        execution: response ? options?.execution : { location: [], skipRequest: request.id === first.id, nextRequestIdOrName: request.id === first.id ? third.id : '' },
+      }),
+    );
+
+    expect(seen).toEqual(['third']);
+    expect(report).toMatchObject({ total: 1, passed: 1, failed: 0, skipped: 2 });
+    expect(report.liveItems?.map((item) => item.status)).toEqual(['skipped', 'skipped', 'completed']);
+  });
+
+  it('terminates non-converging self-directed request flow at a bounded step limit', async () => {
+    const request = createBlankRequest('loop');
+    let executions = 0;
+    const report = await runCollection(
+      { id: 'collection', name: 'Collection', expanded: true, requests: [request] },
+      { id: 'env', name: 'Env', variables: [] },
+      { iterations: 1, retries: 0, delayMs: 0, dataRows: [], flowStepLimit: 3 },
+      async () => { executions += 1; return { status: 200, statusText: 'OK', headers: {}, body: '{}', durationMs: 1, sizeBytes: 2 }; },
+      async (_script, activeRequest, environment, response, _timeout, _local, _iteration, options) => ({
+        request: activeRequest, environment, logs: [], tests: [],
+        execution: response ? options?.execution : { location: [], skipRequest: false, nextRequestIdOrName: request.id },
+      }),
+    );
+
+    expect(executions).toBe(3);
+    expect(report).toMatchObject({ total: 4, passed: 3, failed: 1, flowError: expect.stringContaining('3-step safety limit') });
+    expect(report.results.at(-1)).toMatchObject({ attempt: 0, status: 0, passed: false, error: expect.stringContaining('safety limit') });
+  });
+
   it('bails only after retries are exhausted', async () => {
     const first = createBlankRequest('first');
     const second = createBlankRequest('second');
