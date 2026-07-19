@@ -2077,7 +2077,22 @@ Compatibility bounds remain explicit: the backoff is bounded in time per attempt
 
 Compatibility bounds remain explicit: browser development's `FormData` cannot attach a custom MIME type to a text part without fabricating file disposition, so only packaged/native and portable generated execution claim that metadata. Approved bytes replace reusable filesystem paths by design. Neither difference omits a packaged Tauri user action. The Request bodies row is Complete; 19 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 140 — remaining parity closure and release hardening
+## Milestone 140 — expand Konnect protocol mapping parity (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Corrective pinned capability audit | Complete | Pinned Konnect is pull-only and explicitly skips SNI plus L4 protocols; bidirectional writes and SNI/TCP/UDP execution are removed as false parity requirements |
+| HTTP route expansion | Complete | Every supported HTTP/HTTPS protocol, path, and valid custom/default method combination receives a stable request instead of collapsing each route to one GET/path |
+| WebSocket and gRPC routes | Complete | WS/WSS paths map to WebSocket requests; gRPC/GRPCS paths map to gRPC requests with service/method and route metadata |
+| Regex paths | Complete | Named and unnamed regex segments become bounded editable `{path}` rows; unresolved complex patterns receive one explicit fallback parameter |
+| Safe remote fields | Complete | Nested Liquid/template syntax is stripped from names, paths, methods, hosts, headers, expressions, and protocol fields before local rendering can see them |
+| Managed/local merge | Complete | Stable deduplicated combination keys replace remote-managed URL/path/header/metadata state, remove stale managed fields, preserve user values for surviving path parameters, retain local request behavior, and keep collection hierarchy/environment/documentation state |
+| Explicit skipped routes | Complete | Missing-service, expression-router, SNI, and L4 routes remain inspectable with source-backed reasons rather than becoming misleading HTTP requests |
+| Executable mapping evidence | Complete | Focused tests cover 12 HTTP/WS/gRPC combinations, protocol proxy defaults, regex parameters, sanitization, three skip classes, legacy local and collection preservation, duplicate-key defense, and gRPC stale-metadata replacement |
+
+Compatibility bounds remain explicit: Brunomnia still pulls one selected control plane into the current project rather than reconciling every control plane into typed projects/workspaces. It uses reviewable protocol-specific loopback proxy defaults because the current control-plane model does not retain `proxy_urls`. Automatic route-folder hierarchy, reviewed expression-router conversion, and a credentialed live-tenant fixture remain open. Service integrations stays `Baseline`; 19 parity rows remain incomplete. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 141 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
