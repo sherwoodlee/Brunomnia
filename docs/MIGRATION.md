@@ -29,7 +29,7 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | Rich HTTP bodies | Complete | None, JSON, text, URL-encoded, multipart text/files and binary files |
 | Transport configuration | Complete for HTTP/SSE | Redirect policy, inherited/custom connect/HTTP timeout with `0` disabled, inherited/always/never API certificate validation, unlimited active SSE duration, HTTP proxy and PEM client identity |
 | gRPC TLS | Complete | System trust roots, timeout and PEM client identity |
-| WebSocket TLS | Baseline | System trust roots and arbitrary handshake headers; Milestone 109 later adds inherited validation overrides and domain-scoped PEM client identity, while custom proxy transport remains deferred |
+| WebSocket TLS and proxy | Complete baseline | System roots and arbitrary handshake headers; Milestone 109 adds inherited validation overrides plus domain-scoped PEM identity, and Milestone 110 adds authenticated HTTP/HTTPS custom proxy tunnels plus no-proxy handling |
 | Workspace migration | Complete | Version 1 workspaces migrate in place to the version 2 protocol schema |
 
 Streaming gRPC currently returns up to 100 messages within the configured deadline. WebSocket binary frames are reported with their byte count; binary-frame composition is deferred. These bounds are product behavior, not commercial gates.
@@ -80,7 +80,7 @@ Compatibility bounds remain explicit: nested source folders are represented in f
 | Script/test API | Complete baseline | Environment/base/collection/local/iteration variable APIs, replacement helpers, request getters/setters, response header/cookie helpers, console capture, and Jest/Chai-style expectation aliases |
 | Interoperability and migration | Complete | Workspace v5, advanced Insomnia/Postman auth mapping, Insomnia v4/v5 cookie-jar round trips, and collision-safe cookie import |
 
-Compatibility bounds at Milestone 5 were explicit: OAuth 2 authorization used a copied URL and manual returned code/token. Milestone 88 adds native system-browser loopback capture while retaining that browser-development fallback. Netrc contents were project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, and arbitrary Spectral JavaScript/functions/remote `extends` remained deferred. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. Milestone 109 closes WSS client identity and validation overrides; custom WebSocket proxying plus headless CLI streaming/auth parity remain later closure work. The later permission-bounded scripting expansion is recorded in Milestone 12.
+Compatibility bounds at Milestone 5 were explicit: OAuth 2 authorization used a copied URL and manual returned code/token. Milestone 88 adds native system-browser loopback capture while retaining that browser-development fallback. Netrc contents were project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, and arbitrary Spectral JavaScript/functions/remote `extends` remained deferred. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. Milestone 109 closes WSS client identity and validation overrides, and Milestone 110 closes custom WebSocket proxy transport; headless CLI streaming/auth parity remains later closure work. The later permission-bounded scripting expansion is recorded in Milestone 12.
 
 ## Milestone 6 — Git Sync and extensibility (complete)
 
@@ -525,7 +525,7 @@ Compatibility bounds remain explicit: browser engines own TLS validation and CLI
 | Executable coverage | Complete baseline | Frontend tests cover system/manual protocol selection, no-proxy forwarding, both overrides, legacy migration, native invocation, stream input, and cURL behavior; native compile/lint passes and rendered/live proxy fixtures remain intentionally omitted |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [GraphQL and preferences](GRAPHQL_AND_PREFERENCES.md), and [Milestone 35 verification](QA_MILESTONE_35.md) |
 
-Compatibility bounds remain explicit: reqwest's discovery is not claimed to reproduce Electron session PAC resolution. Browser engines own development-mode proxy routing. gRPC and WebSocket proxy transport remain open, and the CLI deliberately refuses manual proxy execution instead of silently bypassing it. Brunomnia's request-level Custom/Direct modes are an additional local capability; current Insomnia exposes proxy selection globally.
+Compatibility bounds at Milestone 35 were explicit: reqwest's discovery is not claimed to reproduce Electron session PAC resolution. Browser engines own development-mode proxy routing. Milestone 110 later closes inherited/per-request custom WebSocket proxy transport; gRPC proxying, PAC-authenticated system WebSocket discovery, and CLI manual proxy execution remain open. The CLI deliberately refuses a manual proxy instead of silently bypassing it. Brunomnia's request-level Custom/Direct modes are an additional local capability; current Insomnia exposes proxy selection globally.
 
 ## Milestone 36 — bulk request-header and query-parameter editors (complete baseline)
 
@@ -1500,12 +1500,12 @@ Compatibility bounds at this milestone were explicit: the native baseline connec
 | Polling handshake | Complete baseline | Native Engine.IO v4 builds HTTP(S) polling URLs with reserved-query replacement and cache busting, parses bounded open packets, validates session IDs, honors server `maxPayload`, and joins root or URL-path namespaces through GET/POST polling |
 | WebSocket upgrade | Complete baseline | Advertised upgrades use the existing SID, preserve headers, exchange `2probe`/`3probe`, send upgrade packet `5`, and continue the same namespace session over WebSocket |
 | Polling fallback | Complete baseline | Servers with no WebSocket upgrade or a failed pre-upgrade probe retain polling for emits, acknowledgement correlation, named listeners, ping/pong, namespace errors/disconnect, and explicit client disconnect |
-| Transport policy | Complete baseline | Polling reuses the existing redirect, timeout, proxy, certificate-validation, no-proxy, and domain-scoped PEM identity client; custom proxy/identity or disabled validation intentionally remains on polling rather than silently dropping policy during upgrade |
+| Transport policy | Complete baseline | Polling reuses the existing redirect, timeout, proxy, certificate-validation, no-proxy, and domain-scoped PEM identity client; at Milestone 99, custom proxy/identity or disabled validation intentionally remained on polling rather than silently dropping policy during upgrade, and Milestone 110 later closes that upgrade gap |
 | Concurrency and bounds | Complete | A dedicated long-poll receive task permits concurrent POST commands without HTTP/1 head-of-line deadlock; every response/packet remains UTF-8 and 1 MiB bounded, listener/argument limits remain enforced, and teardown aborts the pending poll |
 | Executable coverage | Complete baseline | Unit coverage checks polling/WebSocket URL construction and packets; real polling-only and polling-to-WebSocket fixtures both cover connect, emit, acknowledgement, incoming listener, transport evidence, and disconnect |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 99 verification](QA_MILESTONE_99.md) |
 
-Compatibility bounds at this milestone were explicit: binary Socket.IO attachments were reported but not decoded. Milestone 100 closes receive-side binary event and acknowledgement hydration. WebSocket upgrade remains skipped when custom proxy/client identity or disabled certificate-validation policy is active because the current Tungstenite upgrade connector cannot preserve those authorities; the fully functional polling transport retains them. Persistent message collections/search/export, streaming plugin hooks, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds at Milestone 99 were explicit: binary Socket.IO attachments were reported but not decoded, and WebSocket upgrade was skipped when custom proxy/client identity or disabled certificate-validation policy was active. Milestone 100 closes receive-side binary event and acknowledgement hydration; Milestone 110 later closes the policy-preserving upgrade gap. Persistent message collections/search/export, streaming plugin hooks, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 100 — Socket.IO binary event and acknowledgement hydration (complete baseline)
 
@@ -1520,7 +1520,7 @@ Compatibility bounds at this milestone were explicit: binary Socket.IO attachmen
 | Executable coverage | Complete baseline | Unit coverage proves nested multi-attachment event and binary-ack hydration; upgraded-WebSocket and polling-only loopbacks both prove binary ack, binary named event, ordinary event continuity, and disconnect |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 100 verification](QA_MILESTONE_100.md) |
 
-Compatibility bounds remain explicit: upstream's current editor does not expose a distinct binary-send argument mode, so no separate binary authoring control is claimed. WebSocket upgrade under custom proxy/client identity or disabled certificate validation, persistent message collections/search/export, streaming plugin hooks, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds at Milestone 100 were explicit: upstream's current editor does not expose a distinct binary-send argument mode, so no separate binary authoring control is claimed. Milestone 110 later closes WebSocket upgrade under custom proxy/client identity or disabled certificate validation. Persistent message collections/search/export, streaming plugin hooks, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 101 — persistent realtime response history (complete baseline)
 
@@ -1581,7 +1581,7 @@ Compatibility bounds remain explicit: Brunomnia renders complete event cards rat
 | Executable coverage | Complete baseline | Focused frontend tests cover metadata/timeline merge and migration; native upgraded and polling Socket.IO loopbacks assert returned status/version/transport before full release gates |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 104 verification](QA_MILESTONE_104.md) |
 
-Compatibility bounds at Milestone 104 were explicit: timeline rows are bounded structured workspace records rather than upstream filesystem streams, duplicate response headers remain flattened, and failed pre-response connections have errors but no fabricated status/headers. Milestone 109 closes WSS validation/client identity; custom WebSocket proxy transport, streaming plugin hooks, and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds at Milestone 104 were explicit: timeline rows are bounded structured workspace records rather than upstream filesystem streams, duplicate response headers remain flattened, and failed pre-response connections have errors but no fabricated status/headers. Milestone 109 closes WSS validation/client identity, and Milestone 110 closes custom WebSocket proxy transport. Streaming plugin hooks and live third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 105 — live SSE reconnect and resume evidence (complete)
 
@@ -1635,14 +1635,14 @@ Compatibility bounds remain explicit: selected local files are persisted as appr
 | Current upstream audit | Complete | Pinned Insomnia detects the selected GraphQL `subscription`, converts HTTP(S) to WS(S), negotiates `graphql-transport-ws`, sends `connection_init`, subscribes after `connection_ack`, and closes on protocol `error` or `complete` |
 | Operation selection | Complete baseline | Brunomnia honors operation name, sole anonymous operations, comments, strings, fragments, directives, and object/list variable defaults without routing ordinary queries or mutations away from HTTP |
 | Native protocol lifecycle | Complete | Tauri forces the required subprotocol, sends exact init and UUID subscribe envelopes, preserves the HTTP GraphQL payload shape, types ordered protocol events, and closes on terminal server messages |
-| Request continuity | Complete baseline | Resolved path/query rows, cookies, enabled headers, Basic/Bearer/API-key auth, and an existing OAuth 2 token reach the subscription handshake; Milestone 109 adds WSS validation/identity, while advanced signing and WebSocket proxy transport remain open |
+| Request continuity | Complete baseline | Resolved path/query rows, cookies, enabled headers, Basic/Bearer/API-key auth, and an existing OAuth 2 token reach the subscription handshake; Milestone 109 adds WSS validation/identity and Milestone 110 adds custom proxy/no-proxy continuity, while advanced signing remains open |
 | Realtime UI and history | Complete baseline | GraphQL subscriptions use Connect/Disconnect, the realtime summary/console/headers/timeline, finite/zero/unlimited history, environment filtering, historical request restoration, filtering/search, clear-view, delete, and clear |
 | Collection runner | Complete baseline | Operation-aware GraphQL subscriptions use the shared bounded stream sampler instead of being sent as ordinary HTTP |
 | Workspace schema | Complete | Workspace v28 accepts bounded GraphQL stream sessions while retaining the existing validation and local-only history boundary |
 | Executable coverage | Complete | Frontend operation/routing/history/storage tests and a real native `graphql-transport-ws` loopback verify subprotocol, init, ack, subscribe payload, next, complete, close, and session cleanup |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 108 verification](QA_MILESTONE_108.md) |
 
-Compatibility bounds remain explicit: full GraphQL language-service validation/autocomplete, richer schema workflows, streaming plugin hooks, advanced signing, WebSocket proxy transport, filesystem-backed event logs, and broad third-party fixtures remain open. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: full GraphQL language-service validation/autocomplete, richer schema workflows, streaming plugin hooks, advanced signing, filesystem-backed event logs, PAC-authenticated system proxy discovery, and broad third-party fixtures remain open. Milestone 110 later closes custom proxy transport. Rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 109 — WSS validation and scoped client identity (complete baseline)
 
@@ -1656,9 +1656,23 @@ Compatibility bounds remain explicit: full GraphQL language-service validation/a
 | Executable coverage | Complete | One real WSS loopback rejects an untrusted server under validation, proves a domain-mismatched identity is omitted and rejected by mTLS, then succeeds with validation disabled plus a matching client identity |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 109 verification](QA_MILESTONE_109.md) |
 
-Compatibility bounds remain explicit: custom WebSocket proxy transport, redirect-chain evidence, upstream filesystem-backed event/timeline logs, streaming plugin hooks, and broad third-party fixtures remain open. Socket.IO deliberately stays on its fully functional polling transport whenever proxy/client-identity/disabled-validation policy would make its current WebSocket upgrade lose authority. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds at Milestone 109 were explicit: custom WebSocket proxy transport, redirect-chain evidence, upstream filesystem-backed event/timeline logs, streaming plugin hooks, and broad third-party fixtures remained open. Milestone 110 closes the custom proxy gap and lets Socket.IO upgrade without losing proxy/client-identity/validation authority. The other bounds remain. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 110 — remaining parity closure and release hardening
+## Milestone 110 — custom WebSocket proxy transport (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned WebSocket and Socket.IO execution selects protocol-specific HTTP/HTTPS proxy agents, while GraphQL subscriptions share the WebSocket path |
+| Shared connector | Complete | Direct and proxied sessions use one boxed async transport that composes proxy TLS, bounded CONNECT, target WSS, request-local validation, and scoped PEM identity without process-global state |
+| Proxy policy | Complete baseline | Inherited manual, request-custom, and Direct modes reach WebSocket execution; HTTP/HTTPS proxy URLs, optional percent-decoded Basic credentials, default `http://` normalization, and exact/suffix/port/IP-CIDR no-proxy entries work |
+| Protocol continuity | Complete | WebSocket, GraphQL subscription, and Socket.IO upgrade use the same connector; failed Socket.IO upgrades still retain the established polling fallback with an actionable note |
+| Resource and error bounds | Complete | Proxy response headers stop at 64 KiB, only HTTP 200 establishes the tunnel, unsupported schemes and invalid credentials/statuses fail explicitly, and the effective request timeout bounds connect/TLS/tunnel/handshake phases |
+| Executable coverage | Complete | Real loopbacks cover authenticated proxy routing to an otherwise unresolvable target, direct CIDR bypass, WSS-over-proxy mTLS, an untrusted HTTPS proxy under request-local Never validation, and polling-to-proxied-WebSocket Socket.IO upgrade |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 110 verification](QA_MILESTONE_110.md) |
+
+Compatibility bounds remain explicit: PAC-authenticated system proxy discovery, upstream filesystem-backed event/timeline streams, streaming plugin hooks, broad third-party proxy matrices, and exact upstream forward-proxy behavior for plain WS servers that reject CONNECT remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 111 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

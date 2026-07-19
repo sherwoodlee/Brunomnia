@@ -19,18 +19,22 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
+    net::IpAddr,
+    pin::Pin,
     sync::Arc,
     time::Instant,
 };
 use tauri::ipc::Channel;
 use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpStream,
     sync::{mpsc, Mutex},
 };
 use tokio_tungstenite::{
-    connect_async, connect_async_tls_with_config,
+    client_async_tls_with_config,
     tungstenite::{
         client::IntoClientRequest,
+        handshake::client::Response as WebSocketResponse,
         http::{header::SEC_WEBSOCKET_PROTOCOL, HeaderValue},
         Message,
     },
@@ -45,8 +49,14 @@ const MAX_SOCKET_IO_PACKET_BYTES: usize = 1_048_576;
 const MAX_SOCKET_IO_LISTENERS: usize = 500;
 const GRAPHQL_TRANSPORT_WS_PROTOCOL: &str = "graphql-transport-ws";
 const MAX_GRAPHQL_SUBSCRIPTION_BYTES: usize = 1_048_576;
+const MAX_PROXY_RESPONSE_BYTES: usize = 65_536;
 
-type SocketIoWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+trait WebSocketIo: AsyncRead + AsyncWrite + Send {}
+
+impl<T> WebSocketIo for T where T: AsyncRead + AsyncWrite + Send {}
+
+type BoxedWebSocketIo = Pin<Box<dyn WebSocketIo>>;
+type SocketIoWebSocket = WebSocketStream<MaybeTlsStream<BoxedWebSocketIo>>;
 
 enum WebSocketCommand {
     Text(String),
@@ -288,6 +298,357 @@ fn websocket_tls_connector(
         builder.with_no_client_auth()
     };
     Ok(Some(Connector::Rustls(Arc::new(config))))
+}
+
+fn ip_matches_cidr(hostname: &str, pattern: &str) -> bool {
+    let Some((network, prefix)) = pattern.split_once('/') else {
+        return false;
+    };
+    let (Ok(host), Ok(network), Ok(prefix)) = (
+        hostname.parse::<IpAddr>(),
+        network.parse::<IpAddr>(),
+        prefix.parse::<u8>(),
+    ) else {
+        return false;
+    };
+    match (host, network) {
+        (IpAddr::V4(host), IpAddr::V4(network)) if prefix <= 32 => {
+            let mask = if prefix == 0 {
+                0
+            } else {
+                u32::MAX << (32 - prefix)
+            };
+            u32::from(host) & mask == u32::from(network) & mask
+        }
+        (IpAddr::V6(host), IpAddr::V6(network)) if prefix <= 128 => {
+            let mask = if prefix == 0 {
+                0
+            } else {
+                u128::MAX << (128 - prefix)
+            };
+            u128::from(host) & mask == u128::from(network) & mask
+        }
+        _ => false,
+    }
+}
+
+fn url_hostname(url: &Url) -> Option<&str> {
+    url.host_str()
+        .map(|hostname| hostname.trim_matches(['[', ']']))
+}
+
+fn no_proxy_host_port(pattern: &str) -> (String, Option<u16>) {
+    if pattern.contains("://") {
+        if let Ok(url) = Url::parse(pattern) {
+            return (
+                url_hostname(&url).unwrap_or_default().to_ascii_lowercase(),
+                url.port(),
+            );
+        }
+    }
+    if let Some(closing) = pattern.strip_prefix('[').and_then(|value| value.find(']')) {
+        let host = &pattern[1..closing + 1];
+        let port = pattern
+            .get(closing + 2..)
+            .and_then(|value| value.strip_prefix(':'))
+            .and_then(|value| value.parse().ok());
+        return (host.to_ascii_lowercase(), port);
+    }
+    if pattern.matches(':').count() == 1 {
+        if let Some((host, port)) = pattern.rsplit_once(':') {
+            if let Ok(port) = port.parse::<u16>() {
+                return (host.to_ascii_lowercase(), Some(port));
+            }
+        }
+    }
+    (pattern.trim_matches(['[', ']']).to_ascii_lowercase(), None)
+}
+
+fn proxy_bypassed(exclusions: &str, target: &Url) -> bool {
+    let Some(hostname) = url_hostname(target).map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    let port = target.port_or_known_default();
+    exclusions.split([',', '\n']).any(|entry| {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            return false;
+        }
+        if entry == "*" {
+            return true;
+        }
+        if ip_matches_cidr(&hostname, entry) {
+            return true;
+        }
+        let (pattern, pattern_port) = no_proxy_host_port(entry);
+        if pattern_port.is_some() && pattern_port != port {
+            return false;
+        }
+        let suffix = pattern
+            .strip_prefix("*.")
+            .or_else(|| pattern.strip_prefix('.'))
+            .unwrap_or(&pattern);
+        hostname == suffix || hostname.ends_with(&format!(".{suffix}"))
+    })
+}
+
+fn parse_proxy_url(raw_proxy_url: &str) -> Result<Url, String> {
+    let raw_proxy_url = raw_proxy_url.trim();
+    let normalized = if raw_proxy_url.contains("://") {
+        raw_proxy_url.to_string()
+    } else {
+        format!("http://{raw_proxy_url}")
+    };
+    let proxy = Url::parse(&normalized).map_err(|error| format!("Invalid proxy URL: {error}"))?;
+    if !matches!(proxy.scheme(), "http" | "https") {
+        return Err("WebSocket proxies must use HTTP or HTTPS.".into());
+    }
+    if proxy.host_str().is_none() {
+        return Err("The WebSocket proxy URL requires a hostname.".into());
+    }
+    Ok(proxy)
+}
+
+fn proxy_tls_config(validate_certificates: bool) -> Result<Arc<rustls::ClientConfig>, String> {
+    let builder = if validate_certificates {
+        rustls::ClientConfig::builder().with_root_certificates(native_root_store()?)
+    } else {
+        rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptInvalidServerCertificate))
+    };
+    Ok(Arc::new(builder.with_no_client_auth()))
+}
+
+fn decode_proxy_userinfo(value: &str) -> Result<String, String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let encoded = bytes
+                .get(index + 1..index + 3)
+                .ok_or_else(|| "The proxy URL contains invalid percent encoding.".to_string())?;
+            let encoded = std::str::from_utf8(encoded)
+                .map_err(|_| "The proxy URL contains invalid percent encoding.".to_string())?;
+            decoded.push(
+                u8::from_str_radix(encoded, 16)
+                    .map_err(|_| "The proxy URL contains invalid percent encoding.".to_string())?,
+            );
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    let decoded = String::from_utf8(decoded)
+        .map_err(|_| "The proxy URL credentials must be UTF-8.".to_string())?;
+    if decoded.contains(['\r', '\n']) {
+        return Err("The proxy URL credentials contain invalid control characters.".into());
+    }
+    Ok(decoded)
+}
+
+async fn connect_websocket_tcp(
+    hostname: &str,
+    port: u16,
+    timeout_ms: u64,
+    context: &str,
+) -> Result<TcpStream, String> {
+    let connect = TcpStream::connect((hostname, port));
+    let stream = if timeout_ms == 0 {
+        connect.await
+    } else {
+        tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), connect)
+            .await
+            .map_err(|_| format!("{context} timed out."))?
+    }
+    .map_err(|error| format!("{context} failed: {error}"))?;
+    stream
+        .set_nodelay(true)
+        .map_err(|error| format!("Unable to configure the WebSocket socket: {error}"))?;
+    Ok(stream)
+}
+
+fn websocket_authority(url: &Url) -> Result<String, String> {
+    let hostname =
+        url_hostname(url).ok_or_else(|| "The WebSocket URL requires a hostname.".to_string())?;
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| "The WebSocket URL requires a port.".to_string())?;
+    if hostname.contains(':') {
+        Ok(format!("[{hostname}]:{port}"))
+    } else {
+        Ok(format!("{hostname}:{port}"))
+    }
+}
+
+async fn establish_proxy_tunnel(
+    stream: &mut BoxedWebSocketIo,
+    proxy: &Url,
+    target: &Url,
+) -> Result<(), String> {
+    let authority = websocket_authority(target)?;
+    let authorization = if proxy.username().is_empty() {
+        String::new()
+    } else {
+        let credentials = format!(
+            "{}:{}",
+            decode_proxy_userinfo(proxy.username())?,
+            decode_proxy_userinfo(proxy.password().unwrap_or_default())?
+        );
+        format!(
+            "Proxy-Authorization: Basic {}\r\n",
+            STANDARD.encode(credentials)
+        )
+    };
+    let request = format!(
+        "CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\nProxy-Connection: Keep-Alive\r\n{authorization}\r\n"
+    );
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|error| format!("Unable to write the WebSocket proxy tunnel request: {error}"))?;
+    stream
+        .flush()
+        .await
+        .map_err(|error| format!("Unable to flush the WebSocket proxy tunnel request: {error}"))?;
+
+    let mut response = Vec::new();
+    loop {
+        let mut chunk = [0_u8; 1_024];
+        let read = stream
+            .read(&mut chunk)
+            .await
+            .map_err(|error| format!("Unable to read the WebSocket proxy response: {error}"))?;
+        if read == 0 {
+            return Err("The WebSocket proxy closed before establishing a tunnel.".into());
+        }
+        response.extend_from_slice(&chunk[..read]);
+        if response.len() > MAX_PROXY_RESPONSE_BYTES {
+            return Err("The WebSocket proxy response headers exceed 64 KiB.".into());
+        }
+        if response.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    let headers = String::from_utf8(response)
+        .map_err(|_| "The WebSocket proxy returned non-UTF-8 response headers.".to_string())?;
+    let status_line = headers
+        .lines()
+        .next()
+        .ok_or_else(|| "The WebSocket proxy returned an empty response.".to_string())?;
+    let mut status_parts = status_line.split_whitespace();
+    let version = status_parts.next().unwrap_or_default();
+    if !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
+        return Err("The WebSocket proxy returned an invalid HTTP status line.".into());
+    }
+    let status = status_parts
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| "The WebSocket proxy returned an invalid HTTP status.".to_string())?;
+    if status != 200 {
+        return Err(format!(
+            "The WebSocket proxy refused the CONNECT tunnel with HTTP {status}."
+        ));
+    }
+    Ok(())
+}
+
+async fn websocket_base_stream(
+    transport: &TransportConfig,
+    target: &Url,
+) -> Result<BoxedWebSocketIo, String> {
+    let target_host =
+        url_hostname(target).ok_or_else(|| "The WebSocket URL requires a hostname.".to_string())?;
+    let target_port = target
+        .port_or_known_default()
+        .ok_or_else(|| "The WebSocket URL requires a port.".to_string())?;
+    if !matches!(transport.proxy_mode.as_str(), "" | "custom")
+        || transport.proxy_url.trim().is_empty()
+        || proxy_bypassed(&transport.proxy_exclusions, target)
+    {
+        let stream = connect_websocket_tcp(
+            target_host,
+            target_port,
+            transport.timeout_ms,
+            "WebSocket connection",
+        )
+        .await?;
+        return Ok(Box::pin(stream));
+    }
+
+    let proxy = parse_proxy_url(&transport.proxy_url)?;
+    let proxy_host = url_hostname(&proxy).unwrap();
+    let proxy_port = proxy
+        .port_or_known_default()
+        .ok_or_else(|| "The WebSocket proxy URL requires a port.".to_string())?;
+    let stream = connect_websocket_tcp(
+        proxy_host,
+        proxy_port,
+        transport.timeout_ms,
+        "WebSocket proxy connection",
+    )
+    .await?;
+    let mut stream: BoxedWebSocketIo = if proxy.scheme() == "https" {
+        let server_name = ServerName::try_from(proxy_host.to_string())
+            .map_err(|_| "The WebSocket proxy has an invalid TLS hostname.".to_string())?;
+        let connect =
+            tokio_rustls::TlsConnector::from(proxy_tls_config(transport.validate_certificates)?)
+                .connect(server_name, stream);
+        let stream = if transport.timeout_ms == 0 {
+            connect.await
+        } else {
+            tokio::time::timeout(
+                std::time::Duration::from_millis(transport.timeout_ms),
+                connect,
+            )
+            .await
+            .map_err(|_| "The WebSocket proxy TLS handshake timed out.".to_string())?
+        }
+        .map_err(|error| format!("The WebSocket proxy TLS handshake failed: {error}"))?;
+        Box::pin(stream)
+    } else {
+        Box::pin(stream)
+    };
+    let tunnel = establish_proxy_tunnel(&mut stream, &proxy, target);
+    if transport.timeout_ms == 0 {
+        tunnel.await?;
+    } else {
+        tokio::time::timeout(
+            std::time::Duration::from_millis(transport.timeout_ms),
+            tunnel,
+        )
+        .await
+        .map_err(|_| "The WebSocket proxy tunnel timed out.".to_string())??;
+    }
+    Ok(stream)
+}
+
+async fn connect_native_websocket(
+    request: http::Request<()>,
+    transport: &TransportConfig,
+    request_url: &str,
+) -> Result<(SocketIoWebSocket, WebSocketResponse), String> {
+    let target =
+        Url::parse(request_url).map_err(|error| format!("Invalid WebSocket URL: {error}"))?;
+    if !matches!(target.scheme(), "ws" | "wss") {
+        return Err("WebSocket URLs must use WS or WSS.".into());
+    }
+    let stream = websocket_base_stream(transport, &target).await?;
+    let connector = websocket_tls_connector(transport, request_url)?;
+    let connect = client_async_tls_with_config(request, stream, None, connector);
+    if transport.timeout_ms == 0 {
+        connect.await.map_err(|error| error.to_string())
+    } else {
+        tokio::time::timeout(
+            std::time::Duration::from_millis(transport.timeout_ms),
+            connect,
+        )
+        .await
+        .map_err(|_| "The WebSocket handshake timed out.".to_string())?
+        .map_err(|error| error.to_string())
+    }
 }
 
 #[derive(Clone, Default)]
@@ -680,17 +1041,11 @@ fn parse_engine_io_open(payload: &str) -> Result<EngineIoOpenPacket, String> {
     Ok(open)
 }
 
-fn socket_io_websocket_upgrade_allowed(transport: &TransportConfig) -> bool {
-    transport.validate_certificates
-        && transport.proxy_mode != "custom"
-        && transport.client_certificate_pem.trim().is_empty()
-        && transport.client_key_pem.trim().is_empty()
-}
-
 async fn try_socket_io_websocket_upgrade(
     target: &SocketIoTarget,
     sid: &str,
     headers: &[KeyValue],
+    transport: &TransportConfig,
 ) -> Result<(SocketIoWebSocket, u16), String> {
     let url = socket_io_transport_url(target, "websocket", Some(sid))?;
     let mut request = url
@@ -708,7 +1063,7 @@ async fn try_socket_io_websocket_upgrade(
             .map_err(|error| format!("Invalid Socket.IO header value: {error}"))?;
         request.headers_mut().append(name, value);
     }
-    let (mut socket, response) = connect_async(request)
+    let (mut socket, response) = connect_native_websocket(request, transport, url.as_str())
         .await
         .map_err(|error| format!("Engine.IO WebSocket upgrade failed: {error}"))?;
     socket
@@ -852,32 +1207,23 @@ async fn establish_socket_io_transport(
     let connect_packet = socket_io_connect_packet(&target.namespace, &input.auth_token)?;
     let mut upgrade_note = None;
     if open.upgrades.iter().any(|upgrade| upgrade == "websocket") {
-        if socket_io_websocket_upgrade_allowed(&input.transport) {
-            match try_socket_io_websocket_upgrade(&target, &open.sid, &input.headers).await {
-                Ok((mut socket, status)) => {
-                    join_socket_io_websocket_namespace(
-                        &mut socket,
-                        &target.namespace,
-                        &connect_packet,
-                    )
+        match try_socket_io_websocket_upgrade(&target, &open.sid, &input.headers, &input.transport)
+            .await
+        {
+            Ok((mut socket, status)) => {
+                join_socket_io_websocket_namespace(&mut socket, &target.namespace, &connect_packet)
                     .await?;
-                    return Ok((
-                        target.namespace,
-                        ConnectedSocketIoTransport::WebSocket {
-                            socket: Box::new(socket),
-                            status,
-                            headers: open_response.headers,
-                            http_version: open_response.http_version,
-                        },
-                    ));
-                }
-                Err(error) => upgrade_note = Some(error),
+                return Ok((
+                    target.namespace,
+                    ConnectedSocketIoTransport::WebSocket {
+                        socket: Box::new(socket),
+                        status,
+                        headers: open_response.headers,
+                        http_version: open_response.http_version,
+                    },
+                ));
             }
-        } else {
-            upgrade_note = Some(
-                "WebSocket upgrade skipped so polling can preserve proxy or TLS identity policy."
-                    .into(),
-            );
+            Err(error) => upgrade_note = Some(error),
         }
     }
     join_socket_io_polling_namespace(
@@ -950,9 +1296,8 @@ pub async fn connect_websocket(
         );
     }
 
-    let connector = websocket_tls_connector(&input.transport, &input.url)?;
     let started = Instant::now();
-    let (socket, response) = connect_async_tls_with_config(request, None, false, connector)
+    let (socket, response) = connect_native_websocket(request, &input.transport, &input.url)
         .await
         .map_err(|error| format!("WebSocket connection failed: {error}"))?;
     let status = response.status();
@@ -1989,7 +2334,10 @@ mod tests {
         body: String,
     }
 
-    async fn read_test_http_request(stream: &mut TcpStream) -> TestHttpRequest {
+    async fn read_test_http_request<S>(stream: &mut S) -> TestHttpRequest
+    where
+        S: AsyncRead + Unpin,
+    {
         let mut bytes = Vec::new();
         let header_end = loop {
             let mut chunk = [0_u8; 4096];
@@ -2030,7 +2378,10 @@ mod tests {
         }
     }
 
-    async fn write_test_http_response(stream: &mut TcpStream, body: &str) {
+    async fn write_test_http_response<S>(stream: &mut S, body: &str)
+    where
+        S: AsyncWrite + Unpin,
+    {
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: text/plain; charset=UTF-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()
@@ -2067,6 +2418,17 @@ mod tests {
         }
     }
 
+    fn discard_stream_channel() -> Channel<StreamEvent> {
+        use tauri::ipc::InvokeResponseBody;
+
+        Channel::new(|body| {
+            if let InvokeResponseBody::Json(json) = body {
+                let _: Value = serde_json::from_str(&json)?;
+            }
+            Ok(())
+        })
+    }
+
     #[test]
     fn decodes_binary_websocket_composition() {
         match websocket_command("binary", "AAEC/w==".into()).unwrap() {
@@ -2074,6 +2436,30 @@ mod tests {
             _ => panic!("expected a binary command"),
         }
         assert!(websocket_command("binary", "not base64".into()).is_err());
+    }
+
+    #[test]
+    fn matches_websocket_proxy_exclusions_and_normalizes_proxy_urls() {
+        let target = Url::parse("wss://api.internal.example:8443/socket").unwrap();
+        assert!(proxy_bypassed("localhost, .internal.example", &target));
+        assert!(proxy_bypassed("api.internal.example:8443", &target));
+        assert!(!proxy_bypassed("api.internal.example:443", &target));
+        assert!(proxy_bypassed("*", &target));
+        assert!(proxy_bypassed(
+            "127.0.0.0/8",
+            &Url::parse("ws://127.0.0.42/socket").unwrap()
+        ));
+        assert!(proxy_bypassed(
+            "::1/128",
+            &Url::parse("ws://[::1]/socket").unwrap()
+        ));
+        assert_eq!(
+            parse_proxy_url("proxy.example.test:8080").unwrap().as_str(),
+            "http://proxy.example.test:8080/"
+        );
+        assert!(parse_proxy_url("socks5://proxy.example.test:1080").is_err());
+        assert_eq!(decode_proxy_userinfo("proxy%2Duser").unwrap(), "proxy-user");
+        assert!(decode_proxy_userinfo("proxy%0Duser").is_err());
     }
 
     #[allow(clippy::result_large_err)]
@@ -2316,6 +2702,229 @@ mod tests {
             .await
             .unwrap();
         server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn connects_websocket_through_authenticated_http_proxy_and_honors_bypass() {
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::accept_async;
+
+        let target_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_address = target_listener.local_addr().unwrap();
+        let target_server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (stream, _) = target_listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
+            }
+        });
+
+        let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_address = proxy_listener.local_addr().unwrap();
+        let proxy = tokio::spawn(async move {
+            let (mut downstream, _) = proxy_listener.accept().await.unwrap();
+            let request = read_test_http_request(&mut downstream).await;
+            assert_eq!(request.method, "CONNECT");
+            assert_eq!(
+                request.target,
+                format!("upstream.invalid:{}", target_address.port())
+            );
+            assert_eq!(
+                request
+                    .headers
+                    .get("proxy-authorization")
+                    .map(String::as_str),
+                Some("Basic cHJveHktdXNlcjpwcm94eS1wYXNz")
+            );
+            let mut upstream = TcpStream::connect(target_address).await.unwrap();
+            downstream
+                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                .await
+                .unwrap();
+            tokio::io::copy_bidirectional(&mut downstream, &mut upstream)
+                .await
+                .unwrap();
+        });
+
+        let state = StreamingState::default();
+        let output = connect_websocket(
+            StreamConnectInput {
+                session_id: "proxied-websocket".into(),
+                url: format!("ws://upstream.invalid:{}/socket", target_address.port()),
+                headers: Vec::new(),
+                transport: crate::models::TransportConfig {
+                    timeout_ms: 5_000,
+                    proxy_mode: "custom".into(),
+                    proxy_url: format!(
+                        "http://proxy-user:proxy-pass@127.0.0.1:{}",
+                        proxy_address.port()
+                    ),
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            discard_stream_channel(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.status, 101);
+        disconnect_websocket("proxied-websocket".into(), state.clone())
+            .await
+            .unwrap();
+        proxy.await.unwrap();
+
+        let bypassed = connect_websocket(
+            StreamConnectInput {
+                session_id: "bypassed-websocket-proxy".into(),
+                url: format!("ws://127.0.0.1:{}/socket", target_address.port()),
+                headers: Vec::new(),
+                transport: crate::models::TransportConfig {
+                    timeout_ms: 5_000,
+                    proxy_mode: "custom".into(),
+                    proxy_url: "http://127.0.0.1:1".into(),
+                    proxy_exclusions: "127.0.0.0/8".into(),
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            discard_stream_channel(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(bypassed.status, 101);
+        disconnect_websocket("bypassed-websocket-proxy".into(), state)
+            .await
+            .unwrap();
+        target_server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn connects_wss_through_proxy_with_scoped_client_identity() {
+        use tokio::net::TcpListener;
+        use tokio_rustls::TlsAcceptor;
+
+        let target_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_address = target_listener.local_addr().unwrap();
+        let target_acceptor = TlsAcceptor::from(Arc::new(test_tls_server_config(true)));
+        let target_server = tokio::spawn(async move {
+            let (stream, _) = target_listener.accept().await.unwrap();
+            let tls = target_acceptor.accept(stream).await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(tls).await.unwrap();
+            assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
+        });
+
+        let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_address = proxy_listener.local_addr().unwrap();
+        let proxy = tokio::spawn(async move {
+            let (mut downstream, _) = proxy_listener.accept().await.unwrap();
+            let request = read_test_http_request(&mut downstream).await;
+            assert_eq!(request.method, "CONNECT");
+            assert_eq!(
+                request.target,
+                format!("upstream.invalid:{}", target_address.port())
+            );
+            let mut upstream = TcpStream::connect(target_address).await.unwrap();
+            downstream
+                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                .await
+                .unwrap();
+            tokio::io::copy_bidirectional(&mut downstream, &mut upstream)
+                .await
+                .unwrap();
+        });
+
+        let state = StreamingState::default();
+        let output = connect_websocket(
+            StreamConnectInput {
+                session_id: "proxied-wss-identity".into(),
+                url: format!("wss://upstream.invalid:{}/socket", target_address.port()),
+                headers: Vec::new(),
+                transport: crate::models::TransportConfig {
+                    timeout_ms: 5_000,
+                    validate_certificates: false,
+                    proxy_mode: "custom".into(),
+                    proxy_url: format!("http://127.0.0.1:{}", proxy_address.port()),
+                    client_certificate_pem: TLS_CLIENT_CERTIFICATE.into(),
+                    client_key_pem: TLS_CLIENT_KEY.into(),
+                    client_certificate_domains: "upstream.invalid".into(),
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            discard_stream_channel(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.status, 101);
+        disconnect_websocket("proxied-wss-identity".into(), state)
+            .await
+            .unwrap();
+        proxy.await.unwrap();
+        target_server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn connects_websocket_through_https_proxy_when_validation_is_disabled() {
+        use tokio::net::TcpListener;
+        use tokio_rustls::TlsAcceptor;
+
+        let target_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_address = target_listener.local_addr().unwrap();
+        let target_server = tokio::spawn(async move {
+            let (stream, _) = target_listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            assert!(matches!(socket.next().await, Some(Ok(Message::Close(_)))));
+        });
+
+        let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_address = proxy_listener.local_addr().unwrap();
+        let proxy_acceptor = TlsAcceptor::from(Arc::new(test_tls_server_config(false)));
+        let proxy = tokio::spawn(async move {
+            let (stream, _) = proxy_listener.accept().await.unwrap();
+            let mut downstream = proxy_acceptor.accept(stream).await.unwrap();
+            let request = read_test_http_request(&mut downstream).await;
+            assert_eq!(request.method, "CONNECT");
+            let mut upstream = TcpStream::connect(target_address).await.unwrap();
+            downstream
+                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                .await
+                .unwrap();
+            let _ = tokio::io::copy_bidirectional(&mut downstream, &mut upstream).await;
+        });
+
+        let state = StreamingState::default();
+        let output = connect_websocket(
+            StreamConnectInput {
+                session_id: "https-proxied-websocket".into(),
+                url: format!("ws://upstream.invalid:{}/socket", target_address.port()),
+                headers: Vec::new(),
+                transport: crate::models::TransportConfig {
+                    timeout_ms: 5_000,
+                    validate_certificates: false,
+                    proxy_mode: "custom".into(),
+                    proxy_url: format!("https://127.0.0.1:{}", proxy_address.port()),
+                    ..Default::default()
+                },
+                sse: crate::models::SseConfig::default(),
+                graphql_subscription: None,
+            },
+            discard_stream_channel(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.status, 101);
+        disconnect_websocket("https-proxied-websocket".into(), state)
+            .await
+            .unwrap();
+        proxy.await.unwrap();
+        target_server.await.unwrap();
     }
 
     #[test]
@@ -2588,6 +3197,103 @@ mod tests {
             .await
             .unwrap();
         server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn upgrades_socket_io_through_custom_http_proxy() {
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::accept_async;
+
+        let target_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_address = target_listener.local_addr().unwrap();
+        let target_server = tokio::spawn(async move {
+            let (stream, _) = target_listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            assert_eq!(
+                socket.next().await.unwrap().unwrap().into_text().unwrap(),
+                "2probe"
+            );
+            socket.send(Message::Text("3probe".into())).await.unwrap();
+            assert_eq!(
+                socket.next().await.unwrap().unwrap().into_text().unwrap(),
+                "5"
+            );
+            assert_eq!(
+                socket.next().await.unwrap().unwrap().into_text().unwrap(),
+                "40/orders,"
+            );
+            socket
+                .send(Message::Text("40/orders,{\"sid\":\"proxy-socket\"}".into()))
+                .await
+                .unwrap();
+            assert_eq!(
+                socket.next().await.unwrap().unwrap().into_text().unwrap(),
+                "41/orders,"
+            );
+        });
+
+        let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_address = proxy_listener.local_addr().unwrap();
+        let proxy = tokio::spawn(async move {
+            let (mut polling, _) = proxy_listener.accept().await.unwrap();
+            let request = read_test_http_request(&mut polling).await;
+            assert_eq!(request.method, "GET");
+            assert!(request.target.starts_with(&format!(
+                "http://upstream.invalid:{}/custom/",
+                target_address.port()
+            )));
+            assert!(request.target.contains("transport=polling"));
+            write_test_http_response(
+                &mut polling,
+                "0{\"sid\":\"proxy-engine\",\"upgrades\":[\"websocket\"],\"pingInterval\":25000,\"pingTimeout\":20000,\"maxPayload\":1000000}",
+            )
+            .await;
+
+            let (mut downstream, _) = proxy_listener.accept().await.unwrap();
+            let request = read_test_http_request(&mut downstream).await;
+            assert_eq!(request.method, "CONNECT");
+            assert_eq!(
+                request.target,
+                format!("upstream.invalid:{}", target_address.port())
+            );
+            let mut upstream = TcpStream::connect(target_address).await.unwrap();
+            downstream
+                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                .await
+                .unwrap();
+            tokio::io::copy_bidirectional(&mut downstream, &mut upstream)
+                .await
+                .unwrap();
+        });
+
+        let state = StreamingState::default();
+        let output = connect_socket_io(
+            SocketIoConnectInput {
+                session_id: "proxied-socket-io".into(),
+                url: format!("http://upstream.invalid:{}/orders", target_address.port()),
+                headers: Vec::new(),
+                path: "/custom".into(),
+                auth_token: String::new(),
+                event_listeners: Vec::new(),
+                transport: crate::models::TransportConfig {
+                    timeout_ms: 5_000,
+                    proxy_mode: "custom".into(),
+                    proxy_url: format!("http://127.0.0.1:{}", proxy_address.port()),
+                    ..Default::default()
+                },
+            },
+            discard_stream_channel(),
+            state.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.status, 101);
+        assert_eq!(output.transport, "WebSocket");
+        disconnect_socket_io("proxied-socket-io".into(), state)
+            .await
+            .unwrap();
+        proxy.await.unwrap();
+        target_server.await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -55,8 +55,8 @@ pub fn apply_preferred_request_version(
 }
 
 fn domain_matches(pattern: &str, hostname: &str) -> bool {
-    let pattern = pattern.trim().to_ascii_lowercase();
-    let hostname = hostname.to_ascii_lowercase();
+    let pattern = pattern.trim().trim_matches(['[', ']']).to_ascii_lowercase();
+    let hostname = hostname.trim_matches(['[', ']']).to_ascii_lowercase();
     if pattern == "*" {
         return true;
     }
@@ -618,6 +618,7 @@ mod tests {
         assert!(domain_matches("*.example.com", "api.example.com"));
         assert!(!domain_matches("*.example.com", "example.com"));
         assert!(!domain_matches("api.example.com", "other.example.com"));
+        assert!(domain_matches("::1", "[::1]"));
     }
 
     #[test]
