@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useState } from 'react';
 import type { ApiRequest, StreamMessage } from '../types';
+import { filterStreamMessages, type StreamEventCategory } from '../lib/streamHistory';
 import { Icon } from './Icon';
 
 const fileBase64 = (file: File) => new Promise<string>((resolve, reject) => {
@@ -10,6 +12,7 @@ const fileBase64 = (file: File) => new Promise<string>((resolve, reject) => {
 
 export function StreamConsole({
   request,
+  sessionId,
   protocol,
   messages,
   connected,
@@ -20,6 +23,7 @@ export function StreamConsole({
   onSend,
 }: {
   request: ApiRequest;
+  sessionId: string;
   protocol: ApiRequest['protocol'];
   messages: StreamMessage[];
   connected: boolean;
@@ -29,15 +33,34 @@ export function StreamConsole({
   onFrameKindChange: (value: 'text' | 'binary') => void;
   onSend: () => void;
 }) {
+  const [eventType, setEventType] = useState<StreamEventCategory>('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [clearedThrough, setClearedThrough] = useState('');
+  const visibleMessages = useMemo(
+    () => filterStreamMessages(messages, eventType, searchQuery, clearedThrough),
+    [clearedThrough, eventType, messages, searchQuery],
+  );
+  useEffect(() => {
+    setEventType('');
+    setSearchQuery('');
+    setClearedThrough('');
+  }, [sessionId]);
+
   return (
     <div className={`stream-console${protocol === 'websocket' || protocol === 'socketio' ? ' with-composer' : ''}`}>
       <div className="stream-log" aria-live="polite">
-        {messages.length ? messages.map((message) => (
+        <div className="stream-log-toolbar">
+          <select aria-label="Stream event type" disabled={protocol === 'sse'} onChange={(event) => setEventType(event.target.value as StreamEventCategory)} value={eventType}><option value="">All</option><option value="message">Message</option><option value="open">Open</option><option value="close">Close</option><option value="error">Error</option></select>
+          <label><Icon name="search" size={14} /><input aria-label="Events filter" onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search" type="search" value={searchQuery} /></label>
+          <span>{visibleMessages.length} / {messages.length}</span>
+          <button aria-label="Clear visible stream events" disabled={!messages.length} onClick={() => setClearedThrough(messages.at(-1)?.timestamp ?? '')} type="button"><Icon name="x" size={14} /> Clear view</button>
+        </div>
+        {visibleMessages.length ? visibleMessages.map((message) => (
           <article className={`stream-message ${message.direction}`} key={message.id}>
             <header><span>{message.direction}</span><strong>{message.kind}</strong><time>{new Date(message.timestamp).toLocaleTimeString()}</time></header>
             <pre>{message.text}</pre>
           </article>
-        )) : <div className="empty-state compact"><Icon name="history" size={26} /><strong>No stream activity yet</strong><span>Connect to start the ordered event log.</span></div>}
+        )) : <div className="empty-state compact"><Icon name="history" size={26} /><strong>{messages.length ? 'No matching stream activity' : 'No stream activity yet'}</strong><span>{messages.length ? 'Adjust the event type, search, or wait for a new event.' : 'Connect to start the ordered event log.'}</span></div>}
       </div>
       {protocol === 'websocket' ? (
         <div className="stream-composer">

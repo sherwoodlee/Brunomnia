@@ -12,7 +12,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - WebSocket text/binary-frame sessions with an ordered bidirectional event log
 - Socket.IO Engine.IO v4 sessions with polling-first negotiation, standards-based WebSocket upgrade and polling-only fallback, custom paths and URL namespaces, headers/cookies/Bearer connect auth, ordered JSON/text event arguments, optional acknowledgements, nested binary Buffer reconstruction, live named listeners, and an ordered event console
 - Long-running Server-Sent Events sessions with incremental parsing, bounded or unlimited automatic reconnects, server retry hints, and `Last-Event-ID` resume
-- Persistent chronologically grouped WebSocket, Socket.IO, and SSE session history with finite/zero/unlimited retention, active-environment filtering, incremental event persistence, historical request-version restoration, prior-session selection, and delete/clear actions
+- Persistent chronologically grouped WebSocket, Socket.IO, and SSE session history with finite/zero/unlimited retention, active-environment filtering, incremental event persistence, type filtering, text search, non-destructive clear-view cutoffs, historical request-version restoration, prior-session selection, and delete/clear actions
 - gRPC reflection, pasted `.proto` compilation, dynamic JSON messages, and unary/client/server/bidirectional streaming calls
 - JSON, text, URL-encoded, multipart file/part-metadata, and binary request bodies
 - Standard or custom HTTP methods, explicit encoded path parameters, repeated query keys, regular or device-persistent bulk query/header editing, row descriptions, multiline values, and local JSON/XML body beautification

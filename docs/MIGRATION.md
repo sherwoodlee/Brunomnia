@@ -1552,7 +1552,22 @@ Compatibility bounds remain explicit: stream history does not yet restore histor
 
 Compatibility bounds remain explicit: stream history still does not retain handshake/timeline headers or upstream-style filesystem event-log paths, and saved-event search/export plus streaming plugin hooks remain open. Request restoration follows Brunomnia's existing structural snapshot contract rather than Insomnia's compressed request-version database. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 103 — remaining parity closure and release hardening
+## Milestone 103 — realtime event filtering, search, and clear view (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned realtime responses expose All/Message/Open/Close/Error type filtering except on cURL-backed Event Stream, case-insensitive message/error/close search, and a local `clearEventsBefore` cutoff that resets with the response ID; no dedicated event-log export action exists |
+| Event categorization | Complete baseline | Open, close/closed, and error records map directly; incoming/outgoing records map to Message; remaining system transport/listener/reconnect evidence stays visible under All but not the four selected upstream categories |
+| Search behavior | Complete | Case-insensitive search examines message data and error/close text while excluding open and informational system entries, matching the pinned event predicate |
+| Clear-view behavior | Complete baseline | Clear view stores the newest displayed timestamp, hides records at or before it without mutating saved history, and allows later live events to appear immediately |
+| Session isolation | Complete | Type, query, and cutoff state reset whenever the selected live or historical session ID changes, preventing one response's local view from leaking into another |
+| Responsive UI | Complete baseline | The lazy stream console adds a wrapping toolbar with protocol-aware type selection, search, visible/total count, and a clearly labeled non-destructive clear action |
+| Executable coverage | Complete baseline | Focused tests prove category mapping, exact search eligibility, type filtering, and timestamp cutoff behavior; the full renderer/native/package gates remain required before publication |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 103 verification](QA_MILESTONE_103.md) |
+
+Compatibility bounds remain explicit: Brunomnia renders complete event cards rather than upstream's virtualized summary/detail split, and sessions still lack handshake headers plus a dedicated timeline/console tab. Saved logs are bounded in workspace memory instead of upstream file paths. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 104 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

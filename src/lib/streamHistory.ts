@@ -3,6 +3,8 @@ import type { ApiRequest, StoredStreamSession, StreamMessage } from '../types';
 const MAX_STREAM_MESSAGES = 5_000;
 const MAX_STREAM_TEXT_CHARACTERS = 5_000_000;
 
+export type StreamEventCategory = '' | 'message' | 'open' | 'close' | 'error';
+
 const sameScope = (candidate: StoredStreamSession, session: StoredStreamSession, filterResponsesByEnv: boolean) => candidate.requestId === session.requestId
   && (!filterResponsesByEnv || candidate.environmentId === session.environmentId);
 
@@ -18,6 +20,30 @@ const boundMessages = (messages: StreamMessage[]) => {
 };
 
 export const appendVisibleStreamMessage = (messages: StreamMessage[], message: StreamMessage) => boundMessages([...messages, message]);
+
+export const streamMessageCategory = (message: StreamMessage): Exclude<StreamEventCategory, ''> | 'other' => {
+  if (message.kind === 'open') return 'open';
+  if (message.kind === 'close' || message.kind === 'closed') return 'close';
+  if (message.kind === 'error') return 'error';
+  return message.direction === 'system' ? 'other' : 'message';
+};
+
+export const filterStreamMessages = (
+  messages: StreamMessage[],
+  category: StreamEventCategory,
+  searchQuery: string,
+  clearedThrough = '',
+) => {
+  const query = searchQuery.toLocaleLowerCase();
+  return messages.filter((message) => {
+    if (clearedThrough && message.timestamp <= clearedThrough) return false;
+    const messageCategory = streamMessageCategory(message);
+    if (category && messageCategory !== category) return false;
+    if (!query) return true;
+    if (messageCategory !== 'message' && messageCategory !== 'error' && messageCategory !== 'close') return false;
+    return message.text.toLocaleLowerCase().includes(query);
+  });
+};
 
 export const createStreamSession = (
   request: ApiRequest,

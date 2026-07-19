@@ -649,6 +649,15 @@ kbd {
 .stream-console { height: 100%; min-height: 0; }
 .stream-console.with-composer { display: grid; grid-template-rows: minmax(0, 1fr) 94px; }
 .stream-log { min-height: 0; overflow: auto; padding: 12px; }
+.stream-log-toolbar { align-items: center; backdrop-filter: blur(10px); background: color-mix(in srgb, var(--panel) 92%, transparent); display: flex; flex-wrap: wrap; gap: 8px; margin: -12px -12px 10px; padding: 10px 12px; position: sticky; top: -12px; z-index: 2; }
+.stream-log-toolbar select, .stream-log-toolbar input { background: var(--panel-soft); border: 1px solid var(--border); color: var(--text-soft); font: 9px var(--font-mono); height: 30px; outline: 0; }
+.stream-log-toolbar select { flex: 0 0 104px; padding: 0 8px; }
+.stream-log-toolbar label { align-items: center; display: flex; flex: 1 1 140px; min-width: 100px; position: relative; }
+.stream-log-toolbar label svg { color: var(--muted); left: 8px; position: absolute; }
+.stream-log-toolbar input { padding: 0 28px; width: 100%; }
+.stream-log-toolbar > span { color: var(--faint); font: 8px var(--font-mono); margin-left: auto; white-space: nowrap; }
+.stream-log-toolbar button { align-items: center; background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text-soft); display: flex; font-size: 9px; gap: 5px; height: 30px; padding: 0 9px; white-space: nowrap; }
+.stream-log-toolbar button:disabled { opacity: .4; }
 .stream-message { border: 1px solid var(--border-soft); border-left: 2px solid var(--muted); margin-bottom: 9px; }
 .stream-message.incoming { border-left-color: var(--mint); }
 .stream-message.outgoing { border-left-color: var(--blue); }

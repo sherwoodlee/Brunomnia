@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
 import { restoreRequestSnapshot } from './historicalRequest';
-import { appendStreamSessionMessage, clearStoredStreamSessions, createStreamSession, deleteStoredStreamSession, retainStreamSessionHistory, streamHistorySections, visibleStreamSessionHistory } from './streamHistory';
+import { appendStreamSessionMessage, clearStoredStreamSessions, createStreamSession, deleteStoredStreamSession, filterStreamMessages, retainStreamSessionHistory, streamHistorySections, streamMessageCategory, visibleStreamSessionHistory } from './streamHistory';
 
 describe('stream session history', () => {
   it('retains request/environment scoped sessions and incrementally closes logs', () => {
@@ -54,5 +54,21 @@ describe('stream session history', () => {
       url: 'wss://example.test/original',
       folderId: 'current-folder',
     });
+  });
+
+  it('filters searchable event categories and clears only the current view', () => {
+    const messages = [
+      { id: 'open', sessionId: 'stream', direction: 'system' as const, kind: 'open', text: 'Connected', timestamp: '2026-07-18T12:00:00.000Z' },
+      { id: 'incoming', sessionId: 'stream', direction: 'incoming' as const, kind: 'order.created', text: '{"id":42}', timestamp: '2026-07-18T12:00:01.000Z' },
+      { id: 'info', sessionId: 'stream', direction: 'system' as const, kind: 'upgrade', text: 'Upgraded to WebSocket', timestamp: '2026-07-18T12:00:02.000Z' },
+      { id: 'error', sessionId: 'stream', direction: 'system' as const, kind: 'error', text: 'Connection reset', timestamp: '2026-07-18T12:00:03.000Z' },
+      { id: 'close', sessionId: 'stream', direction: 'system' as const, kind: 'closed', text: 'Disconnected', timestamp: '2026-07-18T12:00:04.000Z' },
+    ];
+
+    expect(messages.map(streamMessageCategory)).toEqual(['open', 'message', 'other', 'error', 'close']);
+    expect(filterStreamMessages(messages, 'message', '', '').map(({ id }) => id)).toEqual(['incoming']);
+    expect(filterStreamMessages(messages, '', 'connection', '').map(({ id }) => id)).toEqual(['error']);
+    expect(filterStreamMessages(messages, '', 'connected', '').map(({ id }) => id)).toEqual(['close']);
+    expect(filterStreamMessages(messages, '', '', '2026-07-18T12:00:03.000Z').map(({ id }) => id)).toEqual(['close']);
   });
 });
