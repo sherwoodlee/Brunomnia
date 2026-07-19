@@ -1,15 +1,20 @@
 import type { ApiRequest, KeyValue } from '../types';
 import { buildHeaders, buildRequestUrl, resolveTemplate } from './request';
 
-export type ClientCodeTarget = 'curl' | 'javascript-fetch' | 'python-requests' | 'go' | 'java-httpclient' | 'csharp-httpclient';
+export type ClientCodeTarget = 'curl' | 'javascript-fetch' | 'node-native' | 'python-requests' | 'php-curl' | 'ruby-native' | 'go' | 'java-httpclient' | 'csharp-httpclient' | 'swift-urlsession' | 'rust-reqwest';
 
 export const clientCodeTargets: Array<{ id: ClientCodeTarget; label: string }> = [
   { id: 'curl', label: 'cURL' },
   { id: 'javascript-fetch', label: 'JavaScript · Fetch' },
+  { id: 'node-native', label: 'Node.js · Native' },
   { id: 'python-requests', label: 'Python · Requests' },
+  { id: 'php-curl', label: 'PHP · cURL' },
+  { id: 'ruby-native', label: 'Ruby · Net::HTTP' },
   { id: 'go', label: 'Go · net/http' },
   { id: 'java-httpclient', label: 'Java · HttpClient' },
   { id: 'csharp-httpclient', label: 'C# · HttpClient' },
+  { id: 'swift-urlsession', label: 'Swift · URLSession' },
+  { id: 'rust-reqwest', label: 'Rust · Reqwest' },
 ];
 
 export type ClientCodeSnippet = {
@@ -241,6 +246,13 @@ const materialize = (request: ApiRequest, variables: Record<string, string>): Ma
 const json = (value: unknown) => JSON.stringify(value);
 const prettyJson = (value: unknown) => JSON.stringify(value, null, 2);
 const shell = (value: string) => `'${value.replace(/'/g, `'"'"'`)}'`;
+const singleQuoted = (value: string) => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+const bodyBase64 = (body: MaterializedBody) => body.kind === 'bytes' ? body.dataBase64 : encodeBase64(encoder.encode(body.value));
+const rustRaw = (value: string) => {
+  let hashes = '';
+  while (value.includes(`"${hashes}`)) hashes += '#';
+  return `r${hashes}"${value}"${hashes}`;
+};
 
 const curlSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
   const parts = [`curl --request ${method}`, `  --url ${shell(url)}`];
@@ -273,6 +285,29 @@ const data = await response.text();
 console.log(response.status, data);`;
 };
 
+const nodeSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const payload = body?.kind === 'text'
+    ? `Buffer.from(${json(body.value)}, 'utf8')`
+    : body?.kind === 'bytes'
+      ? `Buffer.from(${json(body.dataBase64)}, 'base64')`
+      : '';
+  return `import http from 'node:http';
+import https from 'node:https';
+
+const target = new URL(${json(url)});
+${body ? `const payload = ${payload};\n` : ''}const request = (target.protocol === 'https:' ? https : http).request(target, {
+  method: ${json(method)},
+  headers: ${prettyJson(headers)}
+}, response => {
+  const chunks = [];
+  response.on('data', chunk => chunks.push(chunk));
+  response.on('end', () => console.log(response.statusCode, Buffer.concat(chunks).toString('utf8')));
+});
+
+request.on('error', error => { throw error; });
+request.end(${body ? 'payload' : ''});`;
+};
+
 const pythonSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
   const bodyExpression = body?.kind === 'text'
     ? json(body.value)
@@ -289,6 +324,46 @@ response = requests.request(
 )
 
 print(response.status_code, response.text)`;
+};
+
+const phpSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const payload = body ? `$payload = base64_decode(${singleQuoted(bodyBase64(body))}, true);
+if ($payload === false) { throw new RuntimeException('Invalid generated Base64 payload.'); }
+
+` : '';
+  const options = [
+    `    CURLOPT_URL => ${singleQuoted(url)}`,
+    '    CURLOPT_RETURNTRANSFER => true',
+    `    CURLOPT_CUSTOMREQUEST => ${singleQuoted(method)}`,
+    `    CURLOPT_HTTPHEADER => [${Object.entries(headers).map(([name, value]) => `\n        ${singleQuoted(`${name}: ${value}`)}`).join(',')}${Object.keys(headers).length ? '\n    ' : ''}]`,
+    ...(body ? ['    CURLOPT_POSTFIELDS => $payload'] : []),
+  ];
+  return `<?php
+
+${payload}$curl = curl_init();
+curl_setopt_array($curl, [
+${options.join(',\n')}
+]);
+
+$response = curl_exec($curl);
+if ($response === false) { throw new RuntimeException(curl_error($curl)); }
+$status = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+curl_close($curl);
+echo $status . ' ' . $response . PHP_EOL;`;
+};
+
+const rubySnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const requestHasBody = body ? 'true' : 'false';
+  const headerEntries = Object.entries(headers).map(([name, value]) => `${singleQuoted(name)} => ${singleQuoted(value)}`).join(', ');
+  return `require 'net/http'
+require 'uri'
+${body ? "require 'base64'\n" : ''}
+uri = URI(${singleQuoted(url)})
+request = Net::HTTPGenericRequest.new(${singleQuoted(method)}, ${requestHasBody}, true, uri.request_uri, { ${headerEntries} })
+${body ? `request.body = Base64.strict_decode64(${singleQuoted(bodyBase64(body))})\n` : ''}http = Net::HTTP.new(uri.host, uri.port)
+http.use_ssl = uri.scheme == 'https'
+response = http.request(request)
+puts "#{response.code} #{response.body}"`;
 };
 
 const goSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
@@ -355,15 +430,60 @@ using var response = await client.SendAsync(request);
 Console.WriteLine($"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");`;
 };
 
+const swiftSnippet = ({ method, url, headers, body }: MaterializedRequest) => {
+  const headerFields = Object.entries(headers).map(([name, value]) => `${json(name)}: ${json(value)}`).join(',\n    ');
+  return `import Foundation
+
+let url = URL(string: ${json(url)})!
+var request = URLRequest(url: url)
+request.httpMethod = ${json(method)}
+request.allHTTPHeaderFields = [${headerFields ? `\n    ${headerFields}\n` : ''}]${body ? `
+request.httpBody = Data(base64Encoded: ${json(bodyBase64(body))})!` : ''}
+
+let semaphore = DispatchSemaphore(value: 0)
+URLSession.shared.dataTask(with: request) { data, response, error in
+    defer { semaphore.signal() }
+    if let error { print(error); return }
+    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    print(status, text)
+}.resume()
+semaphore.wait()`;
+};
+
+const rustSnippet = ({ method, url, headers, body }: MaterializedRequest) => `${body ? 'use base64::{engine::general_purpose::STANDARD, Engine as _};\n' : ''}use reqwest::{blocking::Client, Method};
+use std::error::Error;
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let client = Client::new();
+    let mut request = client.request(
+        Method::from_bytes(${rustRaw(method)}.as_bytes())?,
+        ${rustRaw(url)},
+    );
+${Object.entries(headers).map(([name, value]) => `    request = request.header(${rustRaw(name)}, ${rustRaw(value)});`).join('\n')}${Object.keys(headers).length ? '\n' : ''}${body ? `    let payload = STANDARD.decode(${rustRaw(bodyBase64(body))})?;
+    request = request.body(payload);
+` : ''}    let response = request.send()?;
+    let status = response.status();
+    let text = response.text()?;
+    println!("{} {}", status.as_u16(), text);
+    Ok(())
+}
+`;
+
 export const generateClientCode = (target: ClientCodeTarget, request: ApiRequest, variables: Record<string, string>): ClientCodeSnippet => {
   const prepared = materialize(request, variables);
   const generators: Record<ClientCodeTarget, (input: MaterializedRequest) => string> = {
     curl: curlSnippet,
     'javascript-fetch': javascriptSnippet,
+    'node-native': nodeSnippet,
     'python-requests': pythonSnippet,
+    'php-curl': phpSnippet,
+    'ruby-native': rubySnippet,
     go: goSnippet,
     'java-httpclient': javaSnippet,
     'csharp-httpclient': csharpSnippet,
+    'swift-urlsession': swiftSnippet,
+    'rust-reqwest': rustSnippet,
   };
   return { code: generators[target](prepared), warnings: prepared.warnings };
 };

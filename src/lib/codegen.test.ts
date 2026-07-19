@@ -9,6 +9,22 @@ const javascriptInlineBytes = (code: string) => {
 };
 
 describe('local client code generation', () => {
+  it('exposes the expanded pinned target set in stable order', () => {
+    expect(clientCodeTargets.map((target) => target.id)).toEqual([
+      'curl',
+      'javascript-fetch',
+      'node-native',
+      'python-requests',
+      'php-curl',
+      'ruby-native',
+      'go',
+      'java-httpclient',
+      'csharp-httpclient',
+      'swift-urlsession',
+      'rust-reqwest',
+    ]);
+  });
+
   it('generates every supported target from the materialized request', () => {
     const request = createBlankRequest('codegen');
     request.method = 'PROPFIND';
@@ -124,6 +140,31 @@ describe('local client code generation', () => {
       expect(snippet.warnings).toEqual([]);
       expect(snippet.code).toContain('AAEC/w==');
       expect(snippet.code).toContain('application/x-archive');
+    }
+  });
+
+  it('renders the added default clients with exact UTF-8 body bytes and escaped metadata', () => {
+    const request = createBlankRequest('expanded-codegen');
+    request.method = 'REPORT';
+    request.url = 'https://api.example.com/reports?scope=team%20docs';
+    request.headers = [{ id: 'quoted', name: 'X-Quoted', value: "one'\\two", enabled: true }];
+    request.bodyMode = 'text';
+    request.body = 'line one\nπ and \u0000';
+    const encoded = 'bGluZSBvbmUKz4AgYW5kIAA=';
+    const markers = {
+      'node-native': ["import https from 'node:https'", 'Buffer.from', 'request.end(payload)', `"X-Quoted": "one'\\\\two"`],
+      'php-curl': ['CURLOPT_CUSTOMREQUEST', 'CURLOPT_POSTFIELDS', encoded, "X-Quoted: one\\'\\\\two"],
+      'ruby-native': ["require 'net/http'", 'Net::HTTPGenericRequest', encoded, "'X-Quoted' => 'one\\'\\\\two'"],
+      'swift-urlsession': ['URLSession.shared.dataTask', 'Data(base64Encoded:', encoded, `"X-Quoted": "one'\\\\two"`],
+      'rust-reqwest': ['reqwest::{blocking::Client, Method}', 'STANDARD.decode', encoded, "r\"one'\\two\""],
+    } as const;
+
+    for (const [target, expected] of Object.entries(markers)) {
+      const snippet = generateClientCode(target as keyof typeof markers, request, {});
+      expect(snippet.warnings).toEqual([]);
+      expect(snippet.code).toContain('REPORT');
+      expect(snippet.code).toContain('https://api.example.com/reports?scope=team%20docs');
+      expected.forEach((marker) => expect(snippet.code).toContain(marker));
     }
   });
 

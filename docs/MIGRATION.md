@@ -163,7 +163,7 @@ Compatibility bounds remain explicit: bulk folder actions, rendered Markdown, en
 | HTTP methods | Complete baseline | Standard-method suggestions plus bounded, token-valid custom methods through desktop, native transport, import/export, history, runner, and CLI models |
 | Request parameters | Complete baseline | Explicit `{name}` path rows with encoded substitution, ordered repeated query keys, row enablement, descriptions, and multiline values |
 | Body authoring | Complete baseline | Local JSON and conservative XML beautification without network calls or silent modification of unrecognized text |
-| Client code generation | Complete baseline | Local previews for cURL, JavaScript Fetch, Python Requests, Go `net/http`, Java `HttpClient`, and C# `HttpClient`, using effective inherited configuration and the active environment; exact multipart and binary embedding was added in Milestone 106 |
+| Client code generation | Complete baseline | Initial local previews for cURL, JavaScript Fetch, Python Requests, Go `net/http`, Java `HttpClient`, and C# `HttpClient`, using effective inherited configuration and the active environment; exact multipart and binary embedding was added in Milestone 106 and five more target families in Milestone 126 |
 | Interchange | Complete baseline | OpenAPI path parameter generation plus Insomnia v4/v5 and Postman import/export preservation for custom methods, path rows, descriptions, and multiline values |
 | Workspace migration | Complete | Versions 1–10 migrate to v11 bounded method tokens, normalized path/query/header/form/metadata rows, descriptions, and the Generate Code shortcut |
 | Documentation and evidence | Complete | [Request authoring and client-code guide](REQUEST_AUTHORING.md) and [Milestone 11 verification](QA_MILESTONE_11.md) |
@@ -1611,7 +1611,7 @@ Compatibility bounds remain explicit: Event Stream logs/timelines remain bounded
 | Executable coverage | Complete | Focused tests decode generated multipart bytes, prove framing/metadata/templates/duplicates/binary values/boundary collision handling, compare the common payload across every target, and exercise invalid-file warnings |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 106 verification](QA_MILESTONE_106.md) |
 
-Compatibility bounds remain explicit: Brunomnia currently exposes six local targets rather than Insomnia's full HTTPSnippet matrix, and it does not install target dependencies, reproduce runtime-only advanced auth signing, validate every emitted language, or execute snippets. Inline byte payloads make previews self-contained but can be large. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: Milestone 126 expands Brunomnia to eleven selected clients across eleven of HTTPSnippet's twenty target families, but alternate clients and nine target families remain. Brunomnia does not install target dependencies, reproduce runtime-only advanced auth signing, comprehensively validate every emitted language, or execute snippets. Inline byte payloads make previews self-contained but can be large. Rendered interaction QA remains omitted by standing direction.
 
 ## Milestone 107 — request-body controls and native wire fidelity (complete baseline)
 
@@ -1870,7 +1870,22 @@ Compatibility bounds remain explicit: browser Fetch controls its own User-Agent,
 
 Compatibility bounds remain explicit: WebSocket and Socket.IO calculated handshake rows require transport-level extension parity before they can be claimed. Ledger rows stay Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 126 — remaining parity closure and release hardening
+## Milestone 126 — local client-code target expansion (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia depends on HTTPSnippet 3.0.10, exposes every package target and client in its Generate Client Code modal, selects each target's declared default client, persists the last choice locally, and generates through main-process HAR conversion |
+| Target-family expansion | Complete baseline | Node.js native HTTP, PHP cURL, Ruby `Net::HTTP`, Swift `URLSession`, and Rust Reqwest join the existing six selected clients, representing eleven of the pinned package's twenty target families |
+| Request fidelity | Complete | Every added emitter consumes the same inherited/environment-resolved URL, method, headers, supported static authentication, body, warnings, multipart framing, and binary MIME policy as the existing emitters |
+| Exact payload bytes | Complete | Added clients encode text from exact UTF-8 bytes and reuse materialized multipart/binary Base64, with in-memory decoding and no source-path dependency |
+| Escaping and syntax evidence | Complete baseline | Node/Swift use JSON literals, PHP/Ruby use escaped single-quoted literals, and Rust chooses collision-safe raw-string delimiters; generated fixtures pass available Node, Ruby, Swift, and Rust parsers while PHP remains unavailable locally |
+| Account-free presentation | Complete | The existing local Code dialog enumerates the expanded target list automatically with no login, organization, plan, telemetry, hosted conversion, or entitlement check |
+| Executable coverage | Complete | Stable target order, all-target generation, exact UTF-8 body bytes, escaped metadata, exact multipart/binary identity, malformed-file warnings, and four target-language parser checks pass |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 126 verification](QA_MILESTONE_126.md) |
+
+Compatibility bounds remain explicit: nine HTTPSnippet target families and alternate clients remain open, as do runtime-only advanced signing, dependency installation, comprehensive target-language validation, and generated-code execution. The Client code generation ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 127 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
