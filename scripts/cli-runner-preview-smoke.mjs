@@ -318,6 +318,39 @@ try {
   ]));
   assert.deepEqual(mutualPfx.report.results.map((result) => [result.requestId, result.status]), [['request-mutual', 200]]);
   assert.deepEqual(mutualArrivals.at(-1), { path: '/mutual?row=pfx&region=pfx', authorized: true });
+  const fullReportProxy = `http://proxy-user:proxy-password@127.0.0.1:${proxyAddress.port}`;
+  const rejectedOutputDirectory = join(temporary, 'reports', 'existing-directory');
+  await mkdir(rejectedOutputDirectory, { recursive: true });
+  const arrivalsBeforeRejectedOutput = mutualArrivals.length;
+  const rejectedOutput = await runFailure([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-mutual',
+    '--env-var', 'row=output', '--env-var', 'region=output', '--output', 'reports/existing-directory',
+  ]);
+  assert.equal(rejectedOutput.code, 1);
+  assert.match(rejectedOutput.stderr, /Output path .* is not a file/);
+  assert.equal(mutualArrivals.length, arrivalsBeforeRejectedOutput, 'output validation happened after transport');
+  const safeReporterOutput = await run([
+    'run', 'collection', collection.id, '-w', temporary, '--item', 'request-mutual', '--reporter', 'junit',
+    '--env-var', 'row=safe', '--env-var', 'region=safe', '--httpsProxy', fullReportProxy, '--noProxy', '127.0.0.1',
+    '--output', 'reports/nested/safe.json',
+  ]);
+  assert.match(safeReporterOutput, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
+  const safeReportText = await readFile(join(temporary, 'reports', 'nested', 'safe.json'), 'utf8');
+  const safeReport = JSON.parse(safeReportText);
+  assert.equal(safeReport.format, 'brunomnia-inso-safe-report');
+  assert.equal(safeReport.version, 1);
+  assert.equal(safeReport.mode, 'safe');
+  assert.deepEqual(Object.keys(safeReport.environment).sort(), ['color', 'id', 'name', 'private']);
+  assert.equal('variables' in safeReport.environment, false);
+  assert.equal(safeReport.executions.length, 1);
+  assert.deepEqual(Object.keys(safeReport.executions[0].request).sort(), ['documentation', 'id', 'name']);
+  assert.deepEqual(Object.keys(safeReport.executions[0].response).sort(), ['durationMs', 'status', 'statusText']);
+  assert.equal(safeReport.executions[0].iteration, 1);
+  assert.equal(safeReport.executions[0].attempt, 1);
+  assert.deepEqual(safeReport.stats.requests, { total: 1, failed: 0 });
+  for (const secret of ['full-report-environment-secret', 'full-report-user', 'full-report-password', 'full-report-header-secret', 'proxy-user', 'proxy-password', clientPfxBase64, 'openssl-secret', tlsCa]) {
+    assert.equal(safeReportText.includes(secret), false, `safe report leaked ${secret.slice(0, 40)}`);
+  }
   const arrivalsBeforeRejectedReport = mutualArrivals.length;
   const rejectedFullReport = await runFailure([
     'run', 'collection', collection.id, '-w', temporary, '--item', 'request-mutual',
@@ -326,7 +359,6 @@ try {
   assert.equal(rejectedFullReport.code, 1);
   assert.match(rejectedFullReport.stderr, /Full-data reports may contain secrets.*--acceptRisk/);
   assert.equal(mutualArrivals.length, arrivalsBeforeRejectedReport, 'risk rejection happened after transport');
-  const fullReportProxy = `http://proxy-user:proxy-password@127.0.0.1:${proxyAddress.port}`;
   await run([
     'run', 'collection', collection.id, '-w', temporary, '--item', 'request-mutual',
     '--env-var', 'row=redacted', '--env-var', 'region=redacted', '--httpsProxy', fullReportProxy, '--noProxy', '127.0.0.1',
@@ -430,7 +462,7 @@ try {
   const missingScript = await runFailure(['script', '--config', join(temporary, '.insorc'), 'missing']);
   assert.equal(missingScript.code, 1);
   assert.match(missingScript.stderr, /Available scripts: preview, invalid/);
-  console.log('CLI runner preview smoke passed: explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+  console.log('CLI runner preview smoke passed: metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await close(secureServer).catch(() => undefined);

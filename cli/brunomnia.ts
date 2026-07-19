@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { access, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -704,6 +705,49 @@ const createCliFullDataReport = (
     error: report.flowError ?? null,
   };
 };
+const createCliSafeDataReport = (
+  report: RunnerReport,
+  collection: Workspace['collections'][number],
+  environment: Environment,
+  proxy: ProxyPreferences,
+  executions: CliFullExecution[],
+) => {
+  const responseTimes = executions.map((execution) => Math.max(0, execution.response.durationMs));
+  return {
+    format: 'brunomnia-inso-safe-report',
+    version: 1,
+    mode: 'safe',
+    collection: { id: collection.id, name: collection.name, documentation: collection.documentation ?? '' },
+    environment: {
+      id: environment.id,
+      name: environment.name,
+      ...(environment.parentId ? { parentId: environment.parentId } : {}),
+      ...(environment.private === undefined ? {} : { private: environment.private }),
+      ...(environment.color === undefined ? {} : { color: environment.color }),
+    },
+    proxy: { enabled: proxy.enabled, httpProxy: redactProxyUrl(proxy.httpProxy), httpsProxy: redactProxyUrl(proxy.httpsProxy), noProxy: proxy.noProxy },
+    executions: executions.map((execution) => ({
+      request: { id: execution.request.id, name: execution.request.name, documentation: execution.request.documentation ?? '' },
+      response: { status: execution.response.status, statusText: execution.response.statusText, durationMs: execution.response.durationMs },
+      tests: execution.tests,
+      iteration: execution.iteration,
+      attempt: execution.attempt,
+    })),
+    timing: {
+      started: report.startedAt,
+      completed: report.finishedAt,
+      responseAverage: responseTimes.length ? responseTimes.reduce((total, value) => total + value, 0) / responseTimes.length : 0,
+      responseMin: responseTimes.length ? Math.min(...responseTimes) : 0,
+      responseMax: responseTimes.length ? Math.max(...responseTimes) : 0,
+    },
+    stats: {
+      iterations: { total: report.iterations, failed: new Set(report.results.filter((result) => !result.passed).map((result) => result.iteration)).size },
+      requests: { total: report.total, failed: report.failed },
+      tests: { total: report.results.reduce((total, result) => total + result.tests.length, 0), failed: report.results.reduce((total, result) => total + result.tests.filter(scriptTestFailed).length, 0) },
+    },
+    error: report.flowError ?? null,
+  };
+};
 
 const executeHttp = async (
   request: ApiRequest,
@@ -917,6 +961,12 @@ const main = async () => {
         ? (await stat(workingDir)).isDirectory() ? resolve(workingDir) : dirname(resolve(workingDir))
         : process.cwd();
       reportOutputPath = resolve(outputBase, outputOption);
+      const outputStats = await stat(reportOutputPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined;
+        return fail(`Unable to inspect output path '${reportOutputPath}': ${error.message}`);
+      });
+      if (outputStats && !outputStats.isFile()) fail(`Output path '${reportOutputPath}' is not a file.`);
+      if (outputStats) await access(reportOutputPath, fsConstants.W_OK).catch(() => fail(`Output file '${reportOutputPath}' is not writable.`));
     }
     let cliCookies = [...workspace.cookies];
     let cliResponses = [...workspace.responses];
@@ -933,8 +983,9 @@ const main = async () => {
     const noProxy = firstFlag('--noProxy', '--no-proxy') ?? process.env.NO_PROXY ?? process.env.no_proxy ?? '';
     const proxyPreferences = { enabled: Boolean(httpProxy || httpsProxy), httpProxy, httpsProxy, noProxy };
     const validateCertificates = !hasFlag('--disableCertValidation') && !hasFlag('--disable-cert-validation') && !hasFlag('-k');
-    const fullExecutions: CliFullExecution[] = [];
-    const pendingFullExecutions = new Map<string, Omit<CliFullExecution, 'tests' | 'iteration' | 'attempt'>>();
+    const captureCollectionReport = subject === 'collection' && Boolean(reportOutputPath);
+    const reportExecutions: CliFullExecution[] = [];
+    const pendingReportExecutions = new Map<string, Omit<CliFullExecution, 'tests' | 'iteration' | 'attempt'>>();
     const fullExecutionKey = (key: string, attempt: number) => `${key}\n${attempt}`;
     let resolveResponse: NonNullable<CliRequestContext['resolveResponse']>;
     const executeAndStore = async (
@@ -1010,12 +1061,12 @@ const main = async () => {
         dataRows,
         ...(requestedRequests.length || requestedRequestNamePattern !== undefined ? { requestIds } : {}),
         onResult: (result) => {
-          if (includeFullData && result.key) {
+          if (captureCollectionReport && result.key) {
             const key = fullExecutionKey(result.key, result.attempt);
-            const execution = pendingFullExecutions.get(key);
+            const execution = pendingReportExecutions.get(key);
             if (execution) {
-              fullExecutions.push({ ...execution, tests: structuredClone(result.tests), iteration: result.iteration, attempt: result.attempt });
-              pendingFullExecutions.delete(key);
+              reportExecutions.push({ ...execution, tests: structuredClone(result.tests), iteration: result.iteration, attempt: result.attempt });
+              pendingReportExecutions.delete(key);
             }
           }
           const responseIndex = cliResponses.findIndex((response) => response.requestId === result.requestId);
@@ -1025,8 +1076,8 @@ const main = async () => {
         },
       }, async (request, variables, execution) => {
         const executed = await executeAndStore(request, variables, environment.id);
-        if (includeFullData) {
-          pendingFullExecutions.set(fullExecutionKey(execution.key, execution.attempt), {
+        if (captureCollectionReport) {
+          pendingReportExecutions.set(fullExecutionKey(execution.key, execution.attempt), {
             request: structuredClone(executed.request),
             response: structuredClone(executed.result),
             environment: { ...variables },
@@ -1136,13 +1187,21 @@ const main = async () => {
       };
     }
     const reporter = parseRunnerReporter(flag('--reporter') ?? flag('-r'), subject === 'test' ? 'spec' : 'json');
-    const artifact = includeFullData
-      ? { contents: `${JSON.stringify(createCliFullDataReport(report, collection, environment, proxyPreferences, fullExecutions, includeFullData), null, 2)}\n`, label: `${includeFullData} full-data` }
-      : { contents: createRunnerReportArtifact(report, reporter).contents, label: reporter };
+    const reporterArtifact = createRunnerReportArtifact(report, reporter);
+    const artifact = subject === 'collection' && reportOutputPath
+      ? includeFullData
+        ? { contents: `${JSON.stringify(createCliFullDataReport(report, collection, environment, proxyPreferences, reportExecutions, includeFullData), null, 2)}\n`, label: `${includeFullData} full-data` }
+        : { contents: `${JSON.stringify(createCliSafeDataReport(report, collection, environment, proxyPreferences, reportExecutions), null, 2)}\n`, label: 'safe collection' }
+      : { contents: reporterArtifact.contents, label: reporter };
     if (reportOutputPath) {
       await mkdir(dirname(reportOutputPath), { recursive: true });
       await writeFile(reportOutputPath, artifact.contents);
-      console.log(`Wrote ${artifact.label} report to ${reportOutputPath}`);
+      if (subject === 'collection') {
+        console.error(`Wrote ${artifact.label} report to ${reportOutputPath}`);
+        process.stdout.write(reporterArtifact.contents);
+      } else {
+        console.log(`Wrote ${artifact.label} report to ${reportOutputPath}`);
+      }
     } else {
       process.stdout.write(artifact.contents);
     }

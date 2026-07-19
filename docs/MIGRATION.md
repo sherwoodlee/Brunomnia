@@ -293,7 +293,7 @@ Compatibility bounds remain explicit: PFX/PKCS#12, encrypted-key passphrases, a 
 | Inso reporter names | Complete baseline | `dot`, `list`, `min`, `progress`, `spec`, and TAP reporters are accepted by `run test`, with JSON and JUnit available as additional CI formats |
 | Failure fidelity | Complete baseline | Retry attempts, request status, duration, script assertion errors, runner errors, cancellation, and aggregate counts remain visible |
 | Output safety | Complete | XML metacharacters and invalid control characters are sanitized; TAP diagnostics remain single-line and output is bounded by the already bounded saved report |
-| CLI output | Complete | `--reporter`/`-r` select a format and `--output`/`-o` writes it without changing pass/fail exit codes |
+| CLI output | Complete | `--reporter`/`-r` selects a format without changing pass/fail exit codes. Milestone 212 later aligns collection `--output` with pinned metadata-safe JSON while retaining the reporter on stdout; test output still writes the selected reporter artifact. |
 | Strict typecheck | Complete | Five scripting regressions exposed by a clean non-incremental TypeScript pass were repaired before accepting the release gate |
 | Documentation and evidence | Complete | [Runner reports and CI](RUNNER_REPORTS.md) and [Milestone 20 verification](QA_MILESTONE_20.md) |
 
