@@ -1,4 +1,5 @@
 import type { ApiRequest, KeyValue } from '../types';
+import { applyAdvancedAuth, type AuthClock } from './auth';
 import { buildHeaders, buildRequestUrl, resolveTemplate } from './request';
 
 export const clientCodeFamilies = [
@@ -279,9 +280,14 @@ const materialize = (request: ApiRequest, variables: Record<string, string>): Ma
       url = parsed.toString();
     } catch { warnings.push('The API-key query parameter could not be appended because the resolved URL is invalid.'); }
   }
+  const hasAuthoredAuthorization = request.headers.some((header) =>
+    header.enabled && resolveTemplate(header.name, variables).trim().toLowerCase() === 'authorization');
   const headerRows = buildHeaders(request, variables);
-  if (!request.auth.disabled && request.auth.type === 'oauth2' && request.auth.accessToken) {
-    headerRows.push({ id: 'codegen-oauth2', name: 'Authorization', value: `${request.auth.tokenPrefix || 'Bearer'} ${resolveTemplate(request.auth.accessToken, variables)}`.trim(), enabled: true });
+  if (hasAuthoredAuthorization) headerRows.splice(request.headers.length);
+  if (!hasAuthoredAuthorization && !request.auth.disabled && request.auth.type === 'oauth2' && request.auth.accessToken) {
+    const token = resolveTemplate(request.auth.accessToken, variables);
+    const prefix = resolveTemplate(request.auth.tokenPrefix, variables) || 'Bearer';
+    headerRows.push({ id: 'codegen-oauth2', name: 'Authorization', value: prefix === 'NO_PREFIX' ? token : `${prefix} ${token}`.trim(), enabled: true });
   }
   const headers = headerRecord(headerRows, warnings);
   const body = materializeBody(request, variables, warnings);
@@ -895,8 +901,7 @@ const shellWgetSnippet = ({ method, url, headers, body }: MaterializedRequest) =
   --output-document - \\
   ${shell(url)}`;
 
-export const generateClientCode = (target: ClientCodeTarget, request: ApiRequest, variables: Record<string, string>): ClientCodeSnippet => {
-  const prepared = materialize(request, variables);
+const renderClientCode = (target: ClientCodeTarget, prepared: MaterializedRequest): ClientCodeSnippet => {
   const generators: Record<ClientCodeTarget, (input: MaterializedRequest) => string> = {
     curl: curlSnippet,
     'c-libcurl': cSnippet,
@@ -944,4 +949,35 @@ export const generateClientCode = (target: ClientCodeTarget, request: ApiRequest
     ...(target === 'ruby-faraday' && !['COPY', 'DELETE', 'GET', 'HEAD', 'LOCK', 'MOVE', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE', 'UNLOCK'].includes(prepared.method.toUpperCase()) ? [`Faraday cannot run ${prepared.method} requests.`] : []),
   ];
   return { code: generators[target](prepared), warnings: [...prepared.warnings, ...targetWarnings] };
+};
+
+export const generateClientCode = (target: ClientCodeTarget, request: ApiRequest, variables: Record<string, string>): ClientCodeSnippet =>
+  renderClientCode(target, materialize(request, variables));
+
+export const generateClientCodeWithAuth = async (
+  target: ClientCodeTarget,
+  request: ApiRequest,
+  variables: Record<string, string>,
+  clock: AuthClock = {},
+): Promise<ClientCodeSnippet> => {
+  const prepared = materialize(request, variables);
+  const authType = request.auth.type;
+  const canMaterialize = !request.auth.disabled && ['oauth1', 'hawk', 'asap'].includes(authType);
+  const hasAuthorization = Object.keys(prepared.headers).some((name) => name.toLowerCase() === 'authorization');
+  if (!canMaterialize) return renderClientCode(target, prepared);
+  const signingWarning = `${authType.toUpperCase()} signing is runtime-specific and is not reproduced in the generated snippet.`;
+  if (hasAuthorization) return renderClientCode(target, { ...prepared, warnings: prepared.warnings.filter((warning) => warning !== signingWarning) });
+  const signingBody = prepared.body?.kind === 'text' ? prepared.body.value : '';
+  const application = await applyAdvancedAuth(request, variables, {
+    url: prepared.url,
+    headers: Object.entries(prepared.headers).map(([name, value], index) => ({ id: `codegen-header-${index}`, name, value, enabled: true })),
+    body: signingBody,
+  }, clock);
+  const warnings = prepared.warnings.filter((warning) => warning !== signingWarning);
+  return renderClientCode(target, {
+    ...prepared,
+    headers: headerRecord(application.headers, warnings),
+    url: application.url,
+    warnings,
+  });
 };

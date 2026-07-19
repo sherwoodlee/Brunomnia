@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
-import { clientCodeFamilies, clientCodeTargets, generateClientCode, resolveClientCodeSelection } from './codegen';
+import { clientCodeFamilies, clientCodeTargets, generateClientCode, generateClientCodeWithAuth, resolveClientCodeSelection } from './codegen';
 
 const javascriptInlineBytes = (code: string) => {
   const encoded = code.match(/atob\("([A-Za-z0-9+/=]+)"\)/)?.[1];
@@ -311,6 +311,72 @@ describe('local client code generation', () => {
       expect(snippet.code).toContain(encoded);
       expected.forEach((marker) => expect(snippet.code).toContain(marker));
     }
+  });
+
+  it('materializes deterministic OAuth 1 and Hawk authorization like HAR export', async () => {
+    const oauth = createBlankRequest('oauth-codegen');
+    oauth.method = 'GET';
+    oauth.url = 'http://photos.example.net/photos?file=vacation.jpg&size=original';
+    oauth.auth = { ...oauth.auth, type: 'oauth1', consumerKey: 'dpf43f3p2l4k3l03', consumerSecret: 'kd94hf93k423kf44', tokenKey: 'nnch734d00sl2jdk', tokenSecret: 'pfkkdhi9sl3r4s00', nonce: 'kllo9940pd9333jh', timestamp: '1191242096' };
+    const oauthSnippet = await generateClientCodeWithAuth('curl', oauth, {});
+    expect(oauthSnippet.warnings).toEqual([]);
+    expect(oauthSnippet.code).toContain('oauth_signature_method="HMAC-SHA1"');
+    expect(oauthSnippet.code).toContain('oauth_signature="tR3%2BTy81lMeYAr%2FFid0kMTYa%2FWM%3D"');
+
+    const hawk = createBlankRequest('hawk-codegen');
+    hawk.method = 'POST';
+    hawk.url = 'https://api.example.com/resource?a=1';
+    hawk.headers = [{ id: 'ct', name: 'Content-Type', value: 'text/plain', enabled: true }];
+    hawk.bodyMode = 'text';
+    hawk.body = 'hello';
+    hawk.auth = { ...hawk.auth, type: 'hawk', hawkId: 'dh37fgj492je', hawkKey: 'werxhqb98rpaxn39848xrunpaw3489ruxnpa98w4rxn', hawkAlgorithm: 'sha256', hawkValidatePayload: true };
+    const hawkSnippet = await generateClientCodeWithAuth('curl', hawk, {}, { now: new Date('2026-07-16T12:00:00Z'), nonce: 'abcdef12' });
+    expect(hawkSnippet.warnings).toEqual([]);
+    expect(hawkSnippet.code).toContain('Authorization: Hawk id="dh37fgj492je"');
+    expect(hawkSnippet.code).toContain('nonce="abcdef12"');
+    expect(hawkSnippet.code).toMatch(/hash="[A-Za-z0-9+/=]+"/);
+    expect(hawkSnippet.code).toMatch(/mac="[A-Za-z0-9+/=]+"/);
+  });
+
+  it('materializes Atlassian ASAP into a signed bearer token', async () => {
+    const keyPair = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) }, true, ['sign', 'verify']);
+    const privateKeyBytes = new Uint8Array(await crypto.subtle.exportKey('pkcs8', keyPair.privateKey));
+    const privateKey = `-----BEGIN PRIVATE KEY-----\n${btoa(String.fromCharCode(...privateKeyBytes))}\n-----END PRIVATE KEY-----`;
+    const request = createBlankRequest('asap-codegen');
+    request.auth = { ...request.auth, type: 'asap', asapIssuer: 'issuer', asapAudience: 'audience', asapSubject: 'subject', asapKeyId: 'key-1', asapPrivateKey: privateKey, asapAdditionalClaims: '{"tenant":"team"}' };
+    const snippet = await generateClientCodeWithAuth('curl', request, {}, { now: new Date('2026-07-16T12:00:00Z'), nonce: 'jwt-id' });
+    expect(snippet.warnings).toEqual([]);
+    const token = snippet.code.match(/Authorization: Bearer ([A-Za-z0-9_.-]+)/)?.[1];
+    expect(token?.split('.')).toHaveLength(3);
+    const payloadPart = token?.split('.')[1] ?? '';
+    const payload = JSON.parse(atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payloadPart.length / 4) * 4, '=')));
+    expect(payload).toMatchObject({ aud: 'audience', exp: payload.iat + 600, iss: 'issuer', jti: 'jwt-id', sub: 'subject', tenant: 'team' });
+  });
+
+  it('keeps authored authorization precedence and OAuth 2 NO_PREFIX semantics', async () => {
+    const authored = createBlankRequest('authored-codegen');
+    authored.headers = [{ id: 'authored', name: 'Authorization', value: 'Custom signed value', enabled: true }];
+    const generatedAuth = [
+      { type: 'basic' as const, username: 'ignored', password: 'ignored' },
+      { type: 'bearer' as const, token: 'ignored' },
+      { type: 'api-key' as const, apiKeyLocation: 'header' as const, apiKeyName: 'X-API-Key', apiKeyValue: 'ignored' },
+      { type: 'oauth2' as const, accessToken: 'ignored' },
+      { type: 'oauth1' as const, consumerKey: 'ignored', consumerSecret: 'ignored' },
+    ];
+    for (const auth of generatedAuth) {
+      authored.auth = { ...authored.auth, ...auth };
+      const authoredSnippet = await generateClientCodeWithAuth('curl', authored, {});
+      expect(authoredSnippet.code).toContain('Authorization: Custom signed value');
+      expect(authoredSnippet.code.match(/Authorization:/g)).toHaveLength(1);
+      expect(authoredSnippet.code).not.toContain('X-API-Key');
+      expect(authoredSnippet.warnings).toEqual([]);
+    }
+
+    const oauth2 = createBlankRequest('oauth2-codegen');
+    oauth2.auth = { ...oauth2.auth, type: 'oauth2', accessToken: 'raw-token', tokenPrefix: 'NO_PREFIX' };
+    const oauth2Snippet = generateClientCode('curl', oauth2, {});
+    expect(oauth2Snippet.code).toContain('Authorization: raw-token');
+    expect(oauth2Snippet.code).not.toContain('NO_PREFIX');
   });
 
   it('bounds invalid saved file data with explicit warnings', () => {

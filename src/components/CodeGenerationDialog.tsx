@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ApiRequest } from '../types';
-import { clientCodeFamilies, generateClientCode, resolveClientCodeSelection } from '../lib/codegen';
+import { clientCodeFamilies, generateClientCode, generateClientCodeWithAuth, resolveClientCodeSelection } from '../lib/codegen';
 import { Icon } from './Icon';
 
 type CodeGenerationDialogProps = {
@@ -22,7 +22,22 @@ export function CodeGenerationDialog({ request, variables, onClose }: CodeGenera
   });
   const [copied, setCopied] = useState(false);
   const family = clientCodeFamilies.find((candidate) => candidate.id === selection.familyId)!;
-  const snippet = useMemo(() => generateClientCode(selection.target, request, variables), [request, selection.target, variables]);
+  const [snippet, setSnippet] = useState(() => generateClientCode(selection.target, request, variables));
+
+  useEffect(() => {
+    let active = true;
+    const fallback = generateClientCode(selection.target, request, variables);
+    setSnippet(fallback);
+    void generateClientCodeWithAuth(selection.target, request, variables)
+      .then((generated) => { if (active) setSnippet(generated); })
+      .catch((error: unknown) => {
+        if (active) setSnippet({
+          ...fallback,
+          warnings: [...fallback.warnings, `Authentication could not be materialized: ${error instanceof Error ? error.message : String(error)}`],
+        });
+      });
+    return () => { active = false; };
+  }, [request, selection.target, variables]);
 
   useEffect(() => {
     try {

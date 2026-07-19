@@ -157,7 +157,7 @@ const asap = async (request: ApiRequest, variables: Record<string, string>, appl
   const additionalSource = resolved(auth.asapAdditionalClaims, variables).trim();
   if (additionalSource) additional = JSON.parse(additionalSource);
   const header = { alg: 'RS256', typ: 'JWT', ...(auth.asapKeyId ? { kid: resolved(auth.asapKeyId, variables) } : {}) };
-  const payload = { ...additional, iss: issuer, aud: audience, sub: resolved(auth.asapSubject, variables) || issuer, iat: now, exp: now + 60, jti: clock.nonce || crypto.randomUUID() };
+  const payload = { ...additional, iss: issuer, aud: audience, sub: resolved(auth.asapSubject, variables) || issuer, iat: now, exp: now + 10 * 60, jti: clock.nonce || crypto.randomUUID() };
   const encoded = `${base64Url(utf8(JSON.stringify(header)))}.${base64Url(utf8(JSON.stringify(payload)))}`;
   const signature = base64Url(await rsaSign('SHA-256', resolved(auth.asapPrivateKey, variables), encoded));
   return { ...application, headers: appendHeader(application.headers, 'Authorization', `Bearer ${encoded}.${signature}`, 'auth-asap') };

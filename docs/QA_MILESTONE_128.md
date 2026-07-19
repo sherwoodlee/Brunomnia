@@ -44,4 +44,4 @@ Rendered interaction QA is omitted by standing direction. No screenshot, DOM, co
 
 ## Acceptance boundary
 
-This milestone closes the pinned target/client inventory and selection model. Per-client conversion options, runtime-only advanced signing, dependency installation, comprehensive target-language validation, and snippet execution remain open. Existing `Baseline` and `Early baseline` rows remain; Brunomnia is not declared feature-complete.
+This milestone closes the pinned target/client inventory and selection model. A subsequent source audit confirmed that pinned Insomnia does not expose per-client conversion options, install dependencies, validate target programs, or execute snippets; those are not parity requirements. Advanced auth materialization, request-plugin hooks, cookie-jar inclusion, and Node native Content-Length remained open at this milestone. Existing `Baseline` and `Early baseline` rows remain; Brunomnia is not declared feature-complete.

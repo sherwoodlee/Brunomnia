@@ -1913,9 +1913,24 @@ Compatibility bounds remain explicit: Milestone 128 later closes HTTPSnippet's a
 | Executable coverage | Complete | Exact registry/default order, saved-selection resolution, all-client request generation, exact payload identity, alternate-client markers, and available JavaScript/Node/Python/Ruby/Shell parser checks pass |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 128 verification](QA_MILESTONE_128.md) |
 
-Compatibility bounds remain explicit: per-client formatting/transport options, runtime-only advanced signing, dependency installation, comprehensive target-language validation, and generated-code execution remain open. The Client code generation ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+Compatibility bounds remain explicit: the pinned modal does not pass per-client converter options, install dependencies, validate target programs, or execute snippets, so those are not parity requirements. Milestone 129 later closes OAuth 1/Hawk/ASAP materialization. Request-plugin hooks, cookie-jar inclusion, and Node native Content-Length remain open. The Client code generation ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
 
-## Milestone 129 — remaining parity closure and release hardening
+## Milestone 129 — generated advanced-auth materialization (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned export renders the request, applies request plugins, parses GraphQL, and builds HAR; absent authored Authorization is filled for API key, Basic, Bearer, OAuth 2, OAuth 1, Hawk, or ASAP, while IAM/Digest/NTLM/Netrc remain outside this static-header path |
+| OAuth 1 and Hawk | Complete | The async preview reuses the shared signing engine against the exact prepared URL, headers, and text/form/GraphQL body, then regenerates any selected client without retaining the prior omission warning |
+| Atlassian ASAP | Complete | PKCS#8 RS256 JWT generation carries issuer/audience/subject/key ID/additional claims, generated ID, and the pinned ten-minute expiry shared by runtime sends and generated snippets |
+| Header precedence | Complete | Any authored case-insensitive Authorization header suppresses automatic signing and remains unchanged, matching pinned HAR export |
+| OAuth 2 correction | Complete | `NO_PREFIX` emits the raw saved access token rather than the literal prefix string |
+| Async presentation | Complete baseline | Target changes show an immediate local preview, replace it with signed output when ready, ignore stale completions, and surface signing failures as visible warnings without sending a request |
+| Executable coverage | Complete | Deterministic OAuth 1 and Hawk fixtures, generated-key ASAP claims, authored precedence, OAuth 2 raw-token behavior, and full client-code regressions pass |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 129 verification](QA_MILESTONE_129.md) |
+
+Compatibility bounds remain explicit: request-plugin hooks, cookie-jar inclusion, and Node native Content-Length injection remain open. The Client code generation ledger row stays Baseline, and rendered interaction QA remains omitted by standing direction.
+
+## Milestone 130 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps
