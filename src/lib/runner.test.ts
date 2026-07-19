@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { Workspace } from '../types';
-import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, parseRunnerData, resolveRunnerTarget, runCollection, validateTestNamePattern } from './runner';
+import { RUNNER_REQUEST_PER_RESULT_BYTES, RUNNER_REQUEST_REPORT_BYTES, RUNNER_RESPONSE_PER_RESULT_BYTES, RUNNER_RESPONSE_REPORT_BYTES, discardRunnerDraftEntries, parseRunnerData, resolveRunnerTarget, runCollection, runnerDraftKey, validateTestNamePattern } from './runner';
 
 describe('collection runner', () => {
   it('resolves workspace and nested folder runner targets', () => {
@@ -15,6 +15,21 @@ describe('collection runner', () => {
     expect(resolveRunnerTarget(workspace).requests.map((request) => request.id)).toEqual(['root', 'direct', 'nested', 'other']);
     expect(resolveRunnerTarget(workspace, { collectionId: 'collection', folderId: 'folder' })).toMatchObject({ folder: { id: 'folder' }, requests: [{ id: 'direct' }, { id: 'nested' }] });
     expect(resolveRunnerTarget(workspace, { collectionId: 'collection', folderId: 'missing' }).requests).toEqual([]);
+  });
+
+  it('keys Runner drafts by workspace and clears only closed documents', () => {
+    const draft = { collectionId: 'collection', environmentId: 'environment', iterations: 2, retries: 1, bail: true, delayMs: 25, streamWindowMs: 500, data: '[{}]', requestPlan: [{ id: 'request', enabled: false }] };
+    const drafts = {
+      [runnerDraftKey('workspace-a', 'runner_one')]: draft,
+      [runnerDraftKey('workspace-a', 'runner_two')]: { ...draft, iterations: 3 },
+      [runnerDraftKey('workspace-b', 'runner_one')]: { ...draft, iterations: 4 },
+    };
+    const retained = discardRunnerDraftEntries(drafts, 'workspace-a', ['runner_one', 'missing']);
+    expect(retained).toEqual({
+      [runnerDraftKey('workspace-a', 'runner_two')]: { ...draft, iterations: 3 },
+      [runnerDraftKey('workspace-b', 'runner_one')]: { ...draft, iterations: 4 },
+    });
+    expect(discardRunnerDraftEntries(retained, 'workspace-a', ['missing'])).toBe(retained);
   });
   it('parses JSON and quoted CSV iteration data', () => {
     expect(parseRunnerData('[{"id":1}]')).toEqual([{ id: '1' }]);

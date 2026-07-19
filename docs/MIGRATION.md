@@ -2296,7 +2296,20 @@ Compatibility bounds remain explicit: environment, collection/design, mock-serve
 
 Compatibility bounds remain explicit: pinned Runner context retains unsaved per-runner controls while switching tabs; Brunomnia currently retains persisted reports but remounts unsaved controls when leaving the Runner pane. Environment, collection/design, mock-server/route, and test-suite resources still do not participate in the shared strip. Collections and Collection runner stay `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
-## Milestone 157 — remaining parity closure and release hardening
+## Milestone 157 — isolated Runner document drafts (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned context audit | Complete | Pinned Runner context is keyed by the synthetic Runner document ID and retains the active collection, environment, iterations, delay, and ordered request selection while another tab is active |
+| Per-document draft | Complete baseline | Every open workspace/folder Runner keeps its collection, environment, iterations, retries, bail, delay, stream window, data, and ordered enabled request plan in an isolated in-memory draft |
+| Switch rehydration | Complete | Runner workbenches remount by synthetic document key, initialize from only that document's draft, and reconcile removed collections, environments, or requests against the current workspace |
+| Lifecycle cleanup | Complete | Single close, Close All, and Close Other Tabs discard only the affected Runner drafts; deleted-folder reconciliation prunes its now-invalid synthetic draft without touching other workspaces or Runners |
+| Execution continuity | Complete | Draft publication does not persist reports or execution output into tab state, and run promotion plus all M156 target scoping and account-free execution behavior remain unchanged |
+| Executable evidence | Complete baseline | Focused draft/tab regressions, strict React/TypeScript compilation, full frontend/native suites, CLI/audit gates, and a rebuilt macOS app verify the milestone without rendered Browser QA |
+
+Compatibility bounds remain explicit: drafts are session-memory context for currently open Runner documents, matching the pinned unsaved-context behavior rather than silently persisting control edits into project files; closing a Runner intentionally discards its draft. Environment, collection/design, mock-server/route, and test-suite resources still do not participate in the shared strip. Collections and Collection runner stay `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 158 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

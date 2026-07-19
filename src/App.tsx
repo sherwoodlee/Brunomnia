@@ -25,6 +25,7 @@ import { closeAllRequestTabs, closeOtherRequestTabs, closeRequestTab, cycleReque
 import type { DocumentTabReference, DocumentTabType, RequestTabPlacement, RequestTabState } from './lib/requestTabs';
 import type { AppliedResponseMockTarget } from './lib/mockRouteFromResponse';
 import type { OAuthAuthorizationStatus } from './components/OAuthAuthorizationDialog';
+import { discardRunnerDraftEntries, runnerDraftKey, type RunnerWorkbenchDraft } from './lib/runner';
 import { withoutOAuth2RuntimeCredentials } from './lib/oauth2Tokens';
 import { userAgentDisabledAfterHeaderChange } from './lib/userAgent';
 import { calculatedRequestHeaders, type CalculatedHeader } from './lib/calculatedHeaders';
@@ -1274,6 +1275,7 @@ export default function App() {
   const [requestTab, setRequestTab] = useState<RequestTab>('body');
   const [requestPinState, setRequestPinState] = useState<{ workspaceId: string; ids: string[] }>({ workspaceId: '', ids: [] });
   const [requestDocumentState, setRequestDocumentState] = useState<{ workspaceId: string; state: RequestTabState }>({ workspaceId: '', state: emptyRequestTabState() });
+  const [runnerDrafts, setRunnerDrafts] = useState<Record<string, RunnerWorkbenchDraft>>({});
   const [responseTab, setResponseTab] = useState<ResponseTab>('preview');
   const [response, setResponse] = useState<HttpResponse>(() => mockResponse());
   const [selectedResponseId, setSelectedResponseId] = useState('');
@@ -1473,6 +1475,13 @@ export default function App() {
   const isRunnerDocument = activeDocumentTab?.type === 'runner' && runnerTargetsById.has(activeDocumentTab.requestId);
   const isRequestDocument = activeDocumentTab?.type === 'request';
   const isRequestDashboard = activeRequestDocumentState.dashboard && openDocumentTabs.length === 0;
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    const validRunnerIds = new Set(validDocumentReferences.filter((document) => document.type === 'runner').map((document) => document.id));
+    const prefix = `${activeWorkspaceId}\n`;
+    const staleDocumentIds = Object.keys(runnerDrafts).filter((key) => key.startsWith(prefix) && !validRunnerIds.has(key.slice(prefix.length))).map((key) => key.slice(prefix.length));
+    if (staleDocumentIds.length) setRunnerDrafts((current) => discardRunnerDraftEntries(current, activeWorkspaceId, staleDocumentIds));
+  }, [activeWorkspaceId, runnerDrafts, validDocumentReferences]);
   const activeStreaming = active ? isStreamingRequest(active.request) : false;
   const activeCollection = workspace.collections.find((collection) => collection.id === active?.collectionId);
   activeRequestIdRef.current = workspace.activeRequestId;
@@ -1760,6 +1769,15 @@ export default function App() {
     }
   };
 
+  const updateRunnerDraft = useCallback((key: string, draft: RunnerWorkbenchDraft) => {
+    setRunnerDrafts((current) => ({ ...current, [key]: draft }));
+  }, []);
+
+  const discardRunnerDrafts = (documentIds: string[]) => {
+    if (!activeWorkspaceId || !documentIds.length) return;
+    setRunnerDrafts((current) => discardRunnerDraftEntries(current, activeWorkspaceId, documentIds));
+  };
+
   const openWorkspaceDocument = (documentId: string, type: DocumentTabType, permanent = false) => {
     applyRequestDocumentState(openDocumentTab(activeRequestDocumentState, documentId, type, permanent));
     setWorkbenchSection('requests');
@@ -1782,14 +1800,17 @@ export default function App() {
   };
 
   const closeRequestDocument = (requestId: string) => {
+    discardRunnerDrafts([requestId]);
     applyRequestDocumentState(closeRequestTab(activeRequestDocumentState, requestId));
   };
 
   const closeAllRequestDocuments = () => {
+    discardRunnerDrafts(activeRequestDocumentState.tabs.filter((tab) => tab.type === 'runner').map((tab) => tab.requestId));
     applyRequestDocumentState(closeAllRequestTabs(activeRequestDocumentState));
   };
 
   const closeOtherRequestDocuments = (requestId: string) => {
+    discardRunnerDrafts(activeRequestDocumentState.tabs.filter((tab) => tab.type === 'runner' && tab.requestId !== requestId).map((tab) => tab.requestId));
     applyRequestDocumentState(closeOtherRequestTabs(activeRequestDocumentState, requestId));
   };
 
@@ -2783,7 +2804,9 @@ export default function App() {
     pinnedRequestIds={activePinnedRequestIds}
     trailing={trailing}
   />;
-  const renderAutomationWorkbench = (section: 'design' | 'runner' | 'mocks', runnerTarget?: { collectionId: string; folderId?: string }) => <Suspense fallback={<div className="dialog-loading">Loading automation…</div>}><AutomationWorkbench
+  const renderAutomationWorkbench = (section: 'design' | 'runner' | 'mocks', runnerTarget?: { collectionId: string; folderId?: string }) => {
+    const draftKey = section === 'runner' && activeDocumentTab?.type === 'runner' ? runnerDraftKey(activeWorkspaceId, activeDocumentTab.requestId) : undefined;
+    return <Suspense fallback={<div className="dialog-loading">Loading automation…</div>}><AutomationWorkbench
     activeEnvironment={activeEnvironment}
     focusedMock={focusedMock}
     onChangeWorkspace={(updater) => setWorkspace(updater)}
@@ -2799,6 +2822,9 @@ export default function App() {
       delete next[serverId];
       return next;
     })}
+    onRunnerDraftChange={updateRunnerDraft}
+    runnerDraft={draftKey ? runnerDrafts[draftKey] : undefined}
+    runnerDraftKey={draftKey}
     runnerTarget={runnerTarget}
     runningMocks={runningMocks}
     section={section}
@@ -2806,6 +2832,7 @@ export default function App() {
     vault={unlockedVault}
     workspace={workspace}
   /></Suspense>;
+  };
   const generateCode = async (target: ClientCodeTarget, request: ApiRequest, variables: Record<string, string>): Promise<ClientCodeSnippet> => {
     const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const initialPluginData = JSON.stringify(pluginState.data);

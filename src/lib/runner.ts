@@ -42,6 +42,33 @@ export type RunnerOptions = {
 
 export type RunnerTarget = { collectionId?: string; folderId?: string };
 
+export type RunnerWorkbenchDraft = {
+  collectionId: string;
+  environmentId: string;
+  iterations: number;
+  retries: number;
+  bail: boolean;
+  delayMs: number;
+  streamWindowMs: number;
+  data: string;
+  requestPlan: Array<{ id: string; enabled: boolean }>;
+};
+
+export const runnerDraftKey = (workspaceId: string, documentId: string) => `${workspaceId}\n${documentId}`;
+
+export const discardRunnerDraftEntries = (drafts: Record<string, RunnerWorkbenchDraft>, workspaceId: string, documentIds: string[]) => {
+  const next = { ...drafts };
+  let changed = false;
+  documentIds.forEach((documentId) => {
+    const key = runnerDraftKey(workspaceId, documentId);
+    if (key in next) {
+      delete next[key];
+      changed = true;
+    }
+  });
+  return changed ? next : drafts;
+};
+
 export const resolveRunnerTarget = (workspace: Workspace, target?: RunnerTarget) => {
   const collection = workspace.collections.find((candidate) => candidate.id === target?.collectionId) ?? workspace.collections[0];
   const folder = target?.folderId ? collection?.folders?.find((candidate) => candidate.id === target.folderId) : undefined;

@@ -13,7 +13,7 @@ import type {
   WorkbenchSection,
 } from '../types';
 import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
-import { parseRunnerData, resolveRunnerTarget, runCollection } from '../lib/runner';
+import { parseRunnerData, resolveRunnerTarget, runCollection, type RunnerWorkbenchDraft } from '../lib/runner';
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
 import { applyCollectionConfiguration, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
 import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
@@ -48,6 +48,9 @@ type AutomationWorkbenchProps = {
   templatePrompt: SendRequestContext['prompt'];
   runnerTarget?: { collectionId: string; folderId?: string };
   onRunnerStart?: () => void;
+  runnerDraft?: RunnerWorkbenchDraft;
+  runnerDraftKey?: string;
+  onRunnerDraftChange?: (key: string, draft: RunnerWorkbenchDraft) => void;
 };
 
 const workspaceProxyPreferences = (workspace: Workspace) => ({
@@ -59,7 +62,7 @@ const workspaceProxyPreferences = (workspace: Workspace) => ({
 
 export function AutomationWorkbench(props: AutomationWorkbenchProps) {
   if (props.section === 'design') return <DesignWorkbench {...props} />;
-  if (props.section === 'runner') return <RunnerWorkbench {...props} />;
+  if (props.section === 'runner') return <RunnerWorkbench key={props.runnerDraftKey} {...props} />;
   return <MockWorkbench {...props} />;
 }
 
@@ -135,7 +138,7 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection }: Aut
   );
 }
 
-function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, templatePrompt, runnerTarget, onRunnerStart }: AutomationWorkbenchProps) {
+function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, templatePrompt, runnerTarget, onRunnerStart, runnerDraft, runnerDraftKey, onRunnerDraftChange }: AutomationWorkbenchProps) {
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
     certificates: workspace.certificates,
     prompt: templatePrompt,
@@ -145,23 +148,23 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
     requestAncestors: requestAncestorNames(workspace.collections, request),
     ...context,
   });
-  const initialTarget = resolveRunnerTarget(workspace, runnerTarget);
+  const initialTarget = resolveRunnerTarget(workspace, { collectionId: runnerTarget?.collectionId ?? runnerDraft?.collectionId, folderId: runnerTarget?.folderId });
   const initialCollection = initialTarget.collection;
   const targetFolderId = runnerTarget?.folderId ?? '';
   const [collectionId, setCollectionId] = useState(initialCollection?.id ?? '');
-  const [environmentId, setEnvironmentId] = useState(activeEnvironment.id);
-  const [iterations, setIterations] = useState(1);
-  const [retries, setRetries] = useState(0);
-  const [bail, setBail] = useState(false);
-  const [delayMs, setDelayMs] = useState(0);
-  const [streamWindowMs, setStreamWindowMs] = useState(1000);
-  const [data, setData] = useState('');
+  const [environmentId, setEnvironmentId] = useState(workspace.environments.some((environment) => environment.id === runnerDraft?.environmentId) ? runnerDraft!.environmentId : activeEnvironment.id);
+  const [iterations, setIterations] = useState(runnerDraft?.iterations ?? 1);
+  const [retries, setRetries] = useState(runnerDraft?.retries ?? 0);
+  const [bail, setBail] = useState(runnerDraft?.bail ?? false);
+  const [delayMs, setDelayMs] = useState(runnerDraft?.delayMs ?? 0);
+  const [streamWindowMs, setStreamWindowMs] = useState(runnerDraft?.streamWindowMs ?? 1000);
+  const [data, setData] = useState(runnerDraft?.data ?? '');
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<RunnerItemResult[]>([]);
   const [selectedResultId, setSelectedResultId] = useState('');
   const [error, setError] = useState('');
   const [oauthAuthorization, setOAuthAuthorization] = useState<OAuthAuthorizationStatus>();
-  const [requestPlan, setRequestPlan] = useState<Array<{ id: string; enabled: boolean }>>(() => initialTarget.requests.map((request) => ({ id: request.id, enabled: true })));
+  const [requestPlan, setRequestPlan] = useState<Array<{ id: string; enabled: boolean }>>(() => runnerDraft?.requestPlan ?? initialTarget.requests.map((request) => ({ id: request.id, enabled: true })));
   const cancelled = useRef(false);
   const oauthFlowId = useRef('');
   const draggedRequestId = useRef('');
@@ -169,6 +172,11 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const { collection, folder: targetFolder, requests: runnerRequests } = resolvedTarget;
   const selectedEnvironment = workspace.environments.find((candidate) => candidate.id === environmentId) ?? activeEnvironment;
   const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
+
+  useEffect(() => {
+    if (!runnerDraftKey || !onRunnerDraftChange) return;
+    onRunnerDraftChange(runnerDraftKey, { collectionId, environmentId, iterations, retries, bail, delayMs, streamWindowMs, data, requestPlan });
+  }, [bail, collectionId, data, delayMs, environmentId, iterations, onRunnerDraftChange, requestPlan, retries, runnerDraftKey, streamWindowMs]);
 
   const cancelRunnerOAuthAuthorization = async () => {
     const flowId = oauthFlowId.current;
