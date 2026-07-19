@@ -318,6 +318,12 @@ export const saveCatalogWorkspace = async (workspaceId: string, workspace: Works
   writeBrowserCatalog(catalog);
 };
 
+export const getCatalogWorkspaceCliPath = async (workspaceId: string): Promise<string> => {
+  if (!workspaceIdPattern.test(workspaceId)) throw new Error('The active project ID is invalid.');
+  if (!isTauri()) throw new Error('Browser-local projects do not have a CLI-readable filesystem path.');
+  return invoke<string>('workspace_catalog_cli_path', { workspaceId });
+};
+
 export const openCatalogWorkspace = async (workspaceId: string): Promise<WorkspaceCatalogSnapshot> => {
   if (!workspaceIdPattern.test(workspaceId)) throw new Error('The selected project ID is invalid.');
   if (isTauri()) {

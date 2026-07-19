@@ -1,7 +1,8 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { arch, cpus, freemem, hostname, platform, release, userInfo } from 'node:os';
-import { basename, extname } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import vm from 'node:vm';
+import { parse as parseYaml } from 'yaml';
 import { analyzeOpenApi, generateCollectionFromOpenApi } from '../src/lib/openapi';
 import { createBlankRequest } from '../src/data/seed';
 import { buildHeaders, buildRequestUrl, environmentMap } from '../src/lib/request';
@@ -28,6 +29,8 @@ const flag = (name: string) => {
   const index = args.indexOf(name);
   return index >= 0 ? args[index + 1] : undefined;
 };
+const firstFlag = (...names: string[]) => names.map(flag).find((value) => value !== undefined);
+const flagValues = (...names: string[]) => args.flatMap((argument, index) => names.includes(argument) && args[index + 1] !== undefined ? [args[index + 1]] : []);
 const hasFlag = (name: string) => args.includes(name);
 const fail = (message: string, code = 1): never => {
   console.error(message);
@@ -47,8 +50,29 @@ const readCliTemplateFile = async (path: string) => {
   if (bytes.byteLength > 5_000_000) throw new Error(`Template file '${path}' exceeds the 5 MB per-file limit.`);
   return bytes.toString('utf8');
 };
+const loadYamlDirectory = async (root: string, directory: string) => {
+  const path = join(root, directory);
+  const entries = await readdir(path, { withFileTypes: true }).catch((error) => error?.code === 'ENOENT' ? [] : fail(`Unable to list ${path}: ${error.message}`));
+  return Promise.all(entries
+    .filter((entry) => entry.isFile() && ['.yaml', '.yml'].includes(extname(entry.name).toLowerCase()))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map(async (entry) => parseYaml(await loadText(join(path, entry.name)))));
+};
+const loadSplitProject = async (path: string) => {
+  const metadata = parseYaml(await loadText(join(path, '.brunomnia', 'project.yaml')));
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) fail('Project metadata must be an object.');
+  return {
+    ...metadata,
+    collections: await loadYamlDirectory(path, 'collections'),
+    environments: await loadYamlDirectory(path, 'environments'),
+    apiDesigns: await loadYamlDirectory(path, 'designs'),
+    mockServers: await loadYamlDirectory(path, 'mocks'),
+    mcpClients: await loadYamlDirectory(path, 'mcp-clients'),
+  };
+};
 const loadWorkspace = async (path: string): Promise<Workspace> => {
-  const parsed = JSON.parse(await loadText(path)) as unknown;
+  const input = await stat(path).catch((error) => fail(`Unable to inspect ${path}: ${error.message}`));
+  const parsed = input.isDirectory() ? await loadSplitProject(path) : JSON.parse(await loadText(path)) as unknown;
   try { return migrateWorkspace(parsed); }
   catch { return fail('The input is not a Brunomnia workspace.'); }
 };
@@ -508,8 +532,8 @@ const usage = `Brunomnia CLI
   brunomnia lint spec <openapi-file> [--ruleset <spectral-yaml>] [--json]
   brunomnia generate collection <openapi-file> --output <file>
   brunomnia export spec <workspace> <design-name-or-id> [--output <file>]
-  brunomnia run collection <workspace> <collection-name-or-id> [--env <name-or-id>] [--iterations N] [--retries N] [--data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
-  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [same options]
+  brunomnia run collection <workspace-or-project> <collection-name-or-id> [-e, --env <name-or-id>] [-i, --request <name-or-id>]... [-n, --iterations N] [--retries N] [--delay-request MS] [-d, --data <json-or-csv>] [--bail] [--reporter <name>] [--output <file>] [--allow-scripts] [--allow-script-requests] [--allow-script-files] [--allow-template-files] [--allow-external-vaults]
+  brunomnia run test <workspace> <suite-name-or-id|spec-name-or-id> [-t, --testNamePattern <regex>] [same options except --request/--delay-request]
 
 Reporters: dot, list, min, progress, spec, tap, json, junit
 `;
@@ -556,10 +580,22 @@ const main = async () => {
     const collection = subject === 'test'
       ? workspace.collections.find((candidate) => candidate.id === suites[0].collectionId) ?? fail(`The selected test suite's collection was not found.`)
       : workspace.collections.find((candidate) => candidate.id === identifier || candidate.name === identifier) ?? fail(`Collection '${identifier}' was not found.`);
-    const environmentIdentifier = flag('--env') ?? workspace.activeEnvironmentId;
+    const environmentIdentifier = firstFlag('--env', '-e') ?? workspace.activeEnvironmentId;
     const selectedEnvironment: Environment = workspace.environments.find((candidate) => candidate.id === environmentIdentifier || candidate.name === environmentIdentifier) ?? workspace.environments[0] ?? fail('The workspace has no environment.');
     const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
-    const dataPath = flag('--data');
+    const dataPath = firstFlag('--data', '-d');
+    const requestedRequests = flagValues('--request', '-i');
+    const requestedDelay = firstFlag('--delay-request', '--delay');
+    if (subject === 'test' && requestedRequests.length) fail('--request is only available for run collection.');
+    if (subject === 'test' && requestedDelay !== undefined) fail('--delay-request is only available for run collection.');
+    const requestIds = requestedRequests.map((requestIdentifier) => {
+      const idMatch = collection.requests.find((request) => request.id === requestIdentifier);
+      if (idMatch) return idMatch.id;
+      const nameMatches = collection.requests.filter((request) => request.name === requestIdentifier);
+      if (!nameMatches.length) return fail(`Request '${requestIdentifier}' was not found in collection '${collection.name}'.`);
+      if (nameMatches.length > 1) return fail(`Request name '${requestIdentifier}' is ambiguous in collection '${collection.name}'. Use its ID.`);
+      return nameMatches[0].id;
+    });
     const requestedTestNamePattern = flag('--testNamePattern') ?? flag('-t') ?? flag('--test-name-pattern');
     if (subject === 'collection' && requestedTestNamePattern !== undefined) fail('--testNamePattern is only available for run test.');
     const testNamePattern = subject === 'test' ? validateTestNamePattern(requestedTestNamePattern) : undefined;
@@ -635,17 +671,19 @@ const main = async () => {
       return stored;
     };
     const executeWorkspaceHttp = async (request: ApiRequest, variables: Record<string, string>) => (await executeAndStore(request, variables, environment.id)).result;
-    const iterations = Math.min(1_000, Math.max(1, Math.floor(Number(flag('--iterations') ?? 1) || 1)));
+    const iterations = Math.min(1_000, Math.max(1, Math.floor(Number(firstFlag('--iterations', '-n') ?? 1) || 1)));
     const retries = Math.min(10, Math.max(0, Math.floor(Number(flag('--retries') ?? 0) || 0)));
+    const delayMs = Math.min(30_000, Math.max(0, Math.floor(Number(requestedDelay ?? 0) || 0)));
     const scriptTimeoutMs = Math.min(60_000, Math.max(1_000, Number(flag('--script-timeout') ?? 10_000)));
     const dataRows = dataPath ? parseRunnerData(await loadText(dataPath)) : [];
     let report: RunnerReport;
     if (subject === 'collection') {
       report = await runCollection(collection, environment, {
-        iterations, retries, bail: hasFlag('--bail'), delayMs: 0,
+        iterations, retries, bail: hasFlag('--bail'), delayMs,
         scriptTimeoutMs,
         environmentScopes: scriptEnvironmentScopes(workspace.environments, selectedEnvironment.id),
         dataRows,
+        ...(requestedRequests.length ? { requestIds } : {}),
         onResult: (result) => {
           const responseIndex = cliResponses.findIndex((response) => response.requestId === result.requestId);
           if (responseIndex < 0) return;

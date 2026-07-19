@@ -35,6 +35,7 @@ import { Icon } from './Icon';
 import { OAuthAuthorizationDialog, type OAuthAuthorizationStatus } from './OAuthAuthorizationDialog';
 import { CodeEditor } from './ProtocolEditors';
 import { RunnerDataDialog } from './RunnerDataDialog';
+import { RunnerCliDialog } from './RunnerCliDialog';
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
@@ -46,6 +47,7 @@ const runnerReportDuration = (report: RunnerReport) => {
 type AutomationWorkbenchProps = {
   section: Exclude<WorkbenchSection, 'requests' | 'git' | 'plugins' | 'security' | 'integrations'>;
   workspace: Workspace;
+  workspaceId: string;
   activeEnvironment: Environment;
   vault: Record<string, string>;
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
@@ -153,7 +155,7 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection, desig
   );
 }
 
-function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, templatePrompt, runnerTarget, onRunnerStart, runnerDraft, runnerDraftKey, onRunnerDraftChange }: AutomationWorkbenchProps) {
+function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onChangeWorkspace, templatePrompt, runnerTarget, onRunnerStart, runnerDraft, runnerDraftKey, onRunnerDraftChange }: AutomationWorkbenchProps) {
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
     certificates: workspace.certificates,
     prompt: templatePrompt,
@@ -178,6 +180,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const [dataFileName, setDataFileName] = useState(runnerDraft?.dataFileName ?? '');
   const [dataFileEncoding, setDataFileEncoding] = useState(runnerDraft?.dataFileEncoding ?? 'utf-8');
   const [showDataDialog, setShowDataDialog] = useState(false);
+  const [showCliDialog, setShowCliDialog] = useState(false);
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<RunnerItemResult[]>([]);
   const [liveItems, setLiveItems] = useState<RunnerLiveItem[]>([]);
@@ -196,6 +199,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const { collection, folder: targetFolder, requests: runnerRequests } = resolvedTarget;
   const selectedEnvironment = workspace.environments.find((candidate) => candidate.id === environmentId) ?? activeEnvironment;
   const environment = resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment;
+  const selectedRequestIds = requestPlan.filter((item) => item.enabled).map((item) => item.id);
 
   useEffect(() => {
     if (!runnerDraftKey || !onRunnerDraftChange) return;
@@ -293,7 +297,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   const start = async () => {
     if (!collection || running) return;
     onRunnerStart?.();
-    const requestIds = requestPlan.filter((item) => item.enabled).map((item) => item.id);
+    const requestIds = selectedRequestIds;
     if (!requestIds.length) { setError('Select at least one request for this run.'); return; }
     setRunning(true); setResults([]); setLiveItems([]); setSelectedResultId(''); setSelectedReportId(''); setError(''); cancelled.current = false; skippedKeys.current.clear(); activeItem.current = undefined;
     try {
@@ -535,6 +539,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
   return (
     <section className="automation-workbench runner-workbench">
       <AutomationHeader eyebrow="Test" title={targetFolder ? `Runner · ${targetFolder.name}` : 'Collection runner'} subtitle="Run requests in order with iteration data, scripts, assertions, delays, and retries.">
+        {!running ? <button className="secondary-action" disabled={!collection || !selectedRequestIds.length} onClick={() => setShowCliDialog(true)} type="button">Run via CLI</button> : null}
         {displayedReport && !running ? <button className="secondary-action" onClick={() => downloadReport('json')} type="button">Export JSON</button> : null}
         {displayedReport && !running ? <button className="secondary-action" onClick={() => downloadReport('junit')} type="button">Export JUnit</button> : null}
         {running ? <button className="danger-action" onClick={cancelRun} type="button">Cancel run</button>
@@ -573,6 +578,7 @@ function RunnerWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspac
       </div>
       {error ? <div className="automation-message error" role="alert">{error}</div> : null}
       {showDataDialog ? <RunnerDataDialog data={data} fileEncoding={dataFileEncoding} fileName={dataFileName} onApply={(nextData, nextFileName, nextFileEncoding, rowCount) => { setData(nextData); setDataFileName(nextFileName); setDataFileEncoding(nextFileEncoding); setIterations(rowCount); }} onClear={() => { setData(''); setDataFileName(''); setDataFileEncoding('utf-8'); }} onClose={() => setShowDataDialog(false)} /> : null}
+      {showCliDialog && collection ? <RunnerCliDialog bail={bail} collectionId={collection.id} dataFileName={dataFileName} delayMs={delayMs} environmentId={selectedEnvironment.id} hasData={Boolean(data.trim())} iterations={iterations} onClose={() => setShowCliDialog(false)} requestIds={selectedRequestIds} retries={retries} workspace={workspace} workspaceId={workspaceId} /> : null}
       {oauthAuthorization ? <OAuthAuthorizationDialog onCancel={cancelRun} status={oauthAuthorization} /> : null}
     </section>
   );

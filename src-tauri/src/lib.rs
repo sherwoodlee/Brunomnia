@@ -95,6 +95,11 @@ fn workspace_catalog_read(app: AppHandle, workspace_id: String) -> Result<Value,
 }
 
 #[tauri::command]
+fn workspace_catalog_cli_path(app: AppHandle, workspace_id: String) -> Result<String, String> {
+    workspace_store::cli_path(&workspace_store_path(&app)?, &workspace_id)
+}
+
+#[tauri::command]
 fn workspace_catalog_save(
     app: AppHandle,
     workspace_id: String,
@@ -776,6 +781,7 @@ pub fn run() {
             workspace_catalog_load,
             workspace_catalog_open,
             workspace_catalog_read,
+            workspace_catalog_cli_path,
             workspace_catalog_save,
             workspace_catalog_create,
             workspace_catalog_rename,

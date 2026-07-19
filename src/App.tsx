@@ -3028,6 +3028,7 @@ export default function App() {
     templatePrompt={requestTemplatePrompt}
     vault={unlockedVault}
     workspace={workspace}
+    workspaceId={activeWorkspaceId}
   /></Suspense>;
   };
   const generateCode = async (target: ClientCodeTarget, request: ApiRequest, variables: Record<string, string>): Promise<ClientCodeSnippet> => {

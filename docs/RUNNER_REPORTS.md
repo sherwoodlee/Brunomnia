@@ -35,6 +35,14 @@ Open **Test → Collection runner** and run a collection. Once a saved report ex
 
 JSON is a versioned envelope with `format: "brunomnia-run-report"`, `version: 1`, and the complete saved report, including retained response snapshots. JUnit creates one `testcase` per request attempt without embedding response content. Script assertion/status failures become `failure` elements, while runner or transport exceptions become `error` elements. Retry attempts are not collapsed.
 
+## Run via CLI
+
+Use **Run via CLI** in a collection or folder Runner to preview a POSIX-shell command for the current environment, selected request order, iterations, retries, inter-request delay, data file, and bail setting. Values are shell-quoted rather than concatenated into executable syntax. The Tauri app resolves its saved device-local project JSON automatically; connected folder and Git project directories are also valid CLI inputs because the CLI reads their `.brunomnia/project.yaml` metadata and managed split YAML resources.
+
+Browser-local projects have no filesystem path, so export all workspace data as Brunomnia JSON and enter the downloaded path. Browser file inputs likewise do not reveal a durable data-file path; when the Runner contains iteration data, save the decoded data as UTF-8 JSON/CSV and enter its path before copying. The copy action stays disabled while either required path is unresolved.
+
+Repeated `--request`/`-i` flags preserve the previewed order and omit unchecked requests. `--delay-request`/`--delay` uses the same bounded 0–30,000 ms inter-request delay as the desktop Runner; `--iterations`/`-n`, `--data`/`-d`, and `--env`/`-e` have matching short aliases. Duplicate request names are rejected as ambiguous, so generated commands use stable request IDs. CLI script, file, script-network, template-file, and external-vault authorities remain separate explicit `--allow-*` grants and are never added silently by the preview.
+
 ## CLI reporters
 
 `run test` defaults to the readable `spec` reporter. `run collection` retains JSON as its default for automation. Select an explicit format with `--reporter` (or `-r`):

@@ -109,6 +109,20 @@ fn workspace_backup_path(root: &Path, id: &str) -> PathBuf {
     root.join(format!("{id}.backup.json"))
 }
 
+pub fn cli_path(root: &Path, workspace_id: &str) -> Result<String, String> {
+    validate_workspace_id(workspace_id)?;
+    let path = workspace_path(root, workspace_id);
+    if !path.is_file() {
+        return Err("This local project's saved workspace file is unavailable.".into());
+    }
+    let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let path = fs::canonicalize(path).map_err(|error| error.to_string())?;
+    if !path.starts_with(root) {
+        return Err("The saved workspace path escapes the local project store.".into());
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 fn trash_file_path(root: &Path, id: &str, deleted_at: i64, label: &str) -> PathBuf {
     root.join("trash")
         .join(format!("{id}-{deleted_at}.{label}.json"))
@@ -1075,6 +1089,22 @@ mod tests {
             vec![first_id.as_str(), "second", "third"]
         );
         assert!(reorder(&root, "second", "third", "middle").is_err());
+    }
+
+    #[test]
+    fn exposes_only_valid_saved_project_paths_for_cli_use() {
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("workspaces");
+        let loaded = load(&root, None, &workspace("Initial")).unwrap();
+        let expected =
+            fs::canonicalize(workspace_path(&root, &loaded.active_workspace_id)).unwrap();
+
+        assert_eq!(
+            cli_path(&root, &loaded.active_workspace_id).unwrap(),
+            expected.to_string_lossy()
+        );
+        assert!(cli_path(&root, "../escape").is_err());
+        assert!(cli_path(&root, "missing").is_err());
     }
 
     #[test]

@@ -1,0 +1,89 @@
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import http from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { stringify } from 'yaml';
+
+const run = (args) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, [join(process.cwd(), 'bin', 'brunomnia.cjs'), ...args], { cwd: process.cwd() });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('error', reject);
+  child.on('close', (code) => code === 0 ? resolve(stdout) : reject(new Error(`CLI exited ${code}: ${stderr || stdout}`)));
+});
+
+const listen = (server) => new Promise((resolve, reject) => {
+  server.once('error', reject);
+  server.listen(0, '127.0.0.1', () => resolve(server.address()));
+});
+
+const close = (server) => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+const temporary = await mkdtemp(join(tmpdir(), 'brunomnia-cli-runner-'));
+const arrivals = [];
+const server = http.createServer((request, response) => {
+  arrivals.push({ path: request.url, at: performance.now() });
+  response.writeHead(200, { 'Content-Type': 'application/json' });
+  response.end(JSON.stringify({ ok: true }));
+});
+
+try {
+  const address = await listen(server);
+  assert.equal(typeof address, 'object');
+  const source = JSON.parse(await readFile(join(process.cwd(), 'examples', 'cli-workspace.json'), 'utf8'));
+  const baseRequest = source.collections[0].requests[0];
+  const request = (id, name, path) => ({
+    ...structuredClone(baseRequest),
+    id,
+    name,
+    url: `http://127.0.0.1:${address.port}/${path}`,
+    preRequestScript: '',
+    tests: '',
+  });
+  const collection = {
+    ...source.collections[0],
+    id: 'preview-collection',
+    name: 'Preview collection',
+    requests: [
+      request('request-first', 'First', 'first'),
+      request('request-second', 'Second', 'second'),
+      request('request-third', 'Third', 'third'),
+    ],
+  };
+  const environment = { id: 'preview-environment', name: 'Preview environment', variables: [] };
+  await mkdir(join(temporary, '.brunomnia'), { recursive: true });
+  await mkdir(join(temporary, 'collections'));
+  await mkdir(join(temporary, 'environments'));
+  await writeFile(join(temporary, '.brunomnia', 'project.yaml'), stringify({
+    format: 'brunomnia', version: 37, name: 'CLI preview project', activeRequestId: 'request-first', activeEnvironmentId: environment.id,
+  }));
+  await writeFile(join(temporary, 'collections', 'preview.yaml'), stringify(collection));
+  await writeFile(join(temporary, 'environments', 'preview.yaml'), stringify(environment));
+  await writeFile(join(temporary, 'iterations.csv'), 'row\n1\n2\n');
+
+  const output = await run([
+    'run', 'collection', temporary, collection.id,
+    '--env', environment.id,
+    '--request', 'request-third',
+    '--request', 'request-first',
+    '--iterations', '2',
+    '--delay-request', '35',
+    '--data', join(temporary, 'iterations.csv'),
+    '--reporter', 'json',
+  ]);
+  const artifact = JSON.parse(output);
+  assert.equal(artifact.format, 'brunomnia-run-report');
+  assert.equal(artifact.report.iterations, 2);
+  assert.deepEqual(artifact.report.results.map((result) => result.requestId), [
+    'request-third', 'request-first', 'request-third', 'request-first',
+  ]);
+  assert.deepEqual(arrivals.map((arrival) => arrival.path), ['/third', '/first', '/third', '/first']);
+  for (let index = 1; index < arrivals.length; index += 1) assert.ok(arrivals[index].at - arrivals[index - 1].at >= 20, 'request delay was not applied');
+  console.log('CLI runner preview smoke passed: split project, selected order, data, and delay.');
+} finally {
+  await close(server).catch(() => undefined);
+  await rm(temporary, { recursive: true, force: true });
+}
