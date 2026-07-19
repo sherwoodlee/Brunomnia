@@ -29,7 +29,7 @@ Brunomnia uses a staged clean-room rewrite. The current repository is intentiona
 | Rich HTTP bodies | Complete | None, JSON, text, URL-encoded, multipart text/files and binary files |
 | Transport configuration | Complete for HTTP/SSE | Redirect policy, inherited/custom connect/HTTP timeout with `0` disabled, inherited/always/never API certificate validation, unlimited active SSE duration, HTTP proxy and PEM client identity |
 | gRPC TLS | Complete | System trust roots, timeout and PEM client identity |
-| WebSocket TLS and proxy | Complete baseline | System roots and arbitrary handshake headers; Milestone 109 adds inherited validation overrides plus domain-scoped PEM identity, and Milestone 110 adds authenticated HTTP/HTTPS custom proxy tunnels plus no-proxy handling |
+| WebSocket TLS and proxy | Complete baseline | System roots and arbitrary handshake headers; Milestone 109 adds inherited validation overrides plus domain-scoped PEM identity, Milestone 110 adds authenticated HTTP/HTTPS custom proxy transport plus no-proxy handling, and Milestone 111 matches plain-WS absolute-form forwarding |
 | Workspace migration | Complete | Version 1 workspaces migrate in place to the version 2 protocol schema |
 
 Streaming gRPC currently returns up to 100 messages within the configured deadline. WebSocket binary frames are reported with their byte count; binary-frame composition is deferred. These bounds are product behavior, not commercial gates.
@@ -1670,9 +1670,23 @@ Compatibility bounds at Milestone 109 were explicit: custom WebSocket proxy tran
 | Executable coverage | Complete | Real loopbacks cover authenticated proxy routing to an otherwise unresolvable target, direct CIDR bypass, WSS-over-proxy mTLS, an untrusted HTTPS proxy under request-local Never validation, and polling-to-proxied-WebSocket Socket.IO upgrade |
 | Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 110 verification](QA_MILESTONE_110.md) |
 
-Compatibility bounds remain explicit: PAC-authenticated system proxy discovery, upstream filesystem-backed event/timeline streams, streaming plugin hooks, broad third-party proxy matrices, and exact upstream forward-proxy behavior for plain WS servers that reject CONNECT remain open. Rendered interaction QA remains omitted by standing direction.
+Compatibility bounds at Milestone 110 were explicit: PAC-authenticated system proxy discovery, upstream filesystem-backed event/timeline streams, streaming plugin hooks, broad third-party proxy matrices, and exact upstream forward-proxy behavior for plain WS servers that reject CONNECT remained open. Milestone 111 closes the exact plain-WS request-form gap; the other bounds remain. Rendered interaction QA remains omitted by standing direction.
 
-## Milestone 111 — remaining parity closure and release hardening
+## Milestone 111 — exact plain-WS forward proxying (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Current upstream audit | Complete | Pinned Insomnia selects `http-proxy-agent` for plain WS; its pinned 7.0.2 implementation changes the client request path to an absolute `http://host[:port]/path?query` URI, injects configured Basic authorization, and adds `Proxy-Connection` when absent |
+| Absolute request form | Complete | Brunomnia rewrites only Tungstenite's first generated request line, preserving its Host, upgrade, key, subprotocol, authored headers, and response verification unchanged |
+| Async transport safety | Complete | The adapter maps partial proxy writes back to the original handshake buffer, refuses incomplete/non-GET input, delegates later WebSocket frames directly, and supports both plain and TLS-protected proxy connections |
+| Authentication continuity | Complete | Percent-decoded URL Basic credentials override an authored proxy-authorization row like the pinned agent; an existing proxy-connection row is preserved and otherwise receives `Keep-Alive` |
+| Protocol split | Complete | Plain WS and HTTP Socket.IO upgrades use forward-proxy form; WSS, GraphQL subscriptions, and HTTPS Socket.IO upgrades retain the bounded authenticated CONNECT plus nested TLS/identity path |
+| Executable coverage | Complete | Real HTTP and HTTPS proxy endpoints parse and complete absolute-form WebSocket upgrades, Socket.IO proves polling-to-forwarded-upgrade continuity, WSS still asserts authenticated CONNECT/mTLS, and no-proxy bypass remains direct |
+| Documentation and evidence | Complete | Updated [request authoring](REQUEST_AUTHORING.md), [parity ledger](PARITY.md), and [Milestone 111 verification](QA_MILESTONE_111.md) |
+
+Compatibility bounds remain explicit: PAC-authenticated system proxy discovery, digest/NTLM proxy authentication, upstream filesystem-backed event/timeline streams, streaming plugin hooks, and broad third-party proxy matrices remain open. Rendered interaction QA remains omitted by standing direction.
+
+## Milestone 112 — remaining parity closure and release hardening
 
 - Re-audit the current Insomnia documentation and release notes against [PARITY.md](PARITY.md)
 - Close remaining response-viewer, nested-resource, environment inheritance, protocol, scripting, extension, collaboration, and CLI gaps

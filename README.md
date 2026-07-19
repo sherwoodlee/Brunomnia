@@ -2,14 +2,14 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the one-hundred-tenth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the one-hundred-eleventh runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
 - Native Rust transports for HTTP, GraphQL, WebSocket, Socket.IO, SSE, and dynamic gRPC calls
 - Multiple account-free local projects with create/switch/rename/duplicate-any/reorder/delete/restore workflows, independent atomic files and encrypted vaults, legacy migration, rotating backups, catalog reconstruction, recently deleted management, and explicit corruption recovery
 - GraphQL operation/variables editor, bounded schema introspection cache, root-field validation, documentation explorer, safe field insertion, and native `graphql-transport-ws` subscriptions with operation-aware routing
-- WebSocket text/binary-frame sessions with an ordered bidirectional event log, inherited certificate validation, domain-scoped PEM client identity for WSS, and authenticated HTTP/HTTPS custom proxy tunnels with no-proxy exclusions
+- WebSocket text/binary-frame sessions with an ordered bidirectional event log, inherited certificate validation, domain-scoped PEM client identity for WSS, absolute-form plain-WS proxy forwarding, and authenticated HTTP/HTTPS WSS tunnels with no-proxy exclusions
 - Socket.IO Engine.IO v4 sessions with polling-first negotiation, policy-preserving WebSocket upgrade and polling-only fallback, custom paths and URL namespaces, headers/cookies/Bearer connect auth, ordered JSON/text event arguments, optional acknowledgements, nested binary Buffer reconstruction, live named listeners, and an ordered event console
 - Long-running Server-Sent Events sessions with incremental parsing, bounded or unlimited automatic reconnects, server retry hints, `Last-Event-ID` resume, and real reconnect/cancellation loopback coverage
 - Persistent chronologically grouped GraphQL subscription, WebSocket, Socket.IO, and SSE session history with finite/zero/unlimited retention, active-environment filtering, incremental event persistence, handshake status/headers/version/duration, lifecycle timelines, type filtering, text search, non-destructive clear-view cutoffs, historical request-version restoration, prior-session selection, and delete/clear actions
