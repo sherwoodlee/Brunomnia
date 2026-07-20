@@ -1363,7 +1363,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Pinned Insomnia client-request resolver plus elicitation, sampling, and event-view source audit: [`docs/QA_MILESTONE_236.md`](QA_MILESTONE_236.md)
 - Live HTTP POST/GET and persistent STDIO server-request delivery, bounded pending registry, concurrent response routing, cancellation, roots updates, and advertised capabilities: [`src-tauri/src/mcp_http.rs`](../src-tauri/src/mcp_http.rs), [`src-tauri/src/mcp_stdio.rs`](../src-tauri/src/mcp_stdio.rs), [`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs), and [`src/lib/mcp.ts`](../src/lib/mcp.ts)
 - Elicitation schema review, sampling approve/reject, configured-provider draft-only generation, bounded queue controls, focused transport/UI regressions, and exact verification record: [`src/components/McpServerRequestPanel.tsx`](../src/components/McpServerRequestPanel.tsx), [`src/components/IntegrationWorkbench.tsx`](../src/components/IntegrationWorkbench.tsx), [`src/lib/mcp.test.ts`](../src/lib/mcp.test.ts), and [`docs/QA_MILESTONE_236.md`](QA_MILESTONE_236.md)
-- Remote rebuild/signing evidence remains pending until the implementation commit completes the main workflow: [`docs/QA_MILESTONE_236.md`](QA_MILESTONE_236.md)
+- Successful remote Node 22 rebuild/no-network smoke, signed AMD64/ARM64 publication, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_236.md`](QA_MILESTONE_236.md)
 
 ## Parity declaration rule
 
