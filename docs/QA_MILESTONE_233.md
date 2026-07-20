@@ -43,7 +43,13 @@ No rendered interaction claim is required for this data adapter. Deterministic v
 
 ## Remote gate
 
-Pending the first push of the M233 implementation commit to `main`.
+Main commit `e6692805924e7385375c0bb790025aa78993b919` completed verify and publish in [Actions run 29711349239](https://github.com/sherwoodlee/Brunomnia/actions/runs/29711349239). Node 22 rebuilt the generated CLI, passed the freshness and non-root no-network trust smoke, and published AMD64/ARM64 provenance/SBOM manifests at:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:5a440dc97eca51d7e1d0af68f9aba0e9bd871c7d144c63dc61321013a6551078
+```
+
+Independent `cosign verify` passed issuer `https://token.actions.githubusercontent.com` and the exact `cli-container.yml@refs/heads/main` identity, validated the M233 commit and digest claims plus the trusted certificate chain, and found transparency-log entry `2204667024`.
 
 ## Acceptance boundary
 

@@ -1342,6 +1342,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Pinned v4 `mcp_request`, v5 `mcpClient.insomnia/5.0`, auth, environment, roots, and command-text audit: [`docs/QA_MILESTONE_233.md`](QA_MILESTONE_233.md)
 - First-class bounded artifact clients, collision-safe apply, v4 workspace extraction/emission, v5 document detection/emission, environment-tree adaptation, and disabled credential-stripped imports: [`src/lib/interchange/types.ts`](../src/lib/interchange/types.ts), [`src/lib/interchange/apply.ts`](../src/lib/interchange/apply.ts), [`src/lib/interchange/insomnia.ts`](../src/lib/interchange/insomnia.ts), and [`src/lib/interchange/exporters.ts`](../src/lib/interchange/exporters.ts)
 - HTTP/STDIO quote round trips, roots/env/auth/header preservation, runtime-secret omission, scoped warnings, repeated apply, sensitive clearing, inert shell-operator evidence, full regressions/builds, packaged CLI smokes, and exact verification record: [`src/lib/interchange/importers.test.ts`](../src/lib/interchange/importers.test.ts), [`src/lib/interchange/exporters.test.ts`](../src/lib/interchange/exporters.test.ts), and [`docs/QA_MILESTONE_233.md`](QA_MILESTONE_233.md)
+- Successful remote Node 22 rebuild/no-network smoke, signed AMD64/ARM64 publication, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_233.md`](QA_MILESTONE_233.md)
 
 ## Parity declaration rule
 
