@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && npm run build:cli",
-    "build:cli": "esbuild cli/brunomnia.ts --bundle --platform=node --format=cjs --banner:js=\"#!/usr/bin/env node\" --outfile=bin/brunomnia.cjs && node scripts/normalize-cli-bundle.mjs",
+    "build:cli": "esbuild cli/brunomnia.ts --bundle --platform=node --format=cjs --alias:jsonc-parser=jsonc-parser/lib/esm/main.js --alias:punycode=punycode/ --banner:js=\"#!/usr/bin/env node\" --outfile=bin/brunomnia.cjs && node scripts/normalize-cli-bundle.mjs",
     "cli": "npm run build:cli && node bin/brunomnia.cjs",
     "test:cli-template-smoke": "npm run build:cli && node scripts/cli-template-smoke.mjs",
     "test:cli-runner-smoke": "npm run build:cli && node scripts/cli-runner-preview-smoke.mjs",
@@ -35,6 +35,7 @@
     "js-md5": "0.8.3",
     "json-bigint": "1.0.0",
     "jsonpath-plus": "10.4.0",
+    "punycode": "2.3.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "undici": "8.7.0",

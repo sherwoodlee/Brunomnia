@@ -218,6 +218,8 @@ paths:
   await mkdir(join(temporary, 'environments'));
   await mkdir(join(temporary, 'designs'));
   await mkdir(join(temporary, 'lint-fixture'));
+  await mkdir(join(temporary, 'lint-fixture', 'rules'));
+  await mkdir(join(temporary, 'lint-fixture', 'schemas'));
   const metadataPath = join(temporary, '.brunomnia', 'project.yaml');
   const metadata = {
     format: 'brunomnia', version: 38, name: 'CLI preview project', activeRequestId: 'request-first', activeEnvironmentId: environment.id,
@@ -242,8 +244,10 @@ paths:
     then: { field: description, function: truthy }
 `;
   await writeFile(join(temporary, 'strict-rules.yaml'), strictRuleset);
-  await writeFile(join(temporary, 'lint-fixture', 'openapi.yaml'), apiDesign.contents);
-  await writeFile(join(temporary, 'lint-fixture', '.spectral.yaml'), strictRuleset);
+  await writeFile(join(temporary, 'lint-fixture', 'openapi.yaml'), `${apiDesign.contents}components:\n  schemas:\n    Health:\n      $ref: ./schemas/health.yaml#/Health\n`);
+  await writeFile(join(temporary, 'lint-fixture', 'schemas', 'health.yaml'), 'Health: { type: object, properties: { ok: { type: boolean } } }\n');
+  await writeFile(join(temporary, 'lint-fixture', '.spectral.yaml'), 'extends: ./rules/strict.yaml\n');
+  await writeFile(join(temporary, 'lint-fixture', 'rules', 'strict.yaml'), strictRuleset);
   await writeFile(globalFile, stringify({
     _type: 'export', __export_format: 4,
     resources: [
@@ -281,15 +285,17 @@ paths:
   assert.equal(cleanExport.paths['/health'].get['x-kong-plugin'], undefined);
   assert.equal(cleanExport.paths['/health'].get['x-visible'], 'retained-operation');
   const designLint = await run(['lint', 'spec', 'preview-api-d', '-w', temporary]);
-  assert.match(designLint, /1 operations · 0 issues/);
+  assert.match(designLint, /Operation must have non-empty "tags" array/);
+  assert.match(designLint, /1 operations · 5 issues/);
   const ciLint = await run(['lint', 'spec', '-w', temporary, '--ci']);
-  assert.match(ciLint, /1 operations · 0 issues/);
+  assert.match(ciLint, /1 operations · 5 issues/);
   const explicitLintFailure = await runFailure(['lint', 'spec', apiDesign.id, '-w', temporary, '-r', 'strict-rules.yaml']);
   assert.equal(explicitLintFailure.code, 1);
   assert.match(explicitLintFailure.stdout, /API info needs a description/);
   const discoveredLintFailure = await runFailure(['lint', 'spec', 'lint-fixture/openapi.yaml', '-w', temporary]);
   assert.equal(discoveredLintFailure.code, 1);
   assert.match(discoveredLintFailure.stdout, /API info needs a description/);
+  assert.doesNotMatch(discoveredLintFailure.stdout, /unresolved-ref|Could not resolve/i);
   for (const [label, command] of [
     ['lint', ['lint', 'spec', apiDesign.id, '-w', temporary, '--printOptions']],
     ['export', ['export', 'spec', apiDesign.id, '-w', temporary, '--printOptions']],
@@ -631,7 +637,7 @@ paths:
   assert.equal(rejectedNonInteractiveEnvironment.code, 1);
   assert.match(rejectedNonInteractiveEnvironment.stderr, /Collection environment selection requires an interactive terminal.*--env <identifier> or --ci/);
   assert.equal(arrivals.length, arrivalsBeforeEnvironmentRefusals, 'environment refusal happened after transport');
-console.log('CLI runner preview smoke passed: prefix IDs, deterministic non-interactive resource/environment selection and refusal, pinned stored/file/CI API-spec lint with explicit and discovered rulesets, pinned and legacy API-spec export with annotation stripping, cross-command global-option diagnostics, explicit-grant TypeScript config and plugin template tags, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
+console.log('CLI runner preview smoke passed: prefix IDs, deterministic non-interactive resource/environment selection and refusal, pinned stored/file/CI Spectral API-spec lint with explicit and nested discovered rulesets plus resolved local references, pinned and legacy API-spec export with annotation stripping, cross-command global-option diagnostics, explicit-grant TypeScript config and plugin template tags, pinned default spec reporting, metadata-safe default reports, pre-transport output validation, explicit-risk redacted/plaintext full reports, working-directory report output, HTTP/HTTPS proxy and no-proxy routing, TLS validation override, workspace CA and client identity, global and collection environment selection, standalone global files, config scripts, config, CI fallback, split project, folder items, pinned aliases, request-name filtering, selected order, remote data, environment overrides, delay, timeout, bail, and assertion evidence.');
 } finally {
   await close(server).catch(() => undefined);
   await close(secureServer).catch(() => undefined);

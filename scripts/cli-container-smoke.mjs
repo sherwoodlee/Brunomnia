@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const run = (command, argumentsList) => new Promise((resolveRun, rejectRun) => {
@@ -41,8 +41,33 @@ workspace.plugins = [{
 workspace.pluginData = { 'container-plugin': { value: 'container' } };
 const workspacePath = join(temporary, 'workspace.json');
 const configPath = join(temporary, 'inso.config.ts');
+const lintDirectory = join(temporary, 'lint');
+await mkdir(join(lintDirectory, 'schemas'), { recursive: true });
 await writeFile(workspacePath, JSON.stringify(workspace));
 await writeFile(configPath, `type InsoConfig = { options: { ci: boolean } }; export default { options: { ci: true } } satisfies InsoConfig;`);
+await writeFile(join(lintDirectory, 'openapi.yaml'), `openapi: 3.0.3
+info:
+  title: Container API
+  version: 1.0.0
+  description: Container lint fixture
+  contact: { name: Brunomnia }
+servers: [{ url: https://example.com }]
+tags: [{ name: Health }]
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      description: Read service health
+      tags: [Health]
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema: { $ref: ./schemas/health.yaml#/Health }
+components: { schemas: {} }
+`);
+await writeFile(join(lintDirectory, 'schemas', 'health.yaml'), 'Health: { type: object, properties: { ok: { type: boolean } } }\n');
 await chmod(temporary, 0o755);
 await chmod(workspacePath, 0o644);
 await chmod(configPath, 0o644);
@@ -67,6 +92,12 @@ try {
   const artifact = JSON.parse(suite.stdout);
   assert.equal(artifact.report.failed, 0);
   assert.equal(artifact.report.passed, 1);
+  const lint = await run('docker', [
+    'run', '--rm', '--network', 'none',
+    '--volume', `${temporary}:/workspace:ro`,
+    image, 'lint', 'spec', '/workspace/lint/openapi.yaml', '--allow-config-code',
+  ]);
+  assert.match(lint.stdout, /1 operations · 0 issues/);
   const pluginRun = await run('docker', [
     'run', '--rm', '--network', 'none',
     '--volume', `${temporary}:/workspace:ro`,
@@ -76,7 +107,7 @@ try {
   const pluginArtifact = JSON.parse(pluginRun.stdout);
   assert.deepEqual(pluginArtifact.report.results.map(result => [result.requestId, result.status]), [['container-plugin-request', 200]]);
   assert.match(pluginRun.stderr, /Loaded options.*"ci":true.*"allowConfigCode":true/);
-  console.log('CLI container smoke passed: pinned image, non-root runtime, exact version, read-only workspace, no network, standalone suite execution, and explicit-grant TypeScript config/plugin tags.');
+  console.log('CLI container smoke passed: pinned image, non-root runtime, exact version, read-only workspace, no network, self-contained Spectral lint with local references, standalone suite execution, and explicit-grant TypeScript config/plugin tags.');
 } finally {
   await run('docker', ['image', 'rm', '--force', image]).catch(() => undefined);
   await rm(temporary, { recursive: true, force: true });

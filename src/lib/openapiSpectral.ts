@@ -1,5 +1,5 @@
 import { stringify } from 'yaml';
-import type { ApiDesign, OpenApiIssue } from '../types';
+import type { ApiDesign, ApiDesignSourceFile, OpenApiIssue } from '../types';
 import { analyzeOpenApi, type OpenApiAnalysis } from './openapi';
 import { lintOpenApiWithSpectral } from './spectral';
 import type { RemoteSourceReader } from './apiDesignSources';
@@ -14,7 +14,7 @@ const mergeIssues = (...groups: OpenApiIssue[][]) => {
   });
 };
 
-export const analyzeOpenApiDesign = async (design: Pick<ApiDesign, 'contents' | 'ruleset' | 'sourceFiles'>, fetchRemote?: RemoteSourceReader): Promise<OpenApiAnalysis> => {
+export const analyzeOpenApiDesign = async (design: Pick<ApiDesign, 'contents' | 'ruleset' | 'sourceFiles'> & { rulesetFiles?: ApiDesignSourceFile[] }, fetchRemote?: RemoteSourceReader): Promise<OpenApiAnalysis> => {
   const structural = analyzeOpenApi(design.contents);
   try {
     const lint = await lintOpenApiWithSpectral({ ...design, fetchRemote });

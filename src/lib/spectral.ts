@@ -201,11 +201,12 @@ export const lintOpenApiWithSpectral = async (input: {
   contents: string;
   ruleset?: string;
   sourceFiles?: ApiDesignSourceFile[];
+  rulesetFiles?: ApiDesignSourceFile[];
   fetchRemote?: RemoteSourceReader;
 }) => {
   const fetchRemote = input.fetchRemote ?? fetchPublicSpecificationSource;
   const specFiles = virtualFiles(input.sourceFiles ?? [], SOURCE_ROOT);
-  const rulesetFiles = virtualFiles(input.sourceFiles ?? [], RULESET_ROOT);
+  const rulesetFiles = virtualFiles(input.rulesetFiles ?? input.sourceFiles ?? [], RULESET_ROOT);
   const spectral = new Spectral({ resolver: createResolver(specFiles, fetchRemote) });
   spectral.setRuleset((input.ruleset?.trim()
     ? await compileRuleset(input.ruleset, `${RULESET_ROOT}/.spectral.yaml`, rulesetFiles, fetchRemote)

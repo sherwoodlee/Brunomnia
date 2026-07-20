@@ -32,6 +32,7 @@ import { generateUnitTestCliArtifact, orderedTestSuites, orderedUnitTests, selec
 import { createCliExternalSecretResolver } from './externalVault';
 import { evaluateRunnerConfigCode } from './configCode';
 import { createCliPluginTemplateRuntime } from './pluginRuntime';
+import { collectCliApiDesignSources, fetchPublicSpecificationSourceNode } from './apiSpecSources';
 import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, selectRunnerResource, type RunnerInsoConfig } from '../src/lib/runnerCli';
 
 const args = process.argv.slice(2);
@@ -958,15 +959,25 @@ const main = async () => {
     const explicitRuleset = firstFlag('--ruleset', '-r');
     let contents = '';
     let ruleset = '';
+    let sourceFiles: ApiDesign['sourceFiles'] = [];
+    let rulesetFiles: ApiDesign['sourceFiles'] = [];
     if (candidateStats?.isFile()) {
-      contents = await loadText(candidatePath);
+      const specificationSources = await collectCliApiDesignSources(candidatePath, 'specification').catch((error) => fail(error instanceof Error ? error.message : String(error)));
+      contents = specificationSources.contents;
+      sourceFiles = specificationSources.files;
+      let rulesetPath = '';
       if (explicitRuleset) {
-        ruleset = await loadText(resolve(inputBase, explicitRuleset));
+        rulesetPath = resolve(inputBase, explicitRuleset);
       } else {
         const sibling = (await readdir(dirname(candidatePath), { withFileTypes: true }))
           .filter((entry) => entry.isFile() && entry.name.startsWith('.spectral'))
           .sort((left, right) => left.name.localeCompare(right.name))[0];
-        if (sibling) ruleset = await loadText(join(dirname(candidatePath), sibling.name));
+        if (sibling) rulesetPath = join(dirname(candidatePath), sibling.name);
+      }
+      if (rulesetPath) {
+        const rulesetSources = await collectCliApiDesignSources(rulesetPath, 'ruleset').catch((error) => fail(error instanceof Error ? error.message : String(error)));
+        ruleset = rulesetSources.contents;
+        rulesetFiles = rulesetSources.files;
       }
     } else {
       const workspace = await loadWorkspace(workingDir ?? fail('Provide an OpenAPI file or use --workingDir with a stored API design.'));
@@ -976,9 +987,18 @@ const main = async () => {
       const design = identifier ? selectRunnerResource(workspace.apiDesigns, identifier, 'API design') : undefined;
       if (!design) fail(identifier ? `Design '${identifier}' was not found.` : 'Provide a design name or ID.');
       contents = design.contents;
-      ruleset = explicitRuleset ? await loadText(resolve(inputBase, explicitRuleset)) : design.ruleset;
+      sourceFiles = design.sourceFiles ?? [];
+      if (explicitRuleset) {
+        const rulesetSources = await collectCliApiDesignSources(resolve(inputBase, explicitRuleset), 'ruleset').catch((error) => fail(error instanceof Error ? error.message : String(error)));
+        ruleset = rulesetSources.contents;
+        rulesetFiles = rulesetSources.files;
+      } else {
+        ruleset = design.ruleset;
+        rulesetFiles = design.sourceFiles ?? [];
+      }
     }
-    const analysis = analyzeOpenApi(contents, ruleset);
+    const { analyzeOpenApiDesign } = await import('../src/lib/openapiSpectral');
+    const analysis = await analyzeOpenApiDesign({ contents, ruleset, sourceFiles, rulesetFiles }, fetchPublicSpecificationSourceNode);
     if (hasFlag('--json')) console.log(JSON.stringify(analysis.issues, null, 2));
     else analysis.issues.forEach((issue) => console.log(`${issue.severity.toUpperCase()} ${issue.path}: ${issue.message}`));
     console.log(`${analysis.operations.length} operations · ${analysis.issues.length} issues`);
