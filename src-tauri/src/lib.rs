@@ -17,6 +17,7 @@ mod secure_store;
 mod specification_source;
 mod streaming;
 mod template_os;
+mod workspace_physical_store;
 mod workspace_store;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};

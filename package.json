@@ -12,6 +12,7 @@
     "build:cli": "esbuild cli/brunomnia.ts --bundle --platform=node --format=cjs --alias:jsonc-parser=jsonc-parser/lib/esm/main.js --alias:punycode=punycode/ --banner:js=\"#!/usr/bin/env node\" --outfile=bin/brunomnia.cjs && node scripts/normalize-cli-bundle.mjs",
     "cli": "npm run build:cli && node bin/brunomnia.cjs",
     "test:cli-template-smoke": "npm run build:cli && node scripts/cli-template-smoke.mjs",
+    "test:cli-physical-store": "npm run build:cli && node scripts/cli-physical-store-smoke.mjs",
     "test:cli-runner-smoke": "npm run build:cli && node scripts/cli-runner-preview-smoke.mjs",
     "test:cli-container": "npm run build:cli && node scripts/cli-container-smoke.mjs",
     "test:mcp-public": "BRUNOMNIA_MCP_LIVE=1 vitest run src/lib/mcpPublic.integration.test.ts",

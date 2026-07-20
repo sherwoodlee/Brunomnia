@@ -30,6 +30,7 @@ describe('local project catalog', () => {
     const initial = await loadWorkspaceCatalog();
     expect(initial.workspace).toMatchObject({ name: 'Local Workspace', version: 43, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
     expect(await listCatalogProjectWorkspaces(initial.activeWorkspaceId)).toEqual([]);
+    expect(JSON.parse(localStorage.getItem(`brunomnia.project.${initial.activeWorkspaceId}.v1`)!)).toMatchObject({ format: 'brunomnia-project-store', version: 1, records: [] });
 
     const created = await createCatalogWorkspace(createBlankWorkspace('Empty Project', initial.workspace.preferences), 'empty-project');
     expect(created.workspace).toMatchObject({ name: 'Empty Project', collections: [], environments: [], apiDesigns: [], mockServers: [], mcpClients: [] });
@@ -41,6 +42,10 @@ describe('local project catalog', () => {
     localStorage.setItem('brunomnia.workspace.v1', JSON.stringify({ ...cloneSeedWorkspace(), name: 'Legacy' }));
     const migrated = await loadWorkspaceCatalog();
     expect(migrated).toMatchObject({ activeWorkspaceId: 'local-workspace', workspace: { name: 'Legacy' } });
+    const manifest = JSON.parse(localStorage.getItem('brunomnia.project.local-workspace.v1')!);
+    expect(manifest).toMatchObject({ format: 'brunomnia-project-store', version: 1 });
+    expect(manifest.records.length).toBeGreaterThan(0);
+    expect(manifest.records.every((record: { key: string }) => localStorage.getItem(record.key) !== null)).toBe(true);
 
     const created = await createCatalogWorkspace(createBlankWorkspace('Second', cloneSeedWorkspace().preferences), 'second');
     expect(created.entries.map((entry) => entry.name)).toEqual(['Legacy', 'Second']);
@@ -210,10 +215,14 @@ describe('local project catalog', () => {
 
   it('permanently deletes exact browser recovery copies and empties recognized trash only', async () => {
     await loadWorkspaceCatalog();
-    await createCatalogWorkspace(createBlankWorkspace('Second', cloneSeedWorkspace().preferences), 'second');
+    const secondWorkspace = createBlankWorkspace('Second', cloneSeedWorkspace().preferences);
+    secondWorkspace.mockServers.push({ id: 'second-mock', name: 'Second mock', host: '127.0.0.1', port: 4010, routes: [] });
+    await createCatalogWorkspace(secondWorkspace, 'second');
     await createCatalogWorkspaceSnapshot('second', 'Second snapshot');
     await deleteCatalogWorkspace('second');
-    await createCatalogWorkspace(createBlankWorkspace('Third', cloneSeedWorkspace().preferences), 'third');
+    const thirdWorkspace = createBlankWorkspace('Third', cloneSeedWorkspace().preferences);
+    thirdWorkspace.environments.push({ id: 'third-environment', name: 'Third environment', variables: [], parentId: '' });
+    await createCatalogWorkspace(thirdWorkspace, 'third');
     await deleteCatalogWorkspace('third');
     localStorage.setItem('brunomnia.trash.keep.txt', 'keep');
 
@@ -221,13 +230,18 @@ describe('local project catalog', () => {
     expect(deleted).toHaveLength(2);
     const second = deleted.find((entry) => entry.workspaceId === 'second')!;
     expect(second.hasSnapshots).toBe(true);
+    const secondRecordKeys = [...((localStorage as MemoryStorage).values.keys())].filter((key) => key.startsWith('brunomnia.project-file.second.'));
+    expect(secondRecordKeys.length).toBeGreaterThan(0);
     await purgeDeletedCatalogWorkspace(second.workspaceId, second.deletedAt);
+    expect(secondRecordKeys.every((key) => localStorage.getItem(key) === null)).toBe(true);
     expect((await listDeletedCatalogWorkspaces()).map((entry) => entry.workspaceId)).toEqual(['third']);
     await expect(purgeDeletedCatalogWorkspace(second.workspaceId, second.deletedAt)).rejects.toThrow('no longer exists');
     await expect(restoreDeletedCatalogWorkspace(second.workspaceId, second.deletedAt)).rejects.toThrow('valid workspace or backup');
 
+    expect([...((localStorage as MemoryStorage).values.keys())].some((key) => key.startsWith('brunomnia.project-file.third.'))).toBe(true);
     await emptyDeletedCatalogWorkspaces();
     expect(await listDeletedCatalogWorkspaces()).toEqual([]);
+    expect([...((localStorage as MemoryStorage).values.keys())].some((key) => key.startsWith('brunomnia.project-file.third.'))).toBe(false);
     expect(localStorage.getItem('brunomnia.trash.keep.txt')).toBe('keep');
   });
 

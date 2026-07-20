@@ -2497,6 +2497,19 @@ Compatibility bounds remain explicit: Brunomnia still stores one atomic project 
 
 Compatibility bounds remain explicit: Brunomnia continues to store typed file state inside one atomic project document rather than separate database records, and Insomnia v5 certificate interchange remains constrained by its document schema. Cloud discovery and provider onboarding remain open. Local projects and persistence stays `Baseline`; exactly 15 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 252 — authoritative physical typed-file records (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Physical format | Complete | One bounded project manifest stores project-level state and an ordered identity-bound record index; each visible Collection, Document, Mock Server, root Environment branch, and MCP Client has one authoritative record, with a Document's generated Collection and every file's cookies/certificates stored beside its owner |
+| Native persistence | Complete | App-data saves stage a complete manifest/record generation, rotate the prior valid generation into a matching backup, roll back failed replacement, reject symlinked/non-regular record stores, and preserve corrupt manifests plus records for recovery |
+| Browser persistence | Complete | Browser catalogs use generation-specific local-storage records referenced by primary/backup manifests, retain exact records through delete/restore, remove only identity-scoped records during purge/Empty, and migrate aggregate documents on first catalog initialization or save |
+| Recovery lifecycle | Complete | Read, catalog reconstruction, rename, duplicate/move saves, snapshot creation/restore, backup restore, delete/trash/list/restore/purge/Empty, runtime-credential wrapping, and genuinely empty projects assemble through the same format; one corrupt record makes the primary recoverable from its last valid backup rather than silently dropping a file |
+| CLI continuity | Complete | The packaged CLI detects a native physical manifest, accepts only bounded `record-00000.json` sibling files in a regular non-symlink directory, enforces per-file/aggregate size limits, binds payload identities to the manifest, and assembles the ordinary workspace before migration/execution |
+| Executable evidence | Complete | Shared splitter/assembler, browser catalog, CLI filesystem, native format, corruption fallback, credential, backup, snapshot, trash, and legacy-migration regressions plus the full release gates are recorded in the milestone verification file |
+
+Compatibility bounds remain explicit: immutable project snapshots remain self-contained aggregate recovery artifacts, while active native/browser project persistence is physically split by typed file. Cloud discovery and provider onboarding remain open, so Local projects and persistence stays `Baseline`. Collections, requests, environments, and history is now `Complete`; exactly 14 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

@@ -1,4 +1,4 @@
-use crate::runtime_credentials;
+use crate::{runtime_credentials, workspace_physical_store};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -118,6 +118,8 @@ enum TrashFileKind {
 struct TrashFiles {
     workspace: Option<PathBuf>,
     backup: Option<PathBuf>,
+    workspace_records: Option<PathBuf>,
+    backup_records: Option<PathBuf>,
     vault: Option<PathBuf>,
     metadata: Option<PathBuf>,
     snapshots: Option<PathBuf>,
@@ -137,6 +139,14 @@ fn workspace_path(root: &Path, id: &str) -> PathBuf {
 
 fn workspace_backup_path(root: &Path, id: &str) -> PathBuf {
     root.join(format!("{id}.backup.json"))
+}
+
+fn workspace_records_path(root: &Path, id: &str) -> PathBuf {
+    root.join(format!("{id}.records"))
+}
+
+fn workspace_backup_records_path(root: &Path, id: &str) -> PathBuf {
+    root.join(format!("{id}.backup.records"))
 }
 
 fn workspace_snapshot_dir(root: &Path, id: &str) -> PathBuf {
@@ -179,10 +189,15 @@ fn trash_snapshot_dir(root: &Path, id: &str, deleted_at: i64) -> PathBuf {
         .join(format!("{id}-{deleted_at}.snapshots"))
 }
 
+fn trash_records_dir(root: &Path, id: &str, deleted_at: i64, label: &str) -> PathBuf {
+    root.join("trash")
+        .join(format!("{id}-{deleted_at}.{label}.records"))
+}
+
 pub fn cli_path(root: &Path, workspace_id: &str) -> Result<String, String> {
     validate_workspace_id(workspace_id)?;
     let path = workspace_path(root, workspace_id);
-    if !path.is_file() {
+    if read_valid_stored_workspace(&path, &workspace_records_path(root, workspace_id)).is_none() {
         return Err("This local project's saved workspace file is unavailable.".into());
     }
     let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
@@ -223,6 +238,18 @@ fn parse_trash_snapshot_dir_name(name: &str) -> Option<(String, i64)> {
     (deleted_at >= 0).then(|| (workspace_id.to_string(), deleted_at))
 }
 
+fn parse_trash_records_dir_name(name: &str) -> Option<(String, i64, bool)> {
+    let (stem, backup) = if let Some(stem) = name.strip_suffix(".workspace.records") {
+        (stem, false)
+    } else {
+        (name.strip_suffix(".backup.records")?, true)
+    };
+    let (workspace_id, deleted_at) = stem.rsplit_once('-')?;
+    validate_workspace_id(workspace_id).ok()?;
+    let deleted_at = deleted_at.parse::<i64>().ok()?;
+    (deleted_at >= 0).then(|| (workspace_id.to_string(), deleted_at, backup))
+}
+
 fn read_regular_bytes(path: &Path) -> Result<Option<Vec<u8>>, String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -233,12 +260,6 @@ fn read_regular_bytes(path: &Path) -> Result<Option<Vec<u8>>, String> {
         return Err("A deleted-project recovery item is not a regular file.".into());
     }
     fs::read(path).map(Some).map_err(|error| error.to_string())
-}
-
-fn valid_workspace_bytes(bytes: &[u8]) -> Option<Value> {
-    serde_json::from_slice(bytes)
-        .ok()
-        .filter(workspace_is_valid)
 }
 
 fn valid_trash_catalog_entry(bytes: &[u8], workspace_id: &str) -> Option<CatalogEntry> {
@@ -265,6 +286,17 @@ fn collect_trash_files(root: &Path) -> Result<HashMap<(String, i64), TrashFiles>
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
         let name = entry.file_name();
         if file_type.is_dir() {
+            if let Some((workspace_id, deleted_at, backup)) =
+                name.to_str().and_then(parse_trash_records_dir_name)
+            {
+                let files = groups.entry((workspace_id, deleted_at)).or_default();
+                if backup {
+                    files.backup_records = Some(entry.path());
+                } else {
+                    files.workspace_records = Some(entry.path());
+                }
+                continue;
+            }
             if let Some((workspace_id, deleted_at)) =
                 name.to_str().and_then(parse_trash_snapshot_dir_name)
             {
@@ -440,10 +472,41 @@ fn read_valid_workspace(path: &Path) -> Option<Value> {
     read_json(path).filter(workspace_is_valid)
 }
 
+fn read_valid_stored_workspace(path: &Path, records: &Path) -> Option<Value> {
+    let stored = read_json(path)?;
+    if workspace_is_valid(&stored) {
+        return Some(stored);
+    }
+    if !workspace_physical_store::is_manifest(&stored) {
+        return None;
+    }
+    let metadata = fs::symlink_metadata(records).ok()?;
+    if !metadata.file_type().is_dir() {
+        return None;
+    }
+    workspace_physical_store::assemble(&stored, |key| {
+        if !workspace_physical_store::valid_record_key(key) {
+            return None;
+        }
+        let path = records.join(key);
+        let metadata = fs::symlink_metadata(&path).ok()?;
+        if !metadata.file_type().is_file() {
+            return None;
+        }
+        read_json(&path)
+    })
+    .filter(workspace_is_valid)
+}
+
 fn read_workspace_raw(root: &Path, id: &str) -> WorkspaceRead {
-    if let Some(value) = read_valid_workspace(&workspace_path(root, id)) {
+    if let Some(value) =
+        read_valid_stored_workspace(&workspace_path(root, id), &workspace_records_path(root, id))
+    {
         WorkspaceRead::Primary(value)
-    } else if let Some(value) = read_valid_workspace(&workspace_backup_path(root, id)) {
+    } else if let Some(value) = read_valid_stored_workspace(
+        &workspace_backup_path(root, id),
+        &workspace_backup_records_path(root, id),
+    ) {
         WorkspaceRead::Backup(value)
     } else {
         WorkspaceRead::Unavailable
@@ -484,6 +547,154 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String>
     write_bytes_atomic(path, &data)
 }
 
+fn path_present(path: &Path) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn remove_store_copy(path: &Path, records: &Path) -> Result<(), String> {
+    if path_present(path)? {
+        let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+        if !metadata.file_type().is_file() {
+            return Err("A project manifest is not a regular file.".into());
+        }
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    if path_present(records)? {
+        let metadata = fs::symlink_metadata(records).map_err(|error| error.to_string())?;
+        if !metadata.file_type().is_dir() {
+            return Err("A project record store is not a regular directory.".into());
+        }
+        fs::remove_dir_all(records).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn stage_physical_copy(
+    path: &Path,
+    records: &Path,
+    workspace: &Value,
+) -> Result<(PathBuf, PathBuf), String> {
+    let (manifest, physical_records) = workspace_physical_store::split(workspace)?;
+    let nonce = Uuid::new_v4();
+    let path_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "The project manifest path is invalid.".to_string())?;
+    let records_name = records
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "The project record path is invalid.".to_string())?;
+    let temporary_path = path.with_file_name(format!(".{path_name}.{nonce}.staged"));
+    let temporary_records = records.with_file_name(format!(".{records_name}.{nonce}.staged"));
+    fs::create_dir(&temporary_records).map_err(|error| error.to_string())?;
+    let staged = (|| {
+        for (key, physical_record) in physical_records {
+            if !workspace_physical_store::valid_record_key(&key) {
+                return Err("A generated project record key is invalid.".into());
+            }
+            write_json_atomic(&temporary_records.join(key), &physical_record)?;
+        }
+        write_json_atomic(&temporary_path, &manifest)
+    })();
+    if let Err(error) = staged {
+        let _ = fs::remove_dir_all(&temporary_records);
+        let _ = fs::remove_file(&temporary_path);
+        return Err(error);
+    }
+    Ok((temporary_path, temporary_records))
+}
+
+fn install_staged_copy(
+    temporary_path: &Path,
+    temporary_records: &Path,
+    path: &Path,
+    records: &Path,
+) -> Result<(), String> {
+    fs::rename(temporary_records, records).map_err(|error| error.to_string())?;
+    if let Err(error) = fs::rename(temporary_path, path) {
+        let _ = fs::remove_dir_all(records);
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+fn write_physical_copy(path: &Path, records: &Path, workspace: &Value) -> Result<(), String> {
+    let (temporary_path, temporary_records) = stage_physical_copy(path, records, workspace)?;
+    let nonce = Uuid::new_v4();
+    let previous_path = path.with_file_name(format!(
+        ".{}.{}.previous",
+        path.file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("manifest"),
+        nonce
+    ));
+    let previous_records = records.with_file_name(format!(
+        ".{}.{}.previous",
+        records
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("records"),
+        nonce
+    ));
+    let had_previous = path_present(path)? || path_present(records)?;
+    if had_previous {
+        if let Err(error) = move_store_copy(path, records, &previous_path, &previous_records) {
+            let _ = fs::remove_file(temporary_path);
+            let _ = fs::remove_dir_all(temporary_records);
+            return Err(error);
+        }
+    }
+    if let Err(error) = install_staged_copy(&temporary_path, &temporary_records, path, records) {
+        if had_previous {
+            let _ = move_store_copy(&previous_path, &previous_records, path, records);
+        }
+        let _ = fs::remove_file(temporary_path);
+        let _ = fs::remove_dir_all(temporary_records);
+        return Err(error);
+    }
+    if had_previous {
+        let _ = remove_store_copy(&previous_path, &previous_records);
+    }
+    Ok(())
+}
+
+fn move_store_copy(
+    source_path: &Path,
+    source_records: &Path,
+    destination_path: &Path,
+    destination_records: &Path,
+) -> Result<(), String> {
+    let has_manifest = path_present(source_path)?;
+    let has_records = path_present(source_records)?;
+    if has_manifest {
+        let metadata = fs::symlink_metadata(source_path).map_err(|error| error.to_string())?;
+        if !metadata.file_type().is_file() {
+            return Err("A project manifest is not a regular file.".into());
+        }
+        fs::rename(source_path, destination_path).map_err(|error| error.to_string())?;
+    }
+    if has_records {
+        let metadata = fs::symlink_metadata(source_records).map_err(|error| error.to_string())?;
+        if !metadata.file_type().is_dir() {
+            if has_manifest {
+                let _ = fs::rename(destination_path, source_path);
+            }
+            return Err("A project record store is not a regular directory.".into());
+        }
+        if let Err(error) = fs::rename(source_records, destination_records) {
+            if has_manifest {
+                let _ = fs::rename(destination_path, source_path);
+            }
+            return Err(error.to_string());
+        }
+    }
+    Ok(())
+}
+
 fn migrate_workspace_file(path: &Path, workspace_id: &str) -> Result<(), String> {
     let Some(workspace) = read_valid_workspace(path) else {
         return Ok(());
@@ -497,28 +708,79 @@ fn migrate_workspace_file(path: &Path, workspace_id: &str) -> Result<(), String>
     Ok(())
 }
 
+fn migrate_stored_workspace_copy(
+    path: &Path,
+    records: &Path,
+    workspace_id: &str,
+) -> Result<(), String> {
+    let Some(stored) = read_json(path) else {
+        return Ok(());
+    };
+    if workspace_is_valid(&stored) {
+        let protected = if runtime_credentials::needs_protection(&stored) {
+            runtime_credentials::protect(workspace_id, &stored)?
+        } else {
+            stored
+        };
+        return write_physical_copy(path, records, &protected);
+    }
+    let Some(workspace) = read_valid_stored_workspace(path, records) else {
+        return Ok(());
+    };
+    if runtime_credentials::needs_protection(&workspace) {
+        write_physical_copy(
+            path,
+            records,
+            &runtime_credentials::protect(workspace_id, &workspace)?,
+        )?;
+    }
+    Ok(())
+}
+
 fn migrate_workspace_copies(root: &Path, workspace_id: &str) -> Result<(), String> {
-    migrate_workspace_file(&workspace_path(root, workspace_id), workspace_id)?;
-    migrate_workspace_file(&workspace_backup_path(root, workspace_id), workspace_id)
+    migrate_stored_workspace_copy(
+        &workspace_path(root, workspace_id),
+        &workspace_records_path(root, workspace_id),
+        workspace_id,
+    )?;
+    migrate_stored_workspace_copy(
+        &workspace_backup_path(root, workspace_id),
+        &workspace_backup_records_path(root, workspace_id),
+        workspace_id,
+    )
 }
 
 fn migrate_trash_workspaces(root: &Path) -> Result<HashMap<(String, i64), TrashFiles>, String> {
     let trash_files = collect_trash_files(root)?;
-    for ((workspace_id, _), files) in &trash_files {
+    for ((workspace_id, deleted_at), files) in &trash_files {
         if let Some(path) = files.workspace.as_deref() {
-            migrate_workspace_file(path, workspace_id)?;
+            let records = trash_records_dir(root, workspace_id, *deleted_at, "workspace");
+            migrate_stored_workspace_copy(
+                path,
+                files.workspace_records.as_deref().unwrap_or(&records),
+                workspace_id,
+            )?;
         }
         if let Some(path) = files.backup.as_deref() {
-            migrate_workspace_file(path, workspace_id)?;
+            let records = trash_records_dir(root, workspace_id, *deleted_at, "backup");
+            migrate_stored_workspace_copy(
+                path,
+                files.backup_records.as_deref().unwrap_or(&records),
+                workspace_id,
+            )?;
         }
     }
-    Ok(trash_files)
+    collect_trash_files(root)
 }
 
 fn read_workspace(root: &Path, id: &str) -> Result<WorkspaceRead, String> {
     migrate_workspace_copies(root, id)?;
-    let primary = read_valid_workspace(&workspace_path(root, id));
-    let backup = read_valid_workspace(&workspace_backup_path(root, id));
+    let primary =
+        read_valid_stored_workspace(&workspace_path(root, id), &workspace_records_path(root, id));
+    let backup = read_valid_stored_workspace(
+        &workspace_backup_path(root, id),
+        &workspace_backup_records_path(root, id),
+    );
     if let Some(workspace) = primary {
         match runtime_credentials::unprotect(id, &workspace) {
             Ok(workspace) => return Ok(WorkspaceRead::Primary(workspace)),
@@ -552,29 +814,61 @@ fn preserve_invalid(root: &Path, id: &str, path: &Path) -> Result<(), String> {
     fs::rename(path, destination).map_err(|error| error.to_string())
 }
 
+fn preserve_invalid_store(
+    root: &Path,
+    id: &str,
+    path: &Path,
+    records: &Path,
+) -> Result<(), String> {
+    let recovery = root.join("recovery");
+    fs::create_dir_all(&recovery).map_err(|error| error.to_string())?;
+    let suffix = Utc::now().timestamp_millis();
+    if path_present(path)? {
+        fs::rename(path, recovery.join(format!("{id}-{suffix}.invalid.json")))
+            .map_err(|error| error.to_string())?;
+    }
+    if path_present(records)? {
+        fs::rename(
+            records,
+            recovery.join(format!("{id}-{suffix}.invalid.records")),
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn write_workspace(root: &Path, id: &str, workspace: &Value) -> Result<(), String> {
     if !workspace_is_valid(workspace) {
         return Err("The project is not a valid Brunomnia workspace.".into());
     }
     let protected_workspace = runtime_credentials::protect(id, workspace)?;
     let path = workspace_path(root, id);
+    let records = workspace_records_path(root, id);
     let backup = workspace_backup_path(root, id);
-    if path.exists() {
-        if let Some(current) = read_valid_workspace(&path) {
-            if backup.exists() {
-                fs::remove_file(&backup).map_err(|error| error.to_string())?;
-            }
-            let current = if runtime_credentials::needs_protection(&current) {
-                runtime_credentials::protect(id, &current)?
-            } else {
-                current
-            };
-            write_json_atomic(&backup, &current)?;
+    let backup_records = workspace_backup_records_path(root, id);
+    let (temporary_path, temporary_records) =
+        stage_physical_copy(&path, &records, &protected_workspace)?;
+    let had_current = path_present(&path)? || path_present(&records)?;
+    let current_valid = read_valid_stored_workspace(&path, &records).is_some();
+    let mut moved_current = false;
+    if had_current {
+        if current_valid {
+            remove_store_copy(&backup, &backup_records)?;
+            move_store_copy(&path, &records, &backup, &backup_records)?;
+            moved_current = true;
         } else {
-            preserve_invalid(root, id, &path)?;
+            preserve_invalid_store(root, id, &path, &records)?;
         }
     }
-    write_json_atomic(&path, &protected_workspace)
+    if let Err(error) = install_staged_copy(&temporary_path, &temporary_records, &path, &records) {
+        if moved_current {
+            let _ = move_store_copy(&backup, &backup_records, &path, &records);
+        }
+        let _ = fs::remove_file(temporary_path);
+        let _ = fs::remove_dir_all(temporary_records);
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn catalog_is_valid(catalog: &Catalog) -> bool {
@@ -651,7 +945,7 @@ fn reconstruct_catalog(root: &Path) -> Catalog {
             }
             let id = name.strip_suffix(".json")?.to_string();
             validate_workspace_id(&id).ok()?;
-            let workspace = read_valid_workspace(&path)?;
+            let workspace = read_valid_stored_workspace(&path, &workspace_records_path(root, &id))?;
             Some(new_entry(id, &workspace))
         })
         .take(MAX_WORKSPACES)
@@ -1154,6 +1448,19 @@ pub fn delete(root: &Path, workspace_id: &str) -> Result<WorkspaceCatalogSnapsho
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => return Err(error.to_string()),
     };
+    for records in [
+        workspace_records_path(root, workspace_id),
+        workspace_backup_records_path(root, workspace_id),
+    ] {
+        if path_present(&records)?
+            && !fs::symlink_metadata(&records)
+                .map_err(|error| error.to_string())?
+                .file_type()
+                .is_dir()
+        {
+            return Err("A project record store is not a regular directory.".into());
+        }
+    }
     write_json_atomic(
         &trash.join(format!("{workspace_id}-{suffix}.metadata.json")),
         &catalog.entries[index],
@@ -1174,6 +1481,19 @@ pub fn delete(root: &Path, workspace_id: &str) -> Result<WorkspaceCatalogSnapsho
             .map_err(|error| error.to_string())?;
         }
     }
+    for (source, label) in [
+        (workspace_records_path(root, workspace_id), "workspace"),
+        (workspace_backup_records_path(root, workspace_id), "backup"),
+    ] {
+        if path_present(&source)? {
+            let metadata = fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
+            if !metadata.file_type().is_dir() {
+                return Err("A project record store is not a regular directory.".into());
+            }
+            fs::rename(source, trash_records_dir(root, workspace_id, suffix, label))
+                .map_err(|error| error.to_string())?;
+        }
+    }
     if has_snapshots {
         fs::rename(&snapshots, trash_snapshot_dir(root, workspace_id, suffix))
             .map_err(|error| error.to_string())?;
@@ -1192,18 +1512,18 @@ pub fn list_trash(root: &Path) -> Result<Vec<WorkspaceTrashEntry>, String> {
     let mut entries = migrate_trash_workspaces(root)?
         .into_iter()
         .map(|((workspace_id, deleted_at), files)| {
-            let primary = files
-                .workspace
-                .as_deref()
-                .and_then(|path| read_regular_bytes(path).ok().flatten())
-                .as_deref()
-                .and_then(valid_workspace_bytes);
-            let backup = files
-                .backup
-                .as_deref()
-                .and_then(|path| read_regular_bytes(path).ok().flatten())
-                .as_deref()
-                .and_then(valid_workspace_bytes);
+            let primary = files.workspace.as_deref().and_then(|path| {
+                files
+                    .workspace_records
+                    .as_deref()
+                    .and_then(|records| read_valid_stored_workspace(path, records))
+            });
+            let backup = files.backup.as_deref().and_then(|path| {
+                files
+                    .backup_records
+                    .as_deref()
+                    .and_then(|records| read_valid_stored_workspace(path, records))
+            });
             let metadata = files
                 .metadata
                 .as_deref()
@@ -1261,6 +1581,30 @@ fn preserve_trashed_invalid(
     }
 }
 
+fn preserve_trashed_invalid_store(
+    root: &Path,
+    workspace_id: &str,
+    deleted_at: i64,
+    label: &str,
+    source: &Path,
+    records: &Path,
+) {
+    preserve_trashed_invalid(root, workspace_id, deleted_at, label, source);
+    if !path_present(records).unwrap_or(false) {
+        return;
+    }
+    let recovery = root.join("recovery");
+    if fs::create_dir_all(&recovery).is_err() {
+        return;
+    }
+    let destination = recovery.join(format!(
+        "{workspace_id}-{deleted_at}.deleted-{label}.invalid.records"
+    ));
+    if !destination.exists() {
+        let _ = fs::rename(records, destination);
+    }
+}
+
 pub fn restore_trash(
     root: &Path,
     workspace_id: &str,
@@ -1272,11 +1616,13 @@ pub fn restore_trash(
     }
     let primary_trash = trash_file_path(root, workspace_id, deleted_at, "workspace");
     let backup_trash = trash_file_path(root, workspace_id, deleted_at, "backup");
+    let primary_records_trash = trash_records_dir(root, workspace_id, deleted_at, "workspace");
+    let backup_records_trash = trash_records_dir(root, workspace_id, deleted_at, "backup");
     let vault_trash = trash_file_path(root, workspace_id, deleted_at, "vault");
     let metadata_trash = trash_file_path(root, workspace_id, deleted_at, "metadata");
     let snapshots_trash = trash_snapshot_dir(root, workspace_id, deleted_at);
-    migrate_workspace_file(&primary_trash, workspace_id)?;
-    migrate_workspace_file(&backup_trash, workspace_id)?;
+    migrate_stored_workspace_copy(&primary_trash, &primary_records_trash, workspace_id)?;
+    migrate_stored_workspace_copy(&backup_trash, &backup_records_trash, workspace_id)?;
     let primary_bytes = read_regular_bytes(&primary_trash)?;
     let backup_bytes = read_regular_bytes(&backup_trash)?;
     let vault_bytes = read_regular_bytes(&vault_trash)?;
@@ -1289,8 +1635,8 @@ pub fn restore_trash(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => return Err(error.to_string()),
     };
-    let primary_workspace = primary_bytes.as_deref().and_then(valid_workspace_bytes);
-    let backup_workspace = backup_bytes.as_deref().and_then(valid_workspace_bytes);
+    let primary_workspace = read_valid_stored_workspace(&primary_trash, &primary_records_trash);
+    let backup_workspace = read_valid_stored_workspace(&backup_trash, &backup_records_trash);
     let workspace = primary_workspace
         .as_ref()
         .or(backup_workspace.as_ref())
@@ -1319,7 +1665,9 @@ pub fn restore_trash(
     }
 
     let primary = workspace_path(root, workspace_id);
+    let primary_records = workspace_records_path(root, workspace_id);
     let backup = workspace_backup_path(root, workspace_id);
+    let backup_records = workspace_backup_records_path(root, workspace_id);
     let vault = root.join("vaults").join(format!("{workspace_id}.enc.json"));
     let snapshots = workspace_snapshot_dir(root, workspace_id);
     let snapshots_conflict = match fs::symlink_metadata(&snapshots) {
@@ -1327,8 +1675,10 @@ pub fn restore_trash(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => return Err(error.to_string()),
     };
-    if primary.exists()
-        || backup.exists()
+    if path_present(&primary)?
+        || path_present(&backup)?
+        || path_present(&primary_records)?
+        || path_present(&backup_records)?
         || (vault_bytes.is_some() && vault.exists())
         || snapshots_conflict
     {
@@ -1339,10 +1689,12 @@ pub fn restore_trash(
     let mut moved_snapshots = false;
     let restore_result = (|| {
         created_paths.push(primary.clone());
-        write_json_atomic(&primary, &workspace)?;
+        created_paths.push(primary_records.clone());
+        write_physical_copy(&primary, &primary_records, &workspace)?;
         if let Some(value) = backup_workspace.as_ref() {
             created_paths.push(backup.clone());
-            write_json_atomic(&backup, value)?;
+            created_paths.push(backup_records.clone());
+            write_physical_copy(&backup, &backup_records, value)?;
         }
         if let Some(bytes) = vault_bytes.as_deref() {
             fs::create_dir_all(
@@ -1368,7 +1720,11 @@ pub fn restore_trash(
             let _ = fs::rename(&snapshots, &snapshots_trash);
         }
         for path in created_paths {
-            let _ = fs::remove_file(path);
+            if path.is_dir() {
+                let _ = fs::remove_dir_all(path);
+            } else {
+                let _ = fs::remove_file(path);
+            }
         }
         return Err(error);
     }
@@ -1376,15 +1732,31 @@ pub fn restore_trash(
     if primary_bytes.is_some() {
         if primary_workspace.is_some() {
             let _ = fs::remove_file(&primary_trash);
+            let _ = fs::remove_dir_all(&primary_records_trash);
         } else {
-            preserve_trashed_invalid(root, workspace_id, deleted_at, "workspace", &primary_trash);
+            preserve_trashed_invalid_store(
+                root,
+                workspace_id,
+                deleted_at,
+                "workspace",
+                &primary_trash,
+                &primary_records_trash,
+            );
         }
     }
     if backup_bytes.is_some() {
         if backup_workspace.is_some() {
             let _ = fs::remove_file(&backup_trash);
+            let _ = fs::remove_dir_all(&backup_records_trash);
         } else {
-            preserve_trashed_invalid(root, workspace_id, deleted_at, "backup", &backup_trash);
+            preserve_trashed_invalid_store(
+                root,
+                workspace_id,
+                deleted_at,
+                "backup",
+                &backup_trash,
+                &backup_records_trash,
+            );
         }
     }
     if vault_bytes.is_some() {
@@ -1424,11 +1796,28 @@ pub fn purge_trash(root: &Path, workspace_id: &str, deleted_at: i64) -> Result<(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => return Err(error.to_string()),
     };
-    if paths.is_empty() && !has_snapshots {
+    let record_directories = [
+        trash_records_dir(root, workspace_id, deleted_at, "workspace"),
+        trash_records_dir(root, workspace_id, deleted_at, "backup"),
+    ]
+    .into_iter()
+    .filter_map(|path| match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_dir() => Some(Ok(path)),
+        Ok(_) => Some(Err(
+            "A deleted-project recovery item is not a regular directory.".to_string(),
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => Some(Err(error.to_string())),
+    })
+    .collect::<Result<Vec<_>, _>>()?;
+    if paths.is_empty() && record_directories.is_empty() && !has_snapshots {
         return Err("This deleted-project recovery copy no longer exists.".into());
     }
     for path in paths {
         fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    for path in record_directories {
+        fs::remove_dir_all(path).map_err(|error| error.to_string())?;
     }
     if has_snapshots {
         fs::remove_dir_all(snapshots).map_err(|error| error.to_string())?;
@@ -1447,6 +1836,13 @@ pub fn empty_trash(root: &Path) -> Result<usize, String> {
             fs::remove_file(path).map_err(|error| error.to_string())?;
             removed += 1;
         }
+        for path in [files.workspace_records, files.backup_records]
+            .into_iter()
+            .flatten()
+        {
+            fs::remove_dir_all(path).map_err(|error| error.to_string())?;
+            removed += 1;
+        }
         if let Some(snapshots) = files.snapshots {
             fs::remove_dir_all(snapshots).map_err(|error| error.to_string())?;
             removed += 1;
@@ -1458,14 +1854,18 @@ pub fn empty_trash(root: &Path) -> Result<usize, String> {
 pub fn restore_backup(root: &Path, workspace_id: &str) -> Result<WorkspaceCatalogSnapshot, String> {
     validate_workspace_id(workspace_id)?;
     let backup = workspace_backup_path(root, workspace_id);
-    migrate_workspace_file(&backup, workspace_id)?;
-    let workspace = read_valid_workspace(&backup)
+    let backup_records = workspace_backup_records_path(root, workspace_id);
+    migrate_stored_workspace_copy(&backup, &backup_records, workspace_id)?;
+    let workspace = read_valid_stored_workspace(&backup, &backup_records)
         .ok_or_else(|| "This project does not have a valid backup to restore.".to_string())?;
     let primary = workspace_path(root, workspace_id);
-    if primary.exists() && read_valid_workspace(&primary).is_none() {
-        preserve_invalid(root, workspace_id, &primary)?;
+    let primary_records = workspace_records_path(root, workspace_id);
+    if (path_present(&primary)? || path_present(&primary_records)?)
+        && read_valid_stored_workspace(&primary, &primary_records).is_none()
+    {
+        preserve_invalid_store(root, workspace_id, &primary, &primary_records)?;
     }
-    write_json_atomic(&primary, &workspace)?;
+    write_physical_copy(&primary, &primary_records, &workspace)?;
     open(root, workspace_id)
 }
 
@@ -1598,6 +1998,44 @@ mod tests {
         assert_eq!(restored.entries[0].status, "ready");
         assert_eq!(restored.workspace["name"], "Initial");
         assert!(root.join("recovery").read_dir().unwrap().next().is_some());
+    }
+
+    #[test]
+    fn recovers_when_one_authoritative_physical_record_is_corrupt() {
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("workspaces");
+        let mut initial_workspace = workspace("Initial physical");
+        initial_workspace["collections"] = serde_json::json!([{
+            "id": "physical-collection",
+            "name": "Physical collection",
+            "requests": [],
+            "folders": []
+        }]);
+        let initial = load(&root, None, &initial_workspace).unwrap();
+        let id = initial.active_workspace_id;
+        let mut saved_workspace = initial_workspace.clone();
+        saved_workspace["name"] = Value::String("Saved physical".into());
+        save(&root, &id, &saved_workspace).unwrap();
+
+        let manifest = read_json(&workspace_path(&root, &id)).unwrap();
+        let record_key = workspace_physical_store::record_keys(&manifest).remove(0);
+        fs::write(
+            workspace_records_path(&root, &id).join(record_key),
+            b"{ broken",
+        )
+        .unwrap();
+
+        let recovered = open(&root, &id).unwrap();
+        assert_eq!(recovered.workspace["name"], "Initial physical");
+        assert_eq!(recovered.entries[0].status, "recoverable");
+        assert_eq!(recovered.recovery.unwrap().kind, "workspace-backup");
+
+        let restored = restore_backup(&root, &id).unwrap();
+        assert_eq!(restored.entries[0].status, "ready");
+        assert_eq!(restored.workspace["name"], "Initial physical");
+        assert!(workspace_physical_store::is_manifest(
+            &read_json(&workspace_path(&root, &id)).unwrap()
+        ));
     }
 
     #[test]
@@ -1839,9 +2277,23 @@ mod tests {
             "request-access"
         );
         assert_eq!(loaded.workspace["mcpClients"][0]["token"], "mcp-access");
+        let primary_manifest = read_json(&workspace_path(&root, "local-workspace")).unwrap();
+        assert!(workspace_physical_store::is_manifest(&primary_manifest));
+        let primary_record_keys = workspace_physical_store::record_keys(&primary_manifest);
+        assert_eq!(primary_record_keys.len(), 2);
+        assert!(primary_record_keys.iter().all(|key| {
+            workspace_records_path(&root, "local-workspace")
+                .join(key)
+                .is_file()
+        }));
 
-        for path in [workspace_path(&root, "local-workspace"), legacy.clone()] {
-            let stored = read_valid_workspace(&path).unwrap();
+        let stored_primary = read_valid_stored_workspace(
+            &workspace_path(&root, "local-workspace"),
+            &workspace_records_path(&root, "local-workspace"),
+        )
+        .unwrap();
+        let stored_legacy = read_valid_workspace(&legacy).unwrap();
+        for stored in [stored_primary, stored_legacy] {
             assert!(stored.get("protectedRuntimeCredentials").is_some());
             assert_eq!(
                 stored["collections"][0]["requests"][0]["auth"]["accessToken"],
@@ -1855,8 +2307,11 @@ mod tests {
         }
 
         save(&root, "local-workspace", &loaded.workspace).unwrap();
-        let backup =
-            read_valid_workspace(&workspace_backup_path(&root, "local-workspace")).unwrap();
+        let backup = read_valid_stored_workspace(
+            &workspace_backup_path(&root, "local-workspace"),
+            &workspace_backup_records_path(&root, "local-workspace"),
+        )
+        .unwrap();
         assert!(backup.get("protectedRuntimeCredentials").is_some());
         assert_eq!(backup["mcpClients"][0]["oauthRegisteredClientSecret"], "");
 
@@ -1887,12 +2342,10 @@ mod tests {
             .find(|entry| entry.workspace_id == "local-workspace")
             .unwrap();
         assert!(entry.has_snapshots);
-        let trash = read_valid_workspace(&trash_file_path(
-            &root,
-            "local-workspace",
-            entry.deleted_at,
-            "workspace",
-        ))
+        let trash = read_valid_stored_workspace(
+            &trash_file_path(&root, "local-workspace", entry.deleted_at, "workspace"),
+            &trash_records_dir(&root, "local-workspace", entry.deleted_at, "workspace"),
+        )
         .unwrap();
         assert!(trash.get("protectedRuntimeCredentials").is_some());
         assert_eq!(trash["mcpClients"][0]["token"], "");

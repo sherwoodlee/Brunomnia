@@ -35,6 +35,7 @@ import { createCliPluginTemplateRuntime } from './pluginRuntime';
 import { collectCliApiDesignSources, fetchPublicSpecificationSourceNode } from './apiSpecSources';
 import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, selectRunnerResource, type RunnerInsoConfig } from '../src/lib/runnerCli';
 import { getWorkspaceFileState, workspaceFileIdForCollection, workspaceFileIdForRequest } from '../src/lib/workspaceFileState';
+import { loadPhysicalWorkspaceFromPath } from './physicalStore';
 
 const args = process.argv.slice(2);
 const cliVersion = process.env.VERSION || packageJson.version;
@@ -152,7 +153,9 @@ const loadSplitProject = async (path: string) => {
 };
 const loadWorkspace = async (path: string): Promise<Workspace> => {
   const input = await stat(path).catch((error) => fail(`Unable to inspect ${path}: ${error.message}`));
-  const parsed = input.isDirectory() ? await loadSplitProject(path) : JSON.parse(await loadText(path)) as unknown;
+  const parsed = input.isDirectory()
+    ? await loadSplitProject(path)
+    : await loadPhysicalWorkspaceFromPath(path, JSON.parse(await loadText(path)) as unknown).catch((error) => fail(error instanceof Error ? error.message : String(error)));
   try { return migrateWorkspace(parsed); }
   catch { return fail('The input is not a Brunomnia workspace.'); }
 };
