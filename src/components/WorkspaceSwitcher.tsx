@@ -13,10 +13,12 @@ type WorkspaceSwitcherProps = {
   onDelete: (workspaceId: string) => Promise<void>;
   onDuplicate: (workspaceId: string, name: string) => Promise<void>;
   onDuplicateProjectWorkspace: (sourceWorkspaceId: string, projectWorkspaceId: string, targetWorkspaceId: string, name: string) => Promise<void>;
+  onEmptyDeleted: () => Promise<void>;
   onListProjectWorkspaces: (workspaceId: string) => Promise<ProjectWorkspaceSummary[]>;
   onListDeleted: () => Promise<WorkspaceTrashEntry[]>;
   onMoveProjectWorkspace: (sourceWorkspaceId: string, projectWorkspaceId: string, targetWorkspaceId: string) => Promise<void>;
   onOpen: (workspaceId: string) => Promise<void>;
+  onPurgeDeleted: (workspaceId: string, deletedAt: number) => Promise<void>;
   onRename: (workspaceId: string, name: string) => Promise<void>;
   onReorder: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => Promise<void>;
   onRestore: (workspaceId: string) => Promise<void>;
@@ -33,10 +35,12 @@ export function WorkspaceSwitcher({
   onDelete,
   onDuplicate,
   onDuplicateProjectWorkspace,
+  onEmptyDeleted,
   onListProjectWorkspaces,
   onListDeleted,
   onMoveProjectWorkspace,
   onOpen,
+  onPurgeDeleted,
   onRename,
   onReorder,
   onRestore,
@@ -161,6 +165,16 @@ export function WorkspaceSwitcher({
     await onRestoreDeleted(entry.workspaceId, entry.deletedAt);
     await refreshTrash();
   };
+  const purgeDeleted = async (entry: WorkspaceTrashEntry) => {
+    if (!window.confirm(`Permanently delete “${entry.name}”? This removes its workspace, backup, and local vault from this device. This cannot be undone.`)) return;
+    await onPurgeDeleted(entry.workspaceId, entry.deletedAt);
+    await refreshTrash();
+  };
+  const emptyDeleted = async () => {
+    if (!trashEntries.length || !window.confirm(`Permanently delete all ${trashEntries.length} recovery ${trashEntries.length === 1 ? 'copy' : 'copies'} from this device? This cannot be undone.`)) return;
+    await onEmptyDeleted();
+    await refreshTrash();
+  };
   const startProjectDrag = (event: ReactDragEvent<HTMLButtonElement>, workspaceId: string) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', workspaceId);
@@ -275,6 +289,7 @@ export function WorkspaceSwitcher({
         {trashExpanded ? <div className="workspace-trash-panel">
           {trashError ? <div className="workspace-store-error">{trashError}</div> : null}
           {!trashLoading && !trashEntries.length && !trashError ? <p>No deleted local projects.</p> : null}
+          {!trashLoading && trashEntries.length ? <div className="workspace-trash-toolbar"><span>Recovery copies remain until permanently deleted.</span><button aria-label="Empty recently deleted projects" disabled={busy} onClick={() => void emptyDeleted()} title="Delete all permanently" type="button"><Icon name="trash" size={12} /> Empty</button></div> : null}
           {trashEntries.map((entry) => {
             const conflicts = entries.some((candidate) => candidate.id === entry.workspaceId);
             const unavailable = entry.status === 'unavailable';
@@ -283,7 +298,7 @@ export function WorkspaceSwitcher({
             return <article key={`${entry.workspaceId}:${entry.deletedAt}`}>
               <Icon name={unavailable ? 'x' : 'trash'} size={15} />
               <span><strong>{entry.name}</strong><small>{deletedLabel} · {entry.status === 'ready' ? 'Workspace' : entry.status === 'recoverable' ? 'Backup' : 'Unreadable'}{entry.hasVault ? ' · Vault' : ''}</small></span>
-              <button disabled={busy || unavailable || conflicts} onClick={() => void restoreDeleted(entry)} title={conflicts ? 'A current project already uses this ID' : unavailable ? 'No valid workspace or backup' : 'Restore and open'} type="button"><Icon name="history" size={13} /> Restore</button>
+              <div className="workspace-trash-actions"><button disabled={busy || unavailable || conflicts} onClick={() => void restoreDeleted(entry)} title={conflicts ? 'A current project already uses this ID' : unavailable ? 'No valid workspace or backup' : 'Restore and open'} type="button"><Icon name="history" size={13} /> Restore</button><button disabled={busy} onClick={() => void purgeDeleted(entry)} title="Delete permanently" type="button"><Icon name="trash" size={13} /> Delete</button></div>
             </article>;
           })}
         </div> : null}

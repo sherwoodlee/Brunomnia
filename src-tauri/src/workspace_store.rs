@@ -85,6 +85,7 @@ enum TrashFileKind {
     Workspace,
     Backup,
     Vault,
+    Metadata,
 }
 
 #[derive(Default)]
@@ -92,6 +93,7 @@ struct TrashFiles {
     workspace: Option<PathBuf>,
     backup: Option<PathBuf>,
     vault: Option<PathBuf>,
+    metadata: Option<PathBuf>,
 }
 
 fn catalog_path(root: &Path) -> PathBuf {
@@ -134,6 +136,8 @@ fn parse_trash_file_name(name: &str) -> Option<(String, i64, TrashFileKind)> {
         (stem, TrashFileKind::Workspace)
     } else if let Some(stem) = name.strip_suffix(".backup.json") {
         (stem, TrashFileKind::Backup)
+    } else if let Some(stem) = name.strip_suffix(".metadata.json") {
+        (stem, TrashFileKind::Metadata)
     } else {
         let stem = name.strip_suffix(".vault.json")?;
         (stem, TrashFileKind::Vault)
@@ -162,6 +166,19 @@ fn valid_workspace_bytes(bytes: &[u8]) -> Option<Value> {
         .filter(workspace_is_valid)
 }
 
+fn valid_trash_catalog_entry(bytes: &[u8], workspace_id: &str) -> Option<CatalogEntry> {
+    let mut entry = serde_json::from_slice::<CatalogEntry>(bytes).ok()?;
+    if entry.id != workspace_id
+        || entry.created_at.len() > 64
+        || entry.updated_at.len() > 64
+        || entry.last_opened_at.len() > 64
+    {
+        return None;
+    }
+    entry.name = normalize_name(&entry.name);
+    Some(entry)
+}
+
 fn collect_trash_files(root: &Path) -> Result<HashMap<(String, i64), TrashFiles>, String> {
     let trash = root.join("trash");
     if !trash.exists() {
@@ -187,6 +204,7 @@ fn collect_trash_files(root: &Path) -> Result<HashMap<(String, i64), TrashFiles>
             TrashFileKind::Workspace => files.workspace = Some(entry.path()),
             TrashFileKind::Backup => files.backup = Some(entry.path()),
             TrashFileKind::Vault => files.vault = Some(entry.path()),
+            TrashFileKind::Metadata => files.metadata = Some(entry.path()),
         }
     }
     Ok(groups)
@@ -822,6 +840,10 @@ pub fn delete(root: &Path, workspace_id: &str) -> Result<WorkspaceCatalogSnapsho
     let trash = root.join("trash");
     fs::create_dir_all(&trash).map_err(|error| error.to_string())?;
     let suffix = Utc::now().timestamp_millis();
+    write_json_atomic(
+        &trash.join(format!("{workspace_id}-{suffix}.metadata.json")),
+        &catalog.entries[index],
+    )?;
     for (source, label) in [
         (workspace_path(root, workspace_id), "workspace"),
         (workspace_backup_path(root, workspace_id), "backup"),
@@ -864,6 +886,12 @@ pub fn list_trash(root: &Path) -> Result<Vec<WorkspaceTrashEntry>, String> {
                 .and_then(|path| read_regular_bytes(path).ok().flatten())
                 .as_deref()
                 .and_then(valid_workspace_bytes);
+            let metadata = files
+                .metadata
+                .as_deref()
+                .and_then(|path| read_regular_bytes(path).ok().flatten())
+                .as_deref()
+                .and_then(|bytes| valid_trash_catalog_entry(bytes, &workspace_id));
             let status = if primary.is_some() {
                 "ready"
             } else if backup.is_some() {
@@ -871,10 +899,9 @@ pub fn list_trash(root: &Path) -> Result<Vec<WorkspaceTrashEntry>, String> {
             } else {
                 "unavailable"
             };
-            let name = primary
-                .as_ref()
-                .or(backup.as_ref())
-                .map(workspace_name)
+            let name = metadata
+                .map(|entry| entry.name)
+                .or_else(|| primary.as_ref().or(backup.as_ref()).map(workspace_name))
                 .unwrap_or_else(|| workspace_id.clone());
             WorkspaceTrashEntry {
                 workspace_id,
@@ -927,11 +954,13 @@ pub fn restore_trash(
     let primary_trash = trash_file_path(root, workspace_id, deleted_at, "workspace");
     let backup_trash = trash_file_path(root, workspace_id, deleted_at, "backup");
     let vault_trash = trash_file_path(root, workspace_id, deleted_at, "vault");
+    let metadata_trash = trash_file_path(root, workspace_id, deleted_at, "metadata");
     migrate_workspace_file(&primary_trash, workspace_id)?;
     migrate_workspace_file(&backup_trash, workspace_id)?;
     let primary_bytes = read_regular_bytes(&primary_trash)?;
     let backup_bytes = read_regular_bytes(&backup_trash)?;
     let vault_bytes = read_regular_bytes(&vault_trash)?;
+    let metadata_bytes = read_regular_bytes(&metadata_trash)?;
     let primary_workspace = primary_bytes.as_deref().and_then(valid_workspace_bytes);
     let backup_workspace = backup_bytes.as_deref().and_then(valid_workspace_bytes);
     let workspace = primary_workspace
@@ -941,6 +970,15 @@ pub fn restore_trash(
         .ok_or_else(|| {
             "This deleted project does not contain a valid workspace or backup.".to_string()
         })?;
+    let catalog_entry = metadata_bytes
+        .as_deref()
+        .and_then(|bytes| valid_trash_catalog_entry(bytes, workspace_id))
+        .map(|mut entry| {
+            entry.name = workspace_name(&workspace);
+            entry.last_opened_at = Utc::now().to_rfc3339();
+            entry
+        })
+        .unwrap_or_else(|| new_entry(workspace_id.to_string(), &workspace));
 
     let (mut catalog, recovery) = load_or_rebuild_catalog(root, None, None)?;
     if catalog.entries.len() >= MAX_WORKSPACES {
@@ -977,9 +1015,7 @@ pub fn restore_trash(
             created_paths.push(vault.clone());
             write_bytes_atomic(&vault, bytes)?;
         }
-        catalog
-            .entries
-            .push(new_entry(workspace_id.to_string(), &workspace));
+        catalog.entries.push(catalog_entry.clone());
         catalog.active_workspace_id = workspace_id.into();
         write_catalog(root, &catalog)
     })();
@@ -1007,7 +1043,55 @@ pub fn restore_trash(
     if vault_bytes.is_some() {
         let _ = fs::remove_file(vault_trash);
     }
+    if metadata_bytes.is_some() {
+        if valid_trash_catalog_entry(metadata_bytes.as_deref().unwrap_or_default(), workspace_id)
+            .is_some()
+        {
+            let _ = fs::remove_file(&metadata_trash);
+        } else {
+            preserve_trashed_invalid(root, workspace_id, deleted_at, "metadata", &metadata_trash);
+        }
+    }
     snapshot(root, catalog, recovery)
+}
+
+pub fn purge_trash(root: &Path, workspace_id: &str, deleted_at: i64) -> Result<(), String> {
+    validate_workspace_id(workspace_id)?;
+    if deleted_at < 0 {
+        return Err("The deleted-project recovery timestamp is invalid.".into());
+    }
+    let mut paths = Vec::new();
+    for label in ["workspace", "backup", "vault", "metadata"] {
+        let path = trash_file_path(root, workspace_id, deleted_at, label);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_file() => paths.push(path),
+            Ok(_) => return Err("A deleted-project recovery item is not a regular file.".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    if paths.is_empty() {
+        return Err("This deleted-project recovery copy no longer exists.".into());
+    }
+    for path in paths {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn empty_trash(root: &Path) -> Result<usize, String> {
+    let groups = collect_trash_files(root)?;
+    let mut removed = 0;
+    for files in groups.into_values() {
+        for path in [files.workspace, files.backup, files.vault, files.metadata]
+            .into_iter()
+            .flatten()
+        {
+            fs::remove_file(path).map_err(|error| error.to_string())?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
 }
 
 pub fn restore_backup(root: &Path, workspace_id: &str) -> Result<WorkspaceCatalogSnapshot, String> {
@@ -1096,6 +1180,8 @@ mod tests {
         assert_eq!(reopened.workspace["name"], "Legacy");
         let renamed = rename(&root, "second", "Renamed").unwrap();
         assert_eq!(renamed.entries[1].name, "Renamed");
+        let deleted_created_at = renamed.entries[1].created_at.clone();
+        let deleted_updated_at = renamed.entries[1].updated_at.clone();
         let vault = root.join("vaults").join("second.enc.json");
         fs::create_dir_all(vault.parent().unwrap()).unwrap();
         fs::write(&vault, b"encrypted").unwrap();
@@ -1122,6 +1208,13 @@ mod tests {
         assert_eq!(restored.active_workspace_id, "second");
         assert_eq!(restored.workspace["name"], "Renamed");
         assert_eq!(restored.entries.len(), 2);
+        let restored_entry = restored
+            .entries
+            .iter()
+            .find(|entry| entry.id == "second")
+            .unwrap();
+        assert_eq!(restored_entry.created_at, deleted_created_at);
+        assert_eq!(restored_entry.updated_at, deleted_updated_at);
         assert_eq!(fs::read(vault).unwrap(), b"encrypted");
         assert!(list_trash(&root).unwrap().is_empty());
     }
@@ -1163,6 +1256,63 @@ mod tests {
             "Replacement"
         );
         assert_eq!(list_trash(&root).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn permanently_purges_exact_or_all_recognized_deleted_projects() {
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("workspaces");
+        load(&root, None, &workspace("Initial")).unwrap();
+        create(&root, "second", &workspace("Second")).unwrap();
+        delete(&root, "second").unwrap();
+        create(&root, "third", &workspace("Third")).unwrap();
+        delete(&root, "third").unwrap();
+        fs::write(root.join("trash").join("keep.txt"), b"keep").unwrap();
+
+        let deleted = list_trash(&root).unwrap();
+        assert_eq!(deleted.len(), 2);
+        let second = deleted
+            .iter()
+            .find(|entry| entry.workspace_id == "second")
+            .unwrap();
+        purge_trash(&root, "second", second.deleted_at).unwrap();
+        assert_eq!(list_trash(&root).unwrap().len(), 1);
+        assert!(purge_trash(&root, "second", second.deleted_at).is_err());
+        assert!(restore_trash(&root, "second", second.deleted_at).is_err());
+
+        assert!(empty_trash(&root).unwrap() > 0);
+        assert!(list_trash(&root).unwrap().is_empty());
+        assert_eq!(
+            fs::read(root.join("trash").join("keep.txt")).unwrap(),
+            b"keep"
+        );
+    }
+
+    #[test]
+    fn restores_valid_projects_when_optional_trash_metadata_is_corrupt() {
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("workspaces");
+        load(&root, None, &workspace("Initial")).unwrap();
+        create(&root, "second", &workspace("Second")).unwrap();
+        delete(&root, "second").unwrap();
+        let deleted_at = list_trash(&root).unwrap()[0].deleted_at;
+        fs::write(
+            trash_file_path(&root, "second", deleted_at, "metadata"),
+            b"{ broken",
+        )
+        .unwrap();
+
+        let restored = restore_trash(&root, "second", deleted_at).unwrap();
+        assert_eq!(restored.workspace["name"], "Second");
+        assert!(root
+            .join("recovery")
+            .read_dir()
+            .unwrap()
+            .flatten()
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .contains("deleted-metadata.invalid.json")));
     }
 
     #[test]

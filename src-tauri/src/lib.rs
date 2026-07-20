@@ -189,6 +189,20 @@ fn workspace_catalog_restore_trash(
 }
 
 #[tauri::command]
+fn workspace_catalog_purge_trash(
+    app: AppHandle,
+    workspace_id: String,
+    deleted_at: i64,
+) -> Result<(), String> {
+    workspace_store::purge_trash(&workspace_store_path(&app)?, &workspace_id, deleted_at)
+}
+
+#[tauri::command]
+fn workspace_catalog_empty_trash(app: AppHandle) -> Result<usize, String> {
+    workspace_store::empty_trash(&workspace_store_path(&app)?)
+}
+
+#[tauri::command]
 fn workspace_catalog_restore_backup(
     app: AppHandle,
     workspace_id: String,
@@ -933,6 +947,8 @@ pub fn run() {
             workspace_catalog_delete,
             workspace_catalog_list_trash,
             workspace_catalog_restore_trash,
+            workspace_catalog_purge_trash,
+            workspace_catalog_empty_trash,
             workspace_catalog_restore_backup,
             template_os_info,
             gguf_list_models,

@@ -2796,6 +2796,22 @@ export default function App() {
     }
   };
 
+  const runWorkspaceMaintenance = async (operation: () => Promise<void>) => {
+    if (workspaceStoreBusy || isSending || scheduledSendLabel) {
+      setWorkspaceStoreError('Wait for the active request or scheduled run to finish before changing projects.');
+      return;
+    }
+    setWorkspaceStoreBusy(true);
+    setWorkspaceStoreError('');
+    try {
+      await operation();
+    } catch (error) {
+      setWorkspaceStoreError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setWorkspaceStoreBusy(false);
+    }
+  };
+
   const openLocalWorkspace = (workspaceId: string) => runWorkspaceOperation(async () => (await workspaceCatalogApi()).openCatalogWorkspace(workspaceId));
   const createLocalWorkspace = (name: string) => runWorkspaceOperation(async () => {
     const api = await workspaceCatalogApi();
@@ -2831,6 +2847,8 @@ export default function App() {
   };
   const deleteLocalWorkspace = (workspaceId: string) => runWorkspaceOperation(async () => (await workspaceCatalogApi()).deleteCatalogWorkspace(workspaceId), workspaceId === activeWorkspaceId);
   const listDeletedLocalWorkspaces = async () => (await workspaceCatalogApi()).listDeletedCatalogWorkspaces();
+  const purgeDeletedLocalWorkspace = (workspaceId: string, deletedAt: number) => runWorkspaceMaintenance(async () => (await workspaceCatalogApi()).purgeDeletedCatalogWorkspace(workspaceId, deletedAt));
+  const emptyDeletedLocalWorkspaces = () => runWorkspaceMaintenance(async () => (await workspaceCatalogApi()).emptyDeletedCatalogWorkspaces());
   const reorderLocalWorkspace = async (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => {
     if (workspaceStoreBusy) return;
     setWorkspaceStoreBusy(true);
@@ -3162,9 +3180,11 @@ export default function App() {
             onDelete={deleteLocalWorkspace}
             onDuplicate={duplicateLocalWorkspace}
             onDuplicateProjectWorkspace={duplicateLocalProjectWorkspace}
+            onEmptyDeleted={emptyDeletedLocalWorkspaces}
             onListProjectWorkspaces={listLocalProjectWorkspaces}
             onListDeleted={listDeletedLocalWorkspaces}
             onOpen={openLocalWorkspace}
+            onPurgeDeleted={purgeDeletedLocalWorkspace}
             onMoveProjectWorkspace={moveLocalProjectWorkspace}
             onRename={renameLocalWorkspace}
             onReorder={reorderLocalWorkspace}

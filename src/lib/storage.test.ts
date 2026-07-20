@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
 import { normalizeGraphqlSchema } from './graphql';
 import { migrateWorkspace, parseWorkspaceImport } from './storage';
-import { createBlankWorkspace, createCatalogWorkspace, createWorkspaceDuplicate, deleteCatalogWorkspace, duplicateCatalogProjectWorkspace, listCatalogProjectWorkspaces, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, moveCatalogProjectWorkspace, openCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
+import { createBlankWorkspace, createCatalogWorkspace, createWorkspaceDuplicate, deleteCatalogWorkspace, duplicateCatalogProjectWorkspace, emptyDeletedCatalogWorkspaces, listCatalogProjectWorkspaces, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, moveCatalogProjectWorkspace, openCatalogWorkspace, purgeDeletedCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
 
 class MemoryStorage implements Storage {
   readonly values = new Map<string, string>();
@@ -119,17 +119,19 @@ describe('local project catalog', () => {
     await loadWorkspaceCatalog();
     const created = await createCatalogWorkspace(createBlankWorkspace('Second', cloneSeedWorkspace().preferences), 'second');
     await saveCatalogWorkspace('second', { ...created.workspace, name: 'Saved' });
+    const beforeDelete = (await openCatalogWorkspace('second')).entries.find((entry) => entry.id === 'second')!;
     localStorage.setItem('brunomnia.project.second.v1', '{ broken');
 
     await deleteCatalogWorkspace('second');
     const deleted = await listDeletedCatalogWorkspaces();
     expect(deleted).toHaveLength(1);
-    expect(deleted[0]).toMatchObject({ workspaceId: 'second', name: 'Second', status: 'recoverable', hasBackup: true, hasVault: false });
+    expect(deleted[0]).toMatchObject({ workspaceId: 'second', name: 'Saved', status: 'recoverable', hasBackup: true, hasVault: false });
 
     const restored = await restoreDeletedCatalogWorkspace('second', deleted[0].deletedAt);
     expect(restored.activeWorkspaceId).toBe('second');
     expect(restored.workspace.name).toBe('Second');
     expect(restored.entries).toHaveLength(2);
+    expect(restored.entries.find((entry) => entry.id === 'second')).toMatchObject({ createdAt: beforeDelete.createdAt, updatedAt: beforeDelete.updatedAt });
     expect(await listDeletedCatalogWorkspaces()).toEqual([]);
     expect([...((localStorage as MemoryStorage).values.keys())].some((key) => key.includes('.deleted-workspace.invalid.v1'))).toBe(true);
   });
@@ -144,6 +146,40 @@ describe('local project catalog', () => {
     await expect(restoreDeletedCatalogWorkspace('second', deleted.deletedAt)).rejects.toThrow('already uses');
     expect((await openCatalogWorkspace('second')).workspace.name).toBe('Replacement');
     expect(await listDeletedCatalogWorkspaces()).toHaveLength(1);
+  });
+
+  it('permanently deletes exact browser recovery copies and empties recognized trash only', async () => {
+    await loadWorkspaceCatalog();
+    await createCatalogWorkspace(createBlankWorkspace('Second', cloneSeedWorkspace().preferences), 'second');
+    await deleteCatalogWorkspace('second');
+    await createCatalogWorkspace(createBlankWorkspace('Third', cloneSeedWorkspace().preferences), 'third');
+    await deleteCatalogWorkspace('third');
+    localStorage.setItem('brunomnia.trash.keep.txt', 'keep');
+
+    const deleted = await listDeletedCatalogWorkspaces();
+    expect(deleted).toHaveLength(2);
+    const second = deleted.find((entry) => entry.workspaceId === 'second')!;
+    await purgeDeletedCatalogWorkspace(second.workspaceId, second.deletedAt);
+    expect((await listDeletedCatalogWorkspaces()).map((entry) => entry.workspaceId)).toEqual(['third']);
+    await expect(purgeDeletedCatalogWorkspace(second.workspaceId, second.deletedAt)).rejects.toThrow('no longer exists');
+    await expect(restoreDeletedCatalogWorkspace(second.workspaceId, second.deletedAt)).rejects.toThrow('valid workspace or backup');
+
+    await emptyDeletedCatalogWorkspaces();
+    expect(await listDeletedCatalogWorkspaces()).toEqual([]);
+    expect(localStorage.getItem('brunomnia.trash.keep.txt')).toBe('keep');
+  });
+
+  it('restores a valid browser project when optional trash metadata is corrupt', async () => {
+    await loadWorkspaceCatalog();
+    await createCatalogWorkspace(createBlankWorkspace('Second', cloneSeedWorkspace().preferences), 'second');
+    await deleteCatalogWorkspace('second');
+    const [deleted] = await listDeletedCatalogWorkspaces();
+    const metadataKey = [...((localStorage as MemoryStorage).values.keys())].find((key) => key.endsWith('.metadata.v1'))!;
+    localStorage.setItem(metadataKey, '{ broken');
+
+    const restored = await restoreDeletedCatalogWorkspace('second', deleted.deletedAt);
+    expect(restored.workspace.name).toBe('Second');
+    expect([...((localStorage as MemoryStorage).values.keys())].some((key) => key.includes('.deleted-metadata.invalid.v1'))).toBe(true);
   });
 
   it('restores a corrupt browser catalog from its rotating backup', async () => {

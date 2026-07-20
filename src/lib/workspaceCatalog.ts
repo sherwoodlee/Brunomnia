@@ -9,11 +9,11 @@ const catalogStorageKey = 'brunomnia.projects.v1';
 const catalogBackupStorageKey = 'brunomnia.projects.backup.v1';
 const projectStorageKey = (id: string) => `brunomnia.project.${id}.v1`;
 const projectBackupStorageKey = (id: string) => `brunomnia.project.${id}.backup.v1`;
-const projectTrashStorageKey = (id: string, deletedAt: number, backup = false) => `brunomnia.trash.${id}.${deletedAt}${backup ? '.backup' : ''}.v1`;
+const projectTrashStorageKey = (id: string, deletedAt: number, kind: 'workspace' | 'backup' | 'metadata' = 'workspace') => `brunomnia.trash.${id}.${deletedAt}${kind === 'workspace' ? '' : `.${kind}`}.v1`;
 const maxCatalogWorkspaces = 500;
 const maxTrashEntries = 1_000;
 const workspaceIdPattern = /^[A-Za-z0-9_-]{1,128}$/;
-const browserTrashKeyPattern = /^brunomnia\.trash\.([A-Za-z0-9_-]{1,128})\.(\d{1,16})(\.backup)?\.v1$/;
+const browserTrashKeyPattern = /^brunomnia\.trash\.([A-Za-z0-9_-]{1,128})\.(\d{1,16})(?:\.(backup|metadata))?\.v1$/;
 
 export type WorkspaceCatalogEntry = {
   id: string;
@@ -50,7 +50,7 @@ export type WorkspaceOrderPosition = 'before' | 'after';
 
 type BrowserCatalogEntry = Omit<WorkspaceCatalogEntry, 'status'>;
 type BrowserCatalog = { version: 1; activeWorkspaceId: string; entries: BrowserCatalogEntry[] };
-type BrowserTrashFiles = { workspaceId: string; deletedAt: number; primary?: string; backup?: string };
+type BrowserTrashFiles = { workspaceId: string; deletedAt: number; primary?: string; backup?: string; metadata?: string };
 
 const isWorkspaceEnvelope = (value: unknown): value is Record<string, unknown> => {
   if (!value || typeof value !== 'object') return false;
@@ -137,12 +137,34 @@ const parseBrowserWorkspace = (raw: string | null): Workspace | undefined => {
   }
 };
 
-const parseBrowserTrashKey = (key: string): { workspaceId: string; deletedAt: number; backup: boolean } | undefined => {
+const parseBrowserTrashKey = (key: string): { workspaceId: string; deletedAt: number; kind: 'workspace' | 'backup' | 'metadata' } | undefined => {
   const match = browserTrashKeyPattern.exec(key);
   if (!match) return undefined;
   const deletedAt = Number(match[2]);
   if (!Number.isSafeInteger(deletedAt) || deletedAt < 0) return undefined;
-  return { workspaceId: match[1], deletedAt, backup: Boolean(match[3]) };
+  return { workspaceId: match[1], deletedAt, kind: match[3] === 'backup' || match[3] === 'metadata' ? match[3] : 'workspace' };
+};
+
+const parseBrowserTrashMetadata = (raw: string | undefined, workspaceId: string): BrowserCatalogEntry | undefined => {
+  if (!raw) return undefined;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== 'object') return undefined;
+    const entry = value as Record<string, unknown>;
+    if (entry.id !== workspaceId || typeof entry.name !== 'string') return undefined;
+    if (typeof entry.createdAt !== 'string' || entry.createdAt.length > 64) return undefined;
+    if (typeof entry.updatedAt !== 'string' || entry.updatedAt.length > 64) return undefined;
+    if (typeof entry.lastOpenedAt !== 'string' || entry.lastOpenedAt.length > 64) return undefined;
+    return {
+      id: workspaceId,
+      name: entry.name.replace(/[\r\n\0]/g, ' ').trim().slice(0, 200) || 'Untitled Project',
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+      lastOpenedAt: entry.lastOpenedAt,
+    };
+  } catch {
+    return undefined;
+  }
 };
 
 const browserTrashEntries = (): WorkspaceTrashEntry[] => {
@@ -155,7 +177,8 @@ const browserTrashEntries = (): WorkspaceTrashEntry[] => {
     const group = groups.get(groupKey) ?? { workspaceId: parsed.workspaceId, deletedAt: parsed.deletedAt };
     const value = localStorage.getItem(key);
     if (value !== null) {
-      if (parsed.backup) group.backup = value;
+      if (parsed.kind === 'backup') group.backup = value;
+      else if (parsed.kind === 'metadata') group.metadata = value;
       else group.primary = value;
     }
     groups.set(groupKey, group);
@@ -165,9 +188,10 @@ const browserTrashEntries = (): WorkspaceTrashEntry[] => {
       const primary = parseBrowserWorkspace(group.primary ?? null);
       const backup = parseBrowserWorkspace(group.backup ?? null);
       const workspace = primary ?? backup;
+      const metadata = parseBrowserTrashMetadata(group.metadata, group.workspaceId);
       return {
         workspaceId: group.workspaceId,
-        name: workspace ? catalogName(workspace) : group.workspaceId,
+        name: metadata?.name ?? (workspace ? catalogName(workspace) : group.workspaceId),
         deletedAt: group.deletedAt,
         status: primary ? 'ready' : backup ? 'recoverable' : 'unavailable',
         hasBackup: group.backup !== undefined,
@@ -463,10 +487,12 @@ export const deleteCatalogWorkspace = async (workspaceId: string): Promise<Works
   const index = catalog.entries.findIndex((entry) => entry.id === workspaceId);
   if (index < 0) throw new Error('This local project no longer exists.');
   const suffix = Date.now();
+  const metadata = catalog.entries[index];
   const primary = localStorage.getItem(projectStorageKey(workspaceId));
   const backup = localStorage.getItem(projectBackupStorageKey(workspaceId));
+  localStorage.setItem(projectTrashStorageKey(workspaceId, suffix, 'metadata'), JSON.stringify(metadata));
   if (primary) localStorage.setItem(projectTrashStorageKey(workspaceId, suffix), primary);
-  if (backup) localStorage.setItem(projectTrashStorageKey(workspaceId, suffix, true), backup);
+  if (backup) localStorage.setItem(projectTrashStorageKey(workspaceId, suffix, 'backup'), backup);
   localStorage.removeItem(projectStorageKey(workspaceId));
   localStorage.removeItem(projectBackupStorageKey(workspaceId));
   catalog.entries.splice(index, 1);
@@ -490,24 +516,58 @@ export const restoreDeletedCatalogWorkspace = async (workspaceId: string, delete
   }
 
   const primaryKey = projectTrashStorageKey(workspaceId, deletedAt);
-  const backupKey = projectTrashStorageKey(workspaceId, deletedAt, true);
+  const backupKey = projectTrashStorageKey(workspaceId, deletedAt, 'backup');
+  const metadataKey = projectTrashStorageKey(workspaceId, deletedAt, 'metadata');
   const primaryRaw = localStorage.getItem(primaryKey);
   const backupRaw = localStorage.getItem(backupKey);
+  const metadataRaw = localStorage.getItem(metadataKey) ?? undefined;
   const primary = parseBrowserWorkspace(primaryRaw);
   const backup = parseBrowserWorkspace(backupRaw);
+  const metadata = parseBrowserTrashMetadata(metadataRaw, workspaceId);
   const workspace = primary ?? backup;
   if (!workspace) throw new Error('This deleted project does not contain a valid workspace or backup.');
 
   if (primaryRaw && !primary) localStorage.setItem(`brunomnia.recovery.${workspaceId}.${deletedAt}.deleted-workspace.invalid.v1`, primaryRaw);
   if (backupRaw && !backup) localStorage.setItem(`brunomnia.recovery.${workspaceId}.${deletedAt}.deleted-backup.invalid.v1`, backupRaw);
+  if (metadataRaw && !metadata) localStorage.setItem(`brunomnia.recovery.${workspaceId}.${deletedAt}.deleted-metadata.invalid.v1`, metadataRaw);
   localStorage.setItem(projectStorageKey(workspaceId), JSON.stringify(workspace));
   if (backup) localStorage.setItem(projectBackupStorageKey(workspaceId), JSON.stringify(backup));
-  catalog.entries.push(browserCatalogEntry(workspaceId, workspace));
+  catalog.entries.push(metadata ? { ...metadata, name: catalogName(workspace) } : browserCatalogEntry(workspaceId, workspace));
   catalog.activeWorkspaceId = workspaceId;
   const snapshot = browserSnapshot(catalog);
   localStorage.removeItem(primaryKey);
   localStorage.removeItem(backupKey);
+  localStorage.removeItem(metadataKey);
   return snapshot;
+};
+
+export const purgeDeletedCatalogWorkspace = async (workspaceId: string, deletedAt: number): Promise<void> => {
+  if (!workspaceIdPattern.test(workspaceId)) throw new Error('The deleted project ID is invalid.');
+  if (!Number.isSafeInteger(deletedAt) || deletedAt < 0) throw new Error('The deleted-project recovery timestamp is invalid.');
+  if (isTauri()) {
+    await invoke('workspace_catalog_purge_trash', { workspaceId, deletedAt });
+    return;
+  }
+  const keys = [
+    projectTrashStorageKey(workspaceId, deletedAt),
+    projectTrashStorageKey(workspaceId, deletedAt, 'backup'),
+    projectTrashStorageKey(workspaceId, deletedAt, 'metadata'),
+  ].filter((key) => localStorage.getItem(key) !== null);
+  if (!keys.length) throw new Error('This deleted-project recovery copy no longer exists.');
+  keys.forEach((key) => localStorage.removeItem(key));
+};
+
+export const emptyDeletedCatalogWorkspaces = async (): Promise<void> => {
+  if (isTauri()) {
+    await invoke('workspace_catalog_empty_trash');
+    return;
+  }
+  const keys: string[] = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && parseBrowserTrashKey(key)) keys.push(key);
+  }
+  keys.forEach((key) => localStorage.removeItem(key));
 };
 
 export const restoreCatalogWorkspaceBackup = async (workspaceId: string): Promise<WorkspaceCatalogSnapshot> => {
