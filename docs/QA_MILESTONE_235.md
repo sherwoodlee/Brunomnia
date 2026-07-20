@@ -40,7 +40,13 @@ Rendered interaction QA remains omitted by standing direction. Deterministic raw
 
 ## Remote gate
 
-Pending implementation commit publication, workflow completion, signed GHCR inspection, and independent exact-identity verification.
+Main commit `0027d10b54ca9de568c4ee686f27ebbd8c53ccc8` completed verify and publish in [Actions run 29712814689](https://github.com/sherwoodlee/Brunomnia/actions/runs/29712814689). Node 22 rebuilt the generated CLI, passed freshness plus non-root/no-network trust smokes, and published AMD64/ARM64 provenance/SBOM manifests at:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:79fba8583847cda1ac1933d3eee3e3949403d51a7819d80e61a06d26024b4549
+```
+
+Independent manifest inspection resolved AMD64 `sha256:72a931cede5b70da35e961f3b93ddf5b5d669389e9d7ebdee6932d25d09dd084`, ARM64 `sha256:e7e62a565063142bc3884b5a8adfec21285d8b0ea3e42d9a939ca44f530a7866`, and their attached attestation manifests. Independent `cosign verify` passed issuer `https://token.actions.githubusercontent.com` and exact identity `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, validated the M235 commit and published digest claims plus the trusted certificate chain, and found transparency-log entry `2204697567`.
 
 ## Acceptance boundary
 
