@@ -13,9 +13,12 @@ use uuid::Uuid;
 const CATALOG_VERSION: u32 = 1;
 const MAX_WORKSPACES: usize = 500;
 const MAX_CATALOG_BYTES: u64 = 5_000_000;
+const MAX_SNAPSHOT_BYTES: u64 = 100_000_000;
 const MAX_WORKSPACE_ID_BYTES: usize = 128;
 const MAX_WORKSPACE_NAME_CHARS: usize = 200;
 const MAX_TRASH_ENTRIES: usize = 1_000;
+const MAX_SNAPSHOTS: usize = 50;
+const SNAPSHOT_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,6 +75,29 @@ pub struct WorkspaceTrashEntry {
     status: String,
     has_backup: bool,
     has_vault: bool,
+    has_snapshots: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSnapshotEntry {
+    id: String,
+    message: String,
+    created_at: String,
+    file_count: usize,
+    size_bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceSnapshotFile {
+    version: u32,
+    id: String,
+    workspace_id: String,
+    message: String,
+    created_at: String,
+    file_count: usize,
+    workspace: Value,
 }
 
 enum WorkspaceRead {
@@ -94,6 +120,7 @@ struct TrashFiles {
     backup: Option<PathBuf>,
     vault: Option<PathBuf>,
     metadata: Option<PathBuf>,
+    snapshots: Option<PathBuf>,
 }
 
 fn catalog_path(root: &Path) -> PathBuf {
@@ -110,6 +137,46 @@ fn workspace_path(root: &Path, id: &str) -> PathBuf {
 
 fn workspace_backup_path(root: &Path, id: &str) -> PathBuf {
     root.join(format!("{id}.backup.json"))
+}
+
+fn workspace_snapshot_dir(root: &Path, id: &str) -> PathBuf {
+    root.join("snapshots").join(id)
+}
+
+fn workspace_snapshot_path(root: &Path, workspace_id: &str, snapshot_id: &str) -> PathBuf {
+    workspace_snapshot_dir(root, workspace_id).join(format!("{snapshot_id}.json"))
+}
+
+fn ensure_snapshot_root(root: &Path) -> Result<PathBuf, String> {
+    let parent = root.join("snapshots");
+    match fs::symlink_metadata(&parent) {
+        Ok(metadata) if metadata.file_type().is_dir() => {}
+        Ok(_) => return Err("The project snapshot store is not a regular directory.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(&parent).map_err(|error| error.to_string())?;
+        }
+        Err(error) => return Err(error.to_string()),
+    }
+    Ok(parent)
+}
+
+fn ensure_workspace_snapshot_dir(root: &Path, workspace_id: &str) -> Result<PathBuf, String> {
+    ensure_snapshot_root(root)?;
+    let directory = workspace_snapshot_dir(root, workspace_id);
+    match fs::symlink_metadata(&directory) {
+        Ok(metadata) if metadata.file_type().is_dir() => {}
+        Ok(_) => return Err("The project snapshot store is not a regular directory.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(&directory).map_err(|error| error.to_string())?;
+        }
+        Err(error) => return Err(error.to_string()),
+    }
+    Ok(directory)
+}
+
+fn trash_snapshot_dir(root: &Path, id: &str, deleted_at: i64) -> PathBuf {
+    root.join("trash")
+        .join(format!("{id}-{deleted_at}.snapshots"))
 }
 
 pub fn cli_path(root: &Path, workspace_id: &str) -> Result<String, String> {
@@ -146,6 +213,14 @@ fn parse_trash_file_name(name: &str) -> Option<(String, i64, TrashFileKind)> {
     validate_workspace_id(workspace_id).ok()?;
     let deleted_at = deleted_at.parse::<i64>().ok()?;
     (deleted_at >= 0).then(|| (workspace_id.to_string(), deleted_at, kind))
+}
+
+fn parse_trash_snapshot_dir_name(name: &str) -> Option<(String, i64)> {
+    let stem = name.strip_suffix(".snapshots")?;
+    let (workspace_id, deleted_at) = stem.rsplit_once('-')?;
+    validate_workspace_id(workspace_id).ok()?;
+    let deleted_at = deleted_at.parse::<i64>().ok()?;
+    (deleted_at >= 0).then(|| (workspace_id.to_string(), deleted_at))
 }
 
 fn read_regular_bytes(path: &Path) -> Result<Option<Vec<u8>>, String> {
@@ -187,14 +262,22 @@ fn collect_trash_files(root: &Path) -> Result<HashMap<(String, i64), TrashFiles>
     let mut groups: HashMap<(String, i64), TrashFiles> = HashMap::new();
     for entry in fs::read_dir(trash).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
-        if !entry
-            .file_type()
-            .map_err(|error| error.to_string())?
-            .is_file()
-        {
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        if file_type.is_dir() {
+            if let Some((workspace_id, deleted_at)) =
+                name.to_str().and_then(parse_trash_snapshot_dir_name)
+            {
+                groups
+                    .entry((workspace_id, deleted_at))
+                    .or_default()
+                    .snapshots = Some(entry.path());
+            }
             continue;
         }
-        let name = entry.file_name();
+        if !file_type.is_file() {
+            continue;
+        }
         let Some((workspace_id, deleted_at, kind)) = name.to_str().and_then(parse_trash_file_name)
         else {
             continue;
@@ -265,6 +348,87 @@ fn workspace_name(value: &Value) -> String {
 fn workspace_is_valid(value: &Value) -> bool {
     value.get("format").and_then(Value::as_str) == Some("brunomnia")
         && value.get("collections").is_some_and(Value::is_array)
+}
+
+fn normalize_snapshot_message(message: &str) -> Result<String, String> {
+    let message = message
+        .replace(['\r', '\n', '\0'], " ")
+        .trim()
+        .chars()
+        .take(MAX_WORKSPACE_NAME_CHARS)
+        .collect::<String>();
+    if message.is_empty() {
+        return Err("A snapshot message is required.".into());
+    }
+    Ok(message)
+}
+
+fn workspace_file_count(workspace: &Value) -> usize {
+    let design_collection_ids = workspace
+        .get("apiDesigns")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|design| design.get("collectionId").and_then(Value::as_str))
+        .collect::<HashSet<_>>();
+    let collections = workspace
+        .get("collections")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|collection| {
+            collection
+                .get("id")
+                .and_then(Value::as_str)
+                .map_or(true, |id| !design_collection_ids.contains(id))
+        })
+        .count();
+    let designs = workspace
+        .get("apiDesigns")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let mocks = workspace
+        .get("mockServers")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let environments = workspace
+        .get("environments")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|environment| {
+            environment
+                .get("parentId")
+                .and_then(Value::as_str)
+                .map_or(true, str::is_empty)
+        })
+        .count();
+    let mcp_clients = workspace
+        .get("mcpClients")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    collections + designs + mocks + environments + mcp_clients
+}
+
+fn valid_snapshot_file(
+    bytes: &[u8],
+    workspace_id: &str,
+    snapshot_id: &str,
+) -> Option<WorkspaceSnapshotFile> {
+    let mut snapshot = serde_json::from_slice::<WorkspaceSnapshotFile>(bytes).ok()?;
+    if snapshot.version != SNAPSHOT_VERSION
+        || snapshot.id != snapshot_id
+        || snapshot.workspace_id != workspace_id
+        || validate_workspace_id(&snapshot.id).is_err()
+        || snapshot.created_at.len() > 64
+        || chrono::DateTime::parse_from_rfc3339(&snapshot.created_at).is_err()
+        || !workspace_is_valid(&snapshot.workspace)
+    {
+        return None;
+    }
+    snapshot.message = normalize_snapshot_message(&snapshot.message).ok()?;
+    snapshot.file_count = workspace_file_count(&snapshot.workspace);
+    Some(snapshot)
 }
 
 fn read_json(path: &Path) -> Option<Value> {
@@ -744,6 +908,13 @@ pub fn create(
     if catalog.entries.iter().any(|entry| entry.id == workspace_id) {
         return Err("A local project with this ID already exists.".into());
     }
+    match fs::symlink_metadata(workspace_snapshot_dir(root, workspace_id)) {
+        Ok(_) => {
+            return Err("Existing local snapshot history conflicts with this project ID.".into())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
     write_workspace(root, workspace_id, workspace)?;
     catalog
         .entries
@@ -826,6 +997,142 @@ pub fn reorder(
     snapshot(root, catalog, recovery)
 }
 
+fn stored_snapshots(
+    root: &Path,
+    workspace_id: &str,
+) -> Result<Vec<(WorkspaceSnapshotFile, u64, PathBuf)>, String> {
+    let directory = workspace_snapshot_dir(root, workspace_id);
+    let metadata = match fs::symlink_metadata(&directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.to_string()),
+    };
+    if !metadata.file_type().is_dir() {
+        return Err("The project snapshot store is not a regular directory.".into());
+    }
+    let mut snapshots = Vec::new();
+    for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_file()
+        {
+            continue;
+        }
+        let metadata = entry.metadata().map_err(|error| error.to_string())?;
+        if metadata.len() > MAX_SNAPSHOT_BYTES {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(snapshot_id) = name.to_str().and_then(|name| name.strip_suffix(".json")) else {
+            continue;
+        };
+        if validate_workspace_id(snapshot_id).is_err() {
+            continue;
+        }
+        let bytes = fs::read(entry.path()).map_err(|error| error.to_string())?;
+        if let Some(snapshot) = valid_snapshot_file(&bytes, workspace_id, snapshot_id) {
+            snapshots.push((snapshot, metadata.len(), entry.path()));
+        }
+    }
+    snapshots.sort_by(|left, right| {
+        left.0
+            .created_at
+            .cmp(&right.0.created_at)
+            .then(left.0.id.cmp(&right.0.id))
+    });
+    Ok(snapshots)
+}
+
+fn snapshot_entry(snapshot: &WorkspaceSnapshotFile, size_bytes: u64) -> WorkspaceSnapshotEntry {
+    WorkspaceSnapshotEntry {
+        id: snapshot.id.clone(),
+        message: snapshot.message.clone(),
+        created_at: snapshot.created_at.clone(),
+        file_count: snapshot.file_count,
+        size_bytes,
+    }
+}
+
+pub fn list_snapshots(
+    root: &Path,
+    workspace_id: &str,
+) -> Result<Vec<WorkspaceSnapshotEntry>, String> {
+    validate_workspace_id(workspace_id)?;
+    let (catalog, _) = load_or_rebuild_catalog(root, None, None)?;
+    if !catalog.entries.iter().any(|entry| entry.id == workspace_id) {
+        return Err("This local project no longer exists.".into());
+    }
+    Ok(stored_snapshots(root, workspace_id)?
+        .into_iter()
+        .rev()
+        .take(MAX_SNAPSHOTS)
+        .map(|(snapshot, size_bytes, _)| snapshot_entry(&snapshot, size_bytes))
+        .collect())
+}
+
+pub fn create_snapshot(
+    root: &Path,
+    workspace_id: &str,
+    message: &str,
+) -> Result<WorkspaceSnapshotEntry, String> {
+    validate_workspace_id(workspace_id)?;
+    let message = normalize_snapshot_message(message)?;
+    let workspace = read(root, workspace_id)?;
+    let snapshot_id = format!("snapshot-{}", Uuid::new_v4());
+    let snapshot = WorkspaceSnapshotFile {
+        version: SNAPSHOT_VERSION,
+        id: snapshot_id.clone(),
+        workspace_id: workspace_id.into(),
+        message,
+        created_at: Utc::now().to_rfc3339(),
+        file_count: workspace_file_count(&workspace),
+        workspace: runtime_credentials::protect(workspace_id, &workspace)?,
+    };
+    ensure_workspace_snapshot_dir(root, workspace_id)?;
+    let path = workspace_snapshot_path(root, workspace_id, &snapshot_id);
+    let bytes = serde_json::to_vec_pretty(&snapshot).map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_SNAPSHOT_BYTES {
+        return Err("The project snapshot exceeds the 100 MB storage limit.".into());
+    }
+    write_bytes_atomic(&path, &bytes)?;
+
+    let mut snapshots = stored_snapshots(root, workspace_id)?;
+    while snapshots.len() > MAX_SNAPSHOTS {
+        let (_, _, oldest) = snapshots.remove(0);
+        fs::remove_file(oldest).map_err(|error| error.to_string())?;
+    }
+    let size_bytes = fs::metadata(path).map_err(|error| error.to_string())?.len();
+    Ok(snapshot_entry(&snapshot, size_bytes))
+}
+
+pub fn restore_snapshot(
+    root: &Path,
+    workspace_id: &str,
+    snapshot_id: &str,
+) -> Result<WorkspaceCatalogSnapshot, String> {
+    validate_workspace_id(workspace_id)?;
+    validate_workspace_id(snapshot_id)?;
+    let path = workspace_snapshot_path(root, workspace_id, snapshot_id);
+    let metadata = fs::symlink_metadata(&path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            "This project snapshot no longer exists.".to_string()
+        } else {
+            error.to_string()
+        }
+    })?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_SNAPSHOT_BYTES {
+        return Err("This project snapshot is not a valid regular file.".into());
+    }
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    let snapshot = valid_snapshot_file(&bytes, workspace_id, snapshot_id)
+        .ok_or_else(|| "This project snapshot is invalid.".to_string())?;
+    let workspace = runtime_credentials::unprotect(workspace_id, &snapshot.workspace)?;
+    save(root, workspace_id, &workspace)?;
+    open(root, workspace_id)
+}
+
 pub fn delete(root: &Path, workspace_id: &str) -> Result<WorkspaceCatalogSnapshot, String> {
     validate_workspace_id(workspace_id)?;
     let (mut catalog, recovery) = load_or_rebuild_catalog(root, None, None)?;
@@ -840,6 +1147,13 @@ pub fn delete(root: &Path, workspace_id: &str) -> Result<WorkspaceCatalogSnapsho
     let trash = root.join("trash");
     fs::create_dir_all(&trash).map_err(|error| error.to_string())?;
     let suffix = Utc::now().timestamp_millis();
+    let snapshots = workspace_snapshot_dir(root, workspace_id);
+    let has_snapshots = match fs::symlink_metadata(&snapshots) {
+        Ok(metadata) if metadata.file_type().is_dir() => true,
+        Ok(_) => return Err("The project snapshot store is not a regular directory.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.to_string()),
+    };
     write_json_atomic(
         &trash.join(format!("{workspace_id}-{suffix}.metadata.json")),
         &catalog.entries[index],
@@ -859,6 +1173,10 @@ pub fn delete(root: &Path, workspace_id: &str) -> Result<WorkspaceCatalogSnapsho
             )
             .map_err(|error| error.to_string())?;
         }
+    }
+    if has_snapshots {
+        fs::rename(&snapshots, trash_snapshot_dir(root, workspace_id, suffix))
+            .map_err(|error| error.to_string())?;
     }
     catalog.entries.remove(index);
     if catalog.active_workspace_id == workspace_id {
@@ -910,6 +1228,7 @@ pub fn list_trash(root: &Path) -> Result<Vec<WorkspaceTrashEntry>, String> {
                 status: status.into(),
                 has_backup: files.backup.is_some(),
                 has_vault: files.vault.is_some(),
+                has_snapshots: files.snapshots.is_some(),
             }
         })
         .collect::<Vec<_>>();
@@ -955,12 +1274,21 @@ pub fn restore_trash(
     let backup_trash = trash_file_path(root, workspace_id, deleted_at, "backup");
     let vault_trash = trash_file_path(root, workspace_id, deleted_at, "vault");
     let metadata_trash = trash_file_path(root, workspace_id, deleted_at, "metadata");
+    let snapshots_trash = trash_snapshot_dir(root, workspace_id, deleted_at);
     migrate_workspace_file(&primary_trash, workspace_id)?;
     migrate_workspace_file(&backup_trash, workspace_id)?;
     let primary_bytes = read_regular_bytes(&primary_trash)?;
     let backup_bytes = read_regular_bytes(&backup_trash)?;
     let vault_bytes = read_regular_bytes(&vault_trash)?;
     let metadata_bytes = read_regular_bytes(&metadata_trash)?;
+    let has_snapshots = match fs::symlink_metadata(&snapshots_trash) {
+        Ok(metadata) if metadata.file_type().is_dir() => true,
+        Ok(_) => {
+            return Err("The deleted project snapshot history is not a regular directory.".into())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.to_string()),
+    };
     let primary_workspace = primary_bytes.as_deref().and_then(valid_workspace_bytes);
     let backup_workspace = backup_bytes.as_deref().and_then(valid_workspace_bytes);
     let workspace = primary_workspace
@@ -993,11 +1321,22 @@ pub fn restore_trash(
     let primary = workspace_path(root, workspace_id);
     let backup = workspace_backup_path(root, workspace_id);
     let vault = root.join("vaults").join(format!("{workspace_id}.enc.json"));
-    if primary.exists() || backup.exists() || (vault_bytes.is_some() && vault.exists()) {
+    let snapshots = workspace_snapshot_dir(root, workspace_id);
+    let snapshots_conflict = match fs::symlink_metadata(&snapshots) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.to_string()),
+    };
+    if primary.exists()
+        || backup.exists()
+        || (vault_bytes.is_some() && vault.exists())
+        || snapshots_conflict
+    {
         return Err("Existing local files conflict with this deleted project restore.".into());
     }
 
     let mut created_paths = Vec::new();
+    let mut moved_snapshots = false;
     let restore_result = (|| {
         created_paths.push(primary.clone());
         write_json_atomic(&primary, &workspace)?;
@@ -1015,11 +1354,19 @@ pub fn restore_trash(
             created_paths.push(vault.clone());
             write_bytes_atomic(&vault, bytes)?;
         }
+        if has_snapshots {
+            ensure_snapshot_root(root)?;
+            fs::rename(&snapshots_trash, &snapshots).map_err(|error| error.to_string())?;
+            moved_snapshots = true;
+        }
         catalog.entries.push(catalog_entry.clone());
         catalog.active_workspace_id = workspace_id.into();
         write_catalog(root, &catalog)
     })();
     if let Err(error) = restore_result {
+        if moved_snapshots {
+            let _ = fs::rename(&snapshots, &snapshots_trash);
+        }
         for path in created_paths {
             let _ = fs::remove_file(path);
         }
@@ -1070,11 +1417,21 @@ pub fn purge_trash(root: &Path, workspace_id: &str, deleted_at: i64) -> Result<(
             Err(error) => return Err(error.to_string()),
         }
     }
-    if paths.is_empty() {
+    let snapshots = trash_snapshot_dir(root, workspace_id, deleted_at);
+    let has_snapshots = match fs::symlink_metadata(&snapshots) {
+        Ok(metadata) if metadata.file_type().is_dir() => true,
+        Ok(_) => return Err("A deleted-project recovery item is not a regular directory.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.to_string()),
+    };
+    if paths.is_empty() && !has_snapshots {
         return Err("This deleted-project recovery copy no longer exists.".into());
     }
     for path in paths {
         fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    if has_snapshots {
+        fs::remove_dir_all(snapshots).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -1088,6 +1445,10 @@ pub fn empty_trash(root: &Path) -> Result<usize, String> {
             .flatten()
         {
             fs::remove_file(path).map_err(|error| error.to_string())?;
+            removed += 1;
+        }
+        if let Some(snapshots) = files.snapshots {
+            fs::remove_dir_all(snapshots).map_err(|error| error.to_string())?;
             removed += 1;
         }
     }
@@ -1264,6 +1625,7 @@ mod tests {
         let root = directory.path().join("workspaces");
         load(&root, None, &workspace("Initial")).unwrap();
         create(&root, "second", &workspace("Second")).unwrap();
+        create_snapshot(&root, "second", "Second snapshot").unwrap();
         delete(&root, "second").unwrap();
         create(&root, "third", &workspace("Third")).unwrap();
         delete(&root, "third").unwrap();
@@ -1275,6 +1637,7 @@ mod tests {
             .iter()
             .find(|entry| entry.workspace_id == "second")
             .unwrap();
+        assert!(second.has_snapshots);
         purge_trash(&root, "second", second.deleted_at).unwrap();
         assert_eq!(list_trash(&root).unwrap().len(), 1);
         assert!(purge_trash(&root, "second", second.deleted_at).is_err());
@@ -1348,6 +1711,70 @@ mod tests {
             vec![first_id.as_str(), "second", "third"]
         );
         assert!(reorder(&root, "second", "third", "middle").is_err());
+    }
+
+    #[test]
+    fn creates_restores_bounds_and_reparents_project_snapshots() {
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("workspaces");
+        let initial = load(&root, None, &workspace("Initial")).unwrap();
+        let workspace_id = initial.active_workspace_id;
+        let baseline = create_snapshot(&root, &workspace_id, "Baseline").unwrap();
+        save(&root, &workspace_id, &workspace("Changed")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        create_snapshot(&root, &workspace_id, "Changed version").unwrap();
+
+        let history = list_snapshots(&root, &workspace_id).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].message, "Changed version");
+        assert!(history.iter().all(|entry| entry.size_bytes > 0));
+        assert_eq!(
+            restore_snapshot(&root, &workspace_id, &baseline.id)
+                .unwrap()
+                .workspace["name"],
+            "Initial"
+        );
+
+        create(&root, "other", &workspace("Other")).unwrap();
+        open(&root, &workspace_id).unwrap();
+        delete(&root, &workspace_id).unwrap();
+        let deleted = list_trash(&root)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.workspace_id == workspace_id)
+            .unwrap();
+        assert!(deleted.has_snapshots);
+        fs::create_dir_all(workspace_snapshot_dir(&root, &workspace_id)).unwrap();
+        assert!(restore_trash(&root, &workspace_id, deleted.deleted_at)
+            .unwrap_err()
+            .contains("conflict"));
+        fs::remove_dir(workspace_snapshot_dir(&root, &workspace_id)).unwrap();
+        restore_trash(&root, &workspace_id, deleted.deleted_at).unwrap();
+        assert_eq!(list_snapshots(&root, &workspace_id).unwrap().len(), 2);
+
+        for index in 0..51 {
+            create_snapshot(&root, &workspace_id, &format!("Retained {index}")).unwrap();
+        }
+        let retained = list_snapshots(&root, &workspace_id).unwrap();
+        assert_eq!(retained.len(), MAX_SNAPSHOTS);
+        assert!(!retained.iter().any(|entry| entry.message == "Baseline"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_snapshot_store_symlink_traversal() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("workspaces");
+        let outside = directory.path().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        let loaded = load(&root, None, &workspace("Initial")).unwrap();
+        symlink(&outside, root.join("snapshots")).unwrap();
+
+        let error = create_snapshot(&root, &loaded.active_workspace_id, "Blocked").unwrap_err();
+        assert!(error.contains("regular directory"));
+        assert!(outside.read_dir().unwrap().next().is_none());
     }
 
     #[test]
@@ -1432,6 +1859,25 @@ mod tests {
         assert!(backup.get("protectedRuntimeCredentials").is_some());
         assert_eq!(backup["mcpClients"][0]["oauthRegisteredClientSecret"], "");
 
+        let snapshot = create_snapshot(&root, "local-workspace", "Protected snapshot").unwrap();
+        let stored_snapshot = serde_json::from_slice::<WorkspaceSnapshotFile>(
+            &fs::read(workspace_snapshot_path(
+                &root,
+                "local-workspace",
+                &snapshot.id,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(stored_snapshot
+            .workspace
+            .get("protectedRuntimeCredentials")
+            .is_some());
+        let serialized_snapshot = serde_json::to_string(&stored_snapshot).unwrap();
+        assert!(!serialized_snapshot.contains("request-access"));
+        assert!(!serialized_snapshot.contains("mcp-access"));
+        assert!(!serialized_snapshot.contains("registered-secret"));
+
         create(&root, "second", &workspace("Second")).unwrap();
         delete(&root, "local-workspace").unwrap();
         let deleted = list_trash(&root).unwrap();
@@ -1439,6 +1885,7 @@ mod tests {
             .iter()
             .find(|entry| entry.workspace_id == "local-workspace")
             .unwrap();
+        assert!(entry.has_snapshots);
         let trash = read_valid_workspace(&trash_file_path(
             &root,
             "local-workspace",
@@ -1455,5 +1902,6 @@ mod tests {
             restored.workspace["collections"][0]["requests"][0]["auth"]["refreshToken"],
             "request-refresh"
         );
+        assert_eq!(list_snapshots(&root, "local-workspace").unwrap().len(), 1);
     }
 }

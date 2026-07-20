@@ -2796,7 +2796,7 @@ export default function App() {
     }
   };
 
-  const runWorkspaceMaintenance = async (operation: () => Promise<void>) => {
+  const runWorkspaceMaintenance = async (operation: () => Promise<void>, persistActive = false) => {
     if (workspaceStoreBusy || isSending || scheduledSendLabel) {
       setWorkspaceStoreError('Wait for the active request or scheduled run to finish before changing projects.');
       return;
@@ -2804,6 +2804,10 @@ export default function App() {
     setWorkspaceStoreBusy(true);
     setWorkspaceStoreError('');
     try {
+      if (persistActive) {
+        workspaceSaveGeneration.current += 1;
+        await persistActiveWorkspaceNow();
+      }
       await operation();
     } catch (error) {
       setWorkspaceStoreError(error instanceof Error ? error.message : String(error));
@@ -2823,6 +2827,13 @@ export default function App() {
     return api.createCatalogWorkspace(api.createWorkspaceDuplicate(source, name, workspace.preferences));
   });
   const listLocalProjectWorkspaces = async (workspaceId: string) => (await workspaceCatalogApi()).listCatalogProjectWorkspaces(workspaceId);
+  const listLocalWorkspaceSnapshots = async (workspaceId: string) => (await workspaceCatalogApi()).listCatalogWorkspaceSnapshots(workspaceId);
+  const createLocalWorkspaceSnapshot = (workspaceId: string, message: string) => runWorkspaceMaintenance(async () => {
+    await (await workspaceCatalogApi()).createCatalogWorkspaceSnapshot(workspaceId, message);
+  }, workspaceId === activeWorkspaceId);
+  const restoreLocalWorkspaceSnapshot = (workspaceId: string, snapshotId: string) => runWorkspaceOperation(async () => (
+    await workspaceCatalogApi()
+  ).restoreCatalogWorkspaceSnapshot(workspaceId, snapshotId));
   const duplicateLocalProjectWorkspace = (sourceWorkspaceId: string, projectWorkspaceId: string, targetWorkspaceId: string, name: string) => runWorkspaceOperation(async () => (
     await workspaceCatalogApi()
   ).duplicateCatalogProjectWorkspace(sourceWorkspaceId, projectWorkspaceId, targetWorkspaceId, name));
@@ -3177,11 +3188,13 @@ export default function App() {
             error={workspaceStoreError}
             recovery={workspaceRecovery}
             onCreate={createLocalWorkspace}
+            onCreateSnapshot={createLocalWorkspaceSnapshot}
             onDelete={deleteLocalWorkspace}
             onDuplicate={duplicateLocalWorkspace}
             onDuplicateProjectWorkspace={duplicateLocalProjectWorkspace}
             onEmptyDeleted={emptyDeletedLocalWorkspaces}
             onListProjectWorkspaces={listLocalProjectWorkspaces}
+            onListSnapshots={listLocalWorkspaceSnapshots}
             onListDeleted={listDeletedLocalWorkspaces}
             onOpen={openLocalWorkspace}
             onPurgeDeleted={purgeDeletedLocalWorkspace}
@@ -3190,6 +3203,7 @@ export default function App() {
             onReorder={reorderLocalWorkspace}
             onRestore={restoreLocalWorkspace}
             onRestoreDeleted={restoreDeletedLocalWorkspace}
+            onRestoreSnapshot={restoreLocalWorkspaceSnapshot}
           />
         </Suspense>
         <button className="command-trigger" onClick={() => setShowPalette(true)} type="button"><Icon name="search" size={17} /><span>Search or run command…</span><kbd>{workspace.preferences.shortcuts.palette.replace('Mod', '⌘/Ctrl')}</kbd></button>

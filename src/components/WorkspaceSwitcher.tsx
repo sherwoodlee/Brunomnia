@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { ProjectWorkspaceSummary } from '../lib/projectWorkspaces';
-import type { WorkspaceCatalogEntry, WorkspaceRecovery, WorkspaceTrashEntry } from '../lib/workspaceCatalog';
+import type { WorkspaceCatalogEntry, WorkspaceRecovery, WorkspaceSnapshotEntry, WorkspaceTrashEntry } from '../lib/workspaceCatalog';
 import { Icon } from './Icon';
 
 type WorkspaceSwitcherProps = {
@@ -10,11 +10,13 @@ type WorkspaceSwitcherProps = {
   error?: string;
   recovery?: WorkspaceRecovery;
   onCreate: (name: string) => Promise<void>;
+  onCreateSnapshot: (workspaceId: string, message: string) => Promise<void>;
   onDelete: (workspaceId: string) => Promise<void>;
   onDuplicate: (workspaceId: string, name: string) => Promise<void>;
   onDuplicateProjectWorkspace: (sourceWorkspaceId: string, projectWorkspaceId: string, targetWorkspaceId: string, name: string) => Promise<void>;
   onEmptyDeleted: () => Promise<void>;
   onListProjectWorkspaces: (workspaceId: string) => Promise<ProjectWorkspaceSummary[]>;
+  onListSnapshots: (workspaceId: string) => Promise<WorkspaceSnapshotEntry[]>;
   onListDeleted: () => Promise<WorkspaceTrashEntry[]>;
   onMoveProjectWorkspace: (sourceWorkspaceId: string, projectWorkspaceId: string, targetWorkspaceId: string) => Promise<void>;
   onOpen: (workspaceId: string) => Promise<void>;
@@ -23,6 +25,7 @@ type WorkspaceSwitcherProps = {
   onReorder: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => Promise<void>;
   onRestore: (workspaceId: string) => Promise<void>;
   onRestoreDeleted: (workspaceId: string, deletedAt: number) => Promise<void>;
+  onRestoreSnapshot: (workspaceId: string, snapshotId: string) => Promise<void>;
 };
 
 export function WorkspaceSwitcher({
@@ -32,11 +35,13 @@ export function WorkspaceSwitcher({
   error,
   recovery,
   onCreate,
+  onCreateSnapshot,
   onDelete,
   onDuplicate,
   onDuplicateProjectWorkspace,
   onEmptyDeleted,
   onListProjectWorkspaces,
+  onListSnapshots,
   onListDeleted,
   onMoveProjectWorkspace,
   onOpen,
@@ -45,6 +50,7 @@ export function WorkspaceSwitcher({
   onReorder,
   onRestore,
   onRestoreDeleted,
+  onRestoreSnapshot,
 }: WorkspaceSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [trashExpanded, setTrashExpanded] = useState(false);
@@ -55,6 +61,10 @@ export function WorkspaceSwitcher({
   const [projectWorkspaces, setProjectWorkspaces] = useState<ProjectWorkspaceSummary[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState('');
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [snapshots, setSnapshots] = useState<WorkspaceSnapshotEntry[]>([]);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
+  const [snapshotsError, setSnapshotsError] = useState('');
   const [duplicateFile, setDuplicateFile] = useState<ProjectWorkspaceSummary>();
   const [duplicateName, setDuplicateName] = useState('');
   const [duplicateTargetId, setDuplicateTargetId] = useState('');
@@ -121,6 +131,28 @@ export function WorkspaceSwitcher({
     if (open && filesExpanded && !projectWorkspaces.length && !filesLoading) void refreshProjectWorkspaces();
   }, [open, filesExpanded]);
 
+  const refreshSnapshots = async () => {
+    if (!activeWorkspaceId) return;
+    setSnapshotsLoading(true);
+    setSnapshotsError('');
+    try {
+      setSnapshots(await onListSnapshots(activeWorkspaceId));
+    } catch (loadError) {
+      setSnapshotsError(loadError instanceof Error ? loadError.message : String(loadError));
+    } finally {
+      setSnapshotsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setSnapshots([]);
+    if (open && historyExpanded) void refreshSnapshots();
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (open && historyExpanded && !snapshots.length && !snapshotsLoading) void refreshSnapshots();
+  }, [open, historyExpanded]);
+
   const create = () => {
     const name = window.prompt('Project name', 'New Project')?.trim();
     if (name) void onCreate(name);
@@ -166,7 +198,7 @@ export function WorkspaceSwitcher({
     await refreshTrash();
   };
   const purgeDeleted = async (entry: WorkspaceTrashEntry) => {
-    if (!window.confirm(`Permanently delete “${entry.name}”? This removes its workspace, backup, and local vault from this device. This cannot be undone.`)) return;
+    if (!window.confirm(`Permanently delete “${entry.name}”? This removes its workspace, backup, snapshots, and local vault from this device. This cannot be undone.`)) return;
     await onPurgeDeleted(entry.workspaceId, entry.deletedAt);
     await refreshTrash();
   };
@@ -174,6 +206,17 @@ export function WorkspaceSwitcher({
     if (!trashEntries.length || !window.confirm(`Permanently delete all ${trashEntries.length} recovery ${trashEntries.length === 1 ? 'copy' : 'copies'} from this device? This cannot be undone.`)) return;
     await onEmptyDeleted();
     await refreshTrash();
+  };
+  const createSnapshot = async () => {
+    const message = window.prompt('Snapshot message', 'Manual snapshot')?.trim();
+    if (!message) return;
+    await onCreateSnapshot(activeWorkspaceId, message);
+    await refreshSnapshots();
+  };
+  const restoreSnapshot = async (snapshot: WorkspaceSnapshotEntry) => {
+    if (!window.confirm(`Restore “${snapshot.message}”? The current project will be replaced by this saved version.`)) return;
+    await onRestoreSnapshot(activeWorkspaceId, snapshot.id);
+    await Promise.all([refreshSnapshots(), filesExpanded ? refreshProjectWorkspaces() : Promise.resolve()]);
   };
   const startProjectDrag = (event: ReactDragEvent<HTMLButtonElement>, workspaceId: string) => {
     event.dataTransfer.effectAllowed = 'move';
@@ -280,6 +323,21 @@ export function WorkspaceSwitcher({
             <div className="workspace-files-actions"><button disabled={busy} onClick={() => beginProjectWorkspaceDuplicate(projectWorkspace)} type="button"><Icon name="copy" size={12} /> Duplicate</button><button disabled={busy || !entries.some((entry) => entry.id !== activeWorkspaceId && entry.status !== 'unavailable')} onClick={() => beginProjectWorkspaceMove(projectWorkspace)} type="button"><Icon name="folder" size={12} /> Move</button></div>
           </article>)}
         </div> : null}
+        <button aria-expanded={historyExpanded} className="workspace-history-toggle" onClick={() => setHistoryExpanded((current) => !current)} type="button">
+          <Icon name="history" size={15} />
+          <span><strong>Project history</strong><small>{historyExpanded ? snapshotsLoading ? 'Loading snapshots…' : `${snapshots.length} saved ${snapshots.length === 1 ? 'version' : 'versions'}` : 'Named local snapshots and restore'}</small></span>
+          <Icon name={historyExpanded ? 'chevron-up' : 'chevron-down'} size={14} />
+        </button>
+        {historyExpanded ? <div className="workspace-history-panel">
+          {snapshotsError ? <div className="workspace-store-error">{snapshotsError}</div> : null}
+          <div className="workspace-history-toolbar"><span>Up to 50 versions remain on this device.</span><button disabled={busy} onClick={() => void createSnapshot()} type="button"><Icon name="plus" size={12} /> Snapshot</button></div>
+          {!snapshotsLoading && !snapshots.length && !snapshotsError ? <p>No project snapshots yet.</p> : null}
+          {snapshots.map((snapshot) => {
+            const created = new Date(snapshot.createdAt);
+            const createdLabel = Number.isNaN(created.getTime()) ? 'Unknown time' : created.toLocaleString();
+            return <article key={snapshot.id}><Icon name="history" size={15} /><span><strong>{snapshot.message}</strong><small>{createdLabel} · {snapshot.fileCount} {snapshot.fileCount === 1 ? 'file' : 'files'} · {Math.max(1, Math.ceil(snapshot.sizeBytes / 1024))} KiB</small></span><button disabled={busy} onClick={() => void restoreSnapshot(snapshot)} type="button"><Icon name="history" size={12} /> Restore</button></article>;
+          })}
+        </div> : null}
         <button className="workspace-create-button" disabled={busy} onClick={create} type="button"><Icon name="plus" size={15} /> New local project</button>
         <button aria-expanded={trashExpanded} className="workspace-trash-toggle" onClick={() => setTrashExpanded((current) => !current)} type="button">
           <Icon name="history" size={15} />
@@ -297,7 +355,7 @@ export function WorkspaceSwitcher({
             const deletedLabel = Number.isNaN(deletedAt.getTime()) ? 'Unknown deletion time' : deletedAt.toLocaleString();
             return <article key={`${entry.workspaceId}:${entry.deletedAt}`}>
               <Icon name={unavailable ? 'x' : 'trash'} size={15} />
-              <span><strong>{entry.name}</strong><small>{deletedLabel} · {entry.status === 'ready' ? 'Workspace' : entry.status === 'recoverable' ? 'Backup' : 'Unreadable'}{entry.hasVault ? ' · Vault' : ''}</small></span>
+              <span><strong>{entry.name}</strong><small>{deletedLabel} · {entry.status === 'ready' ? 'Workspace' : entry.status === 'recoverable' ? 'Backup' : 'Unreadable'}{entry.hasVault ? ' · Vault' : ''}{entry.hasSnapshots ? ' · Snapshots' : ''}</small></span>
               <div className="workspace-trash-actions"><button disabled={busy || unavailable || conflicts} onClick={() => void restoreDeleted(entry)} title={conflicts ? 'A current project already uses this ID' : unavailable ? 'No valid workspace or backup' : 'Restore and open'} type="button"><Icon name="history" size={13} /> Restore</button><button disabled={busy} onClick={() => void purgeDeleted(entry)} title="Delete permanently" type="button"><Icon name="trash" size={13} /> Delete</button></div>
             </article>;
           })}

@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
 import { normalizeGraphqlSchema } from './graphql';
 import { migrateWorkspace, parseWorkspaceImport } from './storage';
-import { createBlankWorkspace, createCatalogWorkspace, createWorkspaceDuplicate, deleteCatalogWorkspace, duplicateCatalogProjectWorkspace, emptyDeletedCatalogWorkspaces, listCatalogProjectWorkspaces, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, moveCatalogProjectWorkspace, openCatalogWorkspace, purgeDeletedCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
+import { createBlankWorkspace, createCatalogWorkspace, createCatalogWorkspaceSnapshot, createWorkspaceDuplicate, deleteCatalogWorkspace, duplicateCatalogProjectWorkspace, emptyDeletedCatalogWorkspaces, listCatalogProjectWorkspaces, listCatalogWorkspaceSnapshots, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, moveCatalogProjectWorkspace, openCatalogWorkspace, purgeDeletedCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreCatalogWorkspaceSnapshot, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
 
 class MemoryStorage implements Storage {
   readonly values = new Map<string, string>();
@@ -115,6 +115,49 @@ describe('local project catalog', () => {
     await expect(moveCatalogProjectWorkspace('destination', mockServerId, 'destination')).rejects.toThrow('different destination');
   });
 
+  it('creates, restores, bounds, and reparents browser project snapshots', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-07-20T10:00:00.000Z'));
+      const initial = await loadWorkspaceCatalog();
+      const workspaceId = initial.activeWorkspaceId;
+      await createCatalogWorkspaceSnapshot(workspaceId, 'Baseline');
+      await saveCatalogWorkspace(workspaceId, { ...initial.workspace, name: 'Changed' });
+      vi.setSystemTime(new Date('2026-07-20T10:01:00.000Z'));
+      await createCatalogWorkspaceSnapshot(workspaceId, 'Changed version');
+
+      expect(await listCatalogWorkspaceSnapshots(workspaceId)).toEqual([
+        expect.objectContaining({ message: 'Changed version', fileCount: 8, sizeBytes: expect.any(Number) }),
+        expect.objectContaining({ message: 'Baseline', fileCount: 8, sizeBytes: expect.any(Number) }),
+      ]);
+      const baseline = (await listCatalogWorkspaceSnapshots(workspaceId)).find((snapshot) => snapshot.message === 'Baseline')!;
+      expect((await restoreCatalogWorkspaceSnapshot(workspaceId, baseline.id)).workspace.name).toBe('Local Workspace');
+
+      await createCatalogWorkspace(createBlankWorkspace('Other', initial.workspace.preferences), 'other');
+      await openCatalogWorkspace(workspaceId);
+      await deleteCatalogWorkspace(workspaceId);
+      const deleted = (await listDeletedCatalogWorkspaces()).find((entry) => entry.workspaceId === workspaceId)!;
+      expect(deleted.hasSnapshots).toBe(true);
+      const orphanKey = `brunomnia.snapshot.${workspaceId}.snapshot-orphan.v1`;
+      localStorage.setItem(orphanKey, '{}');
+      await expect(restoreDeletedCatalogWorkspace(workspaceId, deleted.deletedAt)).rejects.toThrow('snapshot history conflicts');
+      localStorage.removeItem(orphanKey);
+      await restoreDeletedCatalogWorkspace(workspaceId, deleted.deletedAt);
+      expect(await listCatalogWorkspaceSnapshots(workspaceId)).toHaveLength(2);
+
+      for (let index = 0; index < 51; index += 1) {
+        vi.setSystemTime(new Date(Date.UTC(2026, 6, 20, 11, index)));
+        await createCatalogWorkspaceSnapshot(workspaceId, `Retained ${index}`);
+      }
+      const retained = await listCatalogWorkspaceSnapshots(workspaceId);
+      expect(retained).toHaveLength(50);
+      expect(retained[0].message).toBe('Retained 50');
+      expect(retained.some((snapshot) => snapshot.message === 'Baseline')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('lists deleted projects and restores a valid browser backup', async () => {
     await loadWorkspaceCatalog();
     const created = await createCatalogWorkspace(createBlankWorkspace('Second', cloneSeedWorkspace().preferences), 'second');
@@ -151,6 +194,7 @@ describe('local project catalog', () => {
   it('permanently deletes exact browser recovery copies and empties recognized trash only', async () => {
     await loadWorkspaceCatalog();
     await createCatalogWorkspace(createBlankWorkspace('Second', cloneSeedWorkspace().preferences), 'second');
+    await createCatalogWorkspaceSnapshot('second', 'Second snapshot');
     await deleteCatalogWorkspace('second');
     await createCatalogWorkspace(createBlankWorkspace('Third', cloneSeedWorkspace().preferences), 'third');
     await deleteCatalogWorkspace('third');
@@ -159,6 +203,7 @@ describe('local project catalog', () => {
     const deleted = await listDeletedCatalogWorkspaces();
     expect(deleted).toHaveLength(2);
     const second = deleted.find((entry) => entry.workspaceId === 'second')!;
+    expect(second.hasSnapshots).toBe(true);
     await purgeDeletedCatalogWorkspace(second.workspaceId, second.deletedAt);
     expect((await listDeletedCatalogWorkspaces()).map((entry) => entry.workspaceId)).toEqual(['third']);
     await expect(purgeDeletedCatalogWorkspace(second.workspaceId, second.deletedAt)).rejects.toThrow('no longer exists');

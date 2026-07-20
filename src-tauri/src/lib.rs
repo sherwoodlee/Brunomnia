@@ -203,6 +203,32 @@ fn workspace_catalog_empty_trash(app: AppHandle) -> Result<usize, String> {
 }
 
 #[tauri::command]
+fn workspace_catalog_list_snapshots(
+    app: AppHandle,
+    workspace_id: String,
+) -> Result<Vec<workspace_store::WorkspaceSnapshotEntry>, String> {
+    workspace_store::list_snapshots(&workspace_store_path(&app)?, &workspace_id)
+}
+
+#[tauri::command]
+fn workspace_catalog_create_snapshot(
+    app: AppHandle,
+    workspace_id: String,
+    message: String,
+) -> Result<workspace_store::WorkspaceSnapshotEntry, String> {
+    workspace_store::create_snapshot(&workspace_store_path(&app)?, &workspace_id, &message)
+}
+
+#[tauri::command]
+fn workspace_catalog_restore_snapshot(
+    app: AppHandle,
+    workspace_id: String,
+    snapshot_id: String,
+) -> Result<workspace_store::WorkspaceCatalogSnapshot, String> {
+    workspace_store::restore_snapshot(&workspace_store_path(&app)?, &workspace_id, &snapshot_id)
+}
+
+#[tauri::command]
 fn workspace_catalog_restore_backup(
     app: AppHandle,
     workspace_id: String,
@@ -949,6 +975,9 @@ pub fn run() {
             workspace_catalog_restore_trash,
             workspace_catalog_purge_trash,
             workspace_catalog_empty_trash,
+            workspace_catalog_list_snapshots,
+            workspace_catalog_create_snapshot,
+            workspace_catalog_restore_snapshot,
             workspace_catalog_restore_backup,
             template_os_info,
             gguf_list_models,
