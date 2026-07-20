@@ -183,15 +183,23 @@ const normalizeMcpClients = (value: unknown): McpClient[] => !Array.isArray(valu
 
 const normalizeAi = (value: unknown, defaults: AiSettings): AiSettings => {
   const source = record(value);
-  const provider = source?.provider === 'openai' || source?.provider === 'anthropic' || source?.provider === 'gemini' || source?.provider === 'openai-compatible'
+  const provider = source?.provider === 'gguf' || source?.provider === 'openai' || source?.provider === 'anthropic' || source?.provider === 'gemini' || source?.provider === 'openai-compatible'
     ? source.provider
     : defaults.provider;
+  const boundedNumber = (candidate: unknown, fallback: number, minimum: number, maximum: number) => typeof candidate === 'number' && Number.isFinite(candidate)
+    ? Math.min(maximum, Math.max(minimum, candidate))
+    : fallback;
   return {
     enabled: source?.enabled === true,
     provider,
     baseUrl: stringValue(source?.baseUrl, defaults.baseUrl),
     model: stringValue(source?.model),
     apiKey: stringValue(source?.apiKey),
+    temperature: boundedNumber(source?.temperature, defaults.temperature, 0, 2),
+    topP: boundedNumber(source?.topP, defaults.topP, 0, 1),
+    topK: Math.trunc(boundedNumber(source?.topK, defaults.topK, 0, 100)),
+    seed: typeof source?.seed === 'boolean' ? source.seed : defaults.seed,
+    repeatPenalty: boundedNumber(source?.repeatPenalty, defaults.repeatPenalty, 0, 10),
     mockGeneration: source?.mockGeneration === true,
     commitSuggestions: source?.commitSuggestions === true,
   };
@@ -796,7 +804,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const mcpClients = normalizeMcpClients(workspace.mcpClients);
   return {
     ...workspace,
-    version: 39,
+    version: 40,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

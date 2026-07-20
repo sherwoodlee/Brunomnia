@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the one-hundred-sixty-second runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the two-hundred-forty-fourth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -45,16 +45,16 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - End-to-end encrypted shared-file revisions with optimistic conflict checks, explicit force, device-local data filtering, and self-hosted filesystem/WebDAV compatibility
 - Local owner/admin/editor/viewer metadata, storage and plaintext-secret policies, bounded audit records, and governance migration hardening
 - Project-scoped MCP clients over Streamable HTTP/JSON-RPC and native STDIO, with first-class Insomnia v4/v5 interchange, cached tools/prompts/resources, guided prompt and bounded recursive/conditional JSON-Schema tool forms, guided RFC 6570 resource templates, per-primitive drafts, reusable device-memory HTTP sessions and persistent direct-child STDIO sessions with bounded login-shell `PATH` discovery, reviewed isolated process environments, explicit disconnect/recovery, cancellable discovery/invocation, roots, persistent device-local response/event/notification/console history with filters and environment-aware retention, and authorization-code/PKCE OAuth with discovery, bounded metadata redirects, dynamic registration, refresh, scope escalation, and device-local credentials
-- Optional OpenAI, Anthropic, Gemini, and custom/local OpenAI-compatible providers with vault-only credential execution, AI mock generation from manual, reviewed specification-URL, or explicitly selected active-request/latest-response context, and reviewable ordered Git commit groups with optional push
+- Optional direct local `.gguf` inference through a crash-isolated llama.cpp worker plus OpenAI, Anthropic, Gemini, and custom/local OpenAI-compatible providers; pinned-compatible GGUF sampling controls, vault-only hosted credential execution, AI mock generation from manual, reviewed specification-URL, or explicitly selected active-request/latest-response context, and reviewable ordered Git commit groups with optional push
 - Pull-only Konnect control-plane discovery and Gateway Service mapping across managed route/path/protocol folders and HTTP/HTTPS, WebSocket, and gRPC combinations with regex and bounded expression-router conversion, remote-template sanitization, local-work preservation, safe control-plane proxy defaults with loopback fallback, and explicit unextractable/SNI/L4 skips
-- Workspace v39 migrations, bounded MCP process-environment/history and collection-owned standalone test-suite/result normalization, device-local bulk/editor/layout/typography/password-visibility/HTML-script and script-data-folder preferences, legacy-safe timeout/certificate/proxy overrides, complete bounded GraphQL schema-cache refresh, bounded resource hierarchy, request-row/Socket.IO/session-history/request-snapshot/handshake-metadata normalization, collection sub-environment repair, private-global publication filtering, split-YAML serialization, import-time authority stripping, and device-local integration/script permissions
+- Workspace v40 migrations, bounded GGUF settings, MCP process-environment/history and collection-owned standalone test-suite/result normalization, device-local bulk/editor/layout/typography/password-visibility/HTML-script and script-data-folder preferences, legacy-safe timeout/certificate/proxy overrides, complete bounded GraphQL schema-cache refresh, bounded resource hierarchy, request-row/Socket.IO/session-history/request-snapshot/handshake-metadata normalization, collection sub-environment repair, private-global publication filtering, split-YAML serialization, import-time authority stripping, and device-local integration/script permissions
 - Atomic per-project persistence in the OS application-data directory with recoverable prior revisions and restorable soft-deleted workspace/backup/vault snapshots in device-local trash
 - System/dark/light appearance, comfortable/compact density, horizontal/responsive or forced-vertical request layout, separate interface/editor font families and 8–24 px sizes, configurable editor wrapping/indentation/ligatures, masked authentication and integration credentials with device-wide or per-field reveal, request defaults, and customizable keyboard shortcuts
 - Responsive desktop UI with no login, upgrade, or cloud dependency
 
 ## Run it
 
-Requirements: Node.js 20.19+ (or 22.12+) and Rust 1.77.2+.
+Requirements: Node.js 20.19+ (or 22.12+), Rust 1.77.2+, CMake, and Clang. The native build compiles its pinned llama.cpp runtime; no model is downloaded or bundled.
 
 ```sh
 npm install

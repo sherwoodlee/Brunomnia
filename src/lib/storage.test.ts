@@ -129,6 +129,43 @@ describe('local project catalog', () => {
 });
 
 describe('workspace migrations', () => {
+  it('normalizes persisted GGUF settings with Insomnia-compatible defaults and bounds', () => {
+    const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    workspace.version = 39;
+    workspace.ai = {
+      enabled: true,
+      provider: 'gguf',
+      baseUrl: 'ignored',
+      model: 'local.gguf',
+      apiKey: '',
+      temperature: 5,
+      topP: -1,
+      topK: 42.9,
+      seed: false,
+      repeatPenalty: Number.NaN,
+      mockGeneration: true,
+      commitSuggestions: true,
+    };
+
+    expect(migrateWorkspace(workspace).ai).toEqual({
+      enabled: true,
+      provider: 'gguf',
+      baseUrl: 'ignored',
+      model: 'local.gguf',
+      apiKey: '',
+      temperature: 2,
+      topP: 0,
+      topK: 42,
+      seed: false,
+      repeatPenalty: 1.1,
+      mockGeneration: true,
+      commitSuggestions: true,
+    });
+    const legacy = cloneSeedWorkspace() as unknown as Record<string, unknown>;
+    legacy.ai = { enabled: false, provider: 'openai-compatible', baseUrl: '', model: '', apiKey: '' };
+    expect(migrateWorkspace(legacy).ai).toMatchObject({ temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1 });
+  });
+
   it('upgrades v1 requests with protocol defaults without changing request identity', () => {
     const legacy = cloneSeedWorkspace() as unknown as Record<string, unknown>;
     legacy.version = 1;
@@ -149,7 +186,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(39);
+    expect(migrated.version).toBe(40);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
@@ -199,7 +236,7 @@ describe('workspace migrations', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(39);
+    expect(migrated.version).toBe(40);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
@@ -223,7 +260,7 @@ describe('workspace migrations', () => {
     }, { id: 'orphan', suiteId: 'missing', tests: [] }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(39);
+    expect(migrated.version).toBe(40);
     expect(migrated.testSuites).toHaveLength(1);
     expect(migrated.testSuites[0].collectionId).toBe(migrated.collections[0].id);
     expect(migrated.testSuites[0].tests.map((test) => [test.id, test.requestId])).toEqual([['test-two', null], ['test-one', requestId]]);
@@ -277,7 +314,7 @@ describe('workspace migrations', () => {
     };
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(39);
+    expect(migrated.version).toBe(40);
     expect(migrated.collections[0].requests[0].grpc).toMatchObject({
       protoText: 'syntax = "proto3"; service Legacy {}',
       protoEntryPath: 'schema.proto',
@@ -302,7 +339,7 @@ describe('workspace migrations', () => {
 
     const migrated = migrateWorkspace(workspace);
     const grpc = migrated.collections[0].requests[0].grpc;
-    expect(migrated.version).toBe(39);
+    expect(migrated.version).toBe(40);
     expect(grpc.descriptorSource).toBe('buf');
     expect(grpc.reflectionApiUrl).toHaveLength(8_192);
     expect(grpc.reflectionApiKey).toHaveLength(65_536);
@@ -319,7 +356,7 @@ describe('workspace migrations', () => {
       clients: [null, { id: 'client', host: 'api.example.test:8443', enabled: true, certificatePem: 'cert-pem', keyPem: 'key-pem' }, { id: 'pfx', host: '*.internal.test', enabled: true, pfxBase64: 'cGZ4', passphrase: 'secret' }],
     };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(39);
+    expect(migrated.version).toBe(40);
     expect(migrated.certificates).toEqual({
       ca: { enabled: true, pem: 'ca-pem' },
       clients: [
@@ -412,7 +449,7 @@ describe('workspace migrations', () => {
     environments[0].environmentEditorMode = 'raw';
     (environments[0].variables as Array<Record<string, unknown>>).push({ id: 'global-config', name: 'globalConfig', value: '{"enabled":true}', valueType: 'json', enabled: true });
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(39);
+    expect(migrated.version).toBe(40);
     expect(migrated.collections[0]).toMatchObject({ environmentEditorMode: 'raw', environment: [expect.objectContaining({ name: 'config', valueType: 'json' })] });
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', environmentEditorMode: 'raw', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
@@ -491,7 +528,7 @@ describe('workspace migrations', () => {
     }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(39);
+    expect(migrated.version).toBe(40);
     expect(migrated.mcpClients[0].env).toEqual([{ id: 'stdio-env', name: 'MODE', value: 'review', enabled: false, description: '' }]);
     expect(migrated.mcpClients[0].resourceTemplates[0]).toMatchObject({
       uri: 'files://{/path}{?query,limit}',

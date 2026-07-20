@@ -257,7 +257,7 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(39);
+    expect(parsed.version).toBe(40);
     expect(parsed.testSuites).toEqual([expect.objectContaining({ id: 'suite', tests: [expect.objectContaining({ id: 'included' })] }), expect.objectContaining({ id: 'empty-suite', tests: [] })]);
     expect(parsed.unitTestResults).toEqual([expect.objectContaining({ id: 'run', suiteId: 'suite', tests: [expect.objectContaining({ testId: 'included' })] })]);
     expect(parsed.certificates.clients[0]).toMatchObject({ pfxBase64: 'cGZ4', passphrase: 'secret' });

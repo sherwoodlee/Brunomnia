@@ -1662,6 +1662,14 @@ kbd {
 .integration-fields { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .integration-fields label, .mcp-operation-run label { color: var(--muted); display: flex; flex-direction: column; font-size: 8px; gap: 6px; text-transform: uppercase; }
 .integration-fields .wide { grid-column: 1 / -1; }
+.gguf-model-field { color: var(--muted); display: flex; flex-direction: column; font-size: 8px; gap: 6px; text-transform: uppercase; }
+.gguf-model-picker { display: grid; gap: 6px; grid-template-columns: minmax(0, 1fr) 36px; }
+.gguf-model-picker button { align-items: center; display: flex; justify-content: center; padding: 0; }
+.gguf-folder-path { overflow-wrap: anywhere; }
+.gguf-folder-path button { background: transparent; border: 0; color: var(--accent); display: inline; min-height: auto; padding: 0; text-decoration: underline; }
+.gguf-advanced { display: flex; flex-direction: column; gap: 10px; }
+.gguf-advanced-toggle { align-items: center; display: flex; justify-content: space-between; width: 100%; }
+.gguf-advanced .inline-toggle { flex-direction: row; font-size: 8px; text-transform: none; }
 .mcp-oauth-runtime { align-items: center; background: #0d1418; border: 1px solid var(--border-soft); display: flex; justify-content: space-between; padding: 8px 9px; }
 .mcp-oauth-runtime span { display: flex; flex-direction: column; gap: 4px; }
 .mcp-oauth-runtime strong { color: var(--text-soft); font-size: 9px; text-transform: none; }

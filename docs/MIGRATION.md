@@ -2415,6 +2415,19 @@ Compatibility bounds remain explicit: Insomnia v5 cannot represent standalone su
 - Cross-platform installers, signing/notarization guidance, accessibility audit, load/performance testing, and broader recovery tests
 - Declare parity only after every ledger row has reproducible evidence
 
+## Milestone 244 — direct local GGUF inference (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned source audit | Complete | Pinned Insomnia stores models in app-data `llms`, lists regular `.gguf` files, preserves temperature/top-P/top-K/random-seed/repeat-penalty defaults and ranges, and isolates native inference in Electron utility processes |
+| Model storage boundary | Complete | Brunomnia creates the same logical app-data folder, persists only a selected filename, and rejects traversal, non-GGUF entries, symlinked folders/files, non-files, and canonical root escapes |
+| Native inference | Complete | Pinned `llama-cpp-2` loads the model, applies an embedded chat template when available, uses an 8K context and 4,096-token output cap, applies the five pinned controls, stops on EOG, skips non-text control tokens, and decodes UTF-8 statefully |
+| Crash isolation | Complete | One hidden invocation of the Tauri executable handles each bounded JSON request over pipes; the UI process enforces output/diagnostic limits, kills ten-minute workers, and reports native failure without loading llama.cpp into the main process |
+| Desktop UI and persistence | Complete | Workspace v40 adds normalized GGUF settings, model discovery/refresh/open-folder/select controls, advanced options, explicit activation/testing, and local-only disclosure while hiding URL/key fields |
+| Executable evidence | Complete | Focused adapter/dispatch/migration and native path/symlink tests pass; an ignored opt-in test loads checksum `66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739` and completes real Metal-backed inference |
+
+Compatibility bounds remain explicit: Brunomnia does not download, update, or bundle model files, and direct inference remains a desktop capability rather than a browser or headless-CLI authority. The fixed context/output limits are safety constraints. GGUF loading closes the AI row's only named gap; exactly 15 parity rows remain incomplete, so Brunomnia is not declared feature-complete.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

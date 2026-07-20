@@ -12,6 +12,6 @@ describe('AI structured output parsing', () => {
   });
 
   it('rejects hosted plaintext API keys before any provider request', async () => {
-    await expect(generateAiText({ enabled: true, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-test', apiKey: 'plaintext', mockGeneration: false, commitSuggestions: false }, 'test', undefined, {})).rejects.toThrow('complete local-vault');
+    await expect(generateAiText({ enabled: true, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-test', apiKey: 'plaintext', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false }, 'test', undefined, {})).rejects.toThrow('complete local-vault');
   });
 });

@@ -2,6 +2,7 @@ import { isTauri } from '@tauri-apps/api/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Environment, JsonValue, KeyValue, McpClient, McpHistoryEventCategory, Workspace } from '../types';
 import { generateAiText } from '../lib/ai';
+import { listGgufModels, openGgufModelsFolder, type GgufModelCatalog } from '../lib/gguf';
 import type { SendRequestContext } from '../lib/http';
 import { loadKonnectControlPlanes, syncKonnectRoutes } from '../lib/konnect';
 import { disconnectMcpClient, discoverMcpClient, hasMcpClientSession, invokeMcpOperation, mcpClientSessionState, mcpResourceSubscriptionState, notifyMcpRootsChanged, respondMcpServerRequest, setMcpResourceSubscription, type McpEvent, type McpReviewedServerRequest, type McpServerRequest, type McpServerRequestResponse } from '../lib/mcp';
@@ -59,13 +60,21 @@ const newMcpClient = (): McpClient => ({
 
 const row = (): KeyValue => ({ id: `integration-row-${crypto.randomUUID()}`, name: '', value: '', enabled: true });
 const mcpSessionConfigurationFields = new Set<keyof McpClient>(['transport', 'url', 'command', 'args', 'env', 'headers', 'authType', 'token', 'username', 'password', 'oauthAuthorizationUrl', 'oauthAccessTokenUrl', 'oauthClientId', 'oauthClientSecret', 'oauthScope', 'oauthState', 'oauthRegisteredClientId', 'oauthRegisteredClientSecret', 'oauthRegisteredClientIdIssuedAt', 'oauthRegisteredClientSecretExpiresAt', 'oauthRegisteredTokenEndpointAuthMethod']);
-const providerBaseUrl = (provider: Workspace['ai']['provider']) => provider === 'openai'
-  ? 'https://api.openai.com/v1'
-  : provider === 'anthropic'
-    ? 'https://api.anthropic.com'
-    : provider === 'gemini'
-      ? 'https://generativelanguage.googleapis.com/v1beta'
-      : 'http://127.0.0.1:11434/v1';
+const providerBaseUrl = (provider: Workspace['ai']['provider']) => provider === 'gguf'
+  ? ''
+  : provider === 'openai'
+    ? 'https://api.openai.com/v1'
+    : provider === 'anthropic'
+      ? 'https://api.anthropic.com'
+      : provider === 'gemini'
+        ? 'https://generativelanguage.googleapis.com/v1beta'
+        : 'http://127.0.0.1:11434/v1';
+
+const formatModelSize = (bytes: number) => bytes < 1_048_576
+  ? `${Math.max(1, Math.round(bytes / 1_024))} KiB`
+  : bytes < 1_073_741_824
+    ? `${(bytes / 1_048_576).toFixed(1)} MiB`
+    : `${(bytes / 1_073_741_824).toFixed(2)} GiB`;
 
 export const integrationSecretInputType = (showPasswords: boolean, revealed: boolean): 'password' | 'text' => showPasswords || revealed ? 'text' : 'password';
 export const mcpOperationDraftKey = (clientId: string, kind: 'tool' | 'prompt' | 'resource', name: string) => JSON.stringify([clientId, kind, name]);
@@ -116,6 +125,8 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [ggufCatalog, setGgufCatalog] = useState<GgufModelCatalog>();
+  const [showGgufAdvanced, setShowGgufAdvanced] = useState(false);
   const [, setSessionRevision] = useState(0);
   const activeMcpAbort = useRef<AbortController | undefined>(undefined);
   const mcpEnvironmentScope = useRef({ clientId: '', environmentId: '' });
@@ -166,6 +177,19 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
   useEffect(() => {
     if (mcpHistoryTab === 'events') setSelectedMcpEventId(visibleMcpEvents[0]?.id ?? '');
   }, [mcpHistoryTab, visibleMcpEvents[0]?.id]);
+  useEffect(() => {
+    if (!native || tab !== 'ai' || workspace.ai.provider !== 'gguf') return;
+    let active = true;
+    void listGgufModels().then((catalog) => {
+      if (active) setGgufCatalog(catalog);
+    }).catch(() => {
+      if (active) setGgufCatalog(undefined);
+    });
+    return () => { active = false; };
+  }, [native, tab, workspace.ai.provider]);
+  useEffect(() => {
+    if (workspace.ai.provider !== 'gguf' || !workspace.ai.model) setShowGgufAdvanced(false);
+  }, [workspace.ai.provider, workspace.ai.model]);
 
   const run = async (label: string, operation: (signal?: AbortSignal) => Promise<void>, cancelable = false) => {
     if (busy) return;
@@ -519,6 +543,23 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
     setMessage('AI provider returned a response. No workspace data was sent in this connection test.');
   });
 
+  const refreshGgufModels = () => native && run('Refreshing local GGUF models', async () => {
+    const catalog = await listGgufModels();
+    setGgufCatalog(catalog);
+    setMessage(`Found ${catalog.models.length} GGUF model${catalog.models.length === 1 ? '' : 's'} in the local-model folder.`);
+  });
+
+  const openGgufFolder = () => native && run('Opening local-model folder', async () => {
+    const directory = await openGgufModelsFolder();
+    setMessage(`Opened ${directory}.`);
+  });
+
+  const updateGgufNumber = (field: 'temperature' | 'topP' | 'topK' | 'repeatPenalty', source: string, minimum: number, maximum: number, integer = false) => {
+    const value = integer ? Number.parseInt(source, 10) : Number.parseFloat(source);
+    if (!Number.isFinite(value) || value < minimum || value > maximum) return;
+    onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, [field]: value } }));
+  };
+
   const connectKonnect = () => canEdit && run('Loading Konnect control planes', async () => {
     const controlPlanes = await loadKonnectControlPlanes(workspace.konnect, environment, requestContext);
     onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, controlPlanes, controlPlaneId: controlPlanes.some((plane) => plane.id === current.konnect.controlPlaneId) ? current.konnect.controlPlaneId : controlPlanes[0]?.id ?? '' } }));
@@ -571,7 +612,38 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
         </div> : <div className="empty-state"><Icon name="globe" size={30} /><strong>No MCP client selected</strong><span>Create one to begin.</span></div>}
       </div> : null}
 
-      {tab === 'ai' ? <div className="integration-grid"><section className="integration-card"><header><div><small>User-selected provider</small><h2>Large language model</h2></div><label className="inline-toggle"><input checked={workspace.ai.enabled} disabled={!canEdit} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, enabled: event.target.checked } }))} type="checkbox" /> Active</label></header><div className="integration-fields"><label>Provider<select disabled={!canEdit} value={workspace.ai.provider} onChange={(event) => { const provider = event.target.value as Workspace['ai']['provider']; onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, provider, baseUrl: providerBaseUrl(provider), enabled: false } })); }}><option value="openai">OpenAI</option><option value="anthropic">Claude / Anthropic</option><option value="gemini">Gemini</option><option value="openai-compatible">Custom or local OpenAI-compatible</option></select></label><label>Model<input disabled={!canEdit} value={workspace.ai.model} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, model: event.target.value } }))} placeholder="model identifier" /></label><label className="wide">Base URL<input disabled={!canEdit} value={workspace.ai.baseUrl} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, baseUrl: event.target.value, enabled: false } }))} placeholder="https://api.openai.com/v1" /></label><label className="wide">API key or secret reference<IntegrationSecretInput disabled={!canEdit} label="AI provider credential" onChange={(apiKey) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, apiKey } }))} placeholder="{{ vault.ai_api_key }}" showPasswords={workspace.preferences.showPasswords} value={workspace.ai.apiKey} /></label></div><div className="policy-list"><label><input checked={workspace.ai.mockGeneration} disabled={!canEdit || !workspace.ai.enabled} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, mockGeneration: event.target.checked } }))} type="checkbox" /> AI-assisted mock generation</label><label><input checked={workspace.ai.commitSuggestions} disabled={!canEdit || !workspace.ai.enabled} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, commitSuggestions: event.target.checked } }))} type="checkbox" /> Git commit grouping and message suggestions</label></div><div className="integration-actions"><button disabled={!canEdit || !workspace.ai.enabled || !workspace.ai.model || Boolean(busy)} onClick={testAi} type="button">Test provider</button></div><p>Hosted credentials must be complete vault references. Local and custom providers may use loopback HTTP; remote providers require HTTPS. AI features send only the input shown at the point of use.</p></section><section className="integration-card"><header><div><small>Explicit use only</small><h2>Data boundary</h2></div><Icon name="spark" size={24} /></header><ul><li>Mock generation sends only the prompt/spec/example you paste.</li><li>Git suggestions send the staged/working diff and listed paths, capped before transmission.</li><li>MCP sampling can generate a provider-backed draft, but only explicit approval returns it to the server.</li><li>No AI provider is bundled, required, or tied to a Brunomnia subscription.</li></ul><pre>{result || 'Provider test output appears here.'}</pre></section></div> : null}
+      {tab === 'ai' ? <div className="integration-grid">
+        <section className="integration-card">
+          <header><div><small>User-selected provider</small><h2>Large language model</h2></div><label className="inline-toggle"><input checked={workspace.ai.enabled} disabled={!canEdit} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, enabled: event.target.checked } }))} type="checkbox" /> Active</label></header>
+          <div className="integration-fields">
+            <label>Provider<select disabled={!canEdit} value={workspace.ai.provider} onChange={(event) => {
+              const provider = event.target.value as Workspace['ai']['provider'];
+              setResult('');
+              onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, provider, baseUrl: providerBaseUrl(provider), model: '', enabled: false } }));
+            }}><option disabled={!native} value="gguf">Local GGUF file</option><option value="openai">OpenAI</option><option value="anthropic">Claude / Anthropic</option><option value="gemini">Gemini</option><option value="openai-compatible">Custom or local OpenAI-compatible</option></select></label>
+            {workspace.ai.provider === 'gguf' ? <div className="gguf-model-field wide"><span>Model</span><div className="gguf-model-picker"><select aria-label="Local GGUF model" disabled={!canEdit || !native} value={workspace.ai.model} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, model: event.target.value, enabled: false } }))}><option value="">Select a model…</option>{workspace.ai.model && !ggufCatalog?.models.some((model) => model.name === workspace.ai.model) ? <option value={workspace.ai.model}>{workspace.ai.model} (missing)</option> : null}{ggufCatalog?.models.map((model) => <option key={model.name} value={model.name}>{model.name} · {formatModelSize(model.size)}</option>)}</select><button aria-label="Refresh local GGUF models" disabled={!native || Boolean(busy)} onClick={refreshGgufModels} title="Refresh local GGUF models" type="button"><Icon name="refresh" size={14} /></button></div></div> : <>
+              <label>Model<input disabled={!canEdit} value={workspace.ai.model} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, model: event.target.value } }))} placeholder="model identifier" /></label>
+              <label className="wide">Base URL<input disabled={!canEdit} value={workspace.ai.baseUrl} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, baseUrl: event.target.value, enabled: false } }))} placeholder="https://api.openai.com/v1" /></label>
+              <label className="wide">API key or secret reference<IntegrationSecretInput disabled={!canEdit} label="AI provider credential" onChange={(apiKey) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, apiKey } }))} placeholder="{{ vault.ai_api_key }}" showPasswords={workspace.preferences.showPasswords} value={workspace.ai.apiKey} /></label>
+            </>}
+          </div>
+          {workspace.ai.provider === 'gguf' ? <>
+            <p className="gguf-folder-path">Place `.gguf` files in <button disabled={!native || Boolean(busy)} onClick={openGgufFolder} type="button">{ggufCatalog?.directory || 'the Brunomnia local-model folder'}</button>, then refresh the list.</p>
+            {!native ? <p>Direct GGUF loading requires the Tauri desktop app.</p> : null}
+            {workspace.ai.model ? <div className="gguf-advanced"><button aria-expanded={showGgufAdvanced} className="gguf-advanced-toggle" onClick={() => setShowGgufAdvanced((current) => !current)} type="button"><span>Advanced options</span><Icon name={showGgufAdvanced ? 'chevron-up' : 'chevron-down'} size={14} /></button>{showGgufAdvanced ? <div className="integration-fields">
+              <label>Temperature (0–2)<input disabled={!canEdit} max="2" min="0" onChange={(event) => updateGgufNumber('temperature', event.target.value, 0, 2)} step="0.1" type="number" value={workspace.ai.temperature} /></label>
+              <label>Top P (0–1)<input disabled={!canEdit} max="1" min="0" onChange={(event) => updateGgufNumber('topP', event.target.value, 0, 1)} step="0.01" type="number" value={workspace.ai.topP} /></label>
+              <label>Top K (0–100)<input disabled={!canEdit} max="100" min="0" onChange={(event) => updateGgufNumber('topK', event.target.value, 0, 100, true)} step="1" type="number" value={workspace.ai.topK} /></label>
+              <label>Repeat penalty (0–10)<input disabled={!canEdit} max="10" min="0" onChange={(event) => updateGgufNumber('repeatPenalty', event.target.value, 0, 10)} step="0.1" type="number" value={workspace.ai.repeatPenalty} /></label>
+              <label className="inline-toggle wide"><input checked={workspace.ai.seed} disabled={!canEdit} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, seed: event.target.checked } }))} type="checkbox" /> Use random seed</label>
+            </div> : null}</div> : null}
+          </> : null}
+          <div className="policy-list"><label><input checked={workspace.ai.mockGeneration} disabled={!canEdit || !workspace.ai.enabled} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, mockGeneration: event.target.checked } }))} type="checkbox" /> AI-assisted mock generation</label><label><input checked={workspace.ai.commitSuggestions} disabled={!canEdit || !workspace.ai.enabled} onChange={(event) => onChangeWorkspace((current) => ({ ...current, ai: { ...current.ai, commitSuggestions: event.target.checked } }))} type="checkbox" /> Git commit grouping and message suggestions</label></div>
+          <div className="integration-actions"><button disabled={!canEdit || !workspace.ai.enabled || !workspace.ai.model || (workspace.ai.provider === 'gguf' && !native) || Boolean(busy)} onClick={testAi} type="button">Test provider</button></div>
+          <p>{workspace.ai.provider === 'gguf' ? 'The selected model runs locally in a crash-isolated llama.cpp worker with an 8K context and 4,096-token output cap.' : 'Hosted credentials must be complete vault references. Local and custom providers may use loopback HTTP; remote providers require HTTPS.'} AI features use only the input shown at the point of use.</p>
+        </section>
+        <section className="integration-card"><header><div><small>Explicit use only</small><h2>Data boundary</h2></div><Icon name="spark" size={24} /></header><ul><li>Mock generation sends only the prompt/spec/example you paste.</li><li>Git suggestions send the staged/working diff and listed paths, capped before transmission.</li><li>MCP sampling can generate a provider-backed draft, but only explicit approval returns it to the server.</li><li>GGUF files and prompts stay on this device; no model, account, or subscription is bundled or required.</li></ul><pre>{result || 'Provider test output appears here.'}</pre></section>
+      </div> : null}
 
       {tab === 'konnect' ? <div className="integration-grid"><section className="integration-card"><header><div><small>Pull-only Gateway integration</small><h2>Konnect</h2></div><label className="inline-toggle"><input checked={workspace.konnect.enabled} disabled={!canEdit} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, enabled: event.target.checked } }))} type="checkbox" /> Enabled</label></header><div className="integration-fields"><label className="wide">Regional API URL<input disabled={!canEdit} value={workspace.konnect.baseUrl} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, baseUrl: event.target.value, enabled: false, controlPlanes: [], controlPlaneId: '' } }))} placeholder="https://us.api.konghq.com" /></label><label className="wide">PAT or system-token reference<IntegrationSecretInput disabled={!canEdit} label="Konnect credential" onChange={(token) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, token } }))} placeholder="{{ vault.konnect_pat }}" showPasswords={workspace.preferences.showPasswords} value={workspace.konnect.token} /></label><label className="wide">Control plane<select disabled={!canEdit || !workspace.konnect.controlPlanes.length} value={workspace.konnect.controlPlaneId} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, controlPlaneId: event.target.value } }))}><option value="">Choose a control plane…</option>{workspace.konnect.controlPlanes.map((plane) => <option key={plane.id} value={plane.id}>{plane.name}</option>)}</select></label></div><div className="integration-actions"><button disabled={!canEdit || !workspace.konnect.enabled || !workspace.konnect.token || Boolean(busy)} onClick={connectKonnect} type="button">Validate and list</button><button disabled={!canEdit || !workspace.konnect.enabled || !workspace.konnect.controlPlaneId || Boolean(busy)} onClick={syncKonnect} type="button">Pull routes</button></div><p>Sync is read-only. Gateway Services become collections with managed route and path/protocol folders; HTTP/HTTPS method/path combinations, WS/WSS paths, and gRPC/GRPCS methods become native requests. Simple expression-router method/path/host/header predicates are converted; unextractable or SNI expressions stay visible in Skipped Routes. Safe control-plane proxy URLs seed managed environment values, with loopback review defaults when unavailable. Later pulls replace remote-managed names, URLs, hierarchy, path parameters, and headers/metadata while preserving local query, auth, body, transport, script, test, custom-header, edited proxy, folder notes, and manually organized local-folder work. SNI and L4 routes remain explicit skips.</p>{workspace.konnect.lastSyncedAt ? <small>Last pulled {new Date(workspace.konnect.lastSyncedAt).toLocaleString()}</small> : null}</section><section className="integration-card"><header><div><small>Credential confinement</small><h2>Konnect boundary</h2></div><Icon name="lock" size={24} /></header><ul><li>Only HTTPS hosts under `*.api.konghq.com` are accepted.</li><li>Pagination cannot leave the configured origin.</li><li>Redirects and cookies are disabled for control-plane calls.</li><li>The PAT is resolved at send time from your local vault or approved external provider.</li><li>Brunomnia never pushes Gateway configuration.</li></ul></section></div> : null}
 

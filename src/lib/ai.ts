@@ -1,5 +1,6 @@
 import type { AiSettings, Environment, HttpMethod, MockServer } from '../types';
 import { createBlankRequest } from '../data/seed';
+import { generateGgufText } from './gguf';
 import { sendRequest, type SendRequestContext } from './http';
 import { isProtectedSecretReference } from './security';
 
@@ -25,6 +26,20 @@ const endpoint = (settings: AiSettings) => {
 export const generateAiText = async (settings: AiSettings, prompt: string, environment: Environment | undefined, context: SendRequestContext) => {
   if (!settings.enabled) throw new Error('Activate an AI provider in Integrations before using AI-assisted workflows.');
   if (!settings.model.trim()) throw new Error('Choose an AI model.');
+  if (settings.provider === 'gguf') {
+    const text = await generateGgufText({
+      model: settings.model,
+      prompt,
+      temperature: settings.temperature,
+      topP: settings.topP,
+      topK: settings.topK,
+      seed: settings.seed,
+      repeatPenalty: settings.repeatPenalty,
+    });
+    if (text.length > 10_000_000) throw new Error('The GGUF model output exceeded the 10 MB safety limit.');
+    if (!text.trim()) throw new Error('The GGUF model did not return text output.');
+    return text;
+  }
   const hosted = settings.provider !== 'openai-compatible';
   if (hosted && !settings.apiKey.trim()) throw new Error('Hosted AI providers require an API key stored in the local vault or an approved external vault.');
   if (settings.apiKey.trim() && !isProtectedSecretReference(settings.apiKey)) throw new Error('AI provider keys must be a complete local-vault or approved external-vault reference.');

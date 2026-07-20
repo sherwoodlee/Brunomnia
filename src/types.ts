@@ -432,7 +432,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 39;
+  version: 40;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -568,10 +568,15 @@ export type McpClient = {
 
 export type AiSettings = {
   enabled: boolean;
-  provider: 'openai' | 'anthropic' | 'gemini' | 'openai-compatible';
+  provider: 'gguf' | 'openai' | 'anthropic' | 'gemini' | 'openai-compatible';
   baseUrl: string;
   model: string;
   apiKey: string;
+  temperature: number;
+  topP: number;
+  topK: number;
+  seed: boolean;
+  repeatPenalty: number;
   mockGeneration: boolean;
   commitSuggestions: boolean;
 };

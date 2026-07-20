@@ -70,7 +70,7 @@ The desktop app starts the configured executable directly with an argument array
 
 The disconnected client editor accepts up to 100 enabled/disabled text environment rows. Names and values render through the selected project environment plus the existing prompt, file, local-vault, and external-vault template boundary immediately before process start. Blank rendered names are omitted and the last enabled duplicate name wins. Sensitive names such as tokens, passwords, secrets, API keys, and private keys require a complete local-vault or approved external-vault reference before rendering.
 
-Native spawn clears the application environment. On Unix it asks the OS-account login shell for `PATH`, falling back to `$SHELL` and the pinned platform default when account lookup is unavailable. Discovery uses the pinned `-ilc` lifecycle and then tries `/bin/zsh` and `/bin/bash` when the default shell fails, all within one five-second deadline and 1 MB output cap; final failure or empty output falls back silently to the app's current `PATH`. Windows uses the app `PATH`, matching the pinned dependency. The temporary discovery shell receives the pinned Oh My Zsh/tmux suppression variables, but the MCP executable itself is still started directly and never through a shell. Reviewed rendered rows apply last, so a reviewed `PATH` can override the discovered default. The child never inherits unrelated ambient variables. Resolved environment values participate in the persistent-session fingerprint, so changing a row or selected environment replaces the child before the next operation. Workspace v39 JSON and split-YAML projects preserve row order, disabled state, and protected references.
+Native spawn clears the application environment. On Unix it asks the OS-account login shell for `PATH`, falling back to `$SHELL` and the pinned platform default when account lookup is unavailable. Discovery uses the pinned `-ilc` lifecycle and then tries `/bin/zsh` and `/bin/bash` when the default shell fails, all within one five-second deadline and 1 MB output cap; final failure or empty output falls back silently to the app's current `PATH`. Windows uses the app `PATH`, matching the pinned dependency. The temporary discovery shell receives the pinned Oh My Zsh/tmux suppression variables, but the MCP executable itself is still started directly and never through a shell. Reviewed rendered rows apply last, so a reviewed `PATH` can override the discovered default. The child never inherits unrelated ambient variables. Resolved environment values participate in the persistent-session fingerprint, so changing a row or selected environment replaces the child before the next operation. Workspace v40 JSON and split-YAML projects preserve row order, disabled state, and protected references.
 
 One dedicated dispatcher continuously owns persistent STDIO output, routes matching responses to bounded waiters, and emits notifications and reviewed server requests even while no operation is active. Canceling removes the exact waiter, sends `notifications/cancelled`, and stops waiting within 50 ms without killing the persistent child. A bounded registry handles cancellation racing ahead of native call registration. A normal server JSON-RPC error also leaves the initialized child reusable. Process exit, malformed protocol output, timeout, stream-limit exhaustion, or another fatal transport error fails every waiter and marks the session unusable. The renderer immediately clears matching connection and subscription state when the dispatcher reports an unexpected idle failure; a later operation terminates and replaces the stale native entry before starting a clean process. The failed operation is never retried silently. Renderer connection state is recorded only after initialization and a reusable operation result, so spawn failures cannot appear connected.
 
@@ -117,12 +117,19 @@ AI is optional and off by default. The provider adapter supports:
 
 | Provider choice | Protocol |
 | --- | --- |
+| Local GGUF file | Native llama.cpp inference in an isolated Brunomnia worker process |
 | OpenAI | OpenAI chat completions |
 | Claude / Anthropic | Anthropic messages |
 | Gemini | Gemini `generateContent` |
 | Custom or local | OpenAI-compatible chat completions |
 
 Remote endpoints require HTTPS. Plain HTTP is allowed only for `localhost`, `127.0.0.1`, or `::1`. Hosted providers require a vault-backed key. A custom/local endpoint may omit a key, or use a protected reference when authentication is needed. Changing the provider or base URL deactivates the configuration for review.
+
+Direct GGUF loading is available in the Tauri desktop app. Brunomnia creates an `llms` folder under its OS app-data directory, lists only regular `.gguf` files directly inside it, stores the selected filename rather than an arbitrary path, and rejects folder/file symlinks, traversal, non-files, and canonical root escapes. **Open folder** and **Refresh** expose the same add-and-rescan flow as pinned Insomnia. No model is downloaded or bundled.
+
+The local controls preserve pinned defaults and ranges: temperature `0.6` (`0`–`2`), top P `0.9` (`0`–`1`), top K `40` (`0`–`100`), random seed enabled, and repeat penalty `1.1` (`0`–`10`). Inference uses the model's embedded chat template when present and otherwise treats the prepared input as the prompt. Context is capped at 8,192 tokens, generated output at 4,096 tokens and 10 MB, input at 1 MB, and the process at ten minutes. macOS builds use Metal when available and retry with CPU model/context offload disabled after an accelerated failure; other desktop targets use CPU unless their build enables another backend.
+
+Each generation launches the Brunomnia executable in a hidden worker mode and exchanges one bounded JSON request/response over pipes. Model loading, prompt decoding, sampling, EOG handling, and stateful UTF-8 decoding happen outside the Tauri UI process, so a native llama.cpp/model crash cannot terminate the main app. The parent kills a worker that exceeds its deadline and reports bounded diagnostics. GGUF prompts never enter the HTTP transport and require no credential.
 
 ### AI mock generation
 
@@ -140,7 +147,7 @@ The project workbench can send a bounded staged/working diff plus the exact chan
 
 Diff input is capped at 200 KB, messages at 200 characters, comments at 1,000 characters, and output at 10 MB after transport buffering. MCP sampling reaches the AI provider only when the user presses **Generate AI draft**; the request parameters are capped at 200,000 characters, generated text at 1 MB, and explicit approval remains mandatory.
 
-Brunomnia does not bundle a model or load `.gguf` files directly. A local model is currently used through a user-run OpenAI-compatible loopback server.
+Local models can be loaded directly from the app-data `llms` folder or reached through a user-run OpenAI-compatible loopback server. Both paths remain optional, account-free, and explicit.
 
 ## Konnect pull
 

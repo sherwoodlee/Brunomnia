@@ -139,7 +139,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 39,
+  version: 40,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -310,7 +310,7 @@ paths:
     audit: [],
   },
   mcpClients: [],
-  ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', mockGeneration: false, commitSuggestions: false },
+  ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false },
   konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] },
   preferences: structuredClone(defaultPreferences),
 };

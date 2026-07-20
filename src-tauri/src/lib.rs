@@ -1,6 +1,7 @@
 mod client_identity;
 mod external_url;
 mod external_vault;
+mod gguf;
 mod grpc_client;
 mod http_client;
 mod mcp_http;
@@ -31,6 +32,10 @@ fn workspace_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .map_err(|error| error.to_string())?;
     fs::create_dir_all(&app_data).map_err(|error| error.to_string())?;
     Ok(app_data.join("workspace.json"))
+}
+
+pub fn run_gguf_worker() -> i32 {
+    gguf::run_worker()
 }
 
 fn workspace_store_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -198,6 +203,24 @@ async fn send_http_request(
     state: State<'_, http_client::HttpCancellationState>,
 ) -> Result<HttpResponseOutput, HttpRequestError> {
     http_client::send_cancellable(input, cancellation_id, state.inner()).await
+}
+
+#[tauri::command]
+fn gguf_list_models(app: AppHandle) -> Result<gguf::GgufModelCatalog, String> {
+    gguf::list_models(&app)
+}
+
+#[tauri::command]
+fn gguf_open_models_folder(app: AppHandle) -> Result<String, String> {
+    gguf::open_models_folder(&app)
+}
+
+#[tauri::command]
+async fn gguf_generate_text(
+    app: AppHandle,
+    input: gguf::GgufGenerationInput,
+) -> Result<String, String> {
+    gguf::generate(app, input).await
 }
 
 #[tauri::command]
@@ -894,6 +917,9 @@ pub fn run() {
             workspace_catalog_restore_trash,
             workspace_catalog_restore_backup,
             template_os_info,
+            gguf_list_models,
+            gguf_open_models_folder,
+            gguf_generate_text,
             send_http_request,
             fetch_public_specification_source,
             cancel_http_request,
