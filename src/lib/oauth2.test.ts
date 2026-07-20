@@ -229,10 +229,17 @@ describe('OAuth 2 native bridge', () => {
       };
     });
 
-    await expect(authorizeOAuth2(prepared, onReady, { proxy: { enabled: true, httpProxy: 'http://http-proxy.test:8080', httpsProxy: 'http://https-proxy.test:8443', noProxy: 'localhost,.internal' } })).resolves.toMatchObject({ parameters: { code: 'code-123' } });
+    await expect(authorizeOAuth2(prepared, onReady, {
+      proxy: { enabled: true, httpProxy: 'http://http-proxy.test:8080', httpsProxy: 'http://https-proxy.test:8443', noProxy: 'localhost,.internal' },
+      validateAuthCertificates: false,
+      certificates: {
+        ca: { enabled: false, pem: '' },
+        clients: [{ id: 'oauth-client', host: 'identity.example.test', enabled: true, certificatePem: 'client-cert', keyPem: 'client-key', pfxBase64: '', passphrase: '' }],
+      },
+    })).resolves.toMatchObject({ parameters: { code: 'code-123' } });
     expect(onReady).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ready', redirectUrl: 'http://127.0.0.1:49154/callback' }));
     expect(tauri.invoke).toHaveBeenCalledWith('oauth2_authorize', expect.objectContaining({
-      input: expect.objectContaining({ flowId: 'oauth2-channel', useDefaultBrowser: false, proxyUrl: 'http://https-proxy.test:8443', proxyExclusions: 'localhost,.internal' }),
+      input: expect.objectContaining({ flowId: 'oauth2-channel', useDefaultBrowser: false, proxyUrl: 'http://https-proxy.test:8443', proxyExclusions: 'localhost,.internal', validateCertificates: false, clientCertificatePem: 'client-cert', clientKeyPem: 'client-key' }),
       onEvent: tauri.channels[0],
     }));
 
@@ -251,7 +258,7 @@ describe('OAuth 2 native bridge', () => {
 
     await authorizeOAuth2(prepared, undefined, { proxy: { enabled: true, httpProxy: 'http://proxy', httpsProxy: 'http://proxy', noProxy: '' } });
 
-    expect(tauri.invoke).toHaveBeenCalledWith('oauth2_authorize', expect.objectContaining({ input: expect.objectContaining({ useDefaultBrowser: true, proxyUrl: '', proxyExclusions: '' }) }));
+    expect(tauri.invoke).toHaveBeenCalledWith('oauth2_authorize', expect.objectContaining({ input: expect.objectContaining({ useDefaultBrowser: true, proxyUrl: '', proxyExclusions: '', validateCertificates: true, clientCertificatePem: '', clientKeyPem: '' }) }));
   });
 
   it('completes authorization-code callbacks through token exchange', async () => {

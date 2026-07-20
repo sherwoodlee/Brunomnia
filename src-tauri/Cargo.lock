@@ -335,7 +335,9 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "block2",
  "chrono",
+ "core-foundation",
  "digest_auth",
  "encoding_rs",
  "futures-util",
@@ -344,6 +346,10 @@ dependencies = [
  "libc",
  "llama-cpp-2",
  "ntlmclient",
+ "objc2",
+ "objc2-foundation",
+ "objc2-security",
+ "objc2-web-kit",
  "p12-keystore",
  "prost",
  "prost-reflect",
@@ -355,6 +361,7 @@ dependencies = [
  "rustls-native-certs",
  "rustls-pki-types",
  "security-framework",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2752,6 +2759,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-security"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "709fe137109bd1e8b5a99390f77a7d8b2961dafc1a1c5db8f2e60329ad6d895a"
+dependencies = [
+ "bitflags 2.13.1",
+ "objc2",
+ "objc2-core-foundation",
+]
+
+[[package]]
 name = "objc2-ui-kit"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2794,6 +2812,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-core-foundation",
  "objc2-foundation",
+ "objc2-security",
 ]
 
 [[package]]

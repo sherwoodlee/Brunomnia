@@ -1,6 +1,7 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import type { ApiRequest, AuthConfig, Environment } from '../types';
 import { createOAuth2AuthorizationUrl, generateCodeVerifier, generateOAuth2State } from './auth';
+import { selectWorkspaceClientCertificate } from './certificates';
 import { fetchOAuth2Token, OAuth2TokenRequestError, type SendRequestContext } from './http';
 
 export type OAuth2CallbackReady = {
@@ -168,6 +169,9 @@ export const authorizeOAuth2 = async (
   const proxyUrl = prepared.browserMode === 'embedded' && proxy?.enabled
     ? (authorizationProtocol === 'http:' ? proxy.httpProxy : proxy.httpsProxy).trim()
     : '';
+  const clientCertificate = prepared.browserMode === 'embedded' && context.certificates
+    ? selectWorkspaceClientCertificate(context.certificates, prepared.authorizationUrl)
+    : undefined;
   return invoke<OAuth2CallbackOutput>('oauth2_authorize', {
     input: {
       flowId: prepared.flowId,
@@ -176,6 +180,11 @@ export const authorizeOAuth2 = async (
       useDefaultBrowser: prepared.browserMode === 'system',
       proxyUrl,
       proxyExclusions: proxyUrl ? proxy?.noProxy.trim() ?? '' : '',
+      validateCertificates: context.validateAuthCertificates ?? true,
+      clientCertificatePem: clientCertificate?.certificatePem ?? '',
+      clientKeyPem: clientCertificate?.keyPem ?? '',
+      clientCertificatePfxBase64: clientCertificate?.pfxBase64 ?? '',
+      clientCertificatePassphrase: clientCertificate?.passphrase ?? '',
     },
     onEvent: channel,
   });

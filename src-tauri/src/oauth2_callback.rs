@@ -47,6 +47,16 @@ pub struct OAuthCallbackInput {
     pub proxy_url: String,
     #[serde(default)]
     pub proxy_exclusions: String,
+    #[serde(default = "default_true")]
+    pub validate_certificates: bool,
+    #[serde(default)]
+    pub client_certificate_pem: String,
+    #[serde(default)]
+    pub client_key_pem: String,
+    #[serde(default)]
+    pub client_certificate_pfx_base64: String,
+    #[serde(default)]
+    pub client_certificate_passphrase: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -86,6 +96,10 @@ enum EmbeddedEvent {
     Redirect(Url),
     Popup(Url),
     Closed,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn validate_flow_id(flow_id: &str) -> Result<(), String> {
@@ -498,7 +512,7 @@ fn configured_proxy(input: &OAuthCallbackInput, target: &Url) -> Result<Option<U
     Ok(Some(proxy))
 }
 
-fn build_embedded_window(
+async fn build_embedded_window(
     app: &AppHandle,
     input: &OAuthCallbackInput,
     prepared: &PreparedAuthorization,
@@ -506,48 +520,96 @@ fn build_embedded_window(
     session_directory: PathBuf,
     sender: mpsc::UnboundedSender<EmbeddedEvent>,
 ) -> Result<WebviewWindow, String> {
+    #[cfg(target_os = "macos")]
+    let webview_policy = crate::oauth2_webview_macos::prepare_policy(
+        &input.flow_id,
+        &prepared.authorization_url,
+        input.validate_certificates,
+        crate::models::TransportConfig {
+            client_certificate_pem: input.client_certificate_pem.clone(),
+            client_key_pem: input.client_key_pem.clone(),
+            client_certificate_pfx_base64: input.client_certificate_pfx_base64.clone(),
+            client_certificate_passphrase: input.client_certificate_passphrase.clone(),
+            ..crate::models::TransportConfig::default()
+        },
+    )?;
     let navigation_redirect = prepared.redirect_url.clone();
     let navigation_sender = sender.clone();
     let load_redirect = prepared.redirect_url.clone();
     let load_sender = sender.clone();
     let popup_sender = sender.clone();
     let label = format!("oauth2-auth-{}", input.flow_id);
-    let mut builder = WebviewWindowBuilder::new(
-        app,
-        label,
-        WebviewUrl::External(prepared.authorization_url.clone()),
-    )
-    .title("OAuth 2 Authorization")
-    .inner_size(960.0, 720.0)
-    .min_inner_size(480.0, 360.0)
-    .data_directory(session_directory)
-    .data_store_identifier(*session_id.as_bytes())
-    .on_navigation(move |url| {
-        if redirect_parameters(&navigation_redirect, url).is_some() {
-            let _ = navigation_sender.send(EmbeddedEvent::Redirect(url.clone()));
-            false
-        } else {
-            true
-        }
-    })
-    .on_page_load(move |_window, payload| {
-        if redirect_parameters(&load_redirect, payload.url()).is_some() {
-            let _ = load_sender.send(EmbeddedEvent::Redirect(payload.url().clone()));
-        }
-    })
-    .on_new_window(move |url, _features| {
-        let _ = popup_sender.send(EmbeddedEvent::Popup(url));
-        NewWindowResponse::Deny
-    });
+    let initial_url = Url::parse("about:blank").expect("about:blank is a valid URL");
+    let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::External(initial_url))
+        .title("OAuth 2 Authorization")
+        .inner_size(960.0, 720.0)
+        .min_inner_size(480.0, 360.0)
+        .data_directory(session_directory)
+        .data_store_identifier(*session_id.as_bytes())
+        .on_navigation(move |url| {
+            if redirect_parameters(&navigation_redirect, url).is_some() {
+                let _ = navigation_sender.send(EmbeddedEvent::Redirect(url.clone()));
+                false
+            } else {
+                true
+            }
+        })
+        .on_page_load(move |_window, payload| {
+            if redirect_parameters(&load_redirect, payload.url()).is_some() {
+                let _ = load_sender.send(EmbeddedEvent::Redirect(payload.url().clone()));
+            }
+        })
+        .on_new_window(move |url, _features| {
+            let _ = popup_sender.send(EmbeddedEvent::Popup(url));
+            NewWindowResponse::Deny
+        });
     if let Some(proxy) = configured_proxy(input, &prepared.authorization_url)? {
         builder = builder.proxy_url(proxy);
     }
     let window = builder.build().map_err(|error| error.to_string())?;
+    #[cfg(target_os = "macos")]
+    let flow_id = input.flow_id.clone();
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::CloseRequested { .. }) {
             let _ = sender.send(EmbeddedEvent::Closed);
         }
+        #[cfg(target_os = "macos")]
+        if matches!(event, WindowEvent::Destroyed) {
+            crate::oauth2_webview_macos::remove_policy(&flow_id);
+        }
     });
+    #[cfg(target_os = "macos")]
+    {
+        let (installed, installation) = oneshot::channel();
+        if let Err(error) = window.with_webview(move |webview| {
+            let result = unsafe {
+                crate::oauth2_webview_macos::install_policy(webview.inner(), webview_policy)
+            };
+            let _ = installed.send(result);
+        }) {
+            let _ = window.destroy();
+            return Err(error.to_string());
+        }
+        match timeout(CONNECTION_TIMEOUT, installation).await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(error))) => {
+                let _ = window.destroy();
+                return Err(error);
+            }
+            Ok(Err(_)) => {
+                let _ = window.destroy();
+                return Err("The OAuth certificate policy installer stopped unexpectedly.".into());
+            }
+            Err(_) => {
+                let _ = window.destroy();
+                return Err("Installing the OAuth certificate policy timed out.".into());
+            }
+        }
+    }
+    if let Err(error) = window.navigate(prepared.authorization_url.clone()) {
+        let _ = window.destroy();
+        return Err(error.to_string());
+    }
     Ok(window)
 }
 
@@ -690,7 +752,9 @@ where
         session_id,
         session_directory,
         sender,
-    ) {
+    )
+    .await
+    {
         Ok(window) => window,
         Err(error) => {
             state.flows.lock().await.remove(&input.flow_id);
@@ -790,6 +854,11 @@ mod tests {
             use_default_browser: true,
             proxy_url: String::new(),
             proxy_exclusions: String::new(),
+            validate_certificates: true,
+            client_certificate_pem: String::new(),
+            client_key_pem: String::new(),
+            client_certificate_pfx_base64: String::new(),
+            client_certificate_passphrase: String::new(),
         }
     }
 

@@ -2550,6 +2550,19 @@ Compatibility bounds remain explicit: built-in GitHub/GitLab authentication uses
 
 Compatibility bounds remain explicit: Brunomnia's richer local snapshots, physical typed-file records, and browser fallback are account-free extensions, not substitutes for the still-open Cloud Sync service. Local projects and persistence is now `Complete`; exactly 11 parity rows remain incomplete, so Brunomnia is not declared feature-complete. No executable behavior changed in this corrective audit.
 
+## Milestone 256 — embedded OAuth authentication challenges (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Corrective pinned audit | Complete | Pinned `authorize-user-in-window.ts` has exactly two explicit certificate behaviors: session-wide auth TLS validation and Electron's client-certificate event; its smoke suite uses one local OIDC fixture rather than a credentialed provider/OS matrix |
+| Safe WebKit hook | Complete | The OAuth window starts on `about:blank`, installs WebKit's optional authentication-challenge selector on Wry's existing navigation-delegate class, registers a per-WebView policy, and only then navigates to the authorization URL; destruction removes the policy |
+| Server trust | Complete | Enabled validation delegates to platform trust, disabled auth validation returns a credential for the exact WebKit server-trust challenge, repeated failed challenges cancel, and all other HTTP/proxy/authentication variants keep platform default handling |
+| Client identity | Complete | The frontend reuses port-first/host-fallback file-owned certificate selection; bounded PEM, modern/legacy PKCS#12, EC SEC1/PKCS#8, and RSA PKCS#1 material becomes an in-memory Security.framework identity without adding private material to macOS Keychain |
+| Origin confinement | Complete | A configured identity is offered only when the challenge protocol, case-insensitive host, and effective port match the original authorization origin; redirects cannot solicit that identity from another origin |
+| Executable evidence | Complete | IPC regressions, Security.framework identity/credential construction, optional-selector registration, challenge classification, full 655-test frontend and 161-test native suites, strict build/clippy/audit, CLI smokes, and an app-only Tauri bundle verify the closure |
+
+Compatibility bounds remain explicit: macOS is Brunomnia's packaged desktop target for this WebKit implementation. Provider-specific hosted credentials are not required to reproduce a protocol and TLS challenge contract that the pinned project itself tests with a local OIDC provider. Rendered interaction QA remains omitted by standing direction. Request authentication is now `Complete`; exactly 10 parity rows remain incomplete, so Brunomnia is not declared feature-complete.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.
