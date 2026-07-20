@@ -238,6 +238,15 @@ const validKonnectProxyHost = (host: string) => {
 
 const normalizeKonnect = (value: unknown, defaults: KonnectConfig): KonnectConfig => {
   const source = record(value);
+  const deploymentTypes = new Set<KonnectConfig['controlPlanes'][number]['deploymentType']>(['k8sIngressController', 'dedicatedCloud', 'serverless', 'group', 'selfManaged']);
+  const configuredRegion = (() => {
+    try {
+      const labels = new URL(stringValue(source?.baseUrl, defaults.baseUrl)).hostname.split('.');
+      return labels.length === 4 && labels.slice(1).join('.') === 'api.konghq.com' ? labels[0] : '';
+    } catch {
+      return '';
+    }
+  })();
   const controlPlanes = !Array.isArray(source?.controlPlanes) ? [] : source.controlPlanes.flatMap((item): KonnectConfig['controlPlanes'] => {
     const plane = record(item);
     const id = stringValue(plane?.id);
@@ -251,14 +260,29 @@ const normalizeKonnect = (value: unknown, defaults: KonnectConfig): KonnectConfi
       if (!validKonnectProxyHost(host) || !Number.isInteger(port) || port < 1 || port > 65_535 || !['http', 'https', 'ws', 'wss', 'grpc', 'grpcs'].includes(protocol)) return [];
       return [{ host, port, protocol: protocol as KonnectConfig['controlPlanes'][number]['proxyUrls'][number]['protocol'] }];
     }).slice(0, 100);
-    return [{ id, name: stringValue(plane.name, id).slice(0, 500), description: stringValue(plane.description).slice(0, 20_000), proxyUrls }];
+    const deploymentType = stringValue(plane.deploymentType) as KonnectConfig['controlPlanes'][number]['deploymentType'];
+    return [{
+      id,
+      name: stringValue(plane.name, id).slice(0, 500),
+      description: stringValue(plane.description).slice(0, 20_000),
+      region: stringValue(plane.region, configuredRegion).replace(/[^a-z0-9-]/gi, '').slice(0, 32),
+      clusterType: stringValue(plane.clusterType).slice(0, 200),
+      deploymentType: deploymentTypes.has(deploymentType) ? deploymentType : 'selfManaged',
+      proxyUrls,
+    }];
   }).slice(0, 1_000);
+  const managedDeploymentType = stringValue(source?.managedDeploymentType) as KonnectConfig['controlPlanes'][number]['deploymentType'];
   return {
     enabled: source?.enabled === true,
     baseUrl: stringValue(source?.baseUrl, defaults.baseUrl),
     token: stringValue(source?.token),
     controlPlaneId: stringValue(source?.controlPlaneId),
     controlPlanes,
+    managedByWorkspaceId: stringValue(source?.managedByWorkspaceId).slice(0, 128) || undefined,
+    managedControlPlaneId: stringValue(source?.managedControlPlaneId).slice(0, 500) || undefined,
+    managedRegion: stringValue(source?.managedRegion).replace(/[^a-z0-9-]/gi, '').slice(0, 32) || undefined,
+    managedClusterType: stringValue(source?.managedClusterType).slice(0, 200) || undefined,
+    managedDeploymentType: deploymentTypes.has(managedDeploymentType) ? managedDeploymentType : undefined,
     lastSyncedAt: typeof source?.lastSyncedAt === 'string' ? source.lastSyncedAt : undefined,
   };
 };
@@ -847,7 +871,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   }));
   return {
     ...workspace,
-    version: 43,
+    version: 44,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',
@@ -894,7 +918,7 @@ export const secureImportedWorkspace = (value: unknown): Workspace => {
     mcpSessions: [],
     mcpClients: workspace.mcpClients.map((client) => ({ ...client, enabled: false, token: '', password: '', oauthClientSecret: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none' })),
     ai: { ...workspace.ai, enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false },
-    konnect: { ...workspace.konnect, enabled: false, token: '' },
+    konnect: { ...workspace.konnect, enabled: false, token: '', managedByWorkspaceId: undefined, managedControlPlaneId: undefined, managedRegion: undefined, managedClusterType: undefined, managedDeploymentType: undefined },
     preferences: structuredClone(defaultPreferences),
   };
 };

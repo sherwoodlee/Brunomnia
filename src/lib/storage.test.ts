@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
 import { normalizeGraphqlSchema } from './graphql';
 import { migrateWorkspace, parseWorkspaceImport } from './storage';
-import { createBlankWorkspace, createCatalogWorkspace, createCatalogWorkspaceSnapshot, createWorkspaceDuplicate, deleteCatalogWorkspace, duplicateCatalogProjectWorkspace, emptyDeletedCatalogWorkspaces, listCatalogProjectWorkspaces, listCatalogWorkspaceSnapshots, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, moveCatalogProjectWorkspace, openCatalogWorkspace, purgeDeletedCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreCatalogWorkspaceSnapshot, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
+import { createBlankWorkspace, createCatalogWorkspace, createCatalogWorkspaceInactive, createCatalogWorkspaceSnapshot, createWorkspaceDuplicate, deleteCatalogWorkspace, duplicateCatalogProjectWorkspace, emptyDeletedCatalogWorkspaces, listCatalogProjectWorkspaces, listCatalogWorkspaceSnapshots, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, moveCatalogProjectWorkspace, openCatalogWorkspace, purgeDeletedCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreCatalogWorkspaceSnapshot, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
 
 class MemoryStorage implements Storage {
   readonly values = new Map<string, string>();
@@ -28,7 +28,7 @@ describe('local project catalog', () => {
 
   it('creates initial and named local projects with no typed files', async () => {
     const initial = await loadWorkspaceCatalog();
-    expect(initial.workspace).toMatchObject({ name: 'Local Workspace', version: 43, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
+    expect(initial.workspace).toMatchObject({ name: 'Local Workspace', version: 44, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
     expect(await listCatalogProjectWorkspaces(initial.activeWorkspaceId)).toEqual([]);
     expect(JSON.parse(localStorage.getItem(`brunomnia.project.${initial.activeWorkspaceId}.v1`)!)).toMatchObject({ format: 'brunomnia-project-store', version: 1, records: [] });
 
@@ -36,6 +36,18 @@ describe('local project catalog', () => {
     expect(created.workspace).toMatchObject({ name: 'Empty Project', collections: [], environments: [], apiDesigns: [], mockServers: [], mcpClients: [] });
     expect(await listCatalogProjectWorkspaces('empty-project')).toEqual([]);
     expect((await createCatalogWorkspaceSnapshot('empty-project', 'Empty baseline')).fileCount).toBe(0);
+  });
+
+  it('creates inactive projects without switching or overwriting the active project', async () => {
+    const initial = await loadWorkspaceCatalog();
+    const active = { ...initial.workspace, name: 'Active coordinator' };
+    await saveCatalogWorkspace(initial.activeWorkspaceId, active);
+
+    const created = await createCatalogWorkspaceInactive(createBlankWorkspace('Managed control plane', initial.workspace.preferences), 'managed-control-plane');
+
+    expect(created.activeWorkspaceId).toBe(initial.activeWorkspaceId);
+    expect(created.workspace.name).toBe('Active coordinator');
+    expect((await readCatalogWorkspace('managed-control-plane')).name).toBe('Managed control plane');
   });
 
   it('migrates the legacy browser workspace and manages project lifecycle', async () => {
@@ -81,6 +93,7 @@ describe('local project catalog', () => {
     const initial = await loadWorkspaceCatalog();
     const second = createBlankWorkspace('Second', initial.workspace.preferences);
     second.environments.push({ id: 'private-environment', name: 'Private', variables: [], parentId: '', private: true });
+    second.konnect = { ...second.konnect, managedByWorkspaceId: initial.activeWorkspaceId, managedControlPlaneId: 'cp-one', managedRegion: 'us', managedClusterType: 'CLUSTER_TYPE_CONTROL_PLANE', managedDeploymentType: 'dedicatedCloud' };
     await createCatalogWorkspace(second, 'second');
     await createCatalogWorkspace(createBlankWorkspace('Third', initial.workspace.preferences), 'third');
     await openCatalogWorkspace(initial.activeWorkspaceId);
@@ -101,6 +114,8 @@ describe('local project catalog', () => {
     expect(duplicate.streamSessions).toEqual([]);
     expect(duplicate.runnerReports).toEqual([]);
     expect(duplicate.project).toMatchObject({ mode: 'local', path: '', remoteUrl: '' });
+    expect(duplicate.konnect).toMatchObject({ enabled: false, token: '' });
+    expect(duplicate.konnect.managedControlPlaneId).toBeUndefined();
     expect(duplicate.collaboration).toMatchObject({ mode: 'off', path: '', revision: 0 });
 
     const copied = await createCatalogWorkspace(duplicate, 'second-copy');
@@ -272,7 +287,7 @@ describe('local project catalog', () => {
 describe('workspace migrations', () => {
   it('preserves explicit v42 empty projects while repairing legacy empty documents', () => {
     const empty = createBlankWorkspace('Empty', cloneSeedWorkspace().preferences);
-    expect(migrateWorkspace(empty)).toMatchObject({ version: 43, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
+    expect(migrateWorkspace(empty)).toMatchObject({ version: 44, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
 
     const legacy = { ...empty, version: 41 };
     const migratedLegacy = migrateWorkspace(legacy);
@@ -339,7 +354,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(43);
+    expect(migrated.version).toBe(44);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
@@ -391,7 +406,7 @@ describe('workspace migrations', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(43);
+    expect(migrated.version).toBe(44);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
@@ -415,7 +430,7 @@ describe('workspace migrations', () => {
     }, { id: 'orphan', suiteId: 'missing', tests: [] }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(43);
+    expect(migrated.version).toBe(44);
     expect(migrated.testSuites).toHaveLength(1);
     expect(migrated.testSuites[0].collectionId).toBe(migrated.collections[0].id);
     expect(migrated.testSuites[0].tests.map((test) => [test.id, test.requestId])).toEqual([['test-two', null], ['test-one', requestId]]);
@@ -469,7 +484,7 @@ describe('workspace migrations', () => {
     };
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(43);
+    expect(migrated.version).toBe(44);
     expect(migrated.collections[0].requests[0].grpc).toMatchObject({
       protoText: 'syntax = "proto3"; service Legacy {}',
       protoEntryPath: 'schema.proto',
@@ -494,7 +509,7 @@ describe('workspace migrations', () => {
 
     const migrated = migrateWorkspace(workspace);
     const grpc = migrated.collections[0].requests[0].grpc;
-    expect(migrated.version).toBe(43);
+    expect(migrated.version).toBe(44);
     expect(grpc.descriptorSource).toBe('buf');
     expect(grpc.reflectionApiUrl).toHaveLength(8_192);
     expect(grpc.reflectionApiKey).toHaveLength(65_536);
@@ -512,7 +527,7 @@ describe('workspace migrations', () => {
     };
     workspace.cookies = [{ id: 'legacy-cookie', name: 'sid', value: 'legacy', domain: 'api.example.test', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-20T00:00:00.000Z' }];
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(43);
+    expect(migrated.version).toBe(44);
     expect(migrated.certificates).toEqual({ ca: { enabled: false, pem: '' }, clients: [] });
     expect(Object.values(migrated.fileState)).not.toHaveLength(0);
     expect(Object.values(migrated.fileState)).toEqual(expect.arrayContaining([{
@@ -627,7 +642,7 @@ describe('workspace migrations', () => {
     environments[0].environmentEditorMode = 'raw';
     (environments[0].variables as Array<Record<string, unknown>>).push({ id: 'global-config', name: 'globalConfig', value: '{"enabled":true}', valueType: 'json', enabled: true });
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(43);
+    expect(migrated.version).toBe(44);
     expect(migrated.collections[0]).toMatchObject({ environmentEditorMode: 'raw', environment: [expect.objectContaining({ name: 'config', valueType: 'json' })] });
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', environmentEditorMode: 'raw', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
@@ -706,7 +721,7 @@ describe('workspace migrations', () => {
     }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(43);
+    expect(migrated.version).toBe(44);
     expect(migrated.mcpClients[0].env).toEqual([{ id: 'stdio-env', name: 'MODE', value: 'review', enabled: false, description: '' }]);
     expect(migrated.mcpClients[0].resourceTemplates[0]).toMatchObject({
       uri: 'files://{/path}{?query,limit}',
@@ -728,7 +743,7 @@ describe('workspace migrations', () => {
       id: 'mcp-one', name: 'Imported MCP', enabled: true, transport: 'http', url: 'https://mcp.example', command: '', args: [], env: [{ id: 'mode', name: 'MODE', value: 'review', enabled: true }], headers: [], authType: 'oauth2', token: 'raw-token', username: '', password: 'raw-password', oauthAuthorizationUrl: 'https://identity.example/authorize', oauthAccessTokenUrl: 'https://identity.example/token', oauthClientId: 'client', oauthClientSecret: 'raw-client-secret', oauthScope: 'mcp', oauthState: 'state', oauthRefreshToken: 'raw-refresh', oauthIdentityToken: 'raw-identity', oauthExpiresAt: 123, oauthTokenPrefix: 'DPoP', oauthRegisteredClientId: 'registered-client', oauthRegisteredClientSecret: 'registered-secret', oauthRegisteredClientIdIssuedAt: 11, oauthRegisteredClientSecretExpiresAt: 22, oauthRegisteredTokenEndpointAuthMethod: 'client_secret_basic', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [],
     }];
     exported.ai = { ...exported.ai, enabled: true, apiKey: 'raw-ai-key', mockGeneration: true, commitSuggestions: true };
-    exported.konnect = { ...exported.konnect, enabled: true, token: 'raw-konnect-token' };
+    exported.konnect = { ...exported.konnect, enabled: true, token: 'raw-konnect-token', managedByWorkspaceId: 'coordinator', managedControlPlaneId: 'cp-one', managedRegion: 'us', managedClusterType: 'CLUSTER_TYPE_CONTROL_PLANE', managedDeploymentType: 'dedicatedCloud' };
     exported.preferences = { ...exported.preferences, theme: 'light', fontSize: 22, interfaceFontSize: 21, fontInterface: 'Imported UI', fontMonospace: 'Imported Mono', showPasswords: true, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: true, preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 99, maxHistoryResponses: -1, filterResponsesByEnv: true, requestTimeoutMs: 123_000, allowScriptRequests: true, allowScriptFileAccess: true, dataFolders: ['/private/imported-authority'], enableVaultInScripts: true, forceVerticalLayout: true, editorIndentWithTabs: false, editorIndentSize: 8, editorLineWrapping: false, fontVariantLigatures: true };
 
     const imported = parseWorkspaceImport(JSON.stringify(exported));
@@ -739,6 +754,7 @@ describe('workspace migrations', () => {
     expect(imported.mcpClients[0].env).toEqual([{ id: 'mode', name: 'MODE', value: 'review', enabled: true, description: '' }]);
     expect(imported.ai).toMatchObject({ enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false });
     expect(imported.konnect).toMatchObject({ enabled: false, token: '' });
+    expect(imported.konnect.managedControlPlaneId).toBeUndefined();
     expect(imported.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, validateCertificates: true, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', allowScriptRequests: false, allowScriptFileAccess: false, dataFolders: [], enableVaultInScripts: false });
     expect(imported.preferences).toMatchObject({ useBulkHeaderEditor: false, useBulkParametersEditor: false });
     expect(imported.preferences).toMatchObject({ forceVerticalLayout: false, editorIndentWithTabs: true, editorIndentSize: 2, editorLineWrapping: true, fontVariantLigatures: false });

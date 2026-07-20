@@ -1168,10 +1168,11 @@ pub fn save(root: &Path, workspace_id: &str, workspace: &Value) -> Result<(), St
     write_catalog(root, &catalog)
 }
 
-pub fn create(
+fn create_with_activation(
     root: &Path,
     workspace_id: &str,
     workspace: &Value,
+    activate: bool,
 ) -> Result<WorkspaceCatalogSnapshot, String> {
     validate_workspace_id(workspace_id)?;
     if !workspace_is_valid(workspace) {
@@ -1213,9 +1214,27 @@ pub fn create(
     catalog
         .entries
         .push(new_entry(workspace_id.into(), workspace));
-    catalog.active_workspace_id = workspace_id.into();
+    if activate || catalog.active_workspace_id.is_empty() {
+        catalog.active_workspace_id = workspace_id.into();
+    }
     write_catalog(root, &catalog)?;
     snapshot(root, catalog, recovery)
+}
+
+pub fn create(
+    root: &Path,
+    workspace_id: &str,
+    workspace: &Value,
+) -> Result<WorkspaceCatalogSnapshot, String> {
+    create_with_activation(root, workspace_id, workspace, true)
+}
+
+pub fn create_inactive(
+    root: &Path,
+    workspace_id: &str,
+    workspace: &Value,
+) -> Result<WorkspaceCatalogSnapshot, String> {
+    create_with_activation(root, workspace_id, workspace, false)
 }
 
 pub fn rename(
@@ -1978,6 +1997,19 @@ mod tests {
         assert_eq!(restored_entry.updated_at, deleted_updated_at);
         assert_eq!(fs::read(vault).unwrap(), b"encrypted");
         assert!(list_trash(&root).unwrap().is_empty());
+    }
+
+    #[test]
+    fn creates_inactive_projects_without_switching_the_active_project() {
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("workspaces");
+        let initial = load(&root, None, &workspace("Coordinator")).unwrap();
+
+        let created = create_inactive(&root, "managed", &workspace("Managed")).unwrap();
+
+        assert_eq!(created.active_workspace_id, initial.active_workspace_id);
+        assert_eq!(created.workspace["name"], "Coordinator");
+        assert_eq!(read(&root, "managed").unwrap()["name"], "Managed");
     }
 
     #[test]

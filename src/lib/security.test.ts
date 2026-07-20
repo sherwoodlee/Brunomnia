@@ -17,6 +17,7 @@ describe('encrypted collaboration boundaries', () => {
     workspace.certificates = { ca: { enabled: true, pem: 'private-ca' }, clients: [{ id: 'cert', host: 'private.example', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }] };
     workspace.fileState[workspace.collections[0].id] = { cookies: workspace.cookies, certificates: workspace.certificates };
     workspace.collections[0].requests[0].auth = { ...workspace.collections[0].requests[0].auth, type: 'oauth2', code: 'code', codeVerifier: 'verifier', accessToken: 'access', identityToken: 'identity', refreshToken: 'refresh', expiresAt: 123 };
+    workspace.konnect = { ...workspace.konnect, managedByWorkspaceId: 'coordinator', managedControlPlaneId: 'cp-one', managedRegion: 'us', managedClusterType: 'CLUSTER_TYPE_CONTROL_PLANE', managedDeploymentType: 'dedicatedCloud' };
 
     const shared = shareableWorkspace(workspace);
     expect(shared.history).toEqual([]);
@@ -30,6 +31,7 @@ describe('encrypted collaboration boundaries', () => {
     expect(shared.fileState).toEqual({});
     expect(shared.collections).toHaveLength(workspace.collections.length);
     expect(shared.collections[0].requests[0].auth).toMatchObject({ code: '', codeVerifier: '', accessToken: '', identityToken: '', refreshToken: '', expiresAt: 0 });
+    expect(shared.konnect.managedControlPlaneId).toBeUndefined();
     expect(workspace.collections[0].requests[0].auth.accessToken).toBe('access');
   });
 

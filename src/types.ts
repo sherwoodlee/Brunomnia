@@ -438,7 +438,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 43;
+  version: 44;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -593,6 +593,9 @@ export type KonnectControlPlane = {
   id: string;
   name: string;
   description: string;
+  region: string;
+  clusterType: string;
+  deploymentType: 'k8sIngressController' | 'dedicatedCloud' | 'serverless' | 'group' | 'selfManaged';
   proxyUrls: Array<{
     host: string;
     port: number;
@@ -606,6 +609,11 @@ export type KonnectConfig = {
   token: string;
   controlPlaneId: string;
   controlPlanes: KonnectControlPlane[];
+  managedByWorkspaceId?: string;
+  managedControlPlaneId?: string;
+  managedRegion?: string;
+  managedClusterType?: string;
+  managedDeploymentType?: KonnectControlPlane['deploymentType'];
   lastSyncedAt?: string;
 };
 

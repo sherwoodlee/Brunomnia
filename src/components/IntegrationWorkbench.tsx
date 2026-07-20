@@ -5,6 +5,7 @@ import { generateAiText } from '../lib/ai';
 import { listGgufModels, openGgufModelsFolder, type GgufModelCatalog } from '../lib/gguf';
 import type { SendRequestContext } from '../lib/http';
 import { loadKonnectControlPlanes, syncKonnectRoutes } from '../lib/konnect';
+import { konnectCatalogSummaryLines, syncKonnectCatalog, type KonnectCatalogSyncResult } from '../lib/konnectCatalog';
 import { disconnectMcpClient, discoverMcpClient, hasMcpClientSession, invokeMcpOperation, mcpClientSessionState, mcpResourceSubscriptionState, notifyMcpRootsChanged, respondMcpServerRequest, setMcpResourceSubscription, type McpEvent, type McpReviewedServerRequest, type McpServerRequest, type McpServerRequestResponse } from '../lib/mcp';
 import { appendMcpHistoryEvents, clearMcpHistorySessions, createMcpHistorySession, deleteMcpHistorySession, filterMcpHistoryEvents, finishMcpHistorySession, markMcpHistoryConnected, mcpHistorySections, retainMcpHistorySession, visibleMcpHistory } from '../lib/mcpHistory';
 import { initialMcpToolParameters, mcpParameterIssues, renameMcpParameterValue, withMcpParameterValue, withoutMcpParameterValue, type McpParameterPath } from '../lib/mcpParameterSchema';
@@ -14,6 +15,7 @@ import { Icon } from './Icon';
 import { McpParameterField } from './McpParameterField';
 import { McpServerRequestPanel } from './McpServerRequestPanel';
 import { emptyWorkspaceFileState, getWorkspaceFileState } from '../lib/workspaceFileState';
+import type { WorkspaceCatalogSnapshot } from '../lib/workspaceCatalog';
 
 type IntegrationWorkbenchProps = {
   workspace: Workspace;
@@ -22,6 +24,10 @@ type IntegrationWorkbenchProps = {
   environment: Environment | undefined;
   requestContext: SendRequestContext;
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
+  onRefreshWorkspaceCatalog: (snapshot: WorkspaceCatalogSnapshot) => void;
+  onWorkspaceCatalogMutationEnd: () => void;
+  onWorkspaceCatalogMutationStart: () => void;
+  workspaceCatalogBusy: boolean;
 };
 
 const newMcpClient = (): McpClient => ({
@@ -104,7 +110,7 @@ function IntegrationSecretInput({ disabled, label, onChange, placeholder, showPa
   return <span className={`integration-secret-field${showPasswords ? '' : ' masked'}`}><input disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={inputType} value={value} />{!showPasswords ? <button aria-label={masked ? `Show ${label}` : `Hide ${label}`} disabled={disabled} onClick={() => setRevealed((current) => !current)} type="button">{masked ? 'Show' : 'Hide'}</button> : null}</span>;
 }
 
-export function IntegrationWorkbench({ workspace, workspaceId, workspaceFileId, environment, requestContext: baseRequestContext, onChangeWorkspace }: IntegrationWorkbenchProps) {
+export function IntegrationWorkbench({ workspace, workspaceId, workspaceFileId, environment, requestContext: baseRequestContext, onChangeWorkspace, onRefreshWorkspaceCatalog, onWorkspaceCatalogMutationEnd, onWorkspaceCatalogMutationStart, workspaceCatalogBusy }: IntegrationWorkbenchProps) {
   const [tab, setTab] = useState<'mcp' | 'ai' | 'konnect'>('mcp');
   const [activeId, setActiveId] = useState(workspace.mcpClients[0]?.id ?? '');
   const activeFileState = getWorkspaceFileState(workspace, activeId || workspaceFileId);
@@ -128,6 +134,7 @@ export function IntegrationWorkbench({ workspace, workspaceId, workspaceFileId, 
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [konnectCatalogResult, setKonnectCatalogResult] = useState<KonnectCatalogSyncResult>();
   const [ggufCatalog, setGgufCatalog] = useState<GgufModelCatalog>();
   const [showGgufAdvanced, setShowGgufAdvanced] = useState(false);
   const [, setSessionRevision] = useState(0);
@@ -579,6 +586,25 @@ export function IntegrationWorkbench({ workspace, workspaceId, workspaceFileId, 
     setMessage(`Pulled ${output.services} services and ${output.routes} routes · ${output.skipped} unsupported routes placed in Skipped Routes.`);
   });
 
+  const syncAllKonnect = () => canEdit && !workspaceCatalogBusy && run('Syncing all Konnect control planes', async () => {
+    onWorkspaceCatalogMutationStart();
+    try {
+      const output = await syncKonnectCatalog({
+        coordinator: workspace,
+        coordinatorWorkspaceId: workspaceId,
+        environment,
+        requestContext,
+        onProgress: setMessage,
+      });
+      setKonnectCatalogResult(output);
+      onChangeWorkspace(() => output.coordinator);
+      onRefreshWorkspaceCatalog(output.catalog);
+      setMessage(`Synced ${output.controlPlanes.total} control planes, ${output.services.total} services, and ${output.routes.total} request routes in ${(output.durationMs / 1_000).toFixed(1)} s.`);
+    } finally {
+      onWorkspaceCatalogMutationEnd();
+    }
+  });
+
   return (
     <section className="integration-workbench">
       <header className="integration-header">
@@ -652,7 +678,18 @@ export function IntegrationWorkbench({ workspace, workspaceId, workspaceFileId, 
         <section className="integration-card"><header><div><small>Explicit use only</small><h2>Data boundary</h2></div><Icon name="spark" size={24} /></header><ul><li>Mock generation sends only the prompt/spec/example you paste.</li><li>Git suggestions send the staged/working diff and listed paths, capped before transmission.</li><li>MCP sampling can generate a provider-backed draft, but only explicit approval returns it to the server.</li><li>GGUF files and prompts stay on this device; no model, account, or subscription is bundled or required.</li></ul><pre>{result || 'Provider test output appears here.'}</pre></section>
       </div> : null}
 
-      {tab === 'konnect' ? <div className="integration-grid"><section className="integration-card"><header><div><small>Pull-only Gateway integration</small><h2>Konnect</h2></div><label className="inline-toggle"><input checked={workspace.konnect.enabled} disabled={!canEdit} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, enabled: event.target.checked } }))} type="checkbox" /> Enabled</label></header><div className="integration-fields"><label className="wide">Regional API URL<input disabled={!canEdit} value={workspace.konnect.baseUrl} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, baseUrl: event.target.value, enabled: false, controlPlanes: [], controlPlaneId: '' } }))} placeholder="https://us.api.konghq.com" /></label><label className="wide">PAT or system-token reference<IntegrationSecretInput disabled={!canEdit} label="Konnect credential" onChange={(token) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, token } }))} placeholder="{{ vault.konnect_pat }}" showPasswords={workspace.preferences.showPasswords} value={workspace.konnect.token} /></label><label className="wide">Control plane<select disabled={!canEdit || !workspace.konnect.controlPlanes.length} value={workspace.konnect.controlPlaneId} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, controlPlaneId: event.target.value } }))}><option value="">Choose a control plane…</option>{workspace.konnect.controlPlanes.map((plane) => <option key={plane.id} value={plane.id}>{plane.name}</option>)}</select></label></div><div className="integration-actions"><button disabled={!canEdit || !workspace.konnect.enabled || !workspace.konnect.token || Boolean(busy)} onClick={connectKonnect} type="button">Validate and list</button><button disabled={!canEdit || !workspace.konnect.enabled || !workspace.konnect.controlPlaneId || Boolean(busy)} onClick={syncKonnect} type="button">Pull routes</button></div><p>Sync is read-only. Gateway Services become collections with managed route and path/protocol folders; HTTP/HTTPS method/path combinations, WS/WSS paths, and gRPC/GRPCS methods become native requests. Simple expression-router method/path/host/header predicates are converted; unextractable or SNI expressions stay visible in Skipped Routes. Safe control-plane proxy URLs seed managed environment values, with loopback review defaults when unavailable. Later pulls replace remote-managed names, URLs, hierarchy, path parameters, and headers/metadata while preserving local query, auth, body, transport, script, test, custom-header, edited proxy, folder notes, and manually organized local-folder work. SNI and L4 routes remain explicit skips.</p>{workspace.konnect.lastSyncedAt ? <small>Last pulled {new Date(workspace.konnect.lastSyncedAt).toLocaleString()}</small> : null}</section><section className="integration-card"><header><div><small>Credential confinement</small><h2>Konnect boundary</h2></div><Icon name="lock" size={24} /></header><ul><li>Only HTTPS hosts under `*.api.konghq.com` are accepted.</li><li>Pagination cannot leave the configured origin.</li><li>Redirects and cookies are disabled for control-plane calls.</li><li>The PAT is resolved at send time from your local vault or approved external provider.</li><li>Brunomnia never pushes Gateway configuration.</li></ul></section></div> : null}
+      {tab === 'konnect' ? <div className="integration-grid">
+        <section className="integration-card">
+          <header><div><small>Pull-only Gateway integration</small><h2>Konnect</h2></div><label className="inline-toggle"><input checked={workspace.konnect.enabled} disabled={!canEdit} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, enabled: event.target.checked } }))} type="checkbox" /> Enabled</label></header>
+          {workspace.konnect.managedControlPlaneId ? <p><strong>Managed control-plane project.</strong> Automatic sync credentials stay only in its coordinator project; local request, folder, environment, script, test, and transport edits remain here.</p> : null}
+          <div className="integration-fields"><label className="wide">Regional API URL<input disabled={!canEdit} value={workspace.konnect.baseUrl} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, baseUrl: event.target.value, enabled: false, controlPlanes: [], controlPlaneId: '' } }))} placeholder="https://us.api.konghq.com" /></label><label className="wide">PAT or system-token reference<IntegrationSecretInput disabled={!canEdit} label="Konnect credential" onChange={(token) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, token } }))} placeholder="{{ vault.konnect_pat }}" showPasswords={workspace.preferences.showPasswords} value={workspace.konnect.token} /></label><label className="wide">Control plane<select disabled={!canEdit || !workspace.konnect.controlPlanes.length} value={workspace.konnect.controlPlaneId} onChange={(event) => onChangeWorkspace((current) => ({ ...current, konnect: { ...current.konnect, controlPlaneId: event.target.value } }))}><option value="">Choose a control plane…</option>{workspace.konnect.controlPlanes.map((plane) => <option key={`${plane.region}:${plane.id}`} value={plane.id}>{plane.name} {plane.region ? `(${plane.region})` : ''}</option>)}</select></label></div>
+          <div className="integration-actions"><button disabled={!canEdit || !workspace.konnect.enabled || !workspace.konnect.token || Boolean(busy)} onClick={connectKonnect} type="button">Validate and list</button><button disabled={!canEdit || !workspace.konnect.enabled || !workspace.konnect.controlPlaneId || Boolean(busy)} onClick={syncKonnect} type="button">Pull routes</button><button disabled={!canEdit || !workspace.konnect.enabled || !workspace.konnect.token || Boolean(busy) || workspaceCatalogBusy || Boolean(workspace.konnect.managedControlPlaneId)} onClick={syncAllKonnect} type="button">Sync all control planes</button></div>
+          <p>Sync is read-only. Sync all checks the pinned active `us`, `eu`, `au`, `in`, and `sg` regions, creates or updates one local project per control plane, one root Environment per project, and one Collection per Gateway Service, then removes stale managed projects only for regions fetched successfully. Routes are fetched with five-service concurrency. Single-plane pulls remain available. Safe proxy URLs seed managed environment values while later pulls preserve local request and folder work. SNI and L4 routes remain explicit skips.</p>
+          {workspace.konnect.lastSyncedAt ? <small>Last pulled {new Date(workspace.konnect.lastSyncedAt).toLocaleString()}</small> : null}
+        </section>
+        <section className="integration-card"><header><div><small>Credential confinement</small><h2>Konnect boundary</h2></div><Icon name="lock" size={24} /></header><ul><li>Only HTTPS hosts under `*.api.konghq.com` are accepted.</li><li>Pagination cannot leave the configured origin.</li><li>Redirects and cookies are disabled for control-plane calls.</li><li>The PAT is resolved at send time from your local vault or approved external provider.</li><li>Managed projects never receive a copy of the PAT.</li><li>Brunomnia never pushes Gateway configuration.</li></ul></section>
+        {konnectCatalogResult ? <section className="integration-card"><header><div><small>Latest all-region reconciliation</small><h2>Sync result</h2></div><span>{(konnectCatalogResult.durationMs / 1_000).toFixed(1)} s</span></header><pre>{konnectCatalogSummaryLines(konnectCatalogResult).join('\n')}</pre>{konnectCatalogResult.skippedRegions.length ? <ul>{konnectCatalogResult.skippedRegions.map((region) => <li key={region}>{region}</li>)}</ul> : null}{konnectCatalogResult.skippedRoutes.length ? <details><summary>{konnectCatalogResult.skippedRoutes.length} skipped route{konnectCatalogResult.skippedRoutes.length === 1 ? '' : 's'}</summary><ul>{konnectCatalogResult.skippedRoutes.slice(0, 100).map((route, index) => <li key={`${route.serviceName}:${route.routeName}:${index}`}><strong>{route.serviceName} · {route.routeName}</strong> — {route.reason}</li>)}</ul></details> : null}</section> : null}
+      </div> : null}
 
       {busy ? <div className="automation-message">{busy}…{activeMcpAbort.current ? <button onClick={cancelMcpOperation} type="button">Cancel MCP operation</button> : null}</div> : null}{error ? <div className="automation-message error">{error}</div> : null}{message ? <div className="automation-message">{message}</div> : null}
     </section>

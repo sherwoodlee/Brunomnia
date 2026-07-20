@@ -2510,6 +2510,20 @@ Compatibility bounds remain explicit: Brunomnia continues to store typed file st
 
 Compatibility bounds remain explicit: immutable project snapshots remain self-contained aggregate recovery artifacts, while active native/browser project persistence is physically split by typed file. Cloud discovery and provider onboarding remain open, so Local projects and persistence stays `Baseline`. Collections, requests, environments, and history is now `Complete`; exactly 14 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 253 — automatic all-region Konnect reconciliation (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned sync audit | Complete | Pinned Insomnia scans `us`, `eu`, `au`, `in`, and `sg`, creates/updates one Project per control plane and one Collection workspace per Gateway Service, fetches service Routes at concurrency five, deletes stale service workspaces/projects only when safe, reports counts/progress/duration, and never pushes Gateway configuration |
+| Regional API contract | Complete | Brunomnia uses exact page-number control-plane and offset Service/Route pagination, bounded repeated-offset defense, 30-second requests, five retries for `429`, standard regional origin derivation, and the pinned Singapore permission-gap behavior |
+| Managed project model | Complete | Workspace v44 stores bounded control-plane region/cluster/deployment and coordinator ownership metadata; one credential-free local project per control plane receives a root Environment and source-backed service Collections while preserving local route/folder/environment work |
+| Inactive persistence | Complete | Browser and native catalogs create managed projects without changing the active project; the renderer invalidates stale coordinator autosaves, locks project switching during reconciliation, refreshes the sidebar, and never copies the PAT into managed projects |
+| Safe reconciliation | Complete | A pure planner consumes one existing project per region/control-plane key, removes duplicates/stale projects only in successful regions, retains failed-region projects and cached discovery, and strips ownership metadata from imported/shared/duplicated documents |
+| Evidence and UI | Complete | The Konnect workbench exposes Sync all, live progress, created/updated/deleted/skipped counts, duration, skipped regions, and bounded skipped-route reasons; focused browser/native/pagination/retry/reconciliation regressions and an opt-in live tenant fixture cover the path |
+| Current docs audit | Complete | The full Kong Developer Insomnia tree at `73995e32ed758882a290c945807225d7442b483e` contains one service integration page, Konnect, so no newly documented adapter remains |
+
+Compatibility bounds remain explicit: managed project ownership is scoped to the local coordinator rather than a Brunomnia account or hosted organization, preserving the account-free architecture. Credentialed live execution remains opt-in and is skipped without environment-provided tenant authority. Service integrations is now `Complete`; exactly 13 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

@@ -142,6 +142,15 @@ fn workspace_catalog_create(
 }
 
 #[tauri::command]
+fn workspace_catalog_create_inactive(
+    app: AppHandle,
+    workspace_id: String,
+    workspace: Value,
+) -> Result<workspace_store::WorkspaceCatalogSnapshot, String> {
+    workspace_store::create_inactive(&workspace_store_path(&app)?, &workspace_id, &workspace)
+}
+
+#[tauri::command]
 fn workspace_catalog_rename(
     app: AppHandle,
     workspace_id: String,
@@ -969,6 +978,7 @@ pub fn run() {
             workspace_catalog_cli_path,
             workspace_catalog_save,
             workspace_catalog_create,
+            workspace_catalog_create_inactive,
             workspace_catalog_rename,
             workspace_catalog_reorder,
             workspace_catalog_delete,

@@ -153,7 +153,7 @@ export const shareableWorkspace = (workspace: Workspace): Workspace => {
     pluginData: {},
     activePluginTheme: '',
     ai: { ...workspace.ai, enabled: false, apiKey: '' },
-    konnect: { ...workspace.konnect, enabled: false, token: '', controlPlanes: [], controlPlaneId: '' },
+    konnect: { ...workspace.konnect, enabled: false, token: '', controlPlanes: [], controlPlaneId: '', managedByWorkspaceId: undefined, managedControlPlaneId: undefined, managedRegion: undefined, managedClusterType: undefined, managedDeploymentType: undefined },
     preferences: structuredClone(defaultPreferences),
     collaboration: { ...workspace.collaboration, path: '' },
   });

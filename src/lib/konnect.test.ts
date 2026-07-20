@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
-import { applyKonnectVariableDefaults, loadKonnectControlPlanes, mapKonnectResources } from './konnect';
+import { applyKonnectVariableDefaults, loadKonnectControlPlaneResources, loadKonnectControlPlanes, mapKonnectResources } from './konnect';
 
 const transport = vi.hoisted(() => ({ sendRequest: vi.fn() }));
 
@@ -231,6 +231,9 @@ describe('Konnect pull mapping', () => {
       id: 'cp-one',
       name: 'Cloud Gateway',
       description: '',
+      region: 'us',
+      clusterType: 'CLUSTER_TYPE_CONTROL_PLANE',
+      deploymentType: 'dedicatedCloud',
       proxyUrls: [
         { host: 'gateway.example.com', port: 443, protocol: 'https' },
         { host: '2001:db8::1', port: 9000, protocol: 'grpc' },
@@ -294,8 +297,64 @@ describe('Konnect pull mapping', () => {
       id: 'cp-one',
       name: 'Gateway ',
       description: 'Remote ',
+      region: 'us',
+      clusterType: '',
+      deploymentType: 'selfManaged',
       proxyUrls: [{ host: 'gateway.example.com', port: 443, protocol: 'https' }],
     }]);
+  });
+
+  it('follows pinned page-number and offset pagination', async () => {
+    const requestedUrls: string[] = [];
+    let emptyCalls = 0;
+    transport.sendRequest.mockImplementation(async (request?: { url: string }) => {
+      if (!request) {
+        emptyCalls += 1;
+        return { status: 200, body: JSON.stringify({ data: [] }) };
+      }
+      requestedUrls.push(request.url);
+      const url = new URL(request.url);
+      if (url.pathname.endsWith('/v2/control-planes')) {
+        const page = url.searchParams.get('page[number]');
+        return {
+          status: 200,
+          body: JSON.stringify({
+            data: [{ id: `cp-${page}`, name: `Plane ${page}`, config: {} }],
+            meta: { page: { total: 101 } },
+          }),
+        };
+      }
+      if (url.pathname.endsWith('/core-entities/services')) {
+        return url.searchParams.get('offset') === 'next-services'
+          ? { status: 200, body: JSON.stringify({ data: [{ id: 'service-two', name: 'Two' }], offset: null }) }
+          : { status: 200, body: JSON.stringify({ data: [{ id: 'service-one', name: 'One' }], offset: 'next-services' }) };
+      }
+      if (url.pathname.endsWith('/routes')) return { status: 200, body: JSON.stringify({ data: [], offset: null }) };
+      throw new Error(`Unexpected URL: ${request.url}`);
+    });
+    const config = { enabled: true, baseUrl: 'https://us.api.konghq.com', token: '{{ vault.konnect }}', controlPlaneId: '', controlPlanes: [] };
+
+    const controlPlanes = await loadKonnectControlPlanes(config, undefined, {});
+    expect(controlPlanes.map((plane) => plane.id)).toEqual(['cp-1', 'cp-2']);
+    const resources = await loadKonnectControlPlaneResources(config, controlPlanes[0], undefined, {});
+    expect(resources.services).toEqual([{ id: 'service-one', name: 'One' }, { id: 'service-two', name: 'Two' }]);
+    expect(requestedUrls.filter((url) => new URL(url).pathname.endsWith('/routes'))).toHaveLength(2);
+    expect(emptyCalls).toBe(0);
+  });
+
+  it('retries rate limits with bounded exponential backoff', async () => {
+    vi.useFakeTimers();
+    try {
+      transport.sendRequest
+        .mockResolvedValueOnce({ status: 429, headers: {}, body: 'rate limited' })
+        .mockResolvedValueOnce({ status: 200, headers: {}, body: JSON.stringify({ data: [] }) });
+      const pending = loadKonnectControlPlanes({ enabled: true, baseUrl: 'https://us.api.konghq.com', token: '{{ vault.konnect }}', controlPlaneId: '', controlPlanes: [] }, undefined, {});
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(pending).resolves.toEqual([]);
+      expect(transport.sendRequest).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects plaintext tokens before a Konnect request', async () => {

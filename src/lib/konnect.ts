@@ -10,6 +10,32 @@ const asString = (value: unknown) => typeof value === 'string' ? value : '';
 const asStrings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 const sourceId = (value: unknown) => asString(asRecord(value)?.id);
 
+export const activeKonnectRegions = ['us', 'eu', 'au', 'in', 'sg'] as const;
+
+export type KonnectSyncCounts = {
+  total: number;
+  created: number;
+  updated: number;
+  deleted: number;
+  skipped: number;
+};
+
+export type KonnectSkippedRoute = {
+  routeName: string;
+  reason: string;
+  serviceName: string;
+};
+
+export const zeroKonnectSyncCounts = (): KonnectSyncCounts => ({ total: 0, created: 0, updated: 0, deleted: 0, skipped: 0 });
+
+const konnectDeploymentType = (clusterType: string, cloudGateway: boolean): KonnectControlPlane['deploymentType'] => {
+  if (clusterType === 'CLUSTER_TYPE_K8S_INGRESS_CONTROLLER') return 'k8sIngressController';
+  if (clusterType === 'CLUSTER_TYPE_CONTROL_PLANE_GROUP') return 'group';
+  if (clusterType === 'CLUSTER_TYPE_SERVERLESS' || clusterType === 'CLUSTER_TYPE_SERVERLESS_V1' || clusterType === 'CLUSTER_TYPE_CLOUD_API_GATEWAY') return 'serverless';
+  if (clusterType === 'CLUSTER_TYPE_CONTROL_PLANE' && cloudGateway) return 'dedicatedCloud';
+  return 'selfManaged';
+};
+
 const stripTemplateSyntax = (value: string) => {
   let sanitized = value;
   let previous = '';
@@ -49,6 +75,22 @@ const baseUrl = (config: KonnectConfig) => {
   return url;
 };
 
+export const konnectRegionFromConfig = (config: KonnectConfig) => {
+  const labels = baseUrl(config).hostname.split('.');
+  return labels.length === 4 && labels.slice(1).join('.') === 'api.konghq.com' ? labels[0] : '';
+};
+
+export const konnectConfigForRegion = (config: KonnectConfig, region: string): KonnectConfig => {
+  if (!activeKonnectRegions.includes(region as typeof activeKonnectRegions[number])) throw new Error(`Unsupported Konnect region: ${region || 'none'}.`);
+  const url = baseUrl(config);
+  const labels = url.hostname.split('.');
+  if (url.hostname !== 'api.konghq.com' && !(labels.length === 4 && labels.slice(1).join('.') === 'api.konghq.com')) {
+    throw new Error('All-control-plane sync requires the standard api.konghq.com regional endpoint.');
+  }
+  url.hostname = `${region}.api.konghq.com`;
+  return { ...config, baseUrl: url.toString().replace(/\/$/, '') };
+};
+
 const getPage = async (config: KonnectConfig, url: string, environment: Environment | undefined, context: SendRequestContext) => {
   if (!isProtectedSecretReference(config.token)) throw new Error('Konnect access tokens must be a complete local-vault or approved external-vault reference.');
   const request = createBlankRequest(`konnect-${crypto.randomUUID()}`);
@@ -57,48 +99,103 @@ const getPage = async (config: KonnectConfig, url: string, environment: Environm
   request.url = url;
   request.auth = { ...request.auth, type: 'bearer', token: config.token, disabled: false };
   request.headers = [{ id: 'konnect-accept', name: 'Accept', value: 'application/json', enabled: true }];
-  request.transport = { ...request.transport, timeoutMode: 'custom', timeoutMs: 60_000, followRedirects: false, followRedirectsMode: 'off', sendCookies: false, storeCookies: false };
-  const response = await sendRequest(request, environment, context);
+  request.transport = { ...request.transport, timeoutMode: 'custom', timeoutMs: 30_000, followRedirects: false, followRedirectsMode: 'off', sendCookies: false, storeCookies: false };
+  let response: Awaited<ReturnType<typeof sendRequest>>;
+  for (let attempt = 0; ; attempt += 1) {
+    response = await sendRequest(request, environment, context);
+    if (response.status !== 429 || attempt >= 5) break;
+    const retryAfter = Number.parseInt(response.headers?.['retry-after'] ?? response.headers?.['Retry-After'] ?? '', 10);
+    const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1_000 : Math.min(1_000 * 2 ** attempt, 30_000);
+    await new Promise<void>((resolve, reject) => {
+      const signal = context.signal;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const aborted = () => {
+        if (timer) clearTimeout(timer);
+        reject(signal?.reason instanceof Error ? signal.reason : new DOMException('Konnect sync canceled.', 'AbortError'));
+      };
+      if (signal?.aborted) {
+        aborted();
+        return;
+      }
+      timer = setTimeout(() => {
+        signal?.removeEventListener('abort', aborted);
+        resolve();
+      }, delay);
+      signal?.addEventListener('abort', aborted, { once: true });
+    });
+  }
   if (response.status === 401 || response.status === 403) throw new Error(`Konnect rejected the access token (${response.status}). Check its expiry and permissions.`);
   if (response.status < 200 || response.status >= 300) throw new Error(`Konnect request failed (${response.status}): ${response.body.slice(0, 2_000)}`);
   if (response.body.length > 20_000_000) throw new Error('Konnect response exceeded the 20 MB safety limit.');
   return asRecord(JSON.parse(response.body));
 };
 
-const getAll = async (config: KonnectConfig, path: string, environment: Environment | undefined, context: SendRequestContext) => {
+const getAllControlPlaneRecords = async (config: KonnectConfig, environment: Environment | undefined, context: SendRequestContext) => {
   const origin = baseUrl(config);
-  let next = new URL(path, `${origin.toString()}/`).toString();
   const data: unknown[] = [];
-  for (let page = 0; page < 100 && next; page += 1) {
-    const parsed = await getPage(config, next, environment, context);
+  for (let page = 1; page <= 100; page += 1) {
+    const url = new URL('/v2/control-planes', `${origin.toString()}/`);
+    url.searchParams.set('page[size]', '100');
+    url.searchParams.set('page[number]', String(page));
+    const parsed = await getPage(config, url.toString(), environment, context);
     if (Array.isArray(parsed?.data)) data.push(...parsed.data);
     if (data.length > 10_000) throw new Error('Konnect sync exceeded the 10,000-resource safety limit.');
     const pageMeta = asRecord(asRecord(parsed?.meta)?.page);
-    const links = asRecord(parsed?.links);
-    const candidate = asString(pageMeta?.next) || asString(links?.next);
-    if (!candidate) break;
-    const candidateUrl = new URL(candidate, origin);
-    if (candidateUrl.origin !== origin.origin) throw new Error('Konnect pagination attempted to leave the configured API origin.');
-    next = candidateUrl.toString();
+    const total = Number(pageMeta?.total);
+    const totalPages = Number.isFinite(total) && total > 0 ? Math.ceil(total / 100) : 1;
+    if (page >= totalPages) break;
   }
   return data;
 };
 
+const getAllOffsetRecords = async (config: KonnectConfig, path: string, environment: Environment | undefined, context: SendRequestContext) => {
+  const origin = baseUrl(config);
+  const data: unknown[] = [];
+  const seenOffsets = new Set<string>();
+  let offset = '';
+  for (let page = 0; page < 100; page += 1) {
+    const url = new URL(path, `${origin.toString()}/`);
+    url.searchParams.set('size', '100');
+    if (offset) url.searchParams.set('offset', offset);
+    const parsed = await getPage(config, url.toString(), environment, context);
+    if (Array.isArray(parsed?.data)) data.push(...parsed.data);
+    if (data.length > 10_000) throw new Error('Konnect sync exceeded the 10,000-resource safety limit.');
+    const nextOffset = typeof parsed?.offset === 'string' ? parsed.offset.slice(0, 2_000) : '';
+    if (!nextOffset) break;
+    if (seenOffsets.has(nextOffset)) throw new Error('Konnect pagination repeated an offset.');
+    seenOffsets.add(nextOffset);
+    offset = nextOffset;
+  }
+  return data;
+};
+
+const parseKonnectControlPlanes = (records: unknown[], region: string): KonnectControlPlane[] => records.flatMap((item): KonnectControlPlane[] => {
+  const plane = asRecord(item);
+  const id = asString(plane?.id);
+  const remoteConfig = asRecord(plane?.config);
+  const clusterType = stripTemplateSyntax(asString(remoteConfig?.cluster_type)).slice(0, 200);
+  const cloudGateway = remoteConfig?.cloud_gateway === true;
+  return plane && id ? [{
+    id,
+    name: stripTemplateSyntax(asString(plane.name)).slice(0, 500) || id,
+    description: stripTemplateSyntax(asString(plane.description)).slice(0, 20_000),
+    region,
+    clusterType,
+    deploymentType: konnectDeploymentType(clusterType, cloudGateway),
+    proxyUrls: parseProxyUrls(plane.proxy_urls),
+  }] : [];
+});
+
 export const loadKonnectControlPlanes = async (config: KonnectConfig, environment: Environment | undefined, context: SendRequestContext): Promise<KonnectControlPlane[]> => {
   if (!config.enabled) throw new Error('Review and enable the Konnect integration before connecting.');
   if (!isProtectedSecretReference(config.token)) throw new Error('Use a complete local-vault or approved external-vault reference for the Konnect access token.');
-  const records = await getAll(config, '/v2/control-planes', environment, context);
-  return records.flatMap((item): KonnectControlPlane[] => {
-    const plane = asRecord(item);
-    const id = asString(plane?.id);
-    return plane && id ? [{
-      id,
-      name: stripTemplateSyntax(asString(plane.name)).slice(0, 500) || id,
-      description: stripTemplateSyntax(asString(plane.description)).slice(0, 20_000),
-      proxyUrls: parseProxyUrls(plane.proxy_urls),
-    }] : [];
-  });
+  const records = await getAllControlPlaneRecords(config, environment, context);
+  return parseKonnectControlPlanes(records, konnectRegionFromConfig(config));
 };
+
+export const loadKonnectControlPlanesForRegion = async (config: KonnectConfig, region: string, environment: Environment | undefined, context: SendRequestContext) => (
+  loadKonnectControlPlanes(konnectConfigForRegion(config, region), environment, context)
+);
 
 const sanitizedStrings = (value: unknown) => asStrings(value).map(stripTemplateSyntax).filter((item) => item.trim());
 
@@ -427,19 +524,71 @@ export const mapKonnectResources = (workspace: Workspace, servicesSource: unknow
       }),
     }, existing));
   }
-  return { collections, variables: [...variables], variableDefaults, variableProtocols, skipped: skipped.length };
+  return {
+    collections,
+    variables: [...variables],
+    variableDefaults,
+    variableProtocols,
+    skipped: skipped.length,
+    skippedRoutes: skipped.map(({ route, reason }): KonnectSkippedRoute => {
+      const service = services.get(sourceId(route.service));
+      return {
+        routeName: route.name || route.id || 'Unnamed route',
+        reason,
+        serviceName: stripTemplateSyntax(asString(service?.name)).slice(0, 500) || sourceId(route.service) || 'Unknown service',
+      };
+    }),
+  };
 };
 
-export const syncKonnectRoutes = async (workspace: Workspace, environment: Environment | undefined, context: SendRequestContext) => {
-  const config = workspace.konnect;
-  if (!config.enabled) throw new Error('Enable the Konnect integration before syncing.');
-  if (!config.controlPlaneId) throw new Error('Choose a Konnect control plane.');
-  const encoded = encodeURIComponent(config.controlPlaneId);
-  const [services, routes] = await Promise.all([
-    getAll(config, `/v2/control-planes/${encoded}/core-entities/services`, environment, context),
-    getAll(config, `/v2/control-planes/${encoded}/core-entities/routes`, environment, context),
-  ]);
+const managedServiceCollections = (collections: Collection[]) => collections.filter((collection) => collection.source?.format === 'konnect' && collection.source.sourceId !== 'skipped-routes');
+
+const managedRequests = (collections: Collection[]) => new Map(collections.flatMap((collection) => collection.requests
+  .filter((request) => request.source?.format === 'konnect-route' && request.source.sourceId)
+  .map((request) => [request.source!.sourceId!, request] as const)));
+
+const managedRequestSignature = (request: ApiRequest) => {
+  const managedNames = previousManagedHeaderNames(request);
+  const rows = request.protocol === 'grpc' ? request.grpc.metadata : request.headers;
+  return JSON.stringify({
+    name: request.name,
+    protocol: request.protocol,
+    method: request.method,
+    url: request.url,
+    pathParameters: request.pathParams.map((parameter) => ({ name: parameter.name, enabled: parameter.enabled })),
+    headers: rows.filter((header) => managedNames.has(header.name.toLowerCase())).map((header) => ({ name: header.name, value: header.value, enabled: header.enabled })),
+    grpc: request.protocol === 'grpc' ? { service: request.grpc.service, method: request.grpc.method } : undefined,
+  });
+};
+
+export const reconcileKonnectResources = (workspace: Workspace, services: unknown[], routes: unknown[], syncedAt = new Date().toISOString()) => {
   const mapped = mapKonnectResources(workspace, services, routes);
+  const previousServices = new Map(managedServiceCollections(workspace.collections).map((collection) => [collection.source!.sourceId!, collection]));
+  const nextServiceCollections = managedServiceCollections(mapped.collections);
+  const nextServiceIds = new Set(nextServiceCollections.map((collection) => collection.source!.sourceId!));
+  const previousRequests = managedRequests(managedServiceCollections(workspace.collections).filter((collection) => nextServiceIds.has(collection.source!.sourceId!)));
+  const nextRequests = managedRequests(nextServiceCollections);
+  const serviceCounts = zeroKonnectSyncCounts();
+  serviceCounts.total = services.filter((service) => sourceId(service)).length;
+  nextServiceCollections.forEach((collection) => {
+    const previous = previousServices.get(collection.source!.sourceId!);
+    if (!previous) serviceCounts.created += 1;
+    else if (previous.name !== collection.name) serviceCounts.updated += 1;
+  });
+  previousServices.forEach((_collection, id) => {
+    if (!nextServiceIds.has(id)) serviceCounts.deleted += 1;
+  });
+  const routeCounts = zeroKonnectSyncCounts();
+  routeCounts.total = nextRequests.size;
+  routeCounts.skipped = mapped.skipped;
+  nextRequests.forEach((request, key) => {
+    const previous = previousRequests.get(key);
+    if (!previous) routeCounts.created += 1;
+    else if (managedRequestSignature(previous) !== managedRequestSignature(request)) routeCounts.updated += 1;
+  });
+  previousRequests.forEach((_request, key) => {
+    if (!nextRequests.has(key)) routeCounts.deleted += 1;
+  });
   const localCollections = workspace.collections.filter((collection) => collection.source?.format !== 'konnect');
   const environments = workspace.environments.map((candidate) => candidate.id !== workspace.activeEnvironmentId ? candidate : {
     ...candidate,
@@ -450,10 +599,62 @@ export const syncKonnectRoutes = async (workspace: Workspace, environment: Envir
       ...workspace,
       collections: [...localCollections, ...mapped.collections],
       environments,
-      konnect: { ...config, lastSyncedAt: new Date().toISOString() },
+      konnect: { ...workspace.konnect, lastSyncedAt: syncedAt },
     },
+    services: serviceCounts,
+    routes: routeCounts,
+    skipped: mapped.skipped,
+    skippedRoutes: mapped.skippedRoutes,
+  };
+};
+
+export const loadKonnectControlPlaneResources = async (
+  config: KonnectConfig,
+  controlPlane: KonnectControlPlane,
+  environment: Environment | undefined,
+  context: SendRequestContext,
+  onProgress?: (message: string) => void,
+) => {
+  const regionalConfig = controlPlane.region ? konnectConfigForRegion(config, controlPlane.region) : config;
+  const encodedControlPlane = encodeURIComponent(controlPlane.id);
+  onProgress?.(`Fetching services for ${controlPlane.name}…`);
+  const services = await getAllOffsetRecords(regionalConfig, `/v2/control-planes/${encodedControlPlane}/core-entities/services`, environment, context);
+  const routes: unknown[] = [];
+  for (let index = 0; index < services.length; index += 5) {
+    const batch = services.slice(index, index + 5);
+    const results = await Promise.all(batch.map(async (service) => {
+      const serviceId = sourceId(service);
+      return serviceId
+        ? getAllOffsetRecords(regionalConfig, `/v2/control-planes/${encodedControlPlane}/core-entities/services/${encodeURIComponent(serviceId)}/routes`, environment, context)
+        : [];
+    }));
+    results.forEach((items) => routes.push(...items));
+    if (routes.length > 10_000) throw new Error('Konnect sync exceeded the 10,000-route safety limit.');
+    onProgress?.(`Fetched ${Math.min(index + batch.length, services.length)} / ${services.length} services for ${controlPlane.name}…`);
+  }
+  return { services, routes };
+};
+
+export const syncKonnectRoutes = async (workspace: Workspace, environment: Environment | undefined, context: SendRequestContext) => {
+  const config = workspace.konnect;
+  if (!config.enabled) throw new Error('Enable the Konnect integration before syncing.');
+  if (!config.controlPlaneId) throw new Error('Choose a Konnect control plane.');
+  const controlPlane = config.controlPlanes.find((plane) => plane.id === config.controlPlaneId) ?? {
+    id: config.controlPlaneId,
+    name: config.controlPlaneId,
+    description: '',
+    region: konnectRegionFromConfig(config),
+    clusterType: '',
+    deploymentType: 'selfManaged' as const,
+    proxyUrls: [],
+  };
+  const { services, routes } = await loadKonnectControlPlaneResources(config, controlPlane, environment, context);
+  const reconciled = reconcileKonnectResources(workspace, services, routes);
+  return {
+    ...reconciled,
     services: services.length,
     routes: routes.length,
-    skipped: mapped.skipped,
+    serviceCounts: reconciled.services,
+    routeCounts: reconciled.routes,
   };
 };

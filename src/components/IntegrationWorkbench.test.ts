@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { McpReviewedServerRequest } from '../lib/mcp';
+import { konnectCatalogSummaryLines } from '../lib/konnectCatalog';
 import { integrationSecretInputType, mcpOperationDraftKey, withMcpParameterDraft, withMcpServerRequest, withoutMcpServerRequest } from './IntegrationWorkbench';
 
 describe('integration credential visibility', () => {
@@ -40,5 +41,20 @@ describe('integration credential visibility', () => {
     expect(requests).toHaveLength(100);
     expect(requests.some((request) => request.id === 0)).toBe(false);
     expect(withoutMcpServerRequest(requests, 'client-a', 50).some((request) => request.id === 50)).toBe(false);
+  });
+
+  it('formats all-region Konnect reconciliation counts', () => {
+    const counts = (total: number, created: number, updated: number, deleted: number, skipped = 0) => ({ total, created, updated, deleted, skipped });
+    expect(konnectCatalogSummaryLines({
+      controlPlanes: counts(3, 1, 1, 1),
+      services: counts(8, 2, 3, 1),
+      routes: counts(21, 5, 4, 2, 3),
+      skippedRegions: ['eu: unavailable'],
+    })).toEqual([
+      'Control planes  total 3 · created 1 · updated 1 · deleted 1',
+      'Services        total 8 · created 2 · updated 3 · deleted 1',
+      'Routes          total 21 · created 5 · updated 4 · deleted 2 · skipped 3',
+      'Skipped regions 1',
+    ]);
   });
 });

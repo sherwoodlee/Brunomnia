@@ -120,6 +120,16 @@ export const createWorkspaceDuplicate = (source: Workspace, name: string, prefer
   copy.runnerReports = [];
   copy.project = { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true };
   copy.collaboration = { mode: 'off', path: '', actor: copy.collaboration.actor || 'Local owner', revision: 0 };
+  if (copy.konnect.managedControlPlaneId) copy.konnect = {
+    ...copy.konnect,
+    enabled: false,
+    token: '',
+    managedByWorkspaceId: undefined,
+    managedControlPlaneId: undefined,
+    managedRegion: undefined,
+    managedClusterType: undefined,
+    managedDeploymentType: undefined,
+  };
   copy.preferences = structuredClone(preferences);
   return copy;
 };
@@ -648,6 +658,22 @@ export const createCatalogWorkspace = async (workspace: Workspace, workspaceId =
   writeBrowserWorkspace(workspaceId, workspace);
   catalog.entries.push(browserCatalogEntry(workspaceId, workspace));
   catalog.activeWorkspaceId = workspaceId;
+  return browserSnapshot(catalog);
+};
+
+export const createCatalogWorkspaceInactive = async (workspace: Workspace, workspaceId = catalogWorkspaceId()): Promise<WorkspaceCatalogSnapshot> => {
+  if (!workspaceIdPattern.test(workspaceId)) throw new Error('The new project ID is invalid.');
+  if (isTauri()) {
+    const snapshot = await invoke<Omit<WorkspaceCatalogSnapshot, 'workspace'> & { workspace: unknown }>('workspace_catalog_create_inactive', { workspaceId, workspace });
+    return normalizeCatalogSnapshot(snapshot);
+  }
+  const catalog = parseBrowserCatalog() ?? { version: 1 as const, activeWorkspaceId: '', entries: [] };
+  if (catalog.entries.length >= maxCatalogWorkspaces) throw new Error(`At most ${maxCatalogWorkspaces} local projects can be stored.`);
+  if (catalog.entries.some((entry) => entry.id === workspaceId)) throw new Error('A local project with this ID already exists.');
+  if (browserWorkspaceSnapshotKeys(workspaceId).length) throw new Error('Existing local snapshot history conflicts with this project ID.');
+  writeBrowserWorkspace(workspaceId, workspace);
+  catalog.entries.push(browserCatalogEntry(workspaceId, workspace));
+  if (!catalog.activeWorkspaceId) catalog.activeWorkspaceId = workspaceId;
   return browserSnapshot(catalog);
 };
 
