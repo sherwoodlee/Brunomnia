@@ -8,8 +8,9 @@ import { isProtectedSecretReference, isSensitiveSecretName } from './security';
 
 type McpEvent = { direction: 'client' | 'server' | 'stderr'; method: string; detail: string; timestamp: string };
 type McpOperationResult = { result: unknown; events: McpEvent[]; client: McpClient; sessionId?: string };
-export type McpRequestContext = SendRequestContext & { onMcpClient?: (client: McpClient) => void };
+export type McpRequestContext = SendRequestContext & { onMcpClient?: (client: McpClient) => void; sessionScope?: string };
 type StdioOutput = { result: unknown; events: unknown[]; stderr: string };
+type McpHttpSession = { client: McpClient; fingerprint: string; sessionId: string };
 
 const now = () => new Date().toISOString();
 const requestId = () => `mcp-${Date.now().toString(36)}-${crypto.randomUUID()}`;
@@ -17,6 +18,60 @@ const asRecord = (value: unknown) => value && typeof value === 'object' && !Arra
 const asString = (value: unknown) => typeof value === 'string' ? value : '';
 const mcpAbortError = (signal: AbortSignal) => signal.reason instanceof Error ? signal.reason : new DOMException('MCP operation canceled.', 'AbortError');
 const throwIfMcpAborted = (signal?: AbortSignal) => { if (signal?.aborted) throw mcpAbortError(signal); };
+const MCP_PROTOCOL_VERSION = '2025-06-18';
+const MAX_HTTP_SESSIONS = 100;
+const MAX_SESSION_ID_BYTES = 4_096;
+const httpSessions = new Map<string, McpHttpSession>();
+
+class McpHttpStatusError extends Error {
+  constructor(readonly status: number, body: string) {
+    super(`MCP HTTP request failed (${status}): ${body.slice(0, 2_000)}`);
+  }
+}
+
+const sessionKey = (clientId: string, scope = '') => JSON.stringify([scope, clientId]);
+const sessionFingerprint = (client: McpClient) => JSON.stringify({
+  url: client.url,
+  headers: client.headers.map(({ name, value, enabled }) => ({ name, value, enabled })),
+  authType: client.authType,
+  token: client.authType === 'bearer' ? client.token : '',
+  username: client.authType === 'basic' ? client.username : '',
+  password: client.authType === 'basic' ? client.password : '',
+  oauthAuthorizationUrl: client.authType === 'oauth2' ? client.oauthAuthorizationUrl : '',
+  oauthAccessTokenUrl: client.authType === 'oauth2' ? client.oauthAccessTokenUrl : '',
+  oauthClientId: client.authType === 'oauth2' ? client.oauthClientId : '',
+  oauthClientSecret: client.authType === 'oauth2' ? client.oauthClientSecret : '',
+  oauthScope: client.authType === 'oauth2' ? client.oauthScope : '',
+  oauthRegisteredClientId: client.authType === 'oauth2' ? client.oauthRegisteredClientId : '',
+  oauthRegisteredClientSecret: client.authType === 'oauth2' ? client.oauthRegisteredClientSecret : '',
+  oauthRegisteredTokenEndpointAuthMethod: client.authType === 'oauth2' ? client.oauthRegisteredTokenEndpointAuthMethod : 'none',
+});
+const normalizeSessionId = (value: string) => {
+  if (!value) return '';
+  if (value.length > MAX_SESSION_ID_BYTES || /[\0\r\n]/.test(value)) throw new Error('The MCP server returned an invalid or oversized session identity.');
+  return value;
+};
+const matchingHttpSession = (client: McpClient, context: Pick<McpRequestContext, 'sessionScope'>) => {
+  const key = sessionKey(client.id, context.sessionScope);
+  const session = httpSessions.get(key);
+  if (!session) return undefined;
+  if (session.fingerprint !== sessionFingerprint(client)) {
+    httpSessions.delete(key);
+    return undefined;
+  }
+  httpSessions.delete(key);
+  httpSessions.set(key, session);
+  return session;
+};
+const rememberHttpSession = (client: McpClient, context: Pick<McpRequestContext, 'sessionScope'>, sessionId: string) => {
+  const normalized = normalizeSessionId(sessionId);
+  const key = sessionKey(client.id, context.sessionScope);
+  httpSessions.delete(key);
+  httpSessions.set(key, { client, fingerprint: sessionFingerprint(client), sessionId: normalized });
+  while (httpSessions.size > MAX_HTTP_SESSIONS) httpSessions.delete(httpSessions.keys().next().value!);
+};
+export const forgetMcpClientSession = (clientId: string, sessionScope = '') => httpSessions.delete(sessionKey(clientId, sessionScope));
+export const hasMcpClientSession = (client: McpClient, sessionScope = '') => httpSessions.get(sessionKey(client.id, sessionScope))?.fingerprint === sessionFingerprint(client);
 
 const validateHttpEndpoint = (value: string) => {
   const url = new URL(value);
@@ -145,6 +200,7 @@ const sendHttpCancellation = async (
   request.headers = [
     { id: `${request.id}-content-type`, name: 'Content-Type', value: 'application/json', enabled: true },
     { id: `${request.id}-accept`, name: 'Accept', value: 'application/json, text/event-stream', enabled: true },
+    { id: `${request.id}-protocol`, name: 'Mcp-Protocol-Version', value: MCP_PROTOCOL_VERSION, enabled: true },
     ...(sessionId ? [{ id: `${request.id}-session`, name: 'Mcp-Session-Id', value: sessionId, enabled: true }] : []),
     ...client.headers,
   ];
@@ -186,6 +242,7 @@ const httpRequest = async (
   request.headers = [
     { id: `${id}-content-type`, name: 'Content-Type', value: 'application/json', enabled: true },
     { id: `${id}-accept`, name: 'Accept', value: 'application/json, text/event-stream', enabled: true },
+    ...(method === 'initialize' ? [] : [{ id: `${id}-protocol`, name: 'Mcp-Protocol-Version', value: MCP_PROTOCOL_VERSION, enabled: true }]),
     ...(sessionId ? [{ id: `${id}-session`, name: 'Mcp-Session-Id', value: sessionId, enabled: true }] : []),
     ...client.headers,
   ];
@@ -239,8 +296,8 @@ const httpRequest = async (
     };
   }
   if (response.status === 401) throw new Error('MCP authentication failed with 401 after credential acquisition. Review the server, OAuth, PAT, or Basic configuration.');
-  if (response.status < 200 || response.status >= 300) throw new Error(`MCP HTTP request failed (${response.status}): ${response.body.slice(0, 2_000)}`);
-  const nextSession = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'mcp-session-id')?.[1] ?? sessionId;
+  if (response.status < 200 || response.status >= 300) throw new McpHttpStatusError(response.status, response.body);
+  const nextSession = normalizeSessionId(Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'mcp-session-id')?.[1] ?? sessionId);
   const events: McpEvent[] = [{ direction: 'client', method, detail: notification ? 'notification' : id, timestamp: now() }];
   if (notification || !response.body.trim()) return { result: undefined, events, client: updatedClient, sessionId: nextSession };
   const parsed = parseMcpJsonRpcResponse(response.body, id);
@@ -248,13 +305,57 @@ const httpRequest = async (
 };
 
 const httpSession = async (client: McpClient, environment: Environment | undefined, context: McpRequestContext) => {
+  const cached = matchingHttpSession(client, context);
+  if (cached) {
+    return {
+      client,
+      sessionId: cached.sessionId,
+      events: [{ direction: 'client', method: 'MCP session', detail: 'Reused the active HTTP session.', timestamp: now() }] as McpEvent[],
+    };
+  }
   const initialized = await httpRequest(client, 'initialize', {
-    protocolVersion: '2025-06-18',
+    protocolVersion: MCP_PROTOCOL_VERSION,
     capabilities: { roots: { listChanged: false } },
     clientInfo: { name: 'Brunomnia', version: '0.1.0' },
   }, environment, context);
   const notification = await httpRequest(initialized.client, 'notifications/initialized', {}, environment, context, initialized.sessionId, true);
-  return { client: notification.client, sessionId: notification.sessionId ?? initialized.sessionId ?? '', events: [...initialized.events, ...notification.events] };
+  const sessionId = notification.sessionId ?? initialized.sessionId ?? '';
+  rememberHttpSession(notification.client, context, sessionId);
+  return { client: notification.client, sessionId, events: [...initialized.events, ...notification.events] };
+};
+
+export const disconnectMcpClient = async (client: McpClient, environment: Environment | undefined, context: McpRequestContext): Promise<{ events: McpEvent[]; terminated: boolean }> => {
+  const key = sessionKey(client.id, context.sessionScope);
+  const session = httpSessions.get(key);
+  httpSessions.delete(key);
+  if (!session) return { events: [] as McpEvent[], terminated: false };
+  if (!session.sessionId) return { events: [{ direction: 'client', method: 'MCP session', detail: 'Cleared the local stateless HTTP connection.', timestamp: now() }], terminated: false };
+  const request = createBlankRequest(requestId());
+  request.name = `${session.client.name} · terminate MCP session`;
+  request.method = 'DELETE';
+  request.url = validateHttpEndpoint(session.client.url);
+  request.headers = [
+    { id: `${request.id}-accept`, name: 'Accept', value: 'application/json, text/event-stream', enabled: true },
+    { id: `${request.id}-protocol`, name: 'Mcp-Protocol-Version', value: MCP_PROTOCOL_VERSION, enabled: true },
+    { id: `${request.id}-session`, name: 'Mcp-Session-Id', value: session.sessionId, enabled: true },
+    ...session.client.headers,
+  ];
+  request.auth = mcpAuthentication(session.client, request.auth);
+  request.transport = { ...request.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMode: 'custom', timeoutMs: 5_000, sendCookies: false, storeCookies: false };
+  const detachedContext: SendRequestContext = { ...context, signal: undefined, cancellationId: undefined, pluginRuntime: undefined, skipOAuth2Acquisition: true, onOAuth2Token: undefined, authorizeOAuth2: undefined };
+  const events: McpEvent[] = [{ direction: 'client', method: 'MCP session', detail: 'Cleared the local HTTP session and requested remote termination.', timestamp: now() }];
+  try {
+    const response = await sendRequest(request, environment, detachedContext);
+    if (response.status >= 200 && response.status < 300) return { events, terminated: true };
+    const detail = response.status === 404
+      ? 'The remote MCP session was already gone.'
+      : response.status === 405
+        ? 'The server does not support explicit MCP session termination; the local session was still cleared.'
+        : `Remote MCP session termination returned HTTP ${response.status}; the local session was still cleared.`;
+    return { events: [...events, { direction: 'server', method: 'MCP session', detail, timestamp: now() }], terminated: false };
+  } catch (error) {
+    return { events: [...events, { direction: 'server', method: 'MCP session', detail: `Remote MCP session termination failed; the local session was still cleared: ${error instanceof Error ? error.message : String(error)}`, timestamp: now() }], terminated: false };
+  }
 };
 
 const stdioRequest = async (client: McpClient, method: string, params: unknown, context: McpRequestContext): Promise<McpOperationResult> => {
@@ -285,6 +386,35 @@ const operation = async (
 ) => client.transport === 'stdio'
   ? stdioRequest(client, method, params, context)
   : httpRequest(client, method, params, environment, context, sessionId);
+
+const operationWithSessionRecovery = async (
+  client: McpClient,
+  method: string,
+  params: unknown,
+  environment: Environment | undefined,
+  context: McpRequestContext,
+  sessionId = '',
+) => {
+  try {
+    const response = await operation(client, method, params, environment, context, sessionId);
+    if (client.transport === 'http' && response.sessionId) rememberHttpSession(response.client, context, response.sessionId);
+    return response;
+  } catch (error) {
+    if (client.transport !== 'http' || !sessionId || !(error instanceof McpHttpStatusError) || error.status !== 404) throw error;
+    forgetMcpClientSession(client.id, context.sessionScope);
+    const reconnected = await httpSession(client, environment, context);
+    const response = await httpRequest(reconnected.client, method, params, environment, context, reconnected.sessionId);
+    if (response.sessionId) rememberHttpSession(response.client, context, response.sessionId);
+    return {
+      ...response,
+      events: [
+        { direction: 'server', method: 'MCP session', detail: 'The server rejected the expired HTTP session; Brunomnia initialized one replacement and retried once.', timestamp: now() } as McpEvent,
+        ...reconnected.events,
+        ...response.events,
+      ],
+    };
+  }
+};
 
 const toolList = (value: unknown): McpTool[] => {
   const tools = asRecord(value)?.tools;
@@ -335,6 +465,7 @@ export const discoverMcpClient = async (client: McpClient, environment: Environm
   if (!client.enabled) throw new Error('Review the MCP endpoint or command, then enable this client before connecting.');
   const session = client.transport === 'http' ? await httpSession(client, environment, context) : { client, sessionId: '', events: [] as McpEvent[] };
   let activeClient = session.client;
+  let sessionId = session.sessionId;
   const events = [...session.events];
   const warnings: string[] = [];
   const list = async (method: string, key: 'tools' | 'prompts' | 'resources' | 'resourceTemplates') => {
@@ -342,8 +473,9 @@ export const discoverMcpClient = async (client: McpClient, environment: Environm
     let cursor = '';
     for (let page = 0; page < 100; page += 1) {
       try {
-        const response = await operation(activeClient, method, cursor ? { cursor } : {}, environment, context, session.sessionId);
+        const response = await operationWithSessionRecovery(activeClient, method, cursor ? { cursor } : {}, environment, context, sessionId);
         activeClient = response.client;
+        sessionId = response.sessionId ?? sessionId;
         events.push(...response.events);
         values.push(response.result);
         cursor = asString(asRecord(response.result)?.nextCursor);
@@ -378,7 +510,7 @@ export const invokeMcpOperation = async (
   const session = client.transport === 'http' ? await httpSession(client, environment, context) : { client, sessionId: '', events: [] as McpEvent[] };
   const method = kind === 'tool' ? 'tools/call' : kind === 'prompt' ? 'prompts/get' : 'resources/read';
   const params = kind === 'tool' ? { name, arguments: parameters } : kind === 'prompt' ? { name, arguments: parameters } : { uri: mcpResourceUri(session.client, name, parameters) };
-  const response = await operation(session.client, method, params, environment, context, session.sessionId);
+  const response = await operationWithSessionRecovery(session.client, method, params, environment, context, session.sessionId);
   return { result: response.result, events: [...session.events, ...response.events], client: response.client };
 };
 

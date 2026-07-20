@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBlankRequest } from '../data/seed';
 import type { ApiRequest, McpClient } from '../types';
 import type { SendRequestContext } from './http';
-import { discoverMcpClient, mcpAuthentication, mcpClientWithOAuth2Auth, mcpResourceUri } from './mcp';
+import { disconnectMcpClient, discoverMcpClient, forgetMcpClientSession, hasMcpClientSession, invokeMcpOperation, mcpAuthentication, mcpClientWithOAuth2Auth, mcpResourceUri } from './mcp';
 import { authorizationServerMetadataUrls, parseMcpOAuthChallenge, protectedResourceMetadataUrls } from './mcpOAuthDiscovery';
 
 const transport = vi.hoisted(() => ({ sendRequest: vi.fn() }));
@@ -44,7 +44,10 @@ const oauthClient = (): McpClient => ({
   resourceTemplates: [],
 });
 
-beforeEach(() => transport.sendRequest.mockReset());
+beforeEach(() => {
+  transport.sendRequest.mockReset();
+  ['', 'project-a', 'project-b', 'project-recovery', 'stateless'].forEach((scope) => forgetMcpClientSession('oauth-mcp', scope));
+});
 
 describe('MCP OAuth request mapping', () => {
   it('parses Bearer challenge fields and builds path-aware discovery fallbacks', () => {
@@ -315,7 +318,112 @@ describe('MCP OAuth request mapping', () => {
     const cancellation = requests.find((request) => JSON.parse(request.body).method === 'notifications/cancelled');
     expect(JSON.parse(cancellation?.body ?? '{}').params.requestId).toBe(toolsMessage.id);
     expect(cancellation?.headers).toContainEqual(expect.objectContaining({ name: 'Mcp-Session-Id', value: 'cancel-session' }));
+    expect(cancellation?.headers).toContainEqual(expect.objectContaining({ name: 'Mcp-Protocol-Version', value: '2025-06-18' }));
     expect(cancellation?.auth).toMatchObject({ type: 'oauth2', accessToken: 'refreshed-during-call' });
     expect(cancellation?.transport).toMatchObject({ followRedirects: false, timeoutMs: 5_000, sendCookies: false, storeCookies: false });
+  });
+
+  it('reuses and explicitly terminates project-scoped HTTP sessions', async () => {
+    const client = oauthClient();
+    client.authType = 'none';
+    const requests: ApiRequest[] = [];
+    let initializeCount = 0;
+    transport.sendRequest.mockImplementation(async (request: ApiRequest) => {
+      requests.push(request);
+      if (request.method === 'DELETE') return { status: 204, statusText: 'No Content', headers: {}, body: '', durationMs: 1, sizeBytes: 0 };
+      const message = JSON.parse(request.body) as { id?: string; method: string };
+      if (message.method === 'initialize') {
+        initializeCount += 1;
+        return { status: 200, statusText: 'OK', headers: { 'Mcp-Session-Id': `session-${initializeCount}` }, body: JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-06-18', capabilities: {} } }), durationMs: 1, sizeBytes: 1 };
+      }
+      if (message.method === 'notifications/initialized') return { status: 202, statusText: 'Accepted', headers: {}, body: '', durationMs: 1, sizeBytes: 0 };
+      const result = message.method === 'tools/list' ? { tools: [] } : message.method === 'prompts/list' ? { prompts: [] } : message.method === 'resources/list' ? { resources: [] } : { resourceTemplates: [] };
+      return { status: 200, statusText: 'OK', headers: {}, body: JSON.stringify({ jsonrpc: '2.0', id: message.id, result }), durationMs: 1, sizeBytes: 1 };
+    });
+
+    const first = await discoverMcpClient(client, undefined, { sessionScope: 'project-a' });
+    const second = await discoverMcpClient(first.client, undefined, { sessionScope: 'project-a' });
+    await discoverMcpClient(first.client, undefined, { sessionScope: 'project-b' });
+
+    expect(initializeCount).toBe(2);
+    expect(second.events).toContainEqual(expect.objectContaining({ method: 'MCP session', detail: 'Reused the active HTTP session.' }));
+    expect(hasMcpClientSession(first.client, 'project-a')).toBe(true);
+    expect(hasMcpClientSession(first.client, 'project-b')).toBe(true);
+    const disconnected = await disconnectMcpClient(first.client, undefined, { sessionScope: 'project-a' });
+    expect(disconnected.terminated).toBe(true);
+    const termination = requests.find((request) => request.method === 'DELETE');
+    expect(termination?.headers).toContainEqual(expect.objectContaining({ name: 'Mcp-Session-Id', value: 'session-1' }));
+    expect(termination?.headers).toContainEqual(expect.objectContaining({ name: 'Mcp-Protocol-Version', value: '2025-06-18' }));
+    expect(requests.filter((request) => request.method === 'DELETE' || JSON.parse(request.body).method !== 'initialize').every((request) => request.headers.some((header) => header.name === 'Mcp-Protocol-Version' && header.value === '2025-06-18'))).toBe(true);
+    expect(hasMcpClientSession(first.client, 'project-a')).toBe(false);
+    expect(hasMcpClientSession(first.client, 'project-b')).toBe(true);
+  });
+
+  it('reinitializes once when a server rejects an expired HTTP session', async () => {
+    const client = oauthClient();
+    client.authType = 'none';
+    let initializeCount = 0;
+    let expireFirstSession = false;
+    const toolSessions: string[] = [];
+    transport.sendRequest.mockImplementation(async (request: ApiRequest) => {
+      const message = JSON.parse(request.body) as { id?: string; method: string };
+      const sessionId = request.headers.find((header) => header.name === 'Mcp-Session-Id')?.value ?? '';
+      if (message.method === 'initialize') {
+        initializeCount += 1;
+        return { status: 200, statusText: 'OK', headers: { 'Mcp-Session-Id': initializeCount === 1 ? 'expired-session' : 'replacement-session' }, body: JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-06-18', capabilities: {} } }), durationMs: 1, sizeBytes: 1 };
+      }
+      if (message.method === 'notifications/initialized') return { status: 202, statusText: 'Accepted', headers: {}, body: '', durationMs: 1, sizeBytes: 0 };
+      if (message.method === 'tools/call') {
+        toolSessions.push(sessionId);
+        if (expireFirstSession && sessionId === 'expired-session') return { status: 404, statusText: 'Not Found', headers: {}, body: 'session expired', durationMs: 1, sizeBytes: 0 };
+        return { status: 200, statusText: 'OK', headers: {}, body: JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: 'ok' }] } }), durationMs: 1, sizeBytes: 1 };
+      }
+      const result = message.method === 'tools/list' ? { tools: [{ name: 'search', description: '', inputSchema: {} }] } : message.method === 'prompts/list' ? { prompts: [] } : message.method === 'resources/list' ? { resources: [] } : { resourceTemplates: [] };
+      return { status: 200, statusText: 'OK', headers: {}, body: JSON.stringify({ jsonrpc: '2.0', id: message.id, result }), durationMs: 1, sizeBytes: 1 };
+    });
+
+    const discovered = await discoverMcpClient(client, undefined, { sessionScope: 'project-recovery' });
+    expireFirstSession = true;
+    const output = await invokeMcpOperation(discovered.client, 'tool', 'search', {}, undefined, { sessionScope: 'project-recovery' });
+
+    expect(initializeCount).toBe(2);
+    expect(toolSessions).toEqual(['expired-session', 'replacement-session']);
+    expect(output.events).toContainEqual(expect.objectContaining({ method: 'MCP session', detail: expect.stringContaining('expired HTTP session') }));
+    expect(hasMcpClientSession(output.client, 'project-recovery')).toBe(true);
+  });
+
+  it('reuses a logical HTTP connection when the server omits a session identity', async () => {
+    const client = oauthClient();
+    client.authType = 'none';
+    let initializeCount = 0;
+    transport.sendRequest.mockImplementation(async (request: ApiRequest) => {
+      const message = JSON.parse(request.body) as { id?: string; method: string };
+      if (message.method === 'initialize') initializeCount += 1;
+      const result = message.method === 'initialize'
+        ? { protocolVersion: '2025-06-18', capabilities: {} }
+        : message.method === 'tools/list'
+          ? { tools: [] }
+          : message.method === 'prompts/list'
+            ? { prompts: [] }
+            : message.method === 'resources/list'
+              ? { resources: [] }
+              : { resourceTemplates: [] };
+      return { status: message.id ? 200 : 202, statusText: 'OK', headers: {}, body: message.id ? JSON.stringify({ jsonrpc: '2.0', id: message.id, result }) : '', durationMs: 1, sizeBytes: 1 };
+    });
+
+    const first = await discoverMcpClient(client, undefined, { sessionScope: 'stateless' });
+    await discoverMcpClient(first.client, undefined, { sessionScope: 'stateless' });
+    expect(initializeCount).toBe(1);
+    expect(hasMcpClientSession(first.client, 'stateless')).toBe(true);
+    expect((await disconnectMcpClient(first.client, undefined, { sessionScope: 'stateless' })).terminated).toBe(false);
+    expect(hasMcpClientSession(first.client, 'stateless')).toBe(false);
+  });
+
+  it('rejects oversized HTTP session identities before caching them', async () => {
+    const client = oauthClient();
+    client.authType = 'none';
+    transport.sendRequest.mockResolvedValue({ status: 200, statusText: 'OK', headers: { 'Mcp-Session-Id': 'x'.repeat(4_097) }, body: '{}', durationMs: 1, sizeBytes: 1 });
+    await expect(discoverMcpClient(client, undefined, {})).rejects.toThrow('oversized session identity');
+    expect(hasMcpClientSession(client)).toBe(false);
   });
 });
