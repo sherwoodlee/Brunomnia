@@ -1378,7 +1378,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Workspace v39 bounded local connection/event/timeline model, normalization, retention, environment filtering, restart repair, and publication stripping: [`src/types.ts`](../src/types.ts), [`src/lib/mcpHistory.ts`](../src/lib/mcpHistory.ts), [`src/lib/storage.ts`](../src/lib/storage.ts), and [`src/lib/security.ts`](../src/lib/security.ts)
 - Stable HTTP/STDIO logical history identities, matching result events, live idle recording, lifecycle finalization, and Events/Notifications/Console history controls: [`src/lib/mcp.ts`](../src/lib/mcp.ts) and [`src/components/IntegrationWorkbench.tsx`](../src/components/IntegrationWorkbench.tsx)
 - Focused response/filter/retention/migration/security regressions and exact verification record: [`src/lib/mcpHistory.test.ts`](../src/lib/mcpHistory.test.ts), [`src/lib/mcp.test.ts`](../src/lib/mcp.test.ts), [`src/lib/storage.test.ts`](../src/lib/storage.test.ts), [`src/lib/security.test.ts`](../src/lib/security.test.ts), and [`docs/QA_MILESTONE_238.md`](QA_MILESTONE_238.md)
-- Remote rebuild/signing evidence remains pending until the implementation commit completes the main workflow: [`docs/QA_MILESTONE_238.md`](QA_MILESTONE_238.md)
+- Successful remote Node 22 rebuild/no-network smoke, signed AMD64/ARM64 publication, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_238.md`](QA_MILESTONE_238.md)
 
 ## Parity declaration rule
 
