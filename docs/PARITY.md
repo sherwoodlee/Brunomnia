@@ -1370,7 +1370,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Pinned MCP request model, capability gate, Subscribe/Unsubscribe control, client primitive methods, disconnect cleanup, and exact locked SDK OAuth/DPoP audit: [`docs/QA_MILESTONE_237.md`](QA_MILESTONE_237.md)
 - Negotiated HTTP/STDIO resource-subscription state, session-aware protocol calls, disconnect cleanup, and visible ordinary-resource controls: [`src/lib/mcp.ts`](../src/lib/mcp.ts) and [`src/components/IntegrationWorkbench.tsx`](../src/components/IntegrationWorkbench.tsx)
 - Persistent STDIO response routing plus idle notification dispatch, fatal-state propagation, bounded fallback events, real-child coverage, real HTTP loopback coverage, and exact verification record: [`src-tauri/src/mcp_stdio.rs`](../src-tauri/src/mcp_stdio.rs), [`src/lib/mcp.test.ts`](../src/lib/mcp.test.ts), [`src/lib/mcpSession.integration.test.ts`](../src/lib/mcpSession.integration.test.ts), and [`docs/QA_MILESTONE_237.md`](QA_MILESTONE_237.md)
-- Remote rebuild/signing evidence remains pending until the implementation commit completes the main workflow: [`docs/QA_MILESTONE_237.md`](QA_MILESTONE_237.md)
+- Successful remote Node 22 rebuild/no-network smoke, signed AMD64/ARM64 publication, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_237.md`](QA_MILESTONE_237.md)
 
 ## Parity declaration rule
 
