@@ -915,6 +915,75 @@ mod tests {
         }
     }
 
+    fn public_request(
+        url: &str,
+        id: Option<&str>,
+        method: &str,
+        params: Value,
+        session_id: &str,
+    ) -> McpHttpRequestInput {
+        let mut headers = vec![
+            KeyValue {
+                name: "Content-Type".into(),
+                value: "application/json".into(),
+                enabled: true,
+            },
+            KeyValue {
+                name: "Accept".into(),
+                value: "application/json, text/event-stream".into(),
+                enabled: true,
+            },
+        ];
+        if method != "initialize" {
+            headers.push(KeyValue {
+                name: "Mcp-Protocol-Version".into(),
+                value: "2025-06-18".into(),
+                enabled: true,
+            });
+        }
+        if !session_id.is_empty() {
+            headers.push(KeyValue {
+                name: "Mcp-Session-Id".into(),
+                value: session_id.into(),
+                enabled: true,
+            });
+        }
+        let mut body = json!({ "jsonrpc": "2.0", "method": method, "params": params });
+        if let Some(id) = id {
+            body["id"] = Value::String(id.into());
+        }
+        McpHttpRequestInput {
+            request: HttpRequestInput {
+                method: "POST".into(),
+                url: url.into(),
+                headers,
+                body_mode: "json".into(),
+                body: body.to_string(),
+                form_body: Vec::new(),
+                multipart_body: Vec::new(),
+                binary_body: None,
+                auth: NativeAuthConfig::default(),
+                transport: TransportConfig {
+                    follow_redirects: false,
+                    timeout_ms: 30_000,
+                    ..Default::default()
+                },
+            },
+            request_id: id.unwrap_or_default().into(),
+            session_key: format!("public/{method}/{}", id.unwrap_or("notification")),
+            start_get_stream: false,
+        }
+    }
+
+    fn matching_result(output: &HttpResponseOutput, id: &str) -> Value {
+        serde_json::from_str::<Vec<Value>>(&output.body)
+            .unwrap()
+            .into_iter()
+            .find(|message| message["id"] == id)
+            .unwrap()["result"]
+            .clone()
+    }
+
     fn discard_channel() -> Channel<McpHttpEvent> {
         Channel::new(|body| {
             if let InvokeResponseBody::Json(json) = body {
@@ -933,6 +1002,125 @@ mod tests {
             Ok(())
         });
         (channel, receiver)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires public DeepWiki, Context7, and Cloudflare Docs MCP servers"]
+    async fn validates_public_mcp_discovery_and_invocation() {
+        assert_eq!(std::env::var("BRUNOMNIA_MCP_LIVE").as_deref(), Ok("1"));
+        let fixtures = [
+            (
+                "https://mcp.deepwiki.com/mcp",
+                "read_wiki_structure",
+                json!({ "repoName": "Kong/insomnia" }),
+                false,
+            ),
+            (
+                "https://mcp.context7.com/mcp",
+                "resolve-library-id",
+                json!({ "libraryName": "React", "query": "Find the React documentation identifier." }),
+                true,
+            ),
+            (
+                "https://docs.mcp.cloudflare.com/mcp",
+                "search_cloudflare_documentation",
+                json!({ "query": "Workers KV consistency model" }),
+                false,
+            ),
+        ];
+        for (index, (url, tool, arguments, stateful)) in fixtures.into_iter().enumerate() {
+            let cancellations = HttpCancellationState::default();
+            let sessions = McpHttpSessionState::default();
+            let initialize_id = format!("initialize-{index}");
+            let initialized = send_cancellable(
+                public_request(
+                    url,
+                    Some(&initialize_id),
+                    "initialize",
+                    json!({
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": { "roots": { "listChanged": true }, "elicitation": {}, "sampling": {} },
+                        "clientInfo": { "name": "Brunomnia", "version": "0.1.0" }
+                    }),
+                    "",
+                ),
+                None,
+                discard_channel(),
+                &cancellations,
+                sessions.clone(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(initialized.status, 200);
+            assert_eq!(
+                matching_result(&initialized, &initialize_id)["protocolVersion"],
+                "2025-06-18"
+            );
+            assert!(matches!(
+                initialized.http_version.as_str(),
+                "HTTP/1.1" | "HTTP/2.0"
+            ));
+            let session_id = initialized
+                .headers
+                .get("mcp-session-id")
+                .cloned()
+                .unwrap_or_default();
+            assert_eq!(!session_id.is_empty(), stateful);
+
+            let notification = send_cancellable(
+                public_request(
+                    url,
+                    None,
+                    "notifications/initialized",
+                    json!({}),
+                    &session_id,
+                ),
+                None,
+                discard_channel(),
+                &cancellations,
+                sessions.clone(),
+            )
+            .await
+            .unwrap();
+            assert!(notification.status == 200 || notification.status == 202);
+
+            let list_id = format!("tools-{index}");
+            let listed = send_cancellable(
+                public_request(url, Some(&list_id), "tools/list", json!({}), &session_id),
+                None,
+                discard_channel(),
+                &cancellations,
+                sessions.clone(),
+            )
+            .await
+            .unwrap();
+            let tools = matching_result(&listed, &list_id)["tools"]
+                .as_array()
+                .unwrap()
+                .clone();
+            assert!(tools.iter().any(|candidate| candidate["name"] == tool));
+
+            let call_id = format!("call-{index}");
+            let called = send_cancellable(
+                public_request(
+                    url,
+                    Some(&call_id),
+                    "tools/call",
+                    json!({ "name": tool, "arguments": arguments }),
+                    &session_id,
+                ),
+                None,
+                discard_channel(),
+                &cancellations,
+                sessions,
+            )
+            .await
+            .unwrap();
+            assert!(!matching_result(&called, &call_id)["content"]
+                .as_array()
+                .unwrap()
+                .is_empty());
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

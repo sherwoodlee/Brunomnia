@@ -14,6 +14,7 @@
     "test:cli-template-smoke": "npm run build:cli && node scripts/cli-template-smoke.mjs",
     "test:cli-runner-smoke": "npm run build:cli && node scripts/cli-runner-preview-smoke.mjs",
     "test:cli-container": "npm run build:cli && node scripts/cli-container-smoke.mjs",
+    "test:mcp-public": "BRUNOMNIA_MCP_LIVE=1 vitest run src/lib/mcpPublic.integration.test.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "tauri": "tauri"

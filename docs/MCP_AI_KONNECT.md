@@ -99,6 +99,18 @@ Each logical MCP connection owns one response record keyed to its retained HTTP 
 
 Response records use the shared 20/default, finite, zero, or unlimited response-history preference and active-environment filter. Selecting or deleting an older response closes the live connection first, and **Clear** removes only the selected client's active-environment records. A selected-environment change closes the old connection before another environment can append to it. Each connection keeps at most 5,000 events, one million characters per payload, five million method/payload characters in aggregate, and 5,000 console entries; global normalization keeps at most 5,000 MCP connection records. Records are saved only in the local catalog/backup, reset stale connected states after restart, and are stripped from folder/Git projects, ordinary imports, and encrypted collaboration payloads.
 
+### Live third-party compatibility
+
+The opt-in public matrix uses credential-free, documented MCP endpoints and never runs during the ordinary offline suite:
+
+| Endpoint | Observed implementation | Reproducible operations |
+| --- | --- | --- |
+| `https://mcp.deepwiki.com/mcp` | DeepWiki 2.14.3; stateless Uvicorn HTTP/2 SSE | Initialize, all four discovery families, and `read_wiki_structure` for `Kong/insomnia` |
+| `https://mcp.context7.com/mcp` | Context7 3.2.3; stateful Express HTTP/1.1 SSE with an exposed `Mcp-Session-Id` | Initialize, all four discovery families, `resolve-library-id`, retained session reuse, and explicit disconnect |
+| `https://docs.mcp.cloudflare.com/mcp` | Cloudflare Docs 0.4.9; stateless Cloudflare HTTP/2 SSE | Initialize, all four discovery families, and `search_cloudflare_documentation` |
+
+`npm run test:mcp-public` executes those flows through the shared Brunomnia client, validates named tool schemas/results, and checks stateful versus stateless disconnect behavior. The ignored native test `mcp_http::tests::validates_public_mcp_discovery_and_invocation` repeats initialization, tool discovery, and invocation through the packaged Tauri Streamable HTTP transport. Both matrices use protocol `2025-06-18`, 30-second per-call deadlines, no credentials, no cookies, and harmless documentation queries. Service versions and contents can evolve, so the checked capability/tool identities—not byte-identical output—define the compatibility gate.
+
 ## AI providers and workflows
 
 AI is optional and off by default. The provider adapter supports:
