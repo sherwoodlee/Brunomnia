@@ -44,7 +44,13 @@ Rendered interaction QA remains omitted by standing direction. Focused resolved-
 
 ## Remote gate
 
-Pending implementation workflow and signed publication evidence.
+Main commit `4f22b666d9538c1c4509e15b26c5858d158ffdfc` completed verify and publish in [Actions run 29728531123](https://github.com/sherwoodlee/Brunomnia/actions/runs/29728531123). Node 22 reproduced the committed CLI, passed freshness plus non-root/no-network trust smokes, and published AMD64/ARM64 provenance/SBOM manifests at:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:55b2d26841390ab680de7c73cd5c30b47a821096ae9eb4cf62807a989bcaa88c
+```
+
+Independent manifest inspection resolved AMD64 `sha256:2b56ecd818805cff420fa6f1368986216d2c9f97e5e7d426b6793a39eb582fc8`, ARM64 `sha256:e71a6fce856f467f7f7236df8de3371209fb8bb588fbb2aae00513ff2f49f484`, and their attached attestation manifests. Independent `cosign verify` passed issuer `https://token.actions.githubusercontent.com` and exact identity `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, validated the M241 commit and published digest claims plus the trusted certificate chain, and found transparency-log entry `2205263233`.
 
 ## Acceptance boundary
 
