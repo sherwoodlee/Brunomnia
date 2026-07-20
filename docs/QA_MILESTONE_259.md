@@ -27,8 +27,8 @@ Scope: complete the pinned Collection Runner and automated-test capability by ma
 | Gate | Result |
 | --- | --- |
 | Focused Runner regressions | Pass — 1 file, 38 tests, including probabilistic Shift_JIS identity and compressed wire-size snapshot/live propagation |
-| Frontend aggregate | Environment-limited locally — the changed Runner suite passed in both aggregate attempts, and the four unrelated timeout cases passed exactly as 2 files/33 tests with a relaxed timeout. The aggregate then failed in Node/Tinypool module reads with repeated OS `ETIMEDOUT`; one-worker mode removed concurrent read crashes but made the same unchanged filesystem-bound template test exceed 120 seconds. Remote Node 22 verification is the authoritative full-suite gate. |
-| TypeScript project check | Environment-limited locally — three compiler attempts made no diagnostic progress for 5-10 minutes while the same host filesystem stalled. The production renderer, focused Vitest transform, packaged CLI bundle, and Tauri bundle compile the changed module successfully; remote Node 22 verification remains authoritative for `tsc -b`. |
+| Full frontend suite | Pass — 93 files and 660 tests; 2 opt-in public fixture files and 4 tests skipped. The workspace FileProvider produced unrelated module-read `ETIMEDOUT` failures, so the authoritative rerun used a clean committed `git archive` plus `npm ci` on local `/private/tmp` storage. |
+| TypeScript project check | Pass — `tsc -b` completed without diagnostics in the same clean committed archive |
 | Production renderer | Pass — 1,541 modules; 187.71 kB stylesheet; 497.75 kB main renderer; 3,274.00 kB lazy Spectral chunk |
 | Bundled CLI build | Pass — 23,499,784 bytes; SHA-256 `adadff2fd9fef9807c8fd8e91248a53c90f00e1eb87b1a4e027d6f5b40f5b743` |
 | Bundled CLI smokes | Pass — Runner preview, template/file authority, physical records, and non-root/no-network container behavior |
@@ -52,7 +52,13 @@ Rendered/manual QA remains omitted under the standing project direction. M259 th
 
 ## Remote gate
 
-Pending the implementation commit's GitHub Actions verify-and-publish workflow. The evidence commit will record the immutable run, image digest, architecture manifests, attestations, signature identity, and transparency-log inclusion.
+Implementation commit `2cf40c100ac9926a72f9bd8c7c386e90b31a3ad6` completed verify and publish in [Actions run 29788317913](https://github.com/sherwoodlee/Brunomnia/actions/runs/29788317913). Both jobs passed. The verify job reproduced the committed CLI under Node 22, passed freshness, built the verification image, and passed ordinary plus extended non-root/no-network container smokes. The publish job emitted AMD64/ARM64 provenance and SBOM attestations and keylessly signed:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:bbcd38ace310e7ba3426cbe97881edb882b7784182633c017785391498b74fe9
+```
+
+Independent manifest inspection resolved AMD64 `sha256:1e550af66f1f8fee4606cd1cb8e70cdfe3f7fa939ae8b534d346580806b664e2`, ARM64 `sha256:db5da668bc7c1cd999b1394101fa64569e836cb7df4ebe5ca8212a61372b1b11`, and attached attestation manifests `sha256:457cc155c1c7643520b6ce1bd67caff023bec5079666d0e71b47469197f6419b` plus `sha256:17a01e4cbf4e676c866928b3307a4534665b0a9779ba9f3290d2a3081c8e3bc4`. Independent Cosign verification passed claims, trusted certificate-chain validation, exact issuer `https://token.actions.githubusercontent.com`, exact subject `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, branch, repository, workflow, implementation SHA, digest claims, and offline transparency-log inclusion at Rekor index `2209032263`.
 
 ## Acceptance boundary
 
