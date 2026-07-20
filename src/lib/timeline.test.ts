@@ -72,6 +72,7 @@ describe('response timeline evidence', () => {
       redirects: [{ status: 302, fromUrl: 'https://example.test/start', toUrl: 'https://example.test/final', elapsedMs: 12 }],
       redirectsTruncated: true,
       effectiveUrl: 'https://example.test/final',
+      networkText: [{ value: 'Connected to example.test:443 using HTTP/2.0', elapsedMs: 41 }],
     });
 
     expect(timeline).toEqual(expect.arrayContaining([
@@ -80,7 +81,17 @@ describe('response timeline evidence', () => {
       expect.objectContaining({ name: 'Text', value: 'Redirect trace truncated after 100 hops' }),
       expect.objectContaining({ name: 'HeaderIn', value: 'HTTP/2.0 201 Created\nset-cookie: first=1\nset-cookie: second=2' }),
       expect.objectContaining({ name: 'Text', value: 'Effective URL https://example.test/final' }),
+      expect.objectContaining({ name: 'Text', value: 'Connected to example.test:443 using HTTP/2.0', elapsedMs: 41 }),
     ]));
+  });
+
+  it('distinguishes compressed wire bytes from decoded content bytes', () => {
+    const request = createBlankRequest('compressed-timeline');
+    const timeline = buildResponseTimeline(request, 'https://example.test/data', { ...response, sizeBytes: 4_096, wireSizeBytes: 512 });
+    expect(timeline).toContainEqual(expect.objectContaining({
+      name: 'Text',
+      value: 'Response 201 Created; read 512 B compressed wire body and decoded 4.0 KiB content',
+    }));
   });
 
   it('formats byte evidence with IEC units', () => {

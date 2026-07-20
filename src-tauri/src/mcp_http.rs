@@ -261,6 +261,7 @@ impl ResponseMetadata {
             body_base64: None,
             duration_ms: started.elapsed().as_millis(),
             size_bytes,
+            wire_size_bytes: size_bytes,
             set_cookies: self.set_cookies,
             http_version: self.http_version,
             effective_url: self.effective_url,

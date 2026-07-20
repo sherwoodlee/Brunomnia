@@ -97,7 +97,7 @@ function MultipartPartBody({ allowHtmlPreviewRemoteResources, allowHtmlPreviewSc
   if (normalizedContentType.includes('multipart/')) {
     const block = multipartNestedPreviewBlock(depth, part.bodyBytes.byteLength);
     if (block === 'depth') return <div className="response-multipart-message">Nested multipart preview stopped at {MAX_MULTIPART_PREVIEW_DEPTH} levels. Save the section to inspect its complete original bytes.</div>;
-    if (block === 'size') return <div className="response-multipart-message">Nested multipart section over 5 MB is not expanded to avoid multiplying parser memory. Save the section to inspect its complete original bytes.</div>;
+    if (block === 'size') return <div className="response-multipart-message">Nested multipart sections over 100 MiB cannot be previewed. Save the section to inspect its complete original bytes.</div>;
     return <MultipartResponsePreview allowHtmlPreviewRemoteResources={allowHtmlPreviewRemoteResources} allowHtmlPreviewScripts={allowHtmlPreviewScripts} bytes={part.bodyBytes} contentType={contentType} depth={depth + 1} responseUrl={responseUrl} />;
   }
   if (normalizedContentType.includes('csv')) return <CsvResponsePreview body={part.body} />;

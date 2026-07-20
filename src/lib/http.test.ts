@@ -61,23 +61,25 @@ describe('native HTTP transport preferences', () => {
     await sendRequest(request, undefined);
     expect(tauri.invoke).toHaveBeenLastCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ headers: expect.arrayContaining([
       expect.objectContaining({ name: 'Accept', value: '*/*', enabled: true }),
+      expect.objectContaining({ name: 'Accept-Encoding', value: 'gzip, deflate, br, zstd', enabled: true }),
       expect.objectContaining({ name: 'User-Agent', value: 'brunomnia/0.1.0', enabled: true }),
     ]) }) }));
 
     request.disableUserAgentHeader = true;
     await sendRequest(request, undefined);
-    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual([expect.objectContaining({ name: 'Accept', value: '*/*' })]);
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Accept', value: '*/*' }), expect.objectContaining({ name: 'Accept-Encoding' })]));
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toHaveLength(2);
 
     request.disableUserAgentHeader = false;
     request.headers = [{ id: 'custom-agent', name: 'user-agent', value: 'custom/2.0', enabled: true }];
     await sendRequest(request, undefined);
     expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Accept' }), expect.objectContaining({ value: 'custom/2.0' })]));
-    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toHaveLength(2);
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toHaveLength(3);
 
     request.headers[0].enabled = false;
     await sendRequest(request, undefined);
     expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Accept' }), expect.objectContaining({ value: 'custom/2.0', enabled: false })]));
-    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toHaveLength(2);
+    expect(tauri.invoke.mock.calls.at(-1)?.[1].input.headers).toHaveLength(3);
   });
 
   it('applies or bypasses body template rendering across multipart metadata', async () => {
@@ -122,13 +124,13 @@ describe('native HTTP transport preferences', () => {
   });
 
   it('decodes native response bytes with the declared charset before hooks and previews', async () => {
-    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: { 'content-type': 'text/plain; charset=windows-1252' }, body: 'caf�', bodyBase64: 'Y2Fm6Q==', durationMs: 1, sizeBytes: 4, setCookies: [], httpVersion: 'HTTP/1.1' });
+    tauri.invoke.mockResolvedValue({ status: 200, statusText: 'OK', headers: { 'content-type': 'text/plain; charset=windows-1252' }, body: 'caf�', bodyBase64: 'Y2Fm6Q==', durationMs: 1, sizeBytes: 4, wireSizeBytes: 3, setCookies: [], httpVersion: 'HTTP/1.1' });
     const request = createBlankRequest('native-response-charset');
     request.url = 'https://example.test/legacy-text';
 
     const response = await sendRequest(request, undefined);
 
-    expect(response).toMatchObject({ body: 'café', bodyBase64: 'Y2Fm6Q==', sizeBytes: 4 });
+    expect(response).toMatchObject({ body: 'café', bodyBase64: 'Y2Fm6Q==', sizeBytes: 4, wireSizeBytes: 3 });
   });
 
   it('passes device HTTP and redirect preferences without changing saved request transport', async () => {
@@ -315,17 +317,20 @@ describe('native HTTP transport preferences', () => {
 
     const response = await sendRequest(request, undefined, { maxTimelineDataSizeKB: 0 });
     expect(response.requestUrl).toBe('https://example.test/final');
-    expect(response.timeline).toEqual([
+    expect(response.timeline).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'Text', value: 'Preparing POST request to https://example.test/items' }),
       expect.objectContaining({ name: 'HeaderOut', value: expect.stringContaining('Accept: */*') }),
       expect.objectContaining({ name: 'DataOut', value: '(1.0 KiB hidden)', hidden: true }),
       expect.objectContaining({ name: 'Text', value: 'Redirect 307: https://example.test/items -> https://example.test/final', elapsedMs: 2 }),
+      expect.objectContaining({ name: 'Text', value: 'Connected to example.test:443 using HTTP/1.1', elapsedMs: 3 }),
+      expect.objectContaining({ name: 'Text', value: 'TLS certificate validation enabled', elapsedMs: 3 }),
+      expect.objectContaining({ name: 'Text', value: 'Native request used system proxy resolution', elapsedMs: 3 }),
       expect.objectContaining({ name: 'HeaderIn', value: 'HTTP/1.1 201 Created\nx-duplicate: first\nx-duplicate: second' }),
       expect.objectContaining({ value: 'Response 201 Created; received 2 B decoded body' }),
       expect.objectContaining({ value: 'Effective URL https://example.test/final' }),
       expect.objectContaining({ value: 'Negotiated HTTP/1.1' }),
       expect.objectContaining({ value: 'Response body decoded and available to scripts and preview' }),
-    ]);
+    ]));
   });
 
   it('converts native pre-response failures into bounded timeline errors', async () => {

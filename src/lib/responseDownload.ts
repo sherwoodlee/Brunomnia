@@ -165,7 +165,7 @@ export const createResponseHarArtifact = (
           content: { size: response.sizeBytes, mimeType: contentType(response), text: response.body },
           redirectURL: headerValue(response.headers, 'location'),
           headersSize: -1,
-          bodySize: response.sizeBytes,
+          bodySize: response.wireSizeBytes ?? response.sizeBytes,
         },
         cache: {},
         timings: { send: 0, wait: response.durationMs, receive: 0 },

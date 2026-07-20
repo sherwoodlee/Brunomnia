@@ -404,7 +404,7 @@ describe('workspace migrations', () => {
     expect(migrated.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, validateCertificates: true, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', autoFetchGraphqlSchema: true });
     expect(migrated.preferences).toMatchObject({ useBulkHeaderEditor: false, useBulkParametersEditor: false });
     expect(migrated.preferences).toMatchObject({ forceVerticalLayout: false, editorIndentWithTabs: true, editorIndentSize: 2, editorLineWrapping: true, fontVariantLigatures: false });
-    expect(migrated.preferences).toMatchObject({ fontSize: 11, interfaceFontSize: 13, fontInterface: '', fontMonospace: '', showPasswords: false, allowHtmlPreviewRemoteResources: false, allowHtmlPreviewScripts: false, disableResponsePreviewLinks: false });
+    expect(migrated.preferences).toMatchObject({ fontSize: 11, interfaceFontSize: 13, fontInterface: '', fontMonospace: '', showPasswords: false, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: false });
     expect(migrated.collections[0].requests[0].transport).toMatchObject({ followRedirects: true, followRedirectsMode: 'global', timeoutMode: 'global', validateCertificatesMode: 'global', proxyMode: 'global' });
     expect(migrated.preferences).toMatchObject({ scriptTimeoutMs: 10_000, allowScriptRequests: false, allowScriptFileAccess: false, dataFolders: [], enableVaultInScripts: false });
     expect(migrated.preferences.shortcuts['generate-code']).toBe('Mod+Shift+G');
@@ -784,7 +784,7 @@ describe('workspace migrations', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
     workspace.preferences = { theme: 'unknown', density: 'compact', fontSize: 99, interfaceFontSize: 2, fontInterface: 'Fancy\nUI', fontMonospace: 42, showPasswords: 'yes', allowHtmlPreviewRemoteResources: 'yes', allowHtmlPreviewScripts: 'yes', disableResponsePreviewLinks: 'yes', preferredHttpVersion: 'http3', maxRedirects: -99.8, followRedirects: 'sometimes', maxTimelineDataSizeKB: -400.2, maxHistoryResponses: -400.2, filterResponsesByEnv: 'yes', requestTimeoutMs: 1, validateCertificates: false, validateAuthCertificates: 'no', proxyEnabled: 'yes', httpProxy: 42, httpsProxy: false, noProxy: null, forceVerticalLayout: 'yes', editorIndentWithTabs: 0, editorIndentSize: 999, editorLineWrapping: null, fontVariantLigatures: 1, scriptTimeoutMs: 999_999, allowScriptRequests: 'yes', allowScriptFileAccess: 'yes', dataFolders: [' /tmp/fixtures ', '/tmp/fixtures', 42, '', 'x'.repeat(5_000)], enableVaultInScripts: 1, shortcuts: { palette: ' mod + shift + p ', send: 42 } };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 24, interfaceFontSize: 8, fontInterface: 'Fancy UI', fontMonospace: '', showPasswords: false, allowHtmlPreviewRemoteResources: false, allowHtmlPreviewScripts: false, disableResponsePreviewLinks: false, preferredHttpVersion: 'default', maxRedirects: -1, followRedirects: true, maxTimelineDataSizeKB: 0, maxHistoryResponses: -1, filterResponsesByEnv: false, requestTimeoutMs: 1, validateCertificates: false, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
+    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 24, interfaceFontSize: 8, fontInterface: 'Fancy UI', fontMonospace: '', showPasswords: false, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: false, preferredHttpVersion: 'default', maxRedirects: -1, followRedirects: true, maxTimelineDataSizeKB: 0, maxHistoryResponses: -1, filterResponsesByEnv: false, requestTimeoutMs: 1, validateCertificates: false, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
     expect(migrated.preferences).toMatchObject({ useBulkHeaderEditor: false, useBulkParametersEditor: false });
     expect(migrated.preferences).toMatchObject({ forceVerticalLayout: false, editorIndentWithTabs: true, editorIndentSize: 16, editorLineWrapping: true, fontVariantLigatures: false });
     expect(migrated.preferences.dataFolders).toEqual(['/tmp/fixtures', 'x'.repeat(4_096)]);
@@ -897,12 +897,12 @@ describe('workspace migrations', () => {
   it('preserves optional exact response bytes and rejects non-string containers', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
     workspace.responses = [
-      { id: 'binary', requestId: 'request', requestName: 'Binary', requestUrl: 'https://example.test/file', environmentId: '', receivedAt: '2026-07-17T00:00:00.000Z', status: 200, statusText: 'OK', headers: {}, body: 'f�o', bodyBase64: 'ZoBv', durationMs: 1, sizeBytes: 3 },
+      { id: 'binary', requestId: 'request', requestName: 'Binary', requestUrl: 'https://example.test/file', environmentId: '', receivedAt: '2026-07-17T00:00:00.000Z', status: 200, statusText: 'OK', headers: {}, body: 'f�o', bodyBase64: 'ZoBv', durationMs: 1, sizeBytes: 3, wireSizeBytes: 2 },
       { id: 'invalid', requestId: 'request', requestName: 'Invalid', requestUrl: 'https://example.test/file', environmentId: '', receivedAt: '2026-07-17T00:00:01.000Z', status: 200, statusText: 'OK', headers: {}, body: 'safe', bodyBase64: { bytes: [] }, durationMs: 1, sizeBytes: 4 },
     ];
 
     const responses = migrateWorkspace(workspace).responses;
-    expect(responses[0]).toMatchObject({ id: 'binary', body: 'f�o', bodyBase64: 'ZoBv' });
+    expect(responses[0]).toMatchObject({ id: 'binary', body: 'f�o', bodyBase64: 'ZoBv', wireSizeBytes: 2 });
     expect(responses[1]).not.toHaveProperty('bodyBase64');
   });
 

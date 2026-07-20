@@ -717,6 +717,7 @@ export type HttpResponse = {
   bodyBase64?: string;
   durationMs: number;
   sizeBytes: number;
+  wireSizeBytes?: number;
   setCookies?: string[];
   requestUrl?: string;
   httpVersion?: string;

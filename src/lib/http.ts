@@ -8,7 +8,7 @@ import { buildRequestFailureTimeline, buildResponseTimeline } from './timeline';
 import { decodeHttpResponseBody, responseBodyFromBytes, responseCharset } from './responseBytes';
 import { resolveCertificateValidation, resolveFollowRedirects, resolveProxyTransport, resolveRequestTimeout, type ProxyPreferences } from './transport';
 import { applyDefaultUserAgentHeader } from './userAgent';
-import { applyDefaultAcceptHeader } from './calculatedHeaders';
+import { applyDefaultAcceptEncodingHeader, applyDefaultAcceptHeader } from './calculatedHeaders';
 import { renderApiRequest, type RequestRenderContext } from './requestRender';
 import { clearTemplatePromptValuesForRequest } from './templates';
 
@@ -152,6 +152,21 @@ const signingBody = (request: ApiRequest, variables: Record<string, string>) => 
   return '';
 };
 
+const nativeNetworkTimeline = (
+  requestUrl: string,
+  response: Pick<HttpResponse, 'durationMs' | 'httpVersion'>,
+  validateCertificates: boolean,
+  proxyMode: 'system' | 'custom' | 'disabled',
+) => {
+  const target = new URL(requestUrl);
+  const port = target.port || (target.protocol === 'https:' ? '443' : '80');
+  return [
+    { value: `Connected to ${target.hostname}:${port}${response.httpVersion ? ` using ${response.httpVersion}` : ''}`, elapsedMs: response.durationMs },
+    ...(target.protocol === 'https:' ? [{ value: `TLS certificate validation ${validateCertificates ? 'enabled' : 'disabled'}`, elapsedMs: response.durationMs }] : []),
+    { value: proxyMode === 'custom' ? 'Native request used a configured proxy route' : proxyMode === 'system' ? 'Native request used system proxy resolution' : 'Native request bypassed proxy resolution', elapsedMs: response.durationMs },
+  ];
+};
+
 export const sendRequest = async (request: ApiRequest, environment: Environment | undefined, context: SendRequestContext = {}): Promise<HttpResponse> => {
   throwIfAborted(context.signal);
   const variables = { ...environmentMap(environment), ...(context.vault ?? {}) };
@@ -232,6 +247,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
   throwIfAborted(context.signal);
   if (isTauri()) {
     headers = applyDefaultAcceptHeader(headers);
+    headers = applyDefaultAcceptEncodingHeader(headers);
     headers = applyDefaultUserAgentHeader(headers, prepared.disableUserAgentHeader);
     const body = prepared.protocol === 'graphql'
       ? graphqlPayload!
@@ -279,6 +295,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         redirects,
         redirectsTruncated,
         effectiveUrl,
+        networkText: nativeNetworkTimeline(effectiveUrl ?? url, response, validateCertificates, proxy.proxyMode),
       }));
     } catch (caught) {
       const failure = parseNativeHttpError(caught);

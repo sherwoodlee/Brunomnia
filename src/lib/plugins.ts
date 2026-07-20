@@ -154,7 +154,7 @@ ${source}
     });
     const ${responseApi} = response => ({
       getRequestId: () => ${state}.request?.id ?? '', getStatusCode: () => response.status, getStatusMessage: () => response.statusText,
-      getBytesRead: () => response.sizeBytes, getTime: () => response.durationMs, getBody: () => response.bodyBase64 === undefined ? SafeBuffer.from(response.body) : SafeBuffer.from(response.bodyBase64, 'base64'),
+      getBytesRead: () => response.wireSizeBytes ?? response.sizeBytes, getTime: () => response.durationMs, getBody: () => response.bodyBase64 === undefined ? SafeBuffer.from(response.body) : SafeBuffer.from(response.bodyBase64, 'base64'),
       setBody: body => { requirePermission('response:write'); if (body instanceof Uint8Array) { response.body = new TextDecoder().decode(body); const chunks = []; for (let offset = 0; offset < body.byteLength; offset += 8192) chunks.push(String.fromCharCode(...body.subarray(offset, offset + 8192))); response.bodyBase64 = btoa(chunks.join('')); response.sizeBytes = body.byteLength; } else { response.body = String(body); delete response.bodyBase64; response.sizeBytes = new TextEncoder().encode(response.body).length; } },
       getHeader: name => Object.entries(response.headers).find(([key]) => key.toLowerCase() === String(name).toLowerCase())?.[1] ?? null,
       getHeaders: () => Object.entries(response.headers).map(([name, value]) => ({ name, value })),

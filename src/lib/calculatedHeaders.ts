@@ -2,6 +2,7 @@ import type { ApiRequest, KeyValue } from '../types';
 import { BRUNOMNIA_USER_AGENT, hasAuthoredUserAgentHeader } from './userAgent';
 
 export const DEFAULT_ACCEPT_HEADER = '*/*';
+export const DEFAULT_ACCEPT_ENCODING_HEADER = 'gzip, deflate, br, zstd';
 
 export type CalculatedHeader = KeyValue & { canDisable: boolean };
 
@@ -12,11 +13,17 @@ export const applyDefaultAcceptHeader = (headers: KeyValue[]): KeyValue[] => {
   return [...headers, { id: 'default-accept', name: 'Accept', value: DEFAULT_ACCEPT_HEADER, enabled: true }];
 };
 
+export const applyDefaultAcceptEncodingHeader = (headers: KeyValue[]): KeyValue[] => {
+  if (headers.some((header) => header.enabled && isHeaderNamed(header, 'accept-encoding'))) return headers;
+  return [...headers, { id: 'default-accept-encoding', name: 'Accept-Encoding', value: DEFAULT_ACCEPT_ENCODING_HEADER, enabled: true }];
+};
+
 export const calculatedRequestHeaders = (request: Pick<ApiRequest, 'protocol' | 'headers' | 'disableUserAgentHeader'>): CalculatedHeader[] => {
   if (request.protocol === 'grpc') return [];
   const headers: CalculatedHeader[] = request.protocol === 'http' || request.protocol === 'graphql'
     ? [
       { id: 'default-accept', name: 'Accept', value: DEFAULT_ACCEPT_HEADER, enabled: true, description: 'Added automatically', canDisable: false },
+      { id: 'default-accept-encoding', name: 'Accept-Encoding', value: DEFAULT_ACCEPT_ENCODING_HEADER, enabled: true, description: 'Added automatically by the native transport', canDisable: false },
       { id: 'calculated-host', name: 'Host', value: '<calculated at runtime>', enabled: true, description: 'Calculated at runtime', canDisable: false },
     ]
     : [];

@@ -37,6 +37,7 @@ export type ResponseTransportEvidence = {
   redirects?: Array<{ status: number; fromUrl: string; toUrl: string; elapsedMs: number }>;
   redirectsTruncated?: boolean;
   effectiveUrl?: string;
+  networkText?: Array<{ value: string; elapsedMs: number }>;
 };
 
 const requestPayload = (request: ApiRequest, graphqlPayload?: string): TimelinePayload | undefined => {
@@ -123,6 +124,11 @@ export const buildResponseTimeline = (
   const elapsedMs = Math.max(0, response.durationMs);
   const entries = requestTimeline(request, url, maxTimelineDataSizeKB, graphqlPayload, transport);
   appendRedirectEvidence(entries, transport, elapsedMs);
+  transport.networkText?.forEach((entry) => entries.push({
+    name: 'Text',
+    value: entry.value,
+    elapsedMs: Number.isFinite(entry.elapsedMs) ? Math.max(0, entry.elapsedMs) : elapsedMs,
+  }));
   const responseHeaders = transport.responseHeaders?.length
     ? transport.responseHeaders
     : Object.entries(response.headers).map(([name, value]) => ({ name, value }));
@@ -134,7 +140,14 @@ export const buildResponseTimeline = (
     ].join('\n'),
     elapsedMs,
   });
-  entries.push({ name: 'Text', value: `Response ${response.status} ${response.statusText}; received ${describeTimelineBytes(response.sizeBytes)} decoded body`, elapsedMs });
+  const wireSize = response.wireSizeBytes ?? response.sizeBytes;
+  entries.push({
+    name: 'Text',
+    value: wireSize === response.sizeBytes
+      ? `Response ${response.status} ${response.statusText}; received ${describeTimelineBytes(response.sizeBytes)} decoded body`
+      : `Response ${response.status} ${response.statusText}; read ${describeTimelineBytes(wireSize)} compressed wire body and decoded ${describeTimelineBytes(response.sizeBytes)} content`,
+    elapsedMs,
+  });
   if (transport.effectiveUrl && transport.effectiveUrl !== url) entries.push({ name: 'Text', value: `Effective URL ${transport.effectiveUrl}`, elapsedMs });
   if (response.httpVersion) entries.push({ name: 'Text', value: `Negotiated ${response.httpVersion}`, elapsedMs });
   entries.push({ name: 'Text', value: 'Response body decoded and available to scripts and preview', elapsedMs });

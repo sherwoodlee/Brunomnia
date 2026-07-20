@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createMultipartPartArtifact, MAX_NESTED_MULTIPART_BYTES, multipartNestedPreviewBlock, parseMultipartPreview } from './multipartPreview';
+import { createMultipartPartArtifact, MAX_MULTIPART_PREVIEW_DEPTH, MAX_NESTED_MULTIPART_BYTES, multipartNestedPreviewBlock, parseMultipartPreview } from './multipartPreview';
 
 const body = [
   '--AaB03x',
@@ -81,9 +81,10 @@ describe('multipart response preview', () => {
     expect(parseMultipartPreview(outer.bodyBytes, outer.contentType).parts[0]).toMatchObject({ contentType: 'application/json', body: '{"nested":true}' });
   });
 
-  it('bounds recursive multipart parsing by depth and selected-section bytes', () => {
-    expect(multipartNestedPreviewBlock(4, MAX_NESTED_MULTIPART_BYTES)).toBe('');
-    expect(multipartNestedPreviewBlock(5, 1)).toBe('depth');
+  it('expands practical nested multipart bodies up to the response preview ceiling', () => {
+    expect(multipartNestedPreviewBlock(5, 5 * 1024 * 1024 + 1)).toBe('');
+    expect(multipartNestedPreviewBlock(MAX_MULTIPART_PREVIEW_DEPTH - 1, MAX_NESTED_MULTIPART_BYTES)).toBe('');
+    expect(multipartNestedPreviewBlock(MAX_MULTIPART_PREVIEW_DEPTH, 1)).toBe('depth');
     expect(multipartNestedPreviewBlock(0, MAX_NESTED_MULTIPART_BYTES + 1)).toBe('size');
   });
 });

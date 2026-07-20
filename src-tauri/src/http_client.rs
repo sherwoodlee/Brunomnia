@@ -6,13 +6,19 @@ use crate::{
     },
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use brotli::Decompressor as BrotliDecoder;
 use digest_auth::{AuthContext, HttpMethod as DigestMethod};
+use flate2::read::{DeflateDecoder, GzDecoder, ZlibDecoder};
 use reqwest::{
-    header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE},
+    header::{
+        HeaderMap, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE, SET_COOKIE,
+        WWW_AUTHENTICATE,
+    },
     multipart, Certificate, Client, Method, RequestBuilder, Response, Version,
 };
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    io::{self, Read},
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -36,6 +42,8 @@ enum RedirectMode {
     Limited(usize),
     Unlimited,
 }
+
+const SUPPORTED_CONTENT_ENCODINGS: &str = "gzip, deflate, br, zstd";
 
 struct RedirectTrace {
     started: Instant,
@@ -325,6 +333,7 @@ fn build_request(
     input: &HttpRequestInput,
     url: url::Url,
     authorization: Option<&str>,
+    negotiate_compression: bool,
 ) -> Result<RequestBuilder, String> {
     let method = Method::from_bytes(input.method.as_bytes())
         .map_err(|_| format!("Unsupported HTTP method: {}", input.method))?;
@@ -333,6 +342,13 @@ fn build_request(
 
     for header in input.headers.iter().filter(|header| header.enabled) {
         request = request.header(&header.name, &header.value);
+    }
+    if negotiate_compression
+        && !input.headers.iter().any(|header| {
+            header.enabled && header.name.eq_ignore_ascii_case(ACCEPT_ENCODING.as_str())
+        })
+    {
+        request = request.header(ACCEPT_ENCODING, SUPPORTED_CONTENT_ENCODINGS);
     }
     if let Some(value) = authorization {
         request = request.header(AUTHORIZATION, value);
@@ -425,8 +441,9 @@ async fn send_digest(
     client: &Client,
     input: &HttpRequestInput,
     url: url::Url,
+    negotiate_compression: bool,
 ) -> Result<Response, HttpRequestError> {
-    let response = build_request(client, input, url.clone(), None)?
+    let response = build_request(client, input, url.clone(), None, negotiate_compression)?
         .send()
         .await
         .map_err(HttpRequestError::from_reqwest)?;
@@ -459,10 +476,16 @@ async fn send_digest(
         .respond(&context)
         .map_err(|error| format!("Unable to answer Digest challenge: {error}"))?
         .to_string();
-    build_request(client, input, url, Some(&authorization))?
-        .send()
-        .await
-        .map_err(HttpRequestError::from_reqwest)
+    build_request(
+        client,
+        input,
+        url,
+        Some(&authorization),
+        negotiate_compression,
+    )?
+    .send()
+    .await
+    .map_err(HttpRequestError::from_reqwest)
 }
 
 fn ntlm_challenge(header: &str) -> Option<&str> {
@@ -476,6 +499,7 @@ async fn send_ntlm(
     client: &Client,
     input: &HttpRequestInput,
     url: url::Url,
+    negotiate_compression: bool,
 ) -> Result<Response, HttpRequestError> {
     let negotiate_flags = ntlmclient::Flags::NEGOTIATE_UNICODE
         | ntlmclient::Flags::REQUEST_TARGET
@@ -495,10 +519,16 @@ async fn send_ntlm(
                 .map_err(|error| format!("Unable to encode NTLM negotiation: {error}"))?
         )
     );
-    let response = build_request(client, input, url, Some(&negotiate_header))?
-        .send()
-        .await
-        .map_err(HttpRequestError::from_reqwest)?;
+    let response = build_request(
+        client,
+        input,
+        url,
+        Some(&negotiate_header),
+        negotiate_compression,
+    )?
+    .send()
+    .await
+    .map_err(HttpRequestError::from_reqwest)?;
     let authentication_url = response.url().clone();
     let challenge_header = response
         .headers()
@@ -554,6 +584,7 @@ async fn send_ntlm(
         input,
         authentication_url,
         Some(&authenticate_header),
+        negotiate_compression,
     )?
     .send()
     .await
@@ -603,27 +634,28 @@ async fn send_with_auth(
     client: &Client,
     input: &HttpRequestInput,
     url: url::Url,
+    negotiate_compression: bool,
 ) -> Result<Response, HttpRequestError> {
     if input.auth.disabled {
-        return build_request(client, input, url, None)?
+        return build_request(client, input, url, None, negotiate_compression)?
             .send()
             .await
             .map_err(HttpRequestError::from_reqwest);
     }
     match input.auth.auth_type.as_str() {
-        "digest" => send_digest(client, input, url).await,
-        "ntlm" => send_ntlm(client, input, url).await,
+        "digest" => send_digest(client, input, url, negotiate_compression).await,
+        "ntlm" => send_ntlm(client, input, url, negotiate_compression).await,
         "netrc" => {
             let hostname = url.host_str().unwrap_or_default();
             let (username, password) = netrc_credentials(&input.auth.netrc, hostname)
                 .ok_or_else(|| format!("No Netrc credentials match '{hostname}'."))?;
-            build_request(client, input, url, None)?
+            build_request(client, input, url, None, negotiate_compression)?
                 .basic_auth(username, Some(password))
                 .send()
                 .await
                 .map_err(HttpRequestError::from_reqwest)
         }
-        _ => build_request(client, input, url, None)?
+        _ => build_request(client, input, url, None, negotiate_compression)?
             .send()
             .await
             .map_err(HttpRequestError::from_reqwest),
@@ -635,7 +667,44 @@ pub(crate) async fn send_streaming(input: &HttpRequestInput) -> Result<Response,
         .map_err(|error| HttpRequestError::request(format!("Invalid URL: {error}")))?;
     let client = build_streaming_client(&input.transport, Some(&input.url))
         .map_err(HttpRequestError::request)?;
-    send_with_auth(&client, input, url).await
+    send_with_auth(&client, input, url, true).await
+}
+
+fn read_all(mut reader: impl Read) -> io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    reader.read_to_end(&mut output)?;
+    Ok(output)
+}
+
+fn decode_one_content_encoding(bytes: &[u8], encoding: &str) -> io::Result<Vec<u8>> {
+    match encoding.trim().to_ascii_lowercase().as_str() {
+        "" | "identity" => Ok(bytes.to_vec()),
+        "gzip" | "x-gzip" => read_all(GzDecoder::new(bytes)),
+        "br" => read_all(BrotliDecoder::new(bytes, 8_192)),
+        "zstd" => zstd::stream::decode_all(bytes),
+        "deflate" => {
+            read_all(ZlibDecoder::new(bytes)).or_else(|_| read_all(DeflateDecoder::new(bytes)))
+        }
+        encoding => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Unsupported response content encoding '{encoding}'."),
+        )),
+    }
+}
+
+fn decode_response_body(bytes: &[u8], content_encoding: Option<&str>) -> io::Result<Vec<u8>> {
+    let encodings = content_encoding
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|encoding| !encoding.is_empty())
+        .collect::<Vec<_>>();
+    encodings
+        .into_iter()
+        .rev()
+        .try_fold(bytes.to_vec(), |decoded, encoding| {
+            decode_one_content_encoding(&decoded, encoding)
+        })
 }
 
 async fn read_response(
@@ -643,7 +712,8 @@ async fn read_response(
     started: Instant,
     redirects: Vec<HttpRedirectOutput>,
     redirects_truncated: bool,
-) -> Result<HttpResponseOutput, reqwest::Error> {
+    decode_content: bool,
+) -> Result<HttpResponseOutput, HttpRequestError> {
     let status = response.status();
     let http_version = format!("{:?}", response.version());
     let effective_url = response.url().to_string();
@@ -663,9 +733,28 @@ async fn read_response(
             value: value.to_str().unwrap_or("<binary header>").to_string(),
         })
         .collect();
-    let bytes = response.bytes().await?;
-    let size_bytes = bytes.len();
-    let (body, body_base64) = response_body_fields(&bytes);
+    let content_encoding = response
+        .headers()
+        .get(CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let wire_bytes = response
+        .bytes()
+        .await
+        .map_err(HttpRequestError::from_reqwest)?;
+    let wire_size_bytes = wire_bytes.len();
+    let decoded_bytes = if decode_content {
+        decode_response_body(&wire_bytes, content_encoding.as_deref()).map_err(|error| {
+            let mut failure =
+                HttpRequestError::request(format!("Unable to decode response content: {error}"));
+            failure.kind = "decode".into();
+            failure
+        })?
+    } else {
+        wire_bytes.to_vec()
+    };
+    let size_bytes = decoded_bytes.len();
+    let (body, body_base64) = response_body_fields(&decoded_bytes);
 
     Ok(HttpResponseOutput {
         status: status.as_u16(),
@@ -677,6 +766,7 @@ async fn read_response(
         body_base64,
         duration_ms: started.elapsed().as_millis(),
         set_cookies,
+        wire_size_bytes,
         http_version,
         effective_url,
         redirects,
@@ -703,17 +793,17 @@ pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, HttpReq
         &input.transport,
         Some(&input.url),
         true,
-        true,
+        false,
         Some(Arc::clone(&trace)),
     )
     .map_err(|error| HttpRequestError::request(error).with_trace(started, trace.as_ref()))?;
-    let response = send_with_auth(&client, &input, url.clone())
+    let response = send_with_auth(&client, &input, url.clone(), true)
         .await
         .map_err(|error| error.with_trace(started, trace.as_ref()))?;
     let (redirects, redirects_truncated) = trace.snapshot();
-    match read_response(response, started, redirects, redirects_truncated).await {
+    match read_response(response, started, redirects, redirects_truncated, true).await {
         Ok(output) => Ok(output),
-        Err(error) if error.is_decode() => {
+        Err(error) if error.kind == "decode" => {
             let fallback_trace = Arc::new(RedirectTrace::new(started));
             let client = build_client_with_options(
                 &input.transport,
@@ -725,20 +815,15 @@ pub async fn send(input: HttpRequestInput) -> Result<HttpResponseOutput, HttpReq
             .map_err(|error| {
                 HttpRequestError::request(error).with_trace(started, fallback_trace.as_ref())
             })?;
-            let response = send_with_auth(&client, &input, url)
+            let response = send_with_auth(&client, &input, url, false)
                 .await
                 .map_err(|error| error.with_trace(started, fallback_trace.as_ref()))?;
             let (redirects, redirects_truncated) = fallback_trace.snapshot();
-            read_response(response, started, redirects, redirects_truncated)
+            read_response(response, started, redirects, redirects_truncated, false)
                 .await
-                .map_err(|error| {
-                    HttpRequestError::from_reqwest(error)
-                        .with_trace(started, fallback_trace.as_ref())
-                })
+                .map_err(|error| error.with_trace(started, fallback_trace.as_ref()))
         }
-        Err(error) => {
-            Err(HttpRequestError::from_reqwest(error).with_trace(started, trace.as_ref()))
-        }
+        Err(error) => Err(error.with_trace(started, trace.as_ref())),
     }
 }
 
@@ -781,6 +866,7 @@ pub(crate) fn flatten_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
 mod tests {
     use super::*;
     use crate::models::{FilePayload, KeyValue, MultipartPart, NativeAuthConfig};
+    use std::io::Write as _;
 
     fn body_test_input(body_mode: &str) -> HttpRequestInput {
         HttpRequestInput {
@@ -977,6 +1063,43 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn reports_compressed_wire_and_decoded_content_sizes() {
+        use tokio::{io::AsyncWriteExt, net::TcpListener};
+
+        let payload = b"a response body that compresses well a response body that compresses well";
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let wire_size = compressed.len();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let (headers, _) = read_loopback_request(&mut stream).await;
+            let response_headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                compressed.len()
+            );
+            stream.write_all(response_headers.as_bytes()).await.unwrap();
+            stream.write_all(&compressed).await.unwrap();
+            headers
+        });
+
+        let mut input = body_test_input("none");
+        input.method = "GET".into();
+        input.url = format!("http://127.0.0.1:{}/compressed", address.port());
+        let response = send(input).await.unwrap();
+        assert_eq!(response.body.as_bytes(), payload);
+        assert_eq!(response.wire_size_bytes, wire_size);
+        assert_eq!(response.size_bytes, payload.len());
+        assert!(server
+            .await
+            .unwrap()
+            .to_ascii_lowercase()
+            .contains("accept-encoding: gzip, deflate, br, zstd"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn trusts_workspace_ca_for_https_requests() {
         use rustls::ServerConfig;
         use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
@@ -1152,6 +1275,43 @@ mod tests {
     }
 
     #[test]
+    fn decodes_supported_wire_content_encodings() {
+        let payload = b"compressed response payload";
+
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gzip.write_all(payload).unwrap();
+        let gzip = gzip.finish().unwrap();
+        assert_eq!(decode_response_body(&gzip, Some("gzip")).unwrap(), payload);
+
+        let mut deflate =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        deflate.write_all(payload).unwrap();
+        let deflate = deflate.finish().unwrap();
+        assert_eq!(
+            decode_response_body(&deflate, Some("deflate")).unwrap(),
+            payload
+        );
+
+        let mut brotli = Vec::new();
+        {
+            let mut writer = brotli::CompressorWriter::new(&mut brotli, 4_096, 5, 22);
+            writer.write_all(payload).unwrap();
+        }
+        assert_eq!(decode_response_body(&brotli, Some("br")).unwrap(), payload);
+
+        let zstd = zstd::stream::encode_all(payload.as_slice(), 0).unwrap();
+        assert_eq!(decode_response_body(&zstd, Some("zstd")).unwrap(), payload);
+    }
+
+    #[test]
+    fn rejects_unknown_wire_content_encoding_for_raw_retry() {
+        let error = decode_response_body(b"opaque", Some("compress")).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Unsupported response content encoding"));
+    }
+
+    #[test]
     fn defaults_binary_content_type_without_overriding_an_explicit_header() {
         let client = build_client(&TransportConfig::default(), Some("http://127.0.0.1/")).unwrap();
         let mut input = body_test_input("binary");
@@ -1166,6 +1326,7 @@ mod tests {
             &input,
             url::Url::parse("http://127.0.0.1/").unwrap(),
             None,
+            true,
         )
         .unwrap()
         .build()
@@ -1186,6 +1347,7 @@ mod tests {
             &input,
             url::Url::parse("http://127.0.0.1/").unwrap(),
             None,
+            true,
         )
         .unwrap()
         .build()
@@ -1342,6 +1504,8 @@ mod tests {
         let response = send(input).await.unwrap();
         assert_eq!(response.status, 200);
         assert_eq!(response.body, "ok");
+        assert_eq!(response.wire_size_bytes, 2);
+        assert_eq!(response.size_bytes, 2);
 
         let (headers, body) = server.await.unwrap();
         let content_type = headers

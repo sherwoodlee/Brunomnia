@@ -210,6 +210,7 @@ pub struct HttpResponseOutput {
     pub body_base64: Option<String>,
     pub duration_ms: u128,
     pub size_bytes: usize,
+    pub wire_size_bytes: usize,
     pub set_cookies: Vec<String>,
     pub http_version: String,
     pub effective_url: String,

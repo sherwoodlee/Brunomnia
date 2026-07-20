@@ -15,8 +15,8 @@ export type MultipartPreviewPart = {
 export type MultipartPreview = { error: string; parts: MultipartPreviewPart[]; truncated: boolean };
 export type MultipartNestedPreviewBlock = '' | 'depth' | 'size';
 
-export const MAX_MULTIPART_PREVIEW_DEPTH = 5;
-export const MAX_NESTED_MULTIPART_BYTES = 5 * 1024 * 1024;
+export const MAX_MULTIPART_PREVIEW_DEPTH = 100;
+export const MAX_NESTED_MULTIPART_BYTES = 100 * 1024 * 1024;
 
 export const multipartNestedPreviewBlock = (depth: number, sizeBytes: number): MultipartNestedPreviewBlock => {
   if (depth >= MAX_MULTIPART_PREVIEW_DEPTH) return 'depth';

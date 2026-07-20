@@ -336,10 +336,12 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "block2",
+ "brotli",
  "chrono",
  "core-foundation",
  "digest_auth",
  "encoding_rs",
+ "flate2",
  "futures-util",
  "http",
  "hyper-util",
@@ -377,6 +379,7 @@ dependencies = [
  "tower",
  "url",
  "uuid",
+ "zstd",
 ]
 
 [[package]]

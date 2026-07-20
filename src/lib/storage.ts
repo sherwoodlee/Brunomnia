@@ -317,8 +317,12 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     fontInterface: stringValue(source?.fontInterface).replace(/[\r\n]/g, ' ').slice(0, 512),
     fontMonospace: stringValue(source?.fontMonospace).replace(/[\r\n]/g, ' ').slice(0, 512),
     showPasswords: source?.showPasswords === true,
-    allowHtmlPreviewRemoteResources: source?.allowHtmlPreviewRemoteResources === true,
-    allowHtmlPreviewScripts: source?.allowHtmlPreviewScripts === true,
+    allowHtmlPreviewRemoteResources: typeof source?.allowHtmlPreviewRemoteResources === 'boolean'
+      ? source.allowHtmlPreviewRemoteResources
+      : defaultPreferences.allowHtmlPreviewRemoteResources,
+    allowHtmlPreviewScripts: typeof source?.allowHtmlPreviewScripts === 'boolean'
+      ? source.allowHtmlPreviewScripts
+      : defaultPreferences.allowHtmlPreviewScripts,
     disableResponsePreviewLinks: source?.disableResponsePreviewLinks === true,
     preferredHttpVersion: source?.preferredHttpVersion === 'http1.0'
       || source?.preferredHttpVersion === 'http1.1'
@@ -416,6 +420,9 @@ const normalizeStoredResponses = (value: unknown): StoredResponse[] => Array.isA
     receivedAt: stringValue(source.receivedAt, new Date(0).toISOString()),
     body: stringValue(source.body),
     ...(bodyBase64 ? { bodyBase64 } : {}),
+    ...(typeof source.wireSizeBytes === 'number' && Number.isFinite(source.wireSizeBytes)
+      ? { wireSizeBytes: Math.max(0, Math.trunc(source.wireSizeBytes)) }
+      : {}),
     timeline: normalizeResponseTimeline(source.timeline),
     requestTestResults: normalizeResponseTestResults(source.requestTestResults),
     ...(typeof source.settingSendCookies === 'boolean' ? { settingSendCookies: source.settingSendCookies } : {}),
@@ -935,7 +942,11 @@ export const secureImportedWorkspace = (value: unknown): Workspace => {
     mcpClients: workspace.mcpClients.map((client) => ({ ...client, enabled: false, token: '', password: '', oauthClientSecret: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none' })),
     ai: { ...workspace.ai, enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false },
     konnect: { ...workspace.konnect, enabled: false, token: '', managedByWorkspaceId: undefined, managedControlPlaneId: undefined, managedRegion: undefined, managedClusterType: undefined, managedDeploymentType: undefined },
-    preferences: structuredClone(defaultPreferences),
+    preferences: {
+      ...structuredClone(defaultPreferences),
+      allowHtmlPreviewRemoteResources: false,
+      allowHtmlPreviewScripts: false,
+    },
   };
 };
 
