@@ -15,6 +15,7 @@ type WorkspaceSwitcherProps = {
   onDuplicateProjectWorkspace: (sourceWorkspaceId: string, projectWorkspaceId: string, targetWorkspaceId: string, name: string) => Promise<void>;
   onListProjectWorkspaces: (workspaceId: string) => Promise<ProjectWorkspaceSummary[]>;
   onListDeleted: () => Promise<WorkspaceTrashEntry[]>;
+  onMoveProjectWorkspace: (sourceWorkspaceId: string, projectWorkspaceId: string, targetWorkspaceId: string) => Promise<void>;
   onOpen: (workspaceId: string) => Promise<void>;
   onRename: (workspaceId: string, name: string) => Promise<void>;
   onReorder: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => Promise<void>;
@@ -34,6 +35,7 @@ export function WorkspaceSwitcher({
   onDuplicateProjectWorkspace,
   onListProjectWorkspaces,
   onListDeleted,
+  onMoveProjectWorkspace,
   onOpen,
   onRename,
   onReorder,
@@ -52,6 +54,8 @@ export function WorkspaceSwitcher({
   const [duplicateFile, setDuplicateFile] = useState<ProjectWorkspaceSummary>();
   const [duplicateName, setDuplicateName] = useState('');
   const [duplicateTargetId, setDuplicateTargetId] = useState('');
+  const [moveFile, setMoveFile] = useState<ProjectWorkspaceSummary>();
+  const [moveTargetId, setMoveTargetId] = useState('');
   const [draggedWorkspaceId, setDraggedWorkspaceId] = useState('');
   const [dropTarget, setDropTarget] = useState<{ workspaceId: string; position: 'before' | 'after' }>();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -105,6 +109,7 @@ export function WorkspaceSwitcher({
   useEffect(() => {
     setProjectWorkspaces([]);
     setDuplicateFile(undefined);
+    setMoveFile(undefined);
     if (open && filesExpanded) void refreshProjectWorkspaces();
   }, [activeWorkspaceId]);
 
@@ -134,6 +139,18 @@ export function WorkspaceSwitcher({
     if (!duplicateFile || !duplicateTargetId || !duplicateName.trim()) return;
     await onDuplicateProjectWorkspace(activeWorkspaceId, duplicateFile.id, duplicateTargetId, duplicateName.trim());
     setDuplicateFile(undefined);
+  };
+  const beginProjectWorkspaceMove = (projectWorkspace: ProjectWorkspaceSummary) => {
+    const target = entries.find((entry) => entry.id !== activeWorkspaceId && entry.status !== 'unavailable');
+    if (!target) return;
+    setMoveFile(projectWorkspace);
+    setMoveTargetId(target.id);
+  };
+  const submitProjectWorkspaceMove = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!moveFile || !moveTargetId) return;
+    await onMoveProjectWorkspace(activeWorkspaceId, moveFile.id, moveTargetId);
+    setMoveFile(undefined);
   };
   const remove = async (entry: WorkspaceCatalogEntry) => {
     if (entries.length <= 1 || !window.confirm(`Delete “${entry.name}”? A recovery copy will remain on this device.`)) return;
@@ -246,7 +263,7 @@ export function WorkspaceSwitcher({
           {projectWorkspaces.map((projectWorkspace) => <article key={`${projectWorkspace.scope}:${projectWorkspace.id}`}>
             <Icon name={projectWorkspace.scope === 'environment' ? 'braces' : projectWorkspace.scope === 'mcp' ? 'globe' : projectWorkspace.scope === 'mock-server' ? 'cube' : projectWorkspace.scope === 'design' ? 'code' : 'archive'} size={15} />
             <span><strong>{projectWorkspace.name}</strong><small>{projectWorkspace.label}</small></span>
-            <button disabled={busy} onClick={() => beginProjectWorkspaceDuplicate(projectWorkspace)} type="button"><Icon name="copy" size={12} /> Duplicate</button>
+            <div className="workspace-files-actions"><button disabled={busy} onClick={() => beginProjectWorkspaceDuplicate(projectWorkspace)} type="button"><Icon name="copy" size={12} /> Duplicate</button><button disabled={busy || !entries.some((entry) => entry.id !== activeWorkspaceId && entry.status !== 'unavailable')} onClick={() => beginProjectWorkspaceMove(projectWorkspace)} type="button"><Icon name="folder" size={12} /> Move</button></div>
           </article>)}
         </div> : null}
         <button className="workspace-create-button" disabled={busy} onClick={create} type="button"><Icon name="plus" size={15} /> New local project</button>
@@ -278,6 +295,14 @@ export function WorkspaceSwitcher({
           <label>Destination project<select onChange={(event) => setDuplicateTargetId(event.target.value)} value={duplicateTargetId}>{entries.filter((entry) => entry.status !== 'unavailable').map((entry) => <option key={entry.id} value={entry.id}>{entry.name}{entry.id === activeWorkspaceId ? ' (current)' : ''}</option>)}</select></label>
           <p>The duplicate receives new resource identities and opens in the destination project. Runtime history is not copied.</p>
           <footer><button className="secondary-button" onClick={() => setDuplicateFile(undefined)} type="button">Cancel</button><button className="primary-button" disabled={busy || !duplicateName.trim() || !duplicateTargetId} type="submit"><Icon name="copy" size={13} /> Duplicate</button></footer>
+        </form>
+      </div> : null}
+      {moveFile ? <div className="modal-backdrop workspace-file-duplicate-backdrop" role="presentation" onMouseDown={() => setMoveFile(undefined)}>
+        <form aria-labelledby="workspace-file-move-title" aria-modal="true" className="modal workspace-file-duplicate-modal" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => void submitProjectWorkspaceMove(event)} role="dialog">
+          <header><div><small>Move {moveFile.label.toLowerCase()}</small><h2 id="workspace-file-move-title">{moveFile.name}</h2></div><button aria-label="Close" className="icon-button subtle" onClick={() => setMoveFile(undefined)} type="button"><Icon name="x" /></button></header>
+          <label>Destination project<select autoFocus onChange={(event) => setMoveTargetId(event.target.value)} value={moveTargetId}>{entries.filter((entry) => entry.id !== activeWorkspaceId && entry.status !== 'unavailable').map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
+          <p>The file keeps its resource identities, moves its owned local evidence, and opens in the destination. A minimal Requests or Base Environment file is created if the source would otherwise be unusable.</p>
+          <footer><button className="secondary-button" onClick={() => setMoveFile(undefined)} type="button">Cancel</button><button className="primary-button" disabled={busy || !moveTargetId} type="submit"><Icon name="folder" size={13} /> Move file</button></footer>
         </form>
       </div> : null}
       {recovery?.kind === 'workspace-backup' && recovery.workspaceId === activeWorkspaceId ? <div className="modal-backdrop workspace-recovery-backdrop" role="presentation">

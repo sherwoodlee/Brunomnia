@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
 import { normalizeGraphqlSchema } from './graphql';
 import { migrateWorkspace, parseWorkspaceImport } from './storage';
-import { createBlankWorkspace, createCatalogWorkspace, createWorkspaceDuplicate, deleteCatalogWorkspace, duplicateCatalogProjectWorkspace, listCatalogProjectWorkspaces, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, openCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
+import { createBlankWorkspace, createCatalogWorkspace, createWorkspaceDuplicate, deleteCatalogWorkspace, duplicateCatalogProjectWorkspace, listCatalogProjectWorkspaces, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, moveCatalogProjectWorkspace, openCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
 
 class MemoryStorage implements Storage {
   readonly values = new Map<string, string>();
@@ -99,6 +99,20 @@ describe('local project catalog', () => {
     expect(duplicated.activeWorkspaceId).toBe('destination');
     expect(duplicated.workspace.collections).toContainEqual(expect.objectContaining({ name: 'Copied requests' }));
     expect((await readCatalogWorkspace(initial.activeWorkspaceId)).collections).toHaveLength(sourceCollectionCount);
+  });
+
+  it('moves one typed project file between local projects without changing its identity', async () => {
+    const initial = await loadWorkspaceCatalog();
+    const mockServerId = initial.workspace.mockServers[0].id;
+    await createCatalogWorkspace(createBlankWorkspace('Destination', initial.workspace.preferences), 'destination');
+    await openCatalogWorkspace(initial.activeWorkspaceId);
+
+    const moved = await moveCatalogProjectWorkspace(initial.activeWorkspaceId, mockServerId, 'destination');
+
+    expect(moved.activeWorkspaceId).toBe('destination');
+    expect(moved.workspace.mockServers).toContainEqual(expect.objectContaining({ id: mockServerId }));
+    expect((await readCatalogWorkspace(initial.activeWorkspaceId)).mockServers).not.toContainEqual(expect.objectContaining({ id: mockServerId }));
+    await expect(moveCatalogProjectWorkspace('destination', mockServerId, 'destination')).rejects.toThrow('different destination');
   });
 
   it('lists deleted projects and restores a valid browser backup', async () => {

@@ -2456,6 +2456,20 @@ Compatibility bounds remain explicit: Tauri/Wry does not expose Insomnia's per-s
 
 Compatibility bounds remain explicit: Brunomnia retains one atomic versioned document per local project instead of separate physical records, and this milestone implements pinned duplication rather than true workspace reparenting. Empty-project behavior, cookie/certificate isolation per typed file, and cross-project move semantics remain. Local projects and Collections stay `Baseline`; exactly 15 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 247 — identity-preserving typed project-file moves (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned move audit | Complete | Pinned `move-workspace` validates source/destination records and updates the workspace parent ID; unlike the v5-backed duplicate route, authored identities and descendant resources remain unchanged |
+| Scope ownership | Complete baseline | Collections carry suites, suite results, Runner reports, activity, responses, stream sessions, and response-viewer state; Documents additionally carry their hidden generated collection; mocks carry routes, environments carry complete descendant trees, and MCP clients carry connection history |
+| Identity and collision policy | Complete | Every moved authored/evidence identity stays byte-for-byte stable; the destination's full document/evidence identity set is checked first and a collision refuses with duplicate guidance rather than silently rekeying or overwriting |
+| Source repair | Complete baseline | Moving the last Collection or root Environment creates a fresh minimal Requests or Base Environment file so Brunomnia's current workbench remains loadable; no moved authored identity is reused by that fallback |
+| Catalog persistence | Complete baseline | Destination data writes first through rotating backup, source removal writes second, and any source failure triggers bounded restoration of both original documents; a save-generation guard invalidates stale active-project autosaves before switching |
+| Manager workflow | Complete baseline | Every typed Project files row offers Move when another healthy project exists; the explicit destination dialog excludes the source, discloses identity/evidence/fallback behavior, locks during active work, and opens the destination after success |
+| Executable evidence | Complete baseline | Focused ownership, hidden-design-collection, evidence, placeholder, collision, catalog, and same-project refusal regressions plus strict compilation cover the move flow; broader gates are recorded in the verification file |
+
+Compatibility bounds remain explicit: local projects still use one atomic document rather than separately persisted workspace records, cookie data remains project-level and therefore copies rather than transfers, certificates/preferences/policies remain project-level, and a source receives a fallback instead of becoming truly empty. Local projects and Collections stay `Baseline`; exactly 15 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

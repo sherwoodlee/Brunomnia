@@ -1,7 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
 import type { AppPreferences, Workspace } from '../types';
-import { duplicateProjectWorkspace, listProjectWorkspaces, type ProjectWorkspaceSummary } from './projectWorkspaces';
+import { duplicateProjectWorkspace, listProjectWorkspaces, moveProjectWorkspace, type ProjectWorkspaceSummary } from './projectWorkspaces';
 import { migrateWorkspace } from './storage';
 
 const legacyStorageKey = 'brunomnia.workspace.v1';
@@ -362,6 +362,40 @@ export const duplicateCatalogProjectWorkspace = async (
   const target = sourceWorkspaceId === targetWorkspaceId ? source : await readCatalogWorkspace(targetWorkspaceId);
   const duplicated = duplicateProjectWorkspace(source, target, projectWorkspaceId, name);
   await saveCatalogWorkspace(targetWorkspaceId, duplicated.workspace);
+  return openCatalogWorkspace(targetWorkspaceId);
+};
+
+export const moveCatalogProjectWorkspace = async (
+  sourceWorkspaceId: string,
+  projectWorkspaceId: string,
+  targetWorkspaceId: string,
+): Promise<WorkspaceCatalogSnapshot> => {
+  if (!workspaceIdPattern.test(sourceWorkspaceId) || !workspaceIdPattern.test(targetWorkspaceId)) throw new Error('The project file move selection is invalid.');
+  if (sourceWorkspaceId === targetWorkspaceId) throw new Error('Choose a different destination project to move this file.');
+  const source = await readCatalogWorkspace(sourceWorkspaceId);
+  const target = await readCatalogWorkspace(targetWorkspaceId);
+  const moved = moveProjectWorkspace(source, target, projectWorkspaceId);
+  try {
+    await saveCatalogWorkspace(targetWorkspaceId, moved.target);
+  } catch (error) {
+    try {
+      await saveCatalogWorkspace(targetWorkspaceId, target);
+    } catch (rollbackError) {
+      throw new Error(`The file move failed and destination rollback also failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+    }
+    throw error;
+  }
+  try {
+    await saveCatalogWorkspace(sourceWorkspaceId, moved.source);
+  } catch (error) {
+    const rollbacks = await Promise.allSettled([
+      saveCatalogWorkspace(sourceWorkspaceId, source),
+      saveCatalogWorkspace(targetWorkspaceId, target),
+    ]);
+    const rollbackFailure = rollbacks.find((result) => result.status === 'rejected');
+    if (rollbackFailure?.status === 'rejected') throw new Error(`The file move failed and catalog rollback also failed: ${rollbackFailure.reason instanceof Error ? rollbackFailure.reason.message : String(rollbackFailure.reason)}`);
+    throw error;
+  }
   return openCatalogWorkspace(targetWorkspaceId);
 };
 

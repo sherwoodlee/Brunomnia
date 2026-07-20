@@ -181,6 +181,7 @@ button:disabled { cursor: wait; opacity: .76; }
 .workspace-files-panel article button, .workspace-trash-panel article button { align-items: center; background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text-soft); display: flex; font-size: 9px; gap: 4px; padding: 5px 6px; }
 .workspace-files-panel article button:hover, .workspace-trash-panel article button:hover { background: var(--border-soft); color: var(--text); }
 .workspace-files-panel article button:disabled, .workspace-trash-panel article button:disabled { opacity: .35; }
+.workspace-files-actions { display: flex; gap: 4px; }
 .workspace-file-duplicate-backdrop { z-index: 115; }
 .workspace-file-duplicate-modal { display: grid; gap: 14px; max-width: 480px; }
 .workspace-file-duplicate-modal > header { align-items: center; display: flex; justify-content: space-between; }

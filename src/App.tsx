@@ -1429,6 +1429,7 @@ export default function App() {
   const scheduledCancelled = useRef(false);
   const scheduledTimer = useRef<number | undefined>(undefined);
   const scheduledResolve = useRef<(() => void) | undefined>(undefined);
+  const workspaceSaveGeneration = useRef(0);
   const oauthFlowId = useRef('');
   const templateResponseResolver = useRef<SendRequestContext['resolveResponse']>(undefined);
   const templatePromptQueue = useRef<PendingTemplatePrompt[]>([]);
@@ -1525,7 +1526,9 @@ export default function App() {
 
   useEffect(() => {
     if (!hydrated || !activeWorkspaceId || (workspaceRecovery?.kind === 'workspace-backup' && workspaceRecovery.workspaceId === activeWorkspaceId)) return;
+    const generation = workspaceSaveGeneration.current;
     const timeout = window.setTimeout(() => {
+      if (generation !== workspaceSaveGeneration.current) return;
       void workspaceCatalogApi().then(({ saveCatalogWorkspace }) => saveCatalogWorkspace(activeWorkspaceId, workspace)).then(() => {
         setWorkspaceEntries((current) => current.map((entry) => entry.id === activeWorkspaceId ? { ...entry, name: workspace.name, updatedAt: new Date().toISOString(), status: 'ready' } : entry));
       }).catch((error) => setWorkspaceStoreError(error instanceof Error ? error.message : String(error)));
@@ -2779,6 +2782,7 @@ export default function App() {
       setWorkspaceStoreError('Wait for the active request or scheduled run to finish before changing projects.');
       return;
     }
+    workspaceSaveGeneration.current += 1;
     setWorkspaceStoreBusy(true);
     setWorkspaceStoreError('');
     try {
@@ -2806,6 +2810,9 @@ export default function App() {
   const duplicateLocalProjectWorkspace = (sourceWorkspaceId: string, projectWorkspaceId: string, targetWorkspaceId: string, name: string) => runWorkspaceOperation(async () => (
     await workspaceCatalogApi()
   ).duplicateCatalogProjectWorkspace(sourceWorkspaceId, projectWorkspaceId, targetWorkspaceId, name));
+  const moveLocalProjectWorkspace = (sourceWorkspaceId: string, projectWorkspaceId: string, targetWorkspaceId: string) => runWorkspaceOperation(async () => (
+    await workspaceCatalogApi()
+  ).moveCatalogProjectWorkspace(sourceWorkspaceId, projectWorkspaceId, targetWorkspaceId));
   const renameLocalWorkspace = async (workspaceId: string, name: string) => {
     if (workspaceStoreBusy) return;
     setWorkspaceStoreBusy(true);
@@ -3158,6 +3165,7 @@ export default function App() {
             onListProjectWorkspaces={listLocalProjectWorkspaces}
             onListDeleted={listDeletedLocalWorkspaces}
             onOpen={openLocalWorkspace}
+            onMoveProjectWorkspace={moveLocalProjectWorkspace}
             onRename={renameLocalWorkspace}
             onReorder={reorderLocalWorkspace}
             onRestore={restoreLocalWorkspace}
