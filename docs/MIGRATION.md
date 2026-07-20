@@ -2442,6 +2442,20 @@ Compatibility bounds remain explicit: Brunomnia does not download, update, or bu
 
 Compatibility bounds remain explicit: Tauri/Wry does not expose Insomnia's per-session certificate-verification callback or Electron client-certificate picker, so embedded-browser insecure-TLS override and explicit workspace client-identity selection remain open. No credentialed live provider or cross-platform rendered fixture is claimed. Request authentication stays `Baseline`; exactly 15 parity rows remain incomplete, so Brunomnia is not declared feature-complete.
 
+## Milestone 246 — typed project-file inventory and duplication (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned model audit | Complete | Pinned `Project` parents separately typed `Workspace` records with `collection`, `design`, `mock-server`, `environment`, or `mcp` scope; the file dropdown launches a v5 export/import duplicate into a selected project and the separate project route can reparent a workspace |
+| Typed local inventory | Complete baseline | The top-bar manager derives every collection, API design, local mock server, root global-environment tree, and MCP client as one labeled project file without adding an account, organization, or entitlement branch |
+| Duplicate model | Complete baseline | Collection folders/requests/environments/rows/proto/Socket.IO identities, linked design collections/suites/tests, mock routes, environment descendants, and MCP rows rekey collision-safely; references remap and the source remains unchanged |
+| Security and history | Complete baseline | Private environment descendants copy, the destination receives compatible cookie data, MCP duplicates start disabled with runtime OAuth state cleared, and response/stream/runner/unit-test/MCP connection histories do not copy |
+| Catalog integration | Complete | Same-project and cross-project duplication read healthy source/target documents, write only the destination through the existing rotating-backup path, open the destination, and work identically in native and browser catalogs |
+| Manager workflow | Complete baseline | A lazy Project files panel lists all five scopes and opens an accessible named duplicate dialog with healthy destination selection, explicit copy disclosure, busy gating, and destination navigation |
+| Executable evidence | Complete baseline | Focused five-scope/rekey/reference/catalog regressions and strict TypeScript compilation cover the new model and UI wiring; broader frontend/native/build/release gates are recorded in the milestone verification file |
+
+Compatibility bounds remain explicit: Brunomnia retains one atomic versioned document per local project instead of separate physical records, and this milestone implements pinned duplication rather than true workspace reparenting. Empty-project behavior, cookie/certificate isolation per typed file, and cross-project move semantics remain. Local projects and Collections stay `Baseline`; exactly 15 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

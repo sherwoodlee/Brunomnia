@@ -2802,6 +2802,10 @@ export default function App() {
     const source = workspaceId === activeWorkspaceId ? workspace : await api.readCatalogWorkspace(workspaceId);
     return api.createCatalogWorkspace(api.createWorkspaceDuplicate(source, name, workspace.preferences));
   });
+  const listLocalProjectWorkspaces = async (workspaceId: string) => (await workspaceCatalogApi()).listCatalogProjectWorkspaces(workspaceId);
+  const duplicateLocalProjectWorkspace = (sourceWorkspaceId: string, projectWorkspaceId: string, targetWorkspaceId: string, name: string) => runWorkspaceOperation(async () => (
+    await workspaceCatalogApi()
+  ).duplicateCatalogProjectWorkspace(sourceWorkspaceId, projectWorkspaceId, targetWorkspaceId, name));
   const renameLocalWorkspace = async (workspaceId: string, name: string) => {
     if (workspaceStoreBusy) return;
     setWorkspaceStoreBusy(true);
@@ -3150,6 +3154,8 @@ export default function App() {
             onCreate={createLocalWorkspace}
             onDelete={deleteLocalWorkspace}
             onDuplicate={duplicateLocalWorkspace}
+            onDuplicateProjectWorkspace={duplicateLocalProjectWorkspace}
+            onListProjectWorkspaces={listLocalProjectWorkspaces}
             onListDeleted={listDeletedLocalWorkspaces}
             onOpen={openLocalWorkspace}
             onRename={renameLocalWorkspace}

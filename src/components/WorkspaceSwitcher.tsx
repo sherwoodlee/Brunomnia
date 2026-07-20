@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { ProjectWorkspaceSummary } from '../lib/projectWorkspaces';
 import type { WorkspaceCatalogEntry, WorkspaceRecovery, WorkspaceTrashEntry } from '../lib/workspaceCatalog';
 import { Icon } from './Icon';
 
@@ -11,6 +12,8 @@ type WorkspaceSwitcherProps = {
   onCreate: (name: string) => Promise<void>;
   onDelete: (workspaceId: string) => Promise<void>;
   onDuplicate: (workspaceId: string, name: string) => Promise<void>;
+  onDuplicateProjectWorkspace: (sourceWorkspaceId: string, projectWorkspaceId: string, targetWorkspaceId: string, name: string) => Promise<void>;
+  onListProjectWorkspaces: (workspaceId: string) => Promise<ProjectWorkspaceSummary[]>;
   onListDeleted: () => Promise<WorkspaceTrashEntry[]>;
   onOpen: (workspaceId: string) => Promise<void>;
   onRename: (workspaceId: string, name: string) => Promise<void>;
@@ -28,6 +31,8 @@ export function WorkspaceSwitcher({
   onCreate,
   onDelete,
   onDuplicate,
+  onDuplicateProjectWorkspace,
+  onListProjectWorkspaces,
   onListDeleted,
   onOpen,
   onRename,
@@ -40,6 +45,13 @@ export function WorkspaceSwitcher({
   const [trashEntries, setTrashEntries] = useState<WorkspaceTrashEntry[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
   const [trashError, setTrashError] = useState('');
+  const [filesExpanded, setFilesExpanded] = useState(false);
+  const [projectWorkspaces, setProjectWorkspaces] = useState<ProjectWorkspaceSummary[]>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesError, setFilesError] = useState('');
+  const [duplicateFile, setDuplicateFile] = useState<ProjectWorkspaceSummary>();
+  const [duplicateName, setDuplicateName] = useState('');
+  const [duplicateTargetId, setDuplicateTargetId] = useState('');
   const [draggedWorkspaceId, setDraggedWorkspaceId] = useState('');
   const [dropTarget, setDropTarget] = useState<{ workspaceId: string; position: 'before' | 'after' }>();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -77,6 +89,29 @@ export function WorkspaceSwitcher({
     if (open && trashExpanded) void refreshTrash();
   }, [open, trashExpanded]);
 
+  const refreshProjectWorkspaces = async () => {
+    if (!activeWorkspaceId) return;
+    setFilesLoading(true);
+    setFilesError('');
+    try {
+      setProjectWorkspaces(await onListProjectWorkspaces(activeWorkspaceId));
+    } catch (loadError) {
+      setFilesError(loadError instanceof Error ? loadError.message : String(loadError));
+    } finally {
+      setFilesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setProjectWorkspaces([]);
+    setDuplicateFile(undefined);
+    if (open && filesExpanded) void refreshProjectWorkspaces();
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (open && filesExpanded && !projectWorkspaces.length && !filesLoading) void refreshProjectWorkspaces();
+  }, [open, filesExpanded]);
+
   const create = () => {
     const name = window.prompt('Project name', 'New Project')?.trim();
     if (name) void onCreate(name);
@@ -88,6 +123,17 @@ export function WorkspaceSwitcher({
   const duplicate = (entry: WorkspaceCatalogEntry) => {
     const name = window.prompt('Duplicate project as', entry.name)?.trim();
     if (name) void onDuplicate(entry.id, name);
+  };
+  const beginProjectWorkspaceDuplicate = (projectWorkspace: ProjectWorkspaceSummary) => {
+    setDuplicateFile(projectWorkspace);
+    setDuplicateName(projectWorkspace.name);
+    setDuplicateTargetId(activeWorkspaceId);
+  };
+  const submitProjectWorkspaceDuplicate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!duplicateFile || !duplicateTargetId || !duplicateName.trim()) return;
+    await onDuplicateProjectWorkspace(activeWorkspaceId, duplicateFile.id, duplicateTargetId, duplicateName.trim());
+    setDuplicateFile(undefined);
   };
   const remove = async (entry: WorkspaceCatalogEntry) => {
     if (entries.length <= 1 || !window.confirm(`Delete “${entry.name}”? A recovery copy will remain on this device.`)) return;
@@ -189,6 +235,20 @@ export function WorkspaceSwitcher({
             </article>;
           })}
         </div>
+        <button aria-expanded={filesExpanded} className="workspace-files-toggle" onClick={() => setFilesExpanded((current) => !current)} type="button">
+          <Icon name="grid" size={15} />
+          <span><strong>Project files</strong><small>{filesExpanded ? filesLoading ? 'Loading typed workspaces…' : `${projectWorkspaces.length} ${projectWorkspaces.length === 1 ? 'file' : 'files'}` : 'Collections, documents, mocks, environments, and MCP'}</small></span>
+          <Icon name={filesExpanded ? 'chevron-up' : 'chevron-down'} size={14} />
+        </button>
+        {filesExpanded ? <div className="workspace-files-panel">
+          {filesError ? <div className="workspace-store-error">{filesError}</div> : null}
+          {!filesLoading && !projectWorkspaces.length && !filesError ? <p>No project files.</p> : null}
+          {projectWorkspaces.map((projectWorkspace) => <article key={`${projectWorkspace.scope}:${projectWorkspace.id}`}>
+            <Icon name={projectWorkspace.scope === 'environment' ? 'braces' : projectWorkspace.scope === 'mcp' ? 'globe' : projectWorkspace.scope === 'mock-server' ? 'cube' : projectWorkspace.scope === 'design' ? 'code' : 'archive'} size={15} />
+            <span><strong>{projectWorkspace.name}</strong><small>{projectWorkspace.label}</small></span>
+            <button disabled={busy} onClick={() => beginProjectWorkspaceDuplicate(projectWorkspace)} type="button"><Icon name="copy" size={12} /> Duplicate</button>
+          </article>)}
+        </div> : null}
         <button className="workspace-create-button" disabled={busy} onClick={create} type="button"><Icon name="plus" size={15} /> New local project</button>
         <button aria-expanded={trashExpanded} className="workspace-trash-toggle" onClick={() => setTrashExpanded((current) => !current)} type="button">
           <Icon name="history" size={15} />
@@ -211,6 +271,15 @@ export function WorkspaceSwitcher({
           })}
         </div> : null}
       </section> : null}
+      {duplicateFile ? <div className="modal-backdrop workspace-file-duplicate-backdrop" role="presentation" onMouseDown={() => setDuplicateFile(undefined)}>
+        <form aria-labelledby="workspace-file-duplicate-title" aria-modal="true" className="modal workspace-file-duplicate-modal" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => void submitProjectWorkspaceDuplicate(event)} role="dialog">
+          <header><div><small>Duplicate {duplicateFile.label.toLowerCase()}</small><h2 id="workspace-file-duplicate-title">{duplicateFile.name}</h2></div><button aria-label="Close" className="icon-button subtle" onClick={() => setDuplicateFile(undefined)} type="button"><Icon name="x" /></button></header>
+          <label>New name<input autoFocus maxLength={200} onChange={(event) => setDuplicateName(event.target.value)} value={duplicateName} /></label>
+          <label>Destination project<select onChange={(event) => setDuplicateTargetId(event.target.value)} value={duplicateTargetId}>{entries.filter((entry) => entry.status !== 'unavailable').map((entry) => <option key={entry.id} value={entry.id}>{entry.name}{entry.id === activeWorkspaceId ? ' (current)' : ''}</option>)}</select></label>
+          <p>The duplicate receives new resource identities and opens in the destination project. Runtime history is not copied.</p>
+          <footer><button className="secondary-button" onClick={() => setDuplicateFile(undefined)} type="button">Cancel</button><button className="primary-button" disabled={busy || !duplicateName.trim() || !duplicateTargetId} type="submit"><Icon name="copy" size={13} /> Duplicate</button></footer>
+        </form>
+      </div> : null}
       {recovery?.kind === 'workspace-backup' && recovery.workspaceId === activeWorkspaceId ? <div className="modal-backdrop workspace-recovery-backdrop" role="presentation">
         <section aria-labelledby="workspace-recovery-title" aria-modal="true" className="modal workspace-recovery-modal" role="dialog">
           <div className="modal-header"><div><span className="eyebrow">Local recovery</span><h2 id="workspace-recovery-title">Project backup opened</h2></div></div>

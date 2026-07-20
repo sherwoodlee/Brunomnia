@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
 import { normalizeGraphqlSchema } from './graphql';
 import { migrateWorkspace, parseWorkspaceImport } from './storage';
-import { createBlankWorkspace, createCatalogWorkspace, createWorkspaceDuplicate, deleteCatalogWorkspace, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, openCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
+import { createBlankWorkspace, createCatalogWorkspace, createWorkspaceDuplicate, deleteCatalogWorkspace, duplicateCatalogProjectWorkspace, listCatalogProjectWorkspaces, listDeletedCatalogWorkspaces, loadWorkspaceCatalog, openCatalogWorkspace, readCatalogWorkspace, renameCatalogWorkspace, reorderCatalogWorkspace, restoreCatalogWorkspaceBackup, restoreDeletedCatalogWorkspace, saveCatalogWorkspace } from './workspaceCatalog';
 
 class MemoryStorage implements Storage {
   readonly values = new Map<string, string>();
@@ -84,6 +84,21 @@ describe('local project catalog', () => {
     const copied = await createCatalogWorkspace(duplicate, 'second-copy');
     expect(copied.activeWorkspaceId).toBe('second-copy');
     expect(copied.entries.map((entry) => entry.id)).toEqual(['third', initial.activeWorkspaceId, 'second', 'second-copy']);
+  });
+
+  it('duplicates one typed project file into another local project', async () => {
+    const initial = await loadWorkspaceCatalog();
+    const sourceCollectionId = initial.workspace.collections[0].id;
+    const sourceCollectionCount = initial.workspace.collections.length;
+    await createCatalogWorkspace(createBlankWorkspace('Destination', initial.workspace.preferences), 'destination');
+    await openCatalogWorkspace(initial.activeWorkspaceId);
+
+    expect(await listCatalogProjectWorkspaces(initial.activeWorkspaceId)).toContainEqual(expect.objectContaining({ id: sourceCollectionId, scope: 'collection' }));
+    const duplicated = await duplicateCatalogProjectWorkspace(initial.activeWorkspaceId, sourceCollectionId, 'destination', 'Copied requests');
+
+    expect(duplicated.activeWorkspaceId).toBe('destination');
+    expect(duplicated.workspace.collections).toContainEqual(expect.objectContaining({ name: 'Copied requests' }));
+    expect((await readCatalogWorkspace(initial.activeWorkspaceId)).collections).toHaveLength(sourceCollectionCount);
   });
 
   it('lists deleted projects and restores a valid browser backup', async () => {

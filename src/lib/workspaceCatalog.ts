@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
 import type { AppPreferences, Workspace } from '../types';
+import { duplicateProjectWorkspace, listProjectWorkspaces, type ProjectWorkspaceSummary } from './projectWorkspaces';
 import { migrateWorkspace } from './storage';
 
 const legacyStorageKey = 'brunomnia.workspace.v1';
@@ -346,6 +347,22 @@ export const readCatalogWorkspace = async (workspaceId: string): Promise<Workspa
   const workspace = readBrowserWorkspace(workspaceId).workspace;
   if (!workspace) throw new Error('This local project and its backup are unreadable.');
   return workspace;
+};
+
+export const listCatalogProjectWorkspaces = async (workspaceId: string): Promise<ProjectWorkspaceSummary[]> => listProjectWorkspaces(await readCatalogWorkspace(workspaceId));
+
+export const duplicateCatalogProjectWorkspace = async (
+  sourceWorkspaceId: string,
+  projectWorkspaceId: string,
+  targetWorkspaceId: string,
+  name: string,
+): Promise<WorkspaceCatalogSnapshot> => {
+  if (!workspaceIdPattern.test(sourceWorkspaceId) || !workspaceIdPattern.test(targetWorkspaceId)) throw new Error('The project file copy selection is invalid.');
+  const source = await readCatalogWorkspace(sourceWorkspaceId);
+  const target = sourceWorkspaceId === targetWorkspaceId ? source : await readCatalogWorkspace(targetWorkspaceId);
+  const duplicated = duplicateProjectWorkspace(source, target, projectWorkspaceId, name);
+  await saveCatalogWorkspace(targetWorkspaceId, duplicated.workspace);
+  return openCatalogWorkspace(targetWorkspaceId);
 };
 
 export const createCatalogWorkspace = async (workspace: Workspace, workspaceId = catalogWorkspaceId()): Promise<WorkspaceCatalogSnapshot> => {
