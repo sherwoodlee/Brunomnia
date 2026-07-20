@@ -220,7 +220,7 @@ paths:
   await mkdir(join(temporary, 'lint-fixture'));
   const metadataPath = join(temporary, '.brunomnia', 'project.yaml');
   const metadata = {
-    format: 'brunomnia', version: 37, name: 'CLI preview project', activeRequestId: 'request-first', activeEnvironmentId: environment.id,
+    format: 'brunomnia', version: 38, name: 'CLI preview project', activeRequestId: 'request-first', activeEnvironmentId: environment.id,
     plugins: [{
       id: 'cli-template-plugin', name: 'CLI template plugin', version: '1.0.0', description: '', sourceFormat: 'insomnia-commonjs', enabled: true,
       requestedPermissions: ['template', 'store'], grantedPermissions: ['template', 'store'], installedAt: '2026-07-19T00:00:00.000Z',

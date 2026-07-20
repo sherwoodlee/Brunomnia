@@ -84,14 +84,16 @@ describe('encrypted collaboration boundaries', () => {
     workspace.collections[0].requests[0].headers.push({ id: 'auth-header', name: 'Authorization', value: 'Bearer plaintext', enabled: false });
     workspace.ai.apiKey = 'plaintext-ai';
     workspace.konnect.token = 'plaintext-konnect';
-    workspace.mcpClients.push({ id: 'mcp', name: 'Local tools', transport: 'http', enabled: true, url: 'https://mcp.example', command: '', args: [], authType: 'bearer', username: '', password: '', token: 'plaintext-mcp', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none', headers: [], roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [], lastSyncedAt: '' });
-    expect(plaintextSecretCandidates(workspace)).toHaveLength(6);
+    workspace.mcpClients.push({ id: 'mcp', name: 'Local tools', transport: 'http', enabled: true, url: 'https://mcp.example', command: '', args: [], env: [], authType: 'bearer', username: '', password: '', token: 'plaintext-mcp', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none', headers: [], roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [], lastSyncedAt: '' });
+    workspace.mcpClients[0].env.push({ id: 'private-key', name: 'PRIVATE_KEY', value: 'plaintext-key', enabled: true });
+    expect(plaintextSecretCandidates(workspace)).toHaveLength(7);
     workspace.environments[0].variables.at(-1)!.value = '{{ vault.api_token }}';
     workspace.collections[0].requests[0].auth.token = "{% external 'aws', 'orders-token' %}";
     workspace.collections[0].requests[0].headers.at(-1)!.value = '{{ vault.bearer_header }}';
     workspace.ai.apiKey = '{{ vault.ai_key }}';
     workspace.konnect.token = "{% external 'aws', 'konnect-token' %}";
     workspace.mcpClients[0].token = '{{ vault.mcp_token }}';
+    workspace.mcpClients[0].env[0].value = '{{ vault.private_key }}';
     expect(plaintextSecretCandidates(workspace)).toEqual([]);
     workspace.mcpClients[0].authType = 'oauth2';
     workspace.mcpClients[0].token = 'device-local-runtime-token';

@@ -12,7 +12,7 @@ beforeEach(() => {
 });
 
 const stdioClient = (): McpClient => ({
-  id: 'stdio', name: 'STDIO tools', enabled: true, transport: 'stdio', url: '', command: '/usr/bin/server', args: ['--stdio'], headers: [], authType: 'none', token: '', username: '', password: '', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none', roots: ['file:///project'], tools: [], prompts: [], resources: [], resourceTemplates: [],
+  id: 'stdio', name: 'STDIO tools', enabled: true, transport: 'stdio', url: '', command: '/usr/bin/server', args: ['--stdio'], env: [], headers: [], authType: 'none', token: '', username: '', password: '', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none', roots: ['file:///project'], tools: [], prompts: [], resources: [], resourceTemplates: [],
 });
 
 describe('MCP JSON-RPC transport parsing', () => {
@@ -38,7 +38,7 @@ describe('MCP JSON-RPC transport parsing', () => {
   });
 
   it('rejects plaintext bearer tokens before connecting', async () => {
-    await expect(discoverMcpClient({ id: 'one', name: 'Tools', enabled: true, transport: 'http', url: 'https://mcp.example', command: '', args: [], headers: [], authType: 'bearer', token: 'plaintext', username: '', password: '', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [] }, undefined, {})).rejects.toThrow('complete local-vault');
+    await expect(discoverMcpClient({ id: 'one', name: 'Tools', enabled: true, transport: 'http', url: 'https://mcp.example', command: '', args: [], env: [], headers: [], authType: 'bearer', token: 'plaintext', username: '', password: '', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [] }, undefined, {})).rejects.toThrow('complete local-vault');
   });
 
   it('cancels an in-flight native STDIO operation with the same identity', async () => {
@@ -85,6 +85,7 @@ describe('MCP JSON-RPC transport parsing', () => {
     await invokeMcpOperation(client, 'tool', 'search', {}, undefined, context);
     expect(hasMcpClientSession(client, 'project-a')).toBe(true);
     expect(hasMcpClientSession({ ...client, command: '/usr/bin/changed' }, 'project-a')).toBe(false);
+    expect(hasMcpClientSession({ ...client, env: [{ id: 'mode', name: 'MODE', value: 'changed', enabled: true }] }, 'project-a')).toBe(false);
 
     const controller = new AbortController();
     const pending = invokeMcpOperation(client, 'tool', 'search', {}, undefined, { ...context, signal: controller.signal, cancellationId: 'reuse-cancel' });
@@ -109,6 +110,38 @@ describe('MCP JSON-RPC transport parsing', () => {
 
     await expect(invokeMcpOperation(client, 'tool', 'search', {}, undefined, { sessionScope: 'project-failure' })).rejects.toThrow('Unable to start');
     expect(hasMcpClientSession(client, 'project-failure')).toBe(false);
+  });
+
+  it('renders bounded enabled STDIO environment rows and applies last duplicate wins', async () => {
+    const client = stdioClient();
+    client.env = [
+      { id: 'mode', name: 'MODE', value: '{{ stage }}', enabled: true },
+      { id: 'token', name: 'API_TOKEN', value: '{{ vault.mcp_env_token }}', enabled: true },
+      { id: 'duplicate-one', name: 'DUPLICATE', value: 'first', enabled: true },
+      { id: 'duplicate-two', name: 'DUPLICATE', value: 'second', enabled: true },
+      { id: 'disabled', name: 'DISABLED', value: 'ignored', enabled: false },
+    ];
+    tauri.invoke.mockResolvedValue({ result: { content: [] }, events: [], stderr: '' });
+
+    await invokeMcpOperation(client, 'tool', 'search', {}, { id: 'environment', name: 'Development', variables: [{ id: 'stage', name: 'stage', value: 'dev', enabled: true }] }, { vault: { 'vault.mcp_env_token': 'resolved-token' } });
+
+    expect(tauri.invoke).toHaveBeenCalledWith('mcp_stdio_call', expect.objectContaining({ input: expect.objectContaining({ env: [
+      { name: 'MODE', value: 'dev' },
+      { name: 'API_TOKEN', value: 'resolved-token' },
+      { name: 'DUPLICATE', value: 'second' },
+    ] }) }));
+  });
+
+  it('rejects plaintext sensitive STDIO environment values before process launch', async () => {
+    const client = stdioClient();
+    client.env = [{ id: 'token', name: 'API_TOKEN', value: 'plaintext', enabled: true }];
+
+    await expect(invokeMcpOperation(client, 'tool', 'search', {}, undefined, {})).rejects.toThrow("sensitive environment variable 'API_TOKEN'");
+    expect(tauri.invoke).not.toHaveBeenCalled();
+
+    client.env = [{ id: 'templated-name', name: '{{ variableName }}', value: 'plaintext', enabled: true }];
+    await expect(invokeMcpOperation(client, 'tool', 'search', {}, { id: 'environment', name: 'Development', variables: [{ id: 'name', name: 'variableName', value: 'PRIVATE_KEY', enabled: true }] }, {})).rejects.toThrow("sensitive environment variable 'PRIVATE_KEY'");
+    expect(tauri.invoke).not.toHaveBeenCalled();
   });
 
   it('does not resurrect a STDIO marker when an in-flight call settles after disconnect', async () => {

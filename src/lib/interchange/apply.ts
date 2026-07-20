@@ -86,7 +86,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
     warnings: result.warnings,
     metadata: result.metadata,
   };
-  if (result.replacement) return { ...result.replacement, version: 37, imports: [record, ...result.replacement.imports].slice(0, 100) };
+  if (result.replacement) return { ...result.replacement, version: 38, imports: [record, ...result.replacement.imports].slice(0, 100) };
 
   const collections = result.collections.map((collection) => rekeyCollection(collection, batch));
   const collectionIds = new Map(result.collections.map((collection, index) => [collection.id, collections[index].id]));
@@ -102,7 +102,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
   const firstRequest = collections.flatMap((collection) => collection.requests)[0];
   return {
     ...workspace,
-    version: 37,
+    version: 38,
     activeRequestId: firstRequest?.id ?? workspace.activeRequestId,
     activeEnvironmentId: environments[0]?.id ?? workspace.activeEnvironmentId,
     collections: [...workspace.collections, ...collections],

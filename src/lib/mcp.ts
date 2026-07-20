@@ -4,6 +4,7 @@ import { createBlankRequest } from '../data/seed';
 import { sendRequest, type SendRequestContext } from './http';
 import { discoverMcpOAuthConfiguration, mcpOAuthClientCredentials, mcpOAuthConfigurationReady, mcpOAuthResource, parseMcpOAuthChallenge } from './mcpOAuthDiscovery';
 import { expandMcpUriTemplate, mcpUriTemplateVariables } from './mcpUriTemplate';
+import { renderRequestValue } from './requestRender';
 import { isProtectedSecretReference, isSensitiveSecretName } from './security';
 
 type McpEvent = { direction: 'client' | 'server' | 'stderr'; method: string; detail: string; timestamp: string };
@@ -48,7 +49,7 @@ const sessionFingerprint = (client: McpClient) => JSON.stringify({
   oauthRegisteredClientSecret: client.authType === 'oauth2' ? client.oauthRegisteredClientSecret : '',
   oauthRegisteredTokenEndpointAuthMethod: client.authType === 'oauth2' ? client.oauthRegisteredTokenEndpointAuthMethod : 'none',
 });
-const stdioSessionFingerprint = (client: McpClient) => JSON.stringify([client.command.trim(), client.args]);
+const stdioSessionFingerprint = (client: McpClient) => JSON.stringify([client.command.trim(), client.args, client.env.map(({ name, value, enabled }) => ({ name, value, enabled }))]);
 const stdioSessionRevision = (key: string) => stdioSessionRevisions.get(key) ?? 0;
 const rememberStdioSession = (key: string, fingerprint: string, revision: number) => {
   if (stdioSessionRevision(key) === revision) stdioSessions.set(key, fingerprint);
@@ -116,6 +117,25 @@ const assertProtectedCredentials = (client: McpClient) => {
   }
   const unsafeHeader = client.headers.find((header) => header.enabled && header.value.trim() && isSensitiveSecretName(header.name) && !isProtectedSecretReference(header.value));
   if (unsafeHeader) throw new Error(`MCP sensitive header '${unsafeHeader.name}' must use a complete local-vault or approved external-vault reference.`);
+  const unsafeEnvironment = client.env.find((variable) => variable.enabled && variable.value.trim() && isSensitiveSecretName(variable.name) && !isProtectedSecretReference(variable.value));
+  if (unsafeEnvironment) throw new Error(`MCP sensitive environment variable '${unsafeEnvironment.name}' must use a complete local-vault or approved external-vault reference.`);
+};
+
+const stdioEnvironment = async (client: McpClient, environment: Environment | undefined, context: McpRequestContext) => {
+  const request = createBlankRequest(`mcp-stdio-environment-${client.id}`);
+  request.name = client.name;
+  request.url = client.command;
+  const rendered = new Map<string, string>();
+  for (const variable of client.env.slice(0, 100)) {
+    if (!variable.enabled) continue;
+    const name = await renderRequestValue(variable.name, request, environment, context);
+    if (!name.trim()) continue;
+    if (variable.value.trim() && isSensitiveSecretName(name) && !isProtectedSecretReference(variable.value)) {
+      throw new Error(`MCP sensitive environment variable '${name}' must use a complete local-vault or approved external-vault reference.`);
+    }
+    rendered.set(name, await renderRequestValue(variable.value, request, environment, context));
+  }
+  return [...rendered].map(([name, value]) => ({ name, value }));
 };
 
 const responseMessages = (body: string): unknown[] => {
@@ -390,10 +410,13 @@ export const disconnectMcpClient = async (client: McpClient, environment: Enviro
   }
 };
 
-const stdioRequest = async (client: McpClient, method: string, params: unknown, context: McpRequestContext): Promise<McpOperationResult> => {
+const stdioRequest = async (client: McpClient, method: string, params: unknown, environment: Environment | undefined, context: McpRequestContext): Promise<McpOperationResult> => {
   throwIfMcpAborted(context.signal);
   if (!isTauri()) throw new Error('MCP STDIO servers require the Tauri desktop app.');
   if (!client.command.trim()) throw new Error('Enter the MCP STDIO executable and arguments. Brunomnia never invokes a shell.');
+  assertProtectedCredentials(client);
+  const processEnvironment = await stdioEnvironment(client, environment, context);
+  throwIfMcpAborted(context.signal);
   const sessionKeyValue = sessionKey(client.id, context.sessionScope);
   const sessionRevision = stdioSessionRevision(sessionKeyValue);
   const fingerprint = stdioSessionFingerprint(client);
@@ -402,7 +425,7 @@ const stdioRequest = async (client: McpClient, method: string, params: unknown, 
   context.signal?.addEventListener('abort', cancel, { once: true });
   let output: StdioOutput;
   try {
-    output = await invoke<StdioOutput>('mcp_stdio_call', { input: { command: client.command, args: client.args, method, params, roots: client.roots, timeoutMs: 30_000, cancellationId, sessionKey: sessionKeyValue } });
+    output = await invoke<StdioOutput>('mcp_stdio_call', { input: { command: client.command, args: client.args, env: processEnvironment, method, params, roots: client.roots, timeoutMs: 30_000, cancellationId, sessionKey: sessionKeyValue } });
     rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -431,7 +454,7 @@ const operation = async (
   context: McpRequestContext,
   sessionId?: string,
 ) => client.transport === 'stdio'
-  ? stdioRequest(client, method, params, context)
+  ? stdioRequest(client, method, params, environment, context)
   : httpRequest(client, method, params, environment, context, sessionId);
 
 const operationWithSessionRecovery = async (

@@ -10,7 +10,7 @@ describe('artifact import adapters', () => {
       id: 'plugin-one', name: 'Imported', version: '1.0.0', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true,
       requestedPermissions: ['network'], grantedPermissions: ['network'], installedAt: new Date().toISOString(),
     }];
-    workspace.mcpClients = [{ id: 'mcp-one', name: 'Imported MCP', enabled: true, transport: 'http', url: 'https://mcp.example', command: '', args: [], headers: [], authType: 'oauth2', token: 'secret', username: '', password: '', oauthAuthorizationUrl: 'https://identity.example/authorize', oauthAccessTokenUrl: 'https://identity.example/token', oauthClientId: 'client', oauthClientSecret: 'client-secret', oauthScope: 'mcp', oauthState: '', oauthRefreshToken: 'refresh', oauthIdentityToken: 'identity', oauthExpiresAt: 123, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: 'registered-client', oauthRegisteredClientSecret: 'registered-secret', oauthRegisteredClientIdIssuedAt: 1, oauthRegisteredClientSecretExpiresAt: 2, oauthRegisteredTokenEndpointAuthMethod: 'client_secret_post', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [] }];
+    workspace.mcpClients = [{ id: 'mcp-one', name: 'Imported MCP', enabled: true, transport: 'http', url: 'https://mcp.example', command: '', args: [], env: [], headers: [], authType: 'oauth2', token: 'secret', username: '', password: '', oauthAuthorizationUrl: 'https://identity.example/authorize', oauthAccessTokenUrl: 'https://identity.example/token', oauthClientId: 'client', oauthClientSecret: 'client-secret', oauthScope: 'mcp', oauthState: '', oauthRefreshToken: 'refresh', oauthIdentityToken: 'identity', oauthExpiresAt: 123, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: 'registered-client', oauthRegisteredClientSecret: 'registered-secret', oauthRegisteredClientIdIssuedAt: 1, oauthRegisteredClientSecretExpiresAt: 2, oauthRegisteredTokenEndpointAuthMethod: 'client_secret_post', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [] }];
     workspace.ai = { ...workspace.ai, enabled: true, apiKey: 'secret' };
     const result = importArtifact(JSON.stringify(workspace), 'workspace.brunomnia.json');
     expect(result.warnings[0].message).toContain('capability grants were cleared');
@@ -304,7 +304,7 @@ collection:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(37);
+    expect(second.version).toBe(38);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

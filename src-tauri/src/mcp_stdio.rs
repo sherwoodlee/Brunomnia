@@ -17,6 +17,10 @@ const MAX_MESSAGE_BYTES: usize = 10_000_000;
 const MAX_STREAM_BYTES: usize = 20_000_000;
 const MAX_ARGUMENTS: usize = 100;
 const MAX_ARGUMENT_BYTES: usize = 8_192;
+const MAX_ENVIRONMENT_VARIABLES: usize = 100;
+const MAX_ENVIRONMENT_NAME_BYTES: usize = 512;
+const MAX_ENVIRONMENT_VALUE_BYTES: usize = 32_768;
+const MAX_ENVIRONMENT_BYTES: usize = 1_000_000;
 const MAX_CANCELLATION_ID_BYTES: usize = 512;
 const MAX_CANCELLATION_IDS: usize = 1_024;
 const MAX_SESSION_KEY_BYTES: usize = 512;
@@ -125,6 +129,8 @@ pub struct McpStdioInput {
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
+    #[serde(default)]
+    pub env: Vec<McpStdioEnvironmentVariable>,
     pub method: String,
     #[serde(default)]
     pub params: Value,
@@ -136,6 +142,13 @@ pub struct McpStdioInput {
     pub cancellation_id: String,
     #[serde(default)]
     pub session_key: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpStdioEnvironmentVariable {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -151,8 +164,30 @@ fn default_timeout() -> u64 {
 }
 
 fn session_fingerprint(input: &McpStdioInput) -> Result<String, String> {
-    serde_json::to_string(&(input.command.trim(), &input.args))
+    serde_json::to_string(&(input.command.trim(), &input.args, &input.env))
         .map_err(|error| format!("Unable to encode MCP STDIO session configuration: {error}"))
+}
+
+fn spawn_child(input: &McpStdioInput) -> Result<std::process::Child, String> {
+    let mut command = Command::new(input.command.trim());
+    command
+        .args(&input.args)
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(path) = std::env::var_os("PATH") {
+        command.env("PATH", path);
+    }
+    command.envs(
+        input
+            .env
+            .iter()
+            .map(|variable| (&variable.name, &variable.value)),
+    );
+    command
+        .spawn()
+        .map_err(|error| format!("Unable to start the MCP STDIO server: {error}"))
 }
 
 fn persistent_result_is_reusable(result: &Result<McpStdioOutput, String>) -> bool {
@@ -212,13 +247,7 @@ impl McpStdioSession {
         }
         let timeout = Duration::from_millis(input.timeout_ms.clamp(1_000, 120_000));
         let deadline = Instant::now() + timeout;
-        let mut child = Command::new(input.command.trim())
-            .args(&input.args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| format!("Unable to start the MCP STDIO server: {error}"))?;
+        let mut child = spawn_child(input)?;
         let stdin = child
             .stdin
             .take()
@@ -552,6 +581,23 @@ fn validate(input: &McpStdioInput) -> Result<(), String> {
     {
         return Err("The MCP STDIO argument list exceeds its safety limit.".into());
     }
+    if input.env.len() > MAX_ENVIRONMENT_VARIABLES
+        || input.env.iter().any(|variable| {
+            variable.name.is_empty()
+                || variable.name.contains(['\0', '='])
+                || variable.name.len() > MAX_ENVIRONMENT_NAME_BYTES
+                || variable.value.contains('\0')
+                || variable.value.len() > MAX_ENVIRONMENT_VALUE_BYTES
+        })
+        || input
+            .env
+            .iter()
+            .map(|variable| variable.name.len() + variable.value.len())
+            .sum::<usize>()
+            > MAX_ENVIRONMENT_BYTES
+    {
+        return Err("The MCP STDIO environment exceeds its safety limit.".into());
+    }
     if !matches!(
         input.method.as_str(),
         "tools/list"
@@ -680,13 +726,7 @@ fn call_cancellable(
     }
     let timeout = Duration::from_millis(input.timeout_ms.clamp(1_000, 120_000));
     let deadline = Instant::now() + timeout;
-    let mut child = Command::new(input.command.trim())
-        .args(&input.args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("Unable to start the MCP STDIO server: {error}"))?;
+    let mut child = spawn_child(&input)?;
     let stdin = child
         .stdin
         .take()
@@ -804,6 +844,7 @@ mod tests {
         let mut input = McpStdioInput {
             command: "server".into(),
             args: vec![],
+            env: vec![],
             method: "initialize".into(),
             params: json!({}),
             roots: vec![],
@@ -816,6 +857,12 @@ mod tests {
         input.args = vec!["x".to_string(); MAX_ARGUMENTS + 1];
         assert!(validate(&input).unwrap_err().contains("safety limit"));
         input.args.clear();
+        input.env = vec![McpStdioEnvironmentVariable {
+            name: "INVALID=NAME".into(),
+            value: String::new(),
+        }];
+        assert!(validate(&input).unwrap_err().contains("environment"));
+        input.env.clear();
         input.cancellation_id = "x".repeat(MAX_CANCELLATION_ID_BYTES + 1);
         assert!(validate(&input)
             .unwrap_err()
@@ -900,6 +947,7 @@ done
         let input = McpStdioInput {
             command: server.to_string_lossy().into_owned(),
             args: vec![],
+            env: vec![],
             method: "tools/list".into(),
             params: json!({}),
             roots: vec![],
@@ -942,7 +990,7 @@ done
         fs::write(
             &server,
             r#"#!/bin/sh
-printf '%s\n' start >> "$1"
+printf 'start:%s:%s:%s\n' "${BRUNOMNIA_TEST_VALUE-unset}" "${HOME-unset}" "${PATH:+path}" >> "$1"
 while IFS= read -r line; do
   case "$line" in
     *'"id":1'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{}}}' ;;
@@ -961,6 +1009,10 @@ done
         let input = McpStdioInput {
             command: server.to_string_lossy().into_owned(),
             args: vec![starts.to_string_lossy().into_owned()],
+            env: vec![McpStdioEnvironmentVariable {
+                name: "BRUNOMNIA_TEST_VALUE".into(),
+                value: "one".into(),
+            }],
             method: "tools/list".into(),
             params: json!({}),
             roots: vec![],
@@ -977,13 +1029,26 @@ done
             sessions.call(input.clone(), &cancellations).unwrap().result["tools"],
             json!([])
         );
-        assert_eq!(fs::read_to_string(&starts).unwrap().lines().count(), 1);
-        assert!(sessions.close("persistent"));
         assert_eq!(
-            sessions.call(input, &cancellations).unwrap().result["tools"],
+            fs::read_to_string(&starts).unwrap(),
+            "start:one:unset:path\n"
+        );
+        let mut changed = input.clone();
+        changed.env[0].value = "two".into();
+        assert_eq!(
+            sessions
+                .call(changed.clone(), &cancellations)
+                .unwrap()
+                .result["tools"],
             json!([])
         );
         assert_eq!(fs::read_to_string(&starts).unwrap().lines().count(), 2);
+        assert!(sessions.close("persistent"));
+        assert_eq!(
+            sessions.call(changed, &cancellations).unwrap().result["tools"],
+            json!([])
+        );
+        assert_eq!(fs::read_to_string(&starts).unwrap().lines().count(), 3);
         assert!(sessions.close("persistent"));
     }
 
@@ -1016,6 +1081,7 @@ done
         let input = McpStdioInput {
             command: server.to_string_lossy().into_owned(),
             args: vec![markers.to_string_lossy().into_owned()],
+            env: vec![],
             method: "tools/list".into(),
             params: json!({}),
             roots: vec![],
@@ -1048,6 +1114,7 @@ done
         let resumed = McpStdioInput {
             command: server.to_string_lossy().into_owned(),
             args: vec![markers.to_string_lossy().into_owned()],
+            env: vec![],
             method: "tools/list".into(),
             params: json!({}),
             roots: vec![],
@@ -1100,6 +1167,7 @@ done
         let input = McpStdioInput {
             command: server.to_string_lossy().into_owned(),
             args: vec![starts.to_string_lossy().into_owned()],
+            env: vec![],
             method: "tools/list".into(),
             params: json!({}),
             roots: vec![],

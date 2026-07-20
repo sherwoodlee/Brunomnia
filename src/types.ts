@@ -407,7 +407,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 37;
+  version: 38;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -511,6 +511,7 @@ export type McpClient = {
   url: string;
   command: string;
   args: string[];
+  env: KeyValue[];
   headers: KeyValue[];
   authType: 'none' | 'bearer' | 'basic' | 'oauth2';
   token: string;

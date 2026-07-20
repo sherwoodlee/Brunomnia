@@ -18,7 +18,7 @@ The first form resolves from the passphrase-protected local vault. The second us
 
 Credential fields are masked by default. Each MCP bearer token, Basic password, OAuth client secret, AI-provider key, and Konnect token has a temporary Show/Hide control; the device-local **Reveal saved passwords and tokens** preference reveals them together with request authentication fields. This affects presentation only, and switching MCP clients clears temporary disclosure.
 
-Brunomnia imports workspace integrations in a non-authoritative state: MCP clients are disabled; bearer, Basic, OAuth client-secret, and OAuth runtime-token fields are cleared; AI and Konnect are disabled; and their credential fields are cleared. Changing an MCP URL, transport, command, argument list, authentication family, or OAuth configuration also disables the client and clears its discovery cache.
+Brunomnia imports workspace integrations in a non-authoritative state: MCP clients are disabled; bearer, Basic, OAuth client-secret, and OAuth runtime-token fields are cleared; AI and Konnect are disabled; and their credential fields are cleared. Changing an MCP URL, transport, command, argument list, process environment, authentication family, or OAuth configuration also disables the client and clears its discovery cache.
 
 ## MCP clients
 
@@ -53,17 +53,22 @@ OAuth uses the authorization-code grant, mandatory PKCE S256, an RFC 8707 resour
 
 For automatic setup, Brunomnia parses a Bearer `WWW-Authenticate` challenge, tries the advertised `resource_metadata` URL, then path-aware and root RFC 9728 fallbacks. It validates that protected-resource metadata covers the MCP URL, selects its first authorization server, tries path-aware RFC 8414 and OIDC metadata locations, requires authorization-code and PKCE S256 compatibility when advertised, and chooses explicit scope before challenge, protected-resource, or authorization-server scope. If no client ID exists, it registers a loopback authorization-code/refresh client at the advertised endpoint or legacy `/register` fallback. Metadata GETs follow up to twenty explicit relative or absolute redirects, matching the pinned Fetch ceiling; every hop is revalidated as credential-free, fragment-free HTTPS or loopback HTTP, recorded in the event console, and rejected on a missing `Location`, loop, or overflow. Native automatic redirects remain off, and dynamic-registration POSTs never follow redirects. All discovery/registration requests contain no stored MCP credentials or cookies, have 30-second deadlines, and reject post-buffer JSON over 1 MiB.
 
-MCP OAuth tokens and dynamically registered client ID/secret/expiry/auth-method metadata are retained in the local catalog project but stripped from folder/Git and encrypted-sync payloads. Incoming shared runtime fields are discarded before matching local client state is restored by MCP client ID. Registration state is persisted immediately, even when later browser authorization is canceled. Configured endpoints, manual client ID, scope/state, and protected manual client-secret reference remain project data. The exact SDK supports optional URL-based client IDs, but pinned Insomnia's provider never supplies `clientMetadataUrl`, so client-ID metadata documents are not an observable Insomnia capability or parity requirement. Recursive/conditional JSON-Schema forms, long-lived GET/POST SSE streams with event-ID resumption/reconnect, reviewed per-client STDIO environment overrides, server-request response UI, and reviewed sampling/elicitation remain open.
+MCP OAuth tokens and dynamically registered client ID/secret/expiry/auth-method metadata are retained in the local catalog project but stripped from folder/Git and encrypted-sync payloads. Incoming shared runtime fields are discarded before matching local client state is restored by MCP client ID. Registration state is persisted immediately, even when later browser authorization is canceled. Configured endpoints, manual client ID, scope/state, and protected manual client-secret reference remain project data. The exact SDK supports optional URL-based client IDs, but pinned Insomnia's provider never supplies `clientMetadataUrl`, so client-ID metadata documents are not an observable Insomnia capability or parity requirement. Recursive/conditional JSON-Schema forms, long-lived GET/POST SSE streams with event-ID resumption/reconnect, server-request response UI, and reviewed sampling/elicitation remain open.
 
 ### STDIO
 
 The desktop app starts the configured executable directly with an argument array; it never constructs a shell command. One project/client-scoped child is initialized and retained in process memory across the same four discovery families and three invocation families as HTTP. Requests are serialized per child and use monotonically increasing JSON-RPC IDs. **Disconnect**, disabling/deleting the client, or changing its transport, executable, or arguments terminates and joins that child; changing executable or arguments also replaces a stale native session defensively.
+
+The disconnected client editor accepts up to 100 enabled/disabled text environment rows. Names and values render through the selected project environment plus the existing prompt, file, local-vault, and external-vault template boundary immediately before process start. Blank rendered names are omitted and the last enabled duplicate name wins. Sensitive names such as tokens, passwords, secrets, API keys, and private keys require a complete local-vault or approved external-vault reference before rendering.
+
+Native spawn clears the application environment, restores only its current `PATH`, then applies the reviewed rendered rows; a reviewed `PATH` row can override that default. The process never inherits unrelated ambient variables. Resolved environment values participate in the persistent-session fingerprint, so changing a row or selected environment replaces the child before the next operation. Workspace v38 JSON and split-YAML projects preserve row order, disabled state, and protected references.
 
 Canceling sends `notifications/cancelled` for the exact pending protocol request and stops waiting within 50 ms without killing the persistent child. A bounded registry handles cancellation racing ahead of native call registration. A normal server JSON-RPC error also leaves the initialized child reusable. Process exit, malformed protocol output, timeout, stream-limit exhaustion, or another fatal transport error removes and terminates the session so a later operation starts a clean process; the failed operation is never retried silently. Renderer connection state is recorded only after initialization and a reusable operation result, so spawn failures cannot appear connected.
 
 The native boundary limits:
 
 - arguments to 100 entries and 8,192 bytes each;
+- environment names to 512 bytes, values to 32,768 bytes, and all 100 rows to 1 MB combined;
 - operation parameters to 1 MB;
 - individual protocol messages and stderr to 10 MB;
 - cumulative session stdout to 20 MB and stderr to 10 MB;
@@ -71,7 +76,7 @@ The native boundary limits:
 - cancellation and session identities to 512 bytes, with at most 1,024 pending cancellations and 100 active sessions; and
 - the operation deadline to 1–120 seconds (the UI uses 30 seconds).
 
-Servers may call `roots/list`; Brunomnia returns the reviewed project roots. Other server requests, including sampling and elicitation, receive an explicit JSON-RPC “method not found” response explaining that interactive approval UI is required. A per-client environment override editor/interchange path, sampling review, elicitation forms, and user-reviewed responses to other server requests remain parity work.
+Servers may call `roots/list`; Brunomnia returns the reviewed project roots. Other server requests, including sampling and elicitation, receive an explicit JSON-RPC “method not found” response explaining that interactive approval UI is required. Exact login-shell `PATH` discovery, first-class Insomnia v4/v5 MCP-resource interchange, sampling review, elicitation forms, and user-reviewed responses to other server requests remain parity work.
 
 ## AI providers and workflows
 

@@ -4,7 +4,7 @@ import type { McpClient } from '../types';
 import { mergeLocalOAuth2RuntimeCredentials, withoutOAuth2RuntimeCredentials } from './oauth2Tokens';
 
 const mcpOAuthClient = (): McpClient => ({
-  id: 'mcp-oauth', name: 'MCP OAuth', enabled: true, transport: 'http', url: 'https://mcp.example', command: '', args: [], headers: [], authType: 'oauth2', token: 'mcp-access', username: '', password: '',
+  id: 'mcp-oauth', name: 'MCP OAuth', enabled: true, transport: 'http', url: 'https://mcp.example', command: '', args: [], env: [], headers: [], authType: 'oauth2', token: 'mcp-access', username: '', password: '',
   oauthAuthorizationUrl: 'https://identity.example/authorize', oauthAccessTokenUrl: 'https://identity.example/token', oauthClientId: 'local-client', oauthClientSecret: '{{ vault.mcp_client_secret }}', oauthScope: 'mcp', oauthState: '', oauthRefreshToken: 'mcp-refresh', oauthIdentityToken: 'mcp-identity', oauthExpiresAt: 789, oauthTokenPrefix: 'DPoP', oauthRegisteredClientId: 'registered-client', oauthRegisteredClientSecret: 'registered-secret', oauthRegisteredClientIdIssuedAt: 111, oauthRegisteredClientSecretExpiresAt: 222, oauthRegisteredTokenEndpointAuthMethod: 'client_secret_post',
   roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [],
 });

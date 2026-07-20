@@ -10,7 +10,7 @@ Scope: retain one reusable project-scoped MCP STDIO process across discovery and
 - Pinned `main/mcp/common.ts` stores one ready connection context and MCP `Client` per MCP request resource. Primitive list/call/read functions retrieve that client instead of reconnecting for each operation.
 - Pinned `main/network/mcp.ts` creates one transport, connects it once, retains it after initial primitive discovery, and closes the client on explicit disconnect. STDIO does not use HTTP session termination but follows the same retained-client lifecycle.
 - Pinned `main/mcp/transport-stdio.ts` creates one SDK `StdioClientTransport`, captures persistent stderr, and leaves process shutdown to `client.close()`. The root lock resolves `@modelcontextprotocol/sdk` `1.29.0`.
-- Pinned STDIO also accepts reviewed per-request environment overrides and a shell-resolved `PATH`. Brunomnia does not yet expose that editor/interchange surface, so M230 records it as a remaining MCP gap rather than overstating parity.
+- Pinned STDIO also accepts reviewed per-request environment overrides and a shell-resolved `PATH`. M230 did not expose that editor/interchange surface; Milestone 231 later adds reviewed environment rows over a clean app-`PATH` base while retaining login-shell path discovery and first-class Insomnia MCP-resource interchange as explicit gaps.
 
 ## Implementation
 
@@ -53,4 +53,4 @@ Independent `cosign verify` passed issuer `https://token.actions.githubuserconte
 
 ## Acceptance boundary
 
-M230 closes persistent project/client-scoped STDIO initialization, serialized process reuse, retained-process cancellation, explicit/configuration-triggered termination, and fatal-session cleanup. Recursive/conditional schema forms, long-lived GET/POST SSE resumption/reconnect, reviewed per-client STDIO environment overrides, elicitation and reviewed sampling UI, notification/server-request response UI, multiple authorization-server failover, DPoP, live third-party fixtures, and OS-keychain-wrapped runtime credentials remain. MCP clients stay `Baseline`; exactly 19 parity rows remain incomplete, so Brunomnia is not feature-complete.
+M230 closes persistent project/client-scoped STDIO initialization, serialized process reuse, retained-process cancellation, explicit/configuration-triggered termination, and fatal-session cleanup. Milestone 231 later adds reviewed template/vault-rendered STDIO environment rows, clean child-environment isolation, and environment-triggered process replacement. Recursive/conditional schema forms, long-lived GET/POST SSE resumption/reconnect, login-shell `PATH` discovery, first-class Insomnia MCP-resource interchange, elicitation and reviewed sampling UI, notification/server-request response UI, multiple authorization-server failover, DPoP, live third-party fixtures, and OS-keychain-wrapped runtime credentials remain. MCP clients stay `Baseline`; exactly 19 parity rows remain incomplete, so Brunomnia is not feature-complete.

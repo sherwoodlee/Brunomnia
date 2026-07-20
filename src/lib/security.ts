@@ -80,7 +80,7 @@ export const vaultVariables = (session: VaultSession) => session.unlocked
 export const isProtectedSecretReference = (value: string) => /^\s*\{\{\s*vault\.[^{}]+\s*\}\}\s*$/.test(value)
   || /^\s*\{%\s*external\b[\s\S]*%\}\s*$/.test(value);
 const sensitiveVariable = /(secret|password|token|api.?key|private.?key|client.?secret)/i;
-export const isSensitiveSecretName = (value: string) => /(authorization|api[-_]?key|token|secret|password)/i.test(value);
+export const isSensitiveSecretName = (value: string) => /(authorization|api[-_]?key|token|secret|password|private[-_]?key)/i.test(value);
 const embeddedUrlCredential = /^[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s]+@/i;
 const sensitiveAuthFields = ['token', 'password', 'apiKeyValue', 'consumerSecret', 'tokenSecret', 'privateKey', 'clientSecret', 'code', 'codeVerifier', 'accessToken', 'identityToken', 'refreshToken', 'awsSecretAccessKey', 'awsSessionToken', 'hawkKey', 'asapPrivateKey', 'netrc'] as const;
 
@@ -124,6 +124,8 @@ export const plaintextSecretCandidates = (workspace: Workspace): string[] => {
     if (client.authType === 'oauth2' && client.oauthClientSecret && !isProtectedSecretReference(client.oauthClientSecret)) candidates.push(`MCP ${client.name}: OAuth client secret`);
     client.headers.filter((header) => header.value && isSensitiveSecretName(header.name) && !isProtectedSecretReference(header.value))
       .forEach((header) => candidates.push(`MCP ${client.name}: header ${header.name}`));
+    client.env.filter((variable) => variable.value && isSensitiveSecretName(variable.name) && !isProtectedSecretReference(variable.value))
+      .forEach((variable) => candidates.push(`MCP ${client.name}: environment ${variable.name}`));
   });
   if (workspace.ai.apiKey && !isProtectedSecretReference(workspace.ai.apiKey)) candidates.push('AI provider: API key');
   if (workspace.konnect.token && !isProtectedSecretReference(workspace.konnect.token)) candidates.push('Konnect: access token');

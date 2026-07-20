@@ -17,6 +17,7 @@ const oauthClient = (): McpClient => ({
   url: 'https://mcp.example.test/rpc',
   command: '',
   args: [],
+  env: [],
   headers: [],
   authType: 'oauth2',
   token: '',

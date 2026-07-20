@@ -1512,7 +1512,7 @@ mod tests {
             "collections": [{"id":"collection", "name":"Orders", "expanded":true, "requests":[]}],
             "environments": [{"id":"env", "name":"Development", "variables":[]}],
             "apiDesigns": [], "mockServers": [],
-            "mcpClients": [{"id":"mcp-one", "name":"Tools", "enabled":false, "transport":"http", "url":"https://mcp.example", "command":"", "args":[], "headers":[], "authType":"none", "token":"", "username":"", "password":"", "roots":[], "tools":[], "prompts":[], "resources":[], "resourceTemplates":[]}]
+            "mcpClients": [{"id":"mcp-one", "name":"Tools", "enabled":false, "transport":"stdio", "url":"", "command":"/usr/bin/tools", "args":[], "env":[{"id":"env-one", "name":"MODE", "value":"review", "enabled":true}], "headers":[], "authType":"none", "token":"", "username":"", "password":"", "roots":[], "tools":[], "prompts":[], "resources":[], "resourceTemplates":[]}]
         });
         let first = write_project(ProjectWriteInput {
             path: temporary.path().to_string_lossy().into_owned(),
@@ -1523,6 +1523,7 @@ mod tests {
         let loaded = read_project(temporary.path().to_string_lossy().into_owned()).unwrap();
         assert_eq!(loaded["collections"][0]["name"], "Orders");
         assert_eq!(loaded["mcpClients"][0]["name"], "Tools");
+        assert_eq!(loaded["mcpClients"][0]["env"][0]["value"], "review");
         assert_eq!(
             fs::read_to_string(temporary.path().join("README.md")).unwrap(),
             "keep me"

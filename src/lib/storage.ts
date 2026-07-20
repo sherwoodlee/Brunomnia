@@ -150,6 +150,7 @@ const normalizeMcpClients = (value: unknown): McpClient[] => !Array.isArray(valu
     url: stringValue(client.url),
     command: stringValue(client.command),
     args: Array.isArray(client.args) ? client.args.filter((arg): arg is string => typeof arg === 'string').slice(0, 100) : [],
+    env: normalizeRows(client.env, `mcp-${index}-environment`).slice(0, 100),
     headers: normalizeRows(client.headers, `mcp-${index}-header`),
     authType,
     token: stringValue(client.token),
@@ -793,7 +794,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const testSuites = normalizeTestSuites(workspace.testSuites, collections as Workspace['collections'], requestIds);
   return {
     ...workspace,
-    version: 37,
+    version: 38,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
