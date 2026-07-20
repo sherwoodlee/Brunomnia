@@ -40,7 +40,13 @@ No renderer behavior changes in M232. Deterministic Unix fixtures prove startup-
 
 ## Remote gate
 
-Pending the first push of the M232 implementation commit to `main`.
+Main commit `ac97e91e8433f0a545f74df227b785b8122d755f` completed verify and publish in [Actions run 29710856723](https://github.com/sherwoodlee/Brunomnia/actions/runs/29710856723). Node 22 rebuilt the generated CLI, passed the freshness and non-root no-network trust smoke, and published AMD64/ARM64 provenance/SBOM manifests at:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:18612b9893d12c03043dd1a22bb0813add99d676d1eaaced99b685b386a0b3da
+```
+
+Independent `cosign verify` passed issuer `https://token.actions.githubusercontent.com` and the exact `cli-container.yml@refs/heads/main` identity, validated the M232 commit and digest claims plus the trusted certificate chain, and found transparency-log entry `2204639763`.
 
 ## Acceptance boundary
 

@@ -1335,6 +1335,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Pinned `shell-path` 3.1.0, lock-resolved `shell-env` 4.0.3/`default-shell` 2.2.0 invocation, alternate-shell fallback, and reviewed-precedence audit: [`docs/QA_MILESTONE_232.md`](QA_MILESTONE_232.md)
 - Bounded Unix login-shell discovery, UUID-delimited parsing, app-path fallback, explicit empty-path behavior, and direct-child precedence: [`src-tauri/src/mcp_stdio.rs`](../src-tauri/src/mcp_stdio.rs)
 - Noisy/failing/hanging shell, bare executable, reviewed override, persistent lifecycle, full regression/build, packaged CLI smoke, and app-bundle evidence: [`src-tauri/src/mcp_stdio.rs`](../src-tauri/src/mcp_stdio.rs) and [`docs/QA_MILESTONE_232.md`](QA_MILESTONE_232.md)
+- Successful remote Node 22 rebuild/no-network smoke, signed AMD64/ARM64 publication, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_232.md`](QA_MILESTONE_232.md)
 
 ## Parity declaration rule
 
