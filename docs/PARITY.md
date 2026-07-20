@@ -1320,6 +1320,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Bounded project/client session registry, direct-child reuse, serialized monotonic calls, retained-process cancellation, fatal cleanup, and explicit close command: [`src-tauri/src/mcp_stdio.rs`](../src-tauri/src/mcp_stdio.rs) and [`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs)
 - Fingerprinted renderer session identity, spawn/fatal cleanup, visible disconnect state, and connection-setting invalidation: [`src/lib/mcp.ts`](../src/lib/mcp.ts) and [`src/components/IntegrationWorkbench.tsx`](../src/components/IntegrationWorkbench.tsx)
 - Stable-key, cancellation-reuse, disconnect, spawn-failure, real-child lifecycle, full regression/build, and exact verification evidence: [`src/lib/mcp.test.ts`](../src/lib/mcp.test.ts), [`src-tauri/src/mcp_stdio.rs`](../src-tauri/src/mcp_stdio.rs), and [`docs/QA_MILESTONE_230.md`](QA_MILESTONE_230.md)
+- Successful remote Node 22 rebuild/no-network smoke, signed AMD64/ARM64 publication, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_230.md`](QA_MILESTONE_230.md)
 
 ## Parity declaration rule
 
