@@ -1,3 +1,4 @@
+use crate::runtime_credentials;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -257,7 +258,7 @@ fn read_valid_workspace(path: &Path) -> Option<Value> {
     read_json(path).filter(workspace_is_valid)
 }
 
-fn read_workspace(root: &Path, id: &str) -> WorkspaceRead {
+fn read_workspace_raw(root: &Path, id: &str) -> WorkspaceRead {
     if let Some(value) = read_valid_workspace(&workspace_path(root, id)) {
         WorkspaceRead::Primary(value)
     } else if let Some(value) = read_valid_workspace(&workspace_backup_path(root, id)) {
@@ -301,6 +302,60 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String>
     write_bytes_atomic(path, &data)
 }
 
+fn migrate_workspace_file(path: &Path, workspace_id: &str) -> Result<(), String> {
+    let Some(workspace) = read_valid_workspace(path) else {
+        return Ok(());
+    };
+    if runtime_credentials::needs_protection(&workspace) {
+        write_json_atomic(
+            path,
+            &runtime_credentials::protect(workspace_id, &workspace)?,
+        )?;
+    }
+    Ok(())
+}
+
+fn migrate_workspace_copies(root: &Path, workspace_id: &str) -> Result<(), String> {
+    migrate_workspace_file(&workspace_path(root, workspace_id), workspace_id)?;
+    migrate_workspace_file(&workspace_backup_path(root, workspace_id), workspace_id)
+}
+
+fn migrate_trash_workspaces(root: &Path) -> Result<HashMap<(String, i64), TrashFiles>, String> {
+    let trash_files = collect_trash_files(root)?;
+    for ((workspace_id, _), files) in &trash_files {
+        if let Some(path) = files.workspace.as_deref() {
+            migrate_workspace_file(path, workspace_id)?;
+        }
+        if let Some(path) = files.backup.as_deref() {
+            migrate_workspace_file(path, workspace_id)?;
+        }
+    }
+    Ok(trash_files)
+}
+
+fn read_workspace(root: &Path, id: &str) -> Result<WorkspaceRead, String> {
+    migrate_workspace_copies(root, id)?;
+    let primary = read_valid_workspace(&workspace_path(root, id));
+    let backup = read_valid_workspace(&workspace_backup_path(root, id));
+    if let Some(workspace) = primary {
+        match runtime_credentials::unprotect(id, &workspace) {
+            Ok(workspace) => return Ok(WorkspaceRead::Primary(workspace)),
+            Err(primary_error) => {
+                if let Some(backup) = backup {
+                    return runtime_credentials::unprotect(id, &backup)
+                        .map(WorkspaceRead::Backup)
+                        .map_err(|_| primary_error);
+                }
+                return Err(primary_error);
+            }
+        }
+    }
+    backup
+        .map(|workspace| runtime_credentials::unprotect(id, &workspace).map(WorkspaceRead::Backup))
+        .transpose()
+        .map(|workspace| workspace.unwrap_or(WorkspaceRead::Unavailable))
+}
+
 fn preserve_invalid(root: &Path, id: &str, path: &Path) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
@@ -319,19 +374,25 @@ fn write_workspace(root: &Path, id: &str, workspace: &Value) -> Result<(), Strin
     if !workspace_is_valid(workspace) {
         return Err("The project is not a valid Brunomnia workspace.".into());
     }
+    let protected_workspace = runtime_credentials::protect(id, workspace)?;
     let path = workspace_path(root, id);
     let backup = workspace_backup_path(root, id);
     if path.exists() {
-        if read_valid_workspace(&path).is_some() {
+        if let Some(current) = read_valid_workspace(&path) {
             if backup.exists() {
                 fs::remove_file(&backup).map_err(|error| error.to_string())?;
             }
-            fs::copy(&path, &backup).map_err(|error| error.to_string())?;
+            let current = if runtime_credentials::needs_protection(&current) {
+                runtime_credentials::protect(id, &current)?
+            } else {
+                current
+            };
+            write_json_atomic(&backup, &current)?;
         } else {
             preserve_invalid(root, id, &path)?;
         }
     }
-    write_json_atomic(&path, workspace)
+    write_json_atomic(&path, &protected_workspace)
 }
 
 fn catalog_is_valid(catalog: &Catalog) -> bool {
@@ -449,6 +510,7 @@ fn load_or_rebuild_catalog(
     if catalog.entries.is_empty() {
         if let Some(legacy_path) = legacy_path.filter(|path| path.exists()) {
             if let Some(workspace) = read_valid_workspace(legacy_path) {
+                let workspace = runtime_credentials::unprotect("local-workspace", &workspace)?;
                 let id = "local-workspace".to_string();
                 write_workspace(root, &id, &workspace)?;
                 catalog.entries.push(new_entry(id.clone(), &workspace));
@@ -486,7 +548,7 @@ fn load_or_rebuild_catalog(
 }
 
 fn entry_status(root: &Path, id: &str) -> &'static str {
-    match read_workspace(root, id) {
+    match read_workspace_raw(root, id) {
         WorkspaceRead::Primary(_) => "ready",
         WorkspaceRead::Backup(_) => "recoverable",
         WorkspaceRead::Unavailable => "unavailable",
@@ -514,7 +576,7 @@ fn snapshot(
     mut recovery: Option<WorkspaceRecovery>,
 ) -> Result<WorkspaceCatalogSnapshot, String> {
     ensure_active(&mut catalog, root)?;
-    let workspace = match read_workspace(root, &catalog.active_workspace_id) {
+    let workspace = match read_workspace(root, &catalog.active_workspace_id)? {
         WorkspaceRead::Primary(value) => value,
         WorkspaceRead::Backup(value) => {
             recovery = Some(WorkspaceRecovery {
@@ -551,8 +613,15 @@ pub fn load(
     legacy_path: Option<&Path>,
     default_workspace: &Value,
 ) -> Result<WorkspaceCatalogSnapshot, String> {
+    if let Some(legacy_path) = legacy_path {
+        migrate_workspace_file(legacy_path, "local-workspace")?;
+    }
     let (mut catalog, mut recovery) =
         load_or_rebuild_catalog(root, legacy_path, Some(default_workspace))?;
+    for entry in &catalog.entries {
+        migrate_workspace_copies(root, &entry.id)?;
+    }
+    migrate_trash_workspaces(root)?;
     if ensure_active(&mut catalog, root).is_err() {
         let id = format!("workspace-{}", Uuid::new_v4());
         write_workspace(root, &id, default_workspace)?;
@@ -601,7 +670,7 @@ pub fn read(root: &Path, workspace_id: &str) -> Result<Value, String> {
     if !catalog.entries.iter().any(|entry| entry.id == workspace_id) {
         return Err("This local project no longer exists.".into());
     }
-    match read_workspace(root, workspace_id) {
+    match read_workspace(root, workspace_id)? {
         WorkspaceRead::Primary(workspace) | WorkspaceRead::Backup(workspace) => Ok(workspace),
         WorkspaceRead::Unavailable => {
             Err("This local project and its backup are unreadable.".into())
@@ -678,7 +747,7 @@ pub fn rename(
         .iter_mut()
         .find(|entry| entry.id == workspace_id)
         .ok_or_else(|| "This local project no longer exists.".to_string())?;
-    let mut workspace = match read_workspace(root, workspace_id) {
+    let mut workspace = match read_workspace(root, workspace_id)? {
         WorkspaceRead::Primary(value) | WorkspaceRead::Backup(value) => value,
         WorkspaceRead::Unavailable => {
             return Err("This local project and its backup are unreadable.".into())
@@ -780,7 +849,7 @@ pub fn delete(root: &Path, workspace_id: &str) -> Result<WorkspaceCatalogSnapsho
 }
 
 pub fn list_trash(root: &Path) -> Result<Vec<WorkspaceTrashEntry>, String> {
-    let mut entries = collect_trash_files(root)?
+    let mut entries = migrate_trash_workspaces(root)?
         .into_iter()
         .map(|((workspace_id, deleted_at), files)| {
             let primary = files
@@ -858,6 +927,8 @@ pub fn restore_trash(
     let primary_trash = trash_file_path(root, workspace_id, deleted_at, "workspace");
     let backup_trash = trash_file_path(root, workspace_id, deleted_at, "backup");
     let vault_trash = trash_file_path(root, workspace_id, deleted_at, "vault");
+    migrate_workspace_file(&primary_trash, workspace_id)?;
+    migrate_workspace_file(&backup_trash, workspace_id)?;
     let primary_bytes = read_regular_bytes(&primary_trash)?;
     let backup_bytes = read_regular_bytes(&backup_trash)?;
     let vault_bytes = read_regular_bytes(&vault_trash)?;
@@ -942,6 +1013,7 @@ pub fn restore_trash(
 pub fn restore_backup(root: &Path, workspace_id: &str) -> Result<WorkspaceCatalogSnapshot, String> {
     validate_workspace_id(workspace_id)?;
     let backup = workspace_backup_path(root, workspace_id);
+    migrate_workspace_file(&backup, workspace_id)?;
     let workspace = read_valid_workspace(&backup)
         .ok_or_else(|| "This project does not have a valid backup to restore.".to_string())?;
     let primary = workspace_path(root, workspace_id);
@@ -963,6 +1035,43 @@ mod tests {
             "version": 22,
             "name": name,
             "collections": []
+        })
+    }
+
+    fn runtime_workspace(name: &str) -> Value {
+        serde_json::json!({
+            "format": "brunomnia",
+            "version": 39,
+            "name": name,
+            "collections": [{
+                "id": "collection-one",
+                "requests": [{
+                    "id": "request-one",
+                    "auth": {
+                        "type": "oauth2",
+                        "code": "",
+                        "codeVerifier": "",
+                        "accessToken": "request-access",
+                        "identityToken": "",
+                        "refreshToken": "request-refresh",
+                        "expiresAt": 123
+                    }
+                }],
+                "folders": []
+            }],
+            "mcpClients": [{
+                "id": "mcp-one",
+                "authType": "oauth2",
+                "token": "mcp-access",
+                "oauthRefreshToken": "mcp-refresh",
+                "oauthIdentityToken": "",
+                "oauthExpiresAt": 456,
+                "oauthRegisteredClientId": "registered-client",
+                "oauthRegisteredClientSecret": "registered-secret",
+                "oauthRegisteredClientIdIssuedAt": 0,
+                "oauthRegisteredClientSecretExpiresAt": 0,
+                "oauthRegisteredTokenEndpointAuthMethod": "client_secret_post"
+            }]
         })
     }
 
@@ -1134,6 +1243,67 @@ mod tests {
         assert_ne!(
             project_vault_path(&root, &legacy, "first").unwrap(),
             project_vault_path(&root, &legacy, "second").unwrap()
+        );
+    }
+
+    #[test]
+    fn protects_runtime_credentials_across_catalog_backup_and_trash_paths() {
+        crate::runtime_credentials::set_test_master_key([42; 32]);
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("workspaces");
+        let legacy = directory.path().join("workspace.json");
+        write_json_atomic(&legacy, &runtime_workspace("Protected")).unwrap();
+
+        let loaded = load(&root, Some(&legacy), &workspace("Default")).unwrap();
+        assert_eq!(loaded.active_workspace_id, "local-workspace");
+        assert_eq!(
+            loaded.workspace["collections"][0]["requests"][0]["auth"]["accessToken"],
+            "request-access"
+        );
+        assert_eq!(loaded.workspace["mcpClients"][0]["token"], "mcp-access");
+
+        for path in [workspace_path(&root, "local-workspace"), legacy.clone()] {
+            let stored = read_valid_workspace(&path).unwrap();
+            assert!(stored.get("protectedRuntimeCredentials").is_some());
+            assert_eq!(
+                stored["collections"][0]["requests"][0]["auth"]["accessToken"],
+                ""
+            );
+            assert_eq!(stored["mcpClients"][0]["token"], "");
+            let serialized = serde_json::to_string(&stored).unwrap();
+            assert!(!serialized.contains("request-access"));
+            assert!(!serialized.contains("mcp-access"));
+            assert!(!serialized.contains("registered-secret"));
+        }
+
+        save(&root, "local-workspace", &loaded.workspace).unwrap();
+        let backup =
+            read_valid_workspace(&workspace_backup_path(&root, "local-workspace")).unwrap();
+        assert!(backup.get("protectedRuntimeCredentials").is_some());
+        assert_eq!(backup["mcpClients"][0]["oauthRegisteredClientSecret"], "");
+
+        create(&root, "second", &workspace("Second")).unwrap();
+        delete(&root, "local-workspace").unwrap();
+        let deleted = list_trash(&root).unwrap();
+        let entry = deleted
+            .iter()
+            .find(|entry| entry.workspace_id == "local-workspace")
+            .unwrap();
+        let trash = read_valid_workspace(&trash_file_path(
+            &root,
+            "local-workspace",
+            entry.deleted_at,
+            "workspace",
+        ))
+        .unwrap();
+        assert!(trash.get("protectedRuntimeCredentials").is_some());
+        assert_eq!(trash["mcpClients"][0]["token"], "");
+
+        let restored = restore_trash(&root, "local-workspace", entry.deleted_at).unwrap();
+        assert_eq!(restored.workspace["mcpClients"][0]["token"], "mcp-access");
+        assert_eq!(
+            restored.workspace["collections"][0]["requests"][0]["auth"]["refreshToken"],
+            "request-refresh"
         );
     }
 }

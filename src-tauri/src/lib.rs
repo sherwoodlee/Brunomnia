@@ -11,6 +11,7 @@ mod models;
 mod oauth2_callback;
 mod plugin;
 mod project;
+mod runtime_credentials;
 mod secure_store;
 mod streaming;
 mod template_os;
@@ -54,8 +55,19 @@ fn load_workspace(app: AppHandle) -> Result<Option<Value>, String> {
         return Ok(None);
     }
 
-    let data = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let workspace = serde_json::from_str(&data).map_err(|error| error.to_string())?;
+    let data = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let stored: Value = serde_json::from_str(&data).map_err(|error| error.to_string())?;
+    let stored = if runtime_credentials::needs_protection(&stored) {
+        let protected = runtime_credentials::protect("local-workspace", &stored)?;
+        let temporary_path = path.with_extension("json.tmp");
+        let data = serde_json::to_string_pretty(&protected).map_err(|error| error.to_string())?;
+        fs::write(&temporary_path, data).map_err(|error| error.to_string())?;
+        fs::rename(&temporary_path, &path).map_err(|error| error.to_string())?;
+        protected
+    } else {
+        stored
+    };
+    let workspace = runtime_credentials::unprotect("local-workspace", &stored)?;
     Ok(Some(workspace))
 }
 
@@ -63,7 +75,11 @@ fn load_workspace(app: AppHandle) -> Result<Option<Value>, String> {
 fn save_workspace(app: AppHandle, workspace: Value) -> Result<(), String> {
     let path = workspace_path(&app)?;
     let temporary_path = path.with_extension("json.tmp");
-    let data = serde_json::to_string_pretty(&workspace).map_err(|error| error.to_string())?;
+    let data = serde_json::to_string_pretty(&runtime_credentials::protect(
+        "local-workspace",
+        &workspace,
+    )?)
+    .map_err(|error| error.to_string())?;
 
     fs::write(&temporary_path, data).map_err(|error| error.to_string())?;
     fs::rename(&temporary_path, &path).map_err(|error| error.to_string())?;
