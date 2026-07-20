@@ -48,7 +48,15 @@ Rendered interaction QA remains omitted by standing direction. No screenshot, ob
 
 ## Remote gate
 
-Pending the implementation push to `main`. This section will be replaced with the completed Actions, GHCR, Cosign, provenance/SBOM, and Rekor evidence after the remote workflow succeeds.
+Main implementation commit `0ec887b390112617f9855e6e212a205a1b142d48` completed verify and publish in [Actions run 29744192382](https://github.com/sherwoodlee/Brunomnia/actions/runs/29744192382). The verify job reproduced the committed CLI under the configured Node runtime, passed freshness, built the verification image, and passed both ordinary and extended non-root/no-network container smokes. The publish job emitted AMD64/ARM64 provenance/SBOM attestation manifests and keylessly signed:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:246abb6687b8d4e85cebe5a652ba3a80e7be3f0d457ecfeb6f3fc2abeeae4f67
+```
+
+Independent manifest inspection resolved AMD64 `sha256:9c97f83ab16f8173f44833527cd45df6efc66b6c2ab039d90d9270cd3908552c`, ARM64 `sha256:9bec4d12027d4c8afe4f93e863bcb2198f1e7be0e6f44a4a23b8d8d6c71146c6`, and attached attestation manifests `sha256:9f2f8e86e28fe24fed3c05a0cf32dcde133a2f5f2a1770d04952ce1f25fd9e26` plus `sha256:23f1bec5c4cb2d712675636106466ec40fddb558edf7db1f501a6225d80bb941`. Independent Cosign 3.1.2 verification passed issuer `https://token.actions.githubusercontent.com`, exact identity `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, implementation SHA and digest claims, trusted certificate-chain validation, and offline transparency-log inclusion at Rekor index `2206273641`.
+
+Both jobs and every required step completed successfully. GitHub emitted only its informational Node 20 action-runtime deprecation annotation; the runner forced those pinned actions onto Node 24 and no gate was skipped or weakened.
 
 ## Acceptance boundary
 
