@@ -1685,6 +1685,20 @@ kbd {
 .mcp-guided-parameters .mcp-guided-toggle { align-items: center; grid-template-columns: minmax(0, 1fr) auto; }
 .mcp-guided-toggle input { accent-color: var(--accent); min-height: auto; }
 .mcp-guided-toggle small { grid-column: 1 / -1; }
+.mcp-schema-builder { max-height: 520px; overflow: auto; }
+.mcp-schema-field { border: 0; display: grid; gap: 6px; margin: 0; min-width: 0; padding: 0; }
+.mcp-schema-field > legend, .mcp-schema-field > strong { color: var(--text-soft); font-size: 9px; font-weight: 650; padding: 0; }
+.mcp-schema-field > small { color: var(--faint); font-size: 8px; line-height: 1.4; }
+.mcp-schema-object, .mcp-schema-array { border-left: 1px solid var(--border-soft); padding-left: 9px; }
+.mcp-schema-object > .mcp-schema-field, .mcp-schema-array-item > .mcp-schema-field { margin-top: 3px; }
+.mcp-schema-variant { display: grid; gap: 5px; }
+.mcp-schema-array-item, .mcp-schema-additional { border: 1px solid var(--border-soft); display: grid; gap: 7px; padding: 7px; }
+.mcp-schema-add-field, .mcp-schema-remove { background: transparent; border: 1px solid var(--border-soft); color: var(--muted); font-size: 8px; justify-self: start; padding: 4px 7px; }
+.mcp-schema-remove { color: var(--red); }
+.mcp-schema-unsupported { border: 1px dashed var(--border-soft); padding: 7px; }
+.mcp-schema-issues { background: color-mix(in srgb, var(--red) 8%, transparent); border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border-soft)); color: var(--muted); display: grid; font-size: 8px; gap: 5px; padding: 7px; }
+.mcp-schema-issues ul { margin: 0; padding-left: 16px; }
+.mcp-schema-issues small, .mcp-schema-valid { color: var(--faint); font-size: 8px; }
 .mcp-template-preview { background: #0a0f12; border: 1px solid var(--border-soft); display: grid; gap: 5px; padding: 9px; }
 .mcp-template-preview small { color: var(--faint); font-size: 8px; text-transform: uppercase; }
 .mcp-template-preview code { color: var(--text-soft); font: 8px/1.5 var(--font-mono); overflow-wrap: anywhere; }

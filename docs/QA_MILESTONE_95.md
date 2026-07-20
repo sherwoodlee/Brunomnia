@@ -42,7 +42,7 @@ Rendered interaction QA was not run because this task's standing direction prohi
 
 ## Acceptance boundary
 
-Guided MCP prompt and scalar tool parameters are a complete baseline. Recursive JSON-Schema controls, references/compositions/conditionals, specialized format widgets, persisted draft history, byte-for-byte RJSF validation messages, and live third-party schemas remain open; the complete JSON overview remains the functional path for every valid argument object.
+Guided MCP prompt and scalar tool parameters are a complete baseline. Milestone 234 later closes bounded recursive JSON-Schema controls, local references, compositions, conditionals, dependencies, additional properties, and advisory path validation. Specialized format widgets, remote references, uncommon draft keywords, persisted draft history, byte-for-byte RJSF/AJV validation messages, and live third-party schemas remain open; the complete JSON overview remains the functional path for every valid argument object.
 
 Validated desktop artifact:
 

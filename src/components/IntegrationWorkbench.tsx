@@ -1,14 +1,15 @@
 import { isTauri } from '@tauri-apps/api/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Environment, KeyValue, McpClient, Workspace } from '../types';
+import type { Environment, JsonValue, KeyValue, McpClient, Workspace } from '../types';
 import { generateAiText } from '../lib/ai';
 import type { SendRequestContext } from '../lib/http';
 import { loadKonnectControlPlanes, syncKonnectRoutes } from '../lib/konnect';
 import { disconnectMcpClient, discoverMcpClient, hasMcpClientSession, invokeMcpOperation, type McpEvent } from '../lib/mcp';
-import { initialMcpToolParameters, mcpScalarInputValue, mcpScalarOptionKey, mcpToolParameterSchema } from '../lib/mcpParameterSchema';
+import { initialMcpToolParameters, mcpParameterIssues, renameMcpParameterValue, withMcpParameterValue, withoutMcpParameterValue, type McpParameterPath } from '../lib/mcpParameterSchema';
 import { expandMcpUriTemplate } from '../lib/mcpUriTemplate';
 import { plaintextSecretCandidates } from '../lib/security';
 import { Icon } from './Icon';
+import { McpParameterField } from './McpParameterField';
 
 type IntegrationWorkbenchProps = {
   workspace: Workspace;
@@ -95,6 +96,7 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
   const [operationName, setOperationName] = useState('');
   const [parameters, setParameters] = useState('{}');
   const [parameterDrafts, setParameterDrafts] = useState<Record<string, string>>({});
+  const [parameterVariants, setParameterVariants] = useState<Record<string, number>>({});
   const [events, setEvents] = useState<McpEvent[]>([]);
   const [result, setResult] = useState('');
   const [busy, setBusy] = useState('');
@@ -195,13 +197,16 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
     : undefined;
   const selectedTool = operationKind === 'tool' ? active?.tools.find((tool) => tool.name === operationName) : undefined;
   const selectedPrompt = operationKind === 'prompt' ? active?.prompts.find((prompt) => prompt.name === operationName) : undefined;
-  const selectedToolSchema = useMemo(() => selectedTool ? mcpToolParameterSchema(selectedTool.inputSchema) : { fields: [], hasComplexFields: false }, [selectedTool]);
   const parameterValues = useMemo(() => {
     try {
       const value: unknown = JSON.parse(parameters);
       return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
     } catch { return {}; }
   }, [parameters]);
+  const selectedToolVariantPrefix = selectedTool && active ? mcpOperationDraftKey(active.id, 'tool', selectedTool.name) : '';
+  const toolParameterIssues = useMemo(() => selectedTool && selectedToolVariantPrefix
+    ? mcpParameterIssues(selectedTool.inputSchema, parameterValues, selectedTool.inputSchema, parameterVariants, selectedToolVariantPrefix)
+    : [], [parameterValues, parameterVariants, selectedTool, selectedToolVariantPrefix]);
   const resourceTemplatePreview = useMemo(() => {
     if (!selectedResourceTemplate) return { uri: '', error: '' };
     try { return { uri: expandMcpUriTemplate(selectedResourceTemplate.uriTemplate || selectedResourceTemplate.uri, parameterValues), error: '' }; }
@@ -232,7 +237,7 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
       : prompt
         ? Object.fromEntries(prompt.arguments.map((argument) => [argument.name, '']))
         : tool
-          ? initialMcpToolParameters(mcpToolParameterSchema(tool.inputSchema))
+          ? initialMcpToolParameters(tool.inputSchema)
           : {};
     const key = mcpOperationDraftKey(active?.id ?? '', operationKind, name);
     const value = parameterDrafts[key] ?? JSON.stringify(initial, null, 2);
@@ -249,9 +254,29 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
     setParameterText(JSON.stringify({ ...parameterValues, [name]: value }, null, 2));
   };
 
+  const updateSchemaParameter = (path: McpParameterPath, value: JsonValue) => {
+    setParameterText(JSON.stringify(withMcpParameterValue(parameterValues, path, value), null, 2));
+  };
+
+  const removeSchemaParameter = (path: McpParameterPath) => {
+    setParameterText(JSON.stringify(withoutMcpParameterValue(parameterValues, path), null, 2));
+  };
+
+  const renameSchemaParameter = (parentPath: McpParameterPath, currentName: string, nextName: string) => {
+    setParameterText(JSON.stringify(renameMcpParameterValue(parameterValues, parentPath, currentName, nextName), null, 2));
+  };
+
+  const updateSchemaVariant = (key: string, index: number) => {
+    setParameterVariants((current) => Object.fromEntries([...Object.entries(current).filter(([candidate]) => candidate !== key), [key, index]].slice(-1000)));
+  };
+
   const invokeOperation = () => active && operationName && canEdit && run('Invoking MCP operation', async (signal) => {
     let parsed: Record<string, unknown>;
-    try { parsed = JSON.parse(parameters) as Record<string, unknown>; }
+    try {
+      const value: unknown = JSON.parse(parameters);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('not an object');
+      parsed = value as Record<string, unknown>;
+    }
     catch { throw new Error('MCP parameters must be a JSON object.'); }
     const output = await invokeMcpOperation(active, operationKind, operationName, parsed, environment, { ...requestContext, signal, cancellationId: `mcp-invoke-${active.id}-${crypto.randomUUID()}`, onMcpClient: persistMcpClient });
     onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === active.id ? output.client : client) }));
@@ -312,7 +337,7 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
             <div className="mcp-operation-grid">
               <div className="mcp-operation-list">{operations.map((operation, index) => <button className={operationName === operation.name ? 'active' : ''} key={`${operation.name}-${index}`} onClick={() => selectOperation(operation.name)} type="button"><strong>{operation.name}</strong><small>{operation.description || 'No description'}</small></button>)}</div>
               <div className="mcp-operation-run">
-                {selectedResourceTemplate ? <div className="mcp-template-parameters"><header><strong>URI template parameters</strong><small>All discovered variables are strings.</small></header>{selectedResourceTemplate.variables.map((variable) => <label key={variable}>{variable}<input onChange={(event) => updateTemplateVariable(variable, event.target.value)} required value={String(parameterValues[variable] ?? '')} /></label>)}{!selectedResourceTemplate.variables.length ? <p>This template has no valid variables. Review its syntax before invoking it.</p> : null}<div className="mcp-template-preview"><small>Expanded URI</small><code>{resourceTemplatePreview.error || resourceTemplatePreview.uri || selectedResourceTemplate.uriTemplate}</code></div></div> : selectedPrompt ? <><div className="mcp-template-parameters mcp-guided-parameters"><header><strong>Prompt arguments</strong><small>String arguments from the server schema.</small></header>{selectedPrompt.arguments.map((argument) => <label key={argument.name}><span>{argument.name}{argument.required ? ' *' : ''}</span><input onChange={(event) => updateGuidedParameter(argument.name, event.target.value)} required={argument.required} value={String(parameterValues[argument.name] ?? '')} />{argument.description ? <small>{argument.description}</small> : null}</label>)}{!selectedPrompt.arguments.length ? <p>This prompt accepts no arguments.</p> : null}</div><label>Parameter overview<textarea value={parameters} onChange={(event) => setParameterText(event.target.value)} /></label></> : selectedTool ? <><div className="mcp-template-parameters mcp-guided-parameters"><header><strong>Tool parameters</strong><small>Top-level scalar JSON Schema fields.</small></header>{selectedToolSchema.fields.map((field) => field.options.length ? <label key={field.name}><span>{field.title}{field.required ? ' *' : ''}</span><select onChange={(event) => { const option = field.options.find((candidate) => mcpScalarOptionKey(candidate.value) === event.target.value); if (option) updateGuidedParameter(field.name, option.value); }} required={field.required} value={parameterValues[field.name] === undefined ? '' : mcpScalarOptionKey(parameterValues[field.name])}><option value="">Choose…</option>{field.options.map((option) => <option key={mcpScalarOptionKey(option.value)} value={mcpScalarOptionKey(option.value)}>{option.label}</option>)}</select>{field.description ? <small>{field.description}</small> : null}</label> : field.type === 'boolean' ? <label className="mcp-guided-toggle" key={field.name}><span>{field.title}{field.required ? ' *' : ''}</span><input checked={parameterValues[field.name] === true} onChange={(event) => updateGuidedParameter(field.name, event.target.checked)} type="checkbox" />{field.description ? <small>{field.description}</small> : null}</label> : <label key={field.name}><span>{field.title}{field.required ? ' *' : ''}</span><input onChange={(event) => updateGuidedParameter(field.name, mcpScalarInputValue(field, event.target.value))} required={field.required} type={field.type === 'string' ? 'text' : 'number'} value={String(parameterValues[field.name] ?? '')} />{field.description ? <small>{field.description}</small> : null}</label>)}{selectedToolSchema.hasComplexFields ? <p>Nested, array, union-only, or additional fields remain editable in the JSON overview.</p> : null}{!selectedToolSchema.fields.length && !selectedToolSchema.hasComplexFields ? <p>This tool declares no top-level parameters.</p> : null}</div><label>Parameter overview<textarea value={parameters} onChange={(event) => setParameterText(event.target.value)} /></label></> : operationKind === 'resource' ? <div className="mcp-template-preview"><small>Resource URI</small><code>{operationName || 'Select a resource.'}</code></div> : <label>JSON parameters<textarea value={parameters} onChange={(event) => setParameterText(event.target.value)} /></label>}
+                {selectedResourceTemplate ? <div className="mcp-template-parameters"><header><strong>URI template parameters</strong><small>All discovered variables are strings.</small></header>{selectedResourceTemplate.variables.map((variable) => <label key={variable}>{variable}<input onChange={(event) => updateTemplateVariable(variable, event.target.value)} required value={String(parameterValues[variable] ?? '')} /></label>)}{!selectedResourceTemplate.variables.length ? <p>This template has no valid variables. Review its syntax before invoking it.</p> : null}<div className="mcp-template-preview"><small>Expanded URI</small><code>{resourceTemplatePreview.error || resourceTemplatePreview.uri || selectedResourceTemplate.uriTemplate}</code></div></div> : selectedPrompt ? <><div className="mcp-template-parameters mcp-guided-parameters"><header><strong>Prompt arguments</strong><small>String arguments from the server schema.</small></header>{selectedPrompt.arguments.map((argument) => <label key={argument.name}><span>{argument.name}{argument.required ? ' *' : ''}</span><input onChange={(event) => updateGuidedParameter(argument.name, event.target.value)} required={argument.required} value={String(parameterValues[argument.name] ?? '')} />{argument.description ? <small>{argument.description}</small> : null}</label>)}{!selectedPrompt.arguments.length ? <p>This prompt accepts no arguments.</p> : null}</div><label>Parameter overview<textarea value={parameters} onChange={(event) => setParameterText(event.target.value)} /></label></> : selectedTool ? <><div className="mcp-template-parameters mcp-guided-parameters mcp-schema-builder"><header><strong>Tool parameters</strong><small>Bounded recursive JSON Schema form.</small></header><McpParameterField schema={selectedTool.inputSchema} rootSchema={selectedTool.inputSchema} value={parameterValues} path={[]} label={selectedTool.name} required variantPrefix={selectedToolVariantPrefix} variants={parameterVariants} onSet={updateSchemaParameter} onRemove={removeSchemaParameter} onRename={renameSchemaParameter} onVariant={updateSchemaVariant} />{toolParameterIssues.length ? <div className="mcp-schema-issues"><strong>{toolParameterIssues.length} schema issue{toolParameterIssues.length === 1 ? '' : 's'}</strong><ul>{toolParameterIssues.slice(0, 8).map((issue) => <li key={issue}>{issue}</li>)}</ul><small>Like Insomnia’s debug form, validation is advisory and does not block invocation.</small></div> : <small className="mcp-schema-valid">Current parameters satisfy the guided schema.</small>}</div><label>Parameter overview<textarea value={parameters} onChange={(event) => setParameterText(event.target.value)} /></label></> : operationKind === 'resource' ? <div className="mcp-template-preview"><small>Resource URI</small><code>{operationName || 'Select a resource.'}</code></div> : <label>JSON parameters<textarea value={parameters} onChange={(event) => setParameterText(event.target.value)} /></label>}
                 <button disabled={!canEdit || !operationName || Boolean(busy) || Boolean(resourceTemplatePreview.error)} onClick={invokeOperation} type="button">Invoke {operationKind}</button>
                 <pre>{result || 'Operation output appears here.'}</pre>
               </div>
