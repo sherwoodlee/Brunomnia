@@ -1,4 +1,5 @@
-import type { Collection, CookieRecord, Environment, KeyValue, UnitTestSuite, Workspace } from '../types';
+import type { Collection, Environment, KeyValue, UnitTestSuite, Workspace } from '../types';
+import { cloneWorkspaceFileState } from './workspaceFileState';
 
 export type ProjectWorkspaceScope = 'collection' | 'design' | 'mock-server' | 'environment' | 'mcp';
 
@@ -107,12 +108,6 @@ const cloneSuites = (suites: UnitTestSuite[], collectionId: string, requestIds: 
   })),
 }));
 
-const mergeCookies = (target: CookieRecord[], source: CookieRecord[], id: IdFactory) => {
-  const output = new Map(target.map((cookie) => [`${cookie.name}\n${cookie.domain}\n${cookie.path}`, cookie]));
-  source.forEach((cookie) => output.set(`${cookie.name}\n${cookie.domain}\n${cookie.path}`, { ...structuredClone(cookie), id: id('cookie') }));
-  return [...output.values()];
-};
-
 const environmentBranch = (environments: Environment[], rootId: string) => {
   const byParent = new Map<string, Environment[]>();
   environments.forEach((environment) => {
@@ -154,7 +149,6 @@ export const duplicateProjectWorkspace = (
     duplicatedId = cloned.collectionId;
     workspace.collections.push(cloned.collection);
     workspace.activeRequestId = cloned.collection.requests[0]?.id ?? workspace.activeRequestId;
-    if (source !== target) workspace.cookies = mergeCookies(workspace.cookies, source.cookies, id);
   } else if (summary.scope === 'design') {
     const sourceDesign = source.apiDesigns.find((design) => design.id === summary.id)!;
     duplicatedId = id('design');
@@ -166,7 +160,6 @@ export const duplicateProjectWorkspace = (
       workspace.testSuites.push(...cloneSuites(sourceSuites, cloned.collectionId, cloned.requestIds, id));
       workspace.activeRequestId = cloned.collection.requests[0]?.id ?? workspace.activeRequestId;
       workspace.apiDesigns.push({ ...structuredClone(sourceDesign), id: duplicatedId, name, generatedCollectionId: cloned.collectionId });
-      if (source !== target) workspace.cookies = mergeCookies(workspace.cookies, source.cookies, id);
     } else {
       workspace.apiDesigns.push({ ...structuredClone(sourceDesign), id: duplicatedId, name, generatedCollectionId: undefined });
     }
@@ -213,6 +206,8 @@ export const duplicateProjectWorkspace = (
       oauthRegisteredTokenEndpointAuthMethod: 'none',
     });
   }
+
+  workspace.fileState[duplicatedId] = cloneWorkspaceFileState(source, summary.id);
 
   return {
     workspace,
@@ -264,7 +259,7 @@ const splitResponseFilters = (filters: Workspace['responseFilters'], requestIds:
   return { moved, remaining };
 };
 
-const moveCollectionOwnedResources = (source: Workspace, target: Workspace, collection: Collection, id: IdFactory) => {
+const moveCollectionOwnedResources = (source: Workspace, target: Workspace, collection: Collection) => {
   const requestIds = new Set(collection.requests.map((request) => request.id));
   const suites = partition(source.testSuites, (suite) => suite.collectionId === collection.id);
   const suiteIds = new Set(suites.moved.map((suite) => suite.id));
@@ -305,7 +300,6 @@ const moveCollectionOwnedResources = (source: Workspace, target: Workspace, coll
   target.responses.push(...responses.moved);
   target.streamSessions.push(...streamSessions.moved);
   target.responseFilters = { ...target.responseFilters, ...responseFilters.moved };
-  target.cookies = mergeCookies(target.cookies, source.cookies, id);
   target.activeRequestId = collection.requests[0]?.id ?? target.activeRequestId;
 };
 
@@ -313,7 +307,6 @@ export const moveProjectWorkspace = (
   sourceWorkspace: Workspace,
   targetWorkspace: Workspace,
   projectWorkspaceId: string,
-  id: IdFactory = nextId,
 ): MoveProjectWorkspaceResult => {
   if (sourceWorkspace === targetWorkspace) throw new Error('Choose a different destination project to move this file.');
   const summary = listProjectWorkspaces(sourceWorkspace).find((candidate) => candidate.id === projectWorkspaceId);
@@ -323,13 +316,13 @@ export const moveProjectWorkspace = (
 
   if (summary.scope === 'collection') {
     const collection = source.collections.find((candidate) => candidate.id === summary.id)!;
-    moveCollectionOwnedResources(source, target, collection, id);
+    moveCollectionOwnedResources(source, target, collection);
     repairSourceCollections(source);
   } else if (summary.scope === 'design') {
     const design = source.apiDesigns.find((candidate) => candidate.id === summary.id)!;
     const generated = source.collections.find((collection) => collection.id === design.generatedCollectionId);
     if (projectIdentityIds(target).has(design.id)) throw new Error(`The destination project already contains resource identity '${design.id}'. Duplicate the file instead of moving it.`);
-    if (generated) moveCollectionOwnedResources(source, target, generated, id);
+    if (generated) moveCollectionOwnedResources(source, target, generated);
     source.apiDesigns = source.apiDesigns.filter((candidate) => candidate.id !== design.id);
     target.apiDesigns.push(design);
     repairSourceCollections(source);
@@ -355,6 +348,9 @@ export const moveProjectWorkspace = (
     target.mcpClients.push(client);
     target.mcpSessions.push(...sessions.moved);
   }
+
+  target.fileState[summary.id] = cloneWorkspaceFileState(source, summary.id);
+  delete source.fileState[summary.id];
 
   return { source, target, projectWorkspace: summary };
 };

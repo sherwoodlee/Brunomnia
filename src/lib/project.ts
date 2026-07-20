@@ -35,7 +35,7 @@ const nativeOnly = () => {
 export const writeProject = async (path: string, workspace: Workspace) => {
   nativeOnly();
   const environments = publicEnvironments(workspace.environments);
-  const projectWorkspace = withoutOAuth2RuntimeCredentials({ ...workspace, certificates: emptyWorkspaceCertificates(), environments, activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '' });
+  const projectWorkspace = withoutOAuth2RuntimeCredentials({ ...workspace, cookies: [], fileState: {}, certificates: emptyWorkspaceCertificates(), environments, activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '' });
   return invoke<ProjectWriteResult>('project_write', { input: { path, workspace: projectWorkspace } });
 };
 
@@ -50,16 +50,17 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     ...current,
     ...project,
     format: 'brunomnia',
-    version: 42,
+    version: 43,
     history: current.history,
     runnerReports: current.runnerReports,
     unitTestResults: current.unitTestResults,
     imports: current.imports,
-    cookies: current.cookies,
+    cookies: [],
+    fileState: current.fileState,
     responses: current.responses,
     streamSessions: current.streamSessions,
     mcpSessions: current.mcpSessions,
-    certificates: current.certificates,
+    certificates: emptyWorkspaceCertificates(),
     plugins: current.plugins,
     pluginData: current.pluginData,
     activePluginTheme: current.activePluginTheme,

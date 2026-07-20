@@ -24,10 +24,12 @@ import {
 import type { GovernanceMember, GovernanceRole, Workspace } from '../types';
 import { CertificateManager } from './CertificateManager';
 import { Icon } from './Icon';
+import { getWorkspaceFileState, updateWorkspaceFileState } from '../lib/workspaceFileState';
 
 type SecurityWorkbenchProps = {
   workspaceId: string;
   workspace: Workspace;
+  workspaceFileId: string;
   vaultSession: VaultSession;
   onVaultSession: (session: VaultSession) => void;
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
@@ -38,7 +40,7 @@ const roles: GovernanceRole[] = ['owner', 'admin', 'editor', 'viewer'];
 const secretId = () => `secret-${crypto.randomUUID()}`;
 const memberId = () => `member-${crypto.randomUUID()}`;
 
-export function SecurityWorkbench({ workspaceId, workspace, vaultSession, onVaultSession, onChangeWorkspace }: SecurityWorkbenchProps) {
+export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vaultSession, onVaultSession, onChangeWorkspace }: SecurityWorkbenchProps) {
   const [tab, setTab] = useState<'vault' | 'certificates' | 'sync' | 'governance'>('vault');
   const [status, setStatus] = useState<SecureFileStatus>(blankStatus);
   const [syncStatus, setSyncStatus] = useState<SecureFileStatus>(blankStatus);
@@ -166,7 +168,7 @@ export function SecurityWorkbench({ workspaceId, workspace, vaultSession, onVaul
   return (
     <section className="security-workbench">
       <header className="security-header"><div><small>Security & collaboration</small><h1>Encrypted local control plane</h1><p>Keep secrets out of workspace files, exchange end-to-end encrypted revisions, and record local governance decisions without a paid service.</p></div><span className="local-only-badge">Free · self-hostable files</span></header>
-      <nav className="security-tabs" aria-label="Security sections"><button className={tab === 'vault' ? 'active' : ''} onClick={() => setTab('vault')} type="button">Local vault</button><button className={tab === 'certificates' ? 'active' : ''} onClick={() => setTab('certificates')} type="button">Certificates</button><button className={tab === 'sync' ? 'active' : ''} onClick={() => setTab('sync')} type="button">Encrypted sync</button><button className={tab === 'governance' ? 'active' : ''} onClick={() => setTab('governance')} type="button">Governance & audit</button></nav>{tab === 'certificates' ? <CertificateManager canEdit={Boolean(canEdit)} certificates={workspace.certificates} onChange={(certificates) => onChangeWorkspace((current) => ({ ...current, certificates }))} /> : null}
+      <nav className="security-tabs" aria-label="Security sections"><button className={tab === 'vault' ? 'active' : ''} onClick={() => setTab('vault')} type="button">Local vault</button><button className={tab === 'certificates' ? 'active' : ''} onClick={() => setTab('certificates')} type="button">Certificates</button><button className={tab === 'sync' ? 'active' : ''} onClick={() => setTab('sync')} type="button">Encrypted sync</button><button className={tab === 'governance' ? 'active' : ''} onClick={() => setTab('governance')} type="button">Governance & audit</button></nav>{tab === 'certificates' ? <CertificateManager canEdit={Boolean(canEdit)} certificates={getWorkspaceFileState(workspace, workspaceFileId).certificates} onChange={(certificates) => onChangeWorkspace((current) => updateWorkspaceFileState(current, workspaceFileId, (state) => ({ ...state, certificates })))} /> : null}
 
       {tab === 'vault' ? <div className="security-grid vault-grid">
         <section className="security-card vault-control"><header><div><small>AES-256-GCM · PBKDF2-SHA256</small><h2>{vaultSession.unlocked ? 'Vault unlocked in memory' : status.exists ? 'Unlock local vault' : 'Create local vault'}</h2></div><Icon name="lock" size={24} /></header>{!native ? <p>The browser build cannot access the encrypted application-data file. Use the Tauri desktop app.</p> : vaultSession.unlocked ? <><div className="vault-actions"><button onClick={() => { onVaultSession({ unlocked: false, passphrase: '', entries: [] }); setRevealed(false); setMessage('Vault locked and decrypted values cleared from application memory.'); }} type="button">Lock and clear memory</button><button disabled={!canEdit || Boolean(busy)} onClick={persistVault} type="button">Save encrypted vault</button></div><label className="reveal-toggle"><input checked={revealed} onChange={(event) => setRevealed(event.target.checked)} type="checkbox" /> Reveal secret values on this screen</label></> : <><label>Encryption passphrase<input autoComplete="off" type="password" value={vaultSession.passphrase} onChange={(event) => onVaultSession({ ...vaultSession, passphrase: event.target.value })} /></label><button disabled={vaultSession.passphrase.length < 12 || Boolean(busy)} onClick={unlockOrCreate} type="button">{status.exists ? 'Unlock vault' : 'Create encrypted vault'}</button><small>The passphrase is kept only in memory and is never saved.</small></>}</section>

@@ -19,6 +19,7 @@ import { readDesktopTemplateFile } from '../lib/scriptFiles';
 import { applyCollectionConfiguration, requestAncestorNames, resolveEnvironment } from '../lib/resources';
 import { storeResponseCookies } from '../lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
+import { getWorkspaceFileState, setWorkspaceFileCookies, workspaceFileIdForCollection, workspaceFileIdForRequest } from '../lib/workspaceFileState';
 import type { PluginPermission, PluginRecord, Workspace } from '../types';
 import { Icon } from './Icon';
 
@@ -36,14 +37,16 @@ const activeRequest = (workspace: Workspace) => workspace.collections
   .find((request) => request.id === workspace.activeRequestId);
 
 export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }: PluginWorkbenchProps) {
+  const activeFileId = workspaceFileIdForRequest(workspace, workspace.activeRequestId);
+  const activeFileState = getWorkspaceFileState(workspace, activeFileId);
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
-    certificates: workspace.certificates,
     prompt: templatePrompt,
     readFile: workspace.preferences.allowScriptFileAccess && isTauri()
       ? (path) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)
       : undefined,
     requestAncestors: requestAncestorNames(workspace.collections, request),
     ...context,
+    certificates: getWorkspaceFileState(workspace, workspaceFileIdForRequest(workspace, request.id) || activeFileId).certificates,
   });
   const [selectedId, setSelectedId] = useState(workspace.plugins[0]?.id ?? '');
   const [installName, setInstallName] = useState('Local plugin');
@@ -104,8 +107,12 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }
     if (!dependencyCollection || !dependency) throw new Error(`Could not find request ${requestId}`);
     if (!environment) throw new Error('Select an environment before resending a dependent request.');
     const configured = applyCollectionConfiguration(dependencyCollection, dependency, environment);
+    const dependencyFileId = workspaceFileIdForCollection(workspace, dependencyCollection.id);
+    const callerRequestId = requestChain.at(-2);
+    const callerFileId = callerRequestId ? workspaceFileIdForRequest(workspace, callerRequestId) : activeFileId;
+    const dependencyCookies = dependencyFileId === callerFileId ? cookies : [...getWorkspaceFileState(workspace, dependencyFileId).cookies];
     const result = await sendRequest(configured.request, configured.environment, {
-      cookies,
+      cookies: dependencyCookies,
       responses,
       preferredHttpVersion: workspace.preferences.preferredHttpVersion,
       maxRedirects: workspace.preferences.maxRedirects,
@@ -136,16 +143,14 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }
       settingStoreCookies: configured.request.transport.storeCookies,
     };
     if (configured.request.transport.storeCookies) {
-      const updatedCookies = storeResponseCookies(cookies, requestUrl, result.setCookies ?? []);
-      cookies.splice(0, cookies.length, ...updatedCookies);
+      dependencyCookies.splice(0, dependencyCookies.length, ...storeResponseCookies(dependencyCookies, requestUrl, result.setCookies ?? []));
     }
     const updatedResponses = retainResponseHistory(responses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
     responses.splice(0, responses.length, ...updatedResponses);
-    onChangeWorkspace((current) => ({
-      ...current,
-      cookies: configured.request.transport.storeCookies ? [...cookies] : current.cookies,
-      responses: [...responses],
-    }));
+    onChangeWorkspace((current) => {
+      const updated = { ...current, responses: [...responses] };
+      return configured.request.transport.storeCookies ? setWorkspaceFileCookies(updated, dependencyFileId, [...dependencyCookies]) : updated;
+    });
     return stored;
   };
 
@@ -178,7 +183,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }
 
   const callbacks: PluginHostCallbacks = {
     network: async (pluginRequest) => sendRequest(pluginRequest, workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId), {
-      cookies: [...workspace.cookies],
+      cookies: [...activeFileState.cookies],
       responses: [...workspace.responses],
       preferredHttpVersion: workspace.preferences.preferredHttpVersion,
       maxRedirects: workspace.preferences.maxRedirects,

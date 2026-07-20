@@ -27,6 +27,7 @@ const emptyTarget = () => {
   workspace.unitTestResults = [];
   workspace.runnerReports = [];
   workspace.cookies = [];
+  workspace.fileState = {};
   workspace.responses = [];
   workspace.streamSessions = [];
   workspace.mcpClients = [];
@@ -74,7 +75,10 @@ describe('typed project workspaces', () => {
     request.folderId = 'folder';
     request.grpc.protoFiles = [{ id: 'proto', path: 'service.proto', text: 'syntax = "proto3";' }];
     request.socketIo.args = [{ id: 'socket-arg', value: '{}', mode: 'json' }];
-    source.cookies = [{ id: 'cookie', name: 'sid', value: 'secret', domain: 'api.example', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-20T00:00:00.000Z' }];
+    source.fileState[collection.id] = {
+      cookies: [{ id: 'cookie', name: 'sid', value: 'secret', domain: 'api.example', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-20T00:00:00.000Z' }],
+      certificates: { ca: { enabled: true, pem: 'collection-ca' }, clients: [] },
+    };
     const target = cloneSeedWorkspace();
 
     const result = duplicateProjectWorkspace(source, target, collection.id, 'Copied Collection', idFactory());
@@ -87,12 +91,12 @@ describe('typed project workspaces', () => {
     expect(copied.requests[0].id).not.toBe(request.id);
     expect(copied.requests[0].grpc.protoFiles[0].id).not.toBe('proto');
     expect(copied.requests[0].socketIo.args[0].id).not.toBe('socket-arg');
-    expect(result.workspace.cookies).toContainEqual(expect.objectContaining({ name: 'sid', value: 'secret' }));
+    expect(result.workspace.fileState[copied.id]).toEqual(source.fileState[collection.id]);
     expect(source.collections[0].name).toBe(collection.name);
 
-    const sameProject = duplicateProjectWorkspace(source, source, collection.id, 'Local Copy', idFactory()).workspace;
-    expect(sameProject.collections).toHaveLength(source.collections.length + 1);
-    expect(sameProject.cookies).toHaveLength(source.cookies.length);
+    const sameProject = duplicateProjectWorkspace(source, source, collection.id, 'Local Copy', idFactory());
+    expect(sameProject.workspace.collections).toHaveLength(source.collections.length + 1);
+    expect(sameProject.workspace.fileState[sameProject.projectWorkspace.id]).toEqual(source.fileState[collection.id]);
   });
 
   it('duplicates a design with its generated collection and remapped suites', () => {
@@ -100,6 +104,7 @@ describe('typed project workspaces', () => {
     const collection = source.collections[0];
     const request = collection.requests[0];
     source.apiDesigns = [{ id: 'design', name: 'Orders API', contents: 'openapi: 3.1.0', generatedCollectionId: collection.id }];
+    source.fileState.design = { cookies: [], certificates: { ca: { enabled: true, pem: 'design-ca' }, clients: [] } };
     source.testSuites = [{ id: 'suite', name: 'Contract', collectionId: collection.id, sortKey: 0, tests: [{ id: 'test', name: 'Works', code: '', requestId: request.id, sortKey: 0 }] }];
 
     const result = duplicateProjectWorkspace(source, cloneSeedWorkspace(), 'design', 'Orders API Copy', idFactory());
@@ -111,6 +116,7 @@ describe('typed project workspaces', () => {
     expect(generated.id).not.toBe(collection.id);
     expect(suite.collectionId).toBe(generated.id);
     expect(suite.tests[0].requestId).toBe(generated.requests[0].id);
+    expect(result.workspace.fileState[design.id]).toEqual(source.fileState.design);
   });
 
   it('duplicates only the selected global environment tree', () => {
@@ -164,9 +170,12 @@ describe('typed project workspaces', () => {
     source.responses = [{ id: 'response', requestId: request.id, requestName: request.name, requestUrl: request.url, environmentId: source.activeEnvironmentId, receivedAt: '2026-07-20T00:00:00.000Z', status: 200, statusText: 'OK', headers: {}, body: '', durationMs: 1, sizeBytes: 0 }];
     source.streamSessions = [{ id: 'stream', requestId: request.id, requestName: request.name, requestUrl: request.url, environmentId: source.activeEnvironmentId, protocol: 'websocket', startedAt: '2026-07-20T00:00:00.000Z', messages: [] }];
     source.responseFilters = { [request.id]: { filter: '$.id', history: ['$.id'], previewMode: 'source' } };
-    source.cookies = [{ id: 'cookie', name: 'sid', value: 'secret', domain: 'api.example', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-20T00:00:00.000Z' }];
+    source.fileState[collection.id] = {
+      cookies: [{ id: 'cookie', name: 'sid', value: 'secret', domain: 'api.example', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-20T00:00:00.000Z' }],
+      certificates: { ca: { enabled: true, pem: 'collection-ca' }, clients: [] },
+    };
 
-    const result = moveProjectWorkspace(source, emptyTarget(), collection.id, idFactory());
+    const result = moveProjectWorkspace(source, emptyTarget(), collection.id);
 
     expect(result.target.collections[0].id).toBe(collection.id);
     expect(result.target.testSuites[0]).toMatchObject({ id: 'suite', collectionId: collection.id, tests: [expect.objectContaining({ id: 'test', requestId: request.id })] });
@@ -176,7 +185,8 @@ describe('typed project workspaces', () => {
     expect(result.target.responses[0].id).toBe('response');
     expect(result.target.streamSessions[0].id).toBe('stream');
     expect(result.target.responseFilters?.[request.id].filter).toBe('$.id');
-    expect(result.target.cookies).toContainEqual(expect.objectContaining({ name: 'sid', value: 'secret' }));
+    expect(result.target.fileState[collection.id]).toEqual(source.fileState[collection.id]);
+    expect(result.source.fileState[collection.id]).toBeUndefined();
     expect(result.source.collections).toEqual([]);
     expect(result.source.activeRequestId).toBe('');
     expect(result.source.history).toEqual([]);
@@ -191,7 +201,7 @@ describe('typed project workspaces', () => {
     source.testSuites = [{ id: 'suite', name: 'Contract', collectionId: generated.id, sortKey: 0, tests: [] }];
 
     expect(listProjectWorkspaces(source)).not.toContainEqual(expect.objectContaining({ id: generated.id, scope: 'collection' }));
-    const result = moveProjectWorkspace(source, emptyTarget(), 'design', idFactory());
+    const result = moveProjectWorkspace(source, emptyTarget(), 'design');
 
     expect(result.target.apiDesigns).toContainEqual(expect.objectContaining({ id: 'design', generatedCollectionId: generated.id }));
     expect(result.target.collections).toContainEqual(expect.objectContaining({ id: generated.id }));
@@ -209,16 +219,16 @@ describe('typed project workspaces', () => {
     source.mcpClients = [mcpClient()];
     source.mcpSessions = [{ id: 'mcp-session', clientId: 'mcp-source', clientName: 'Tools', endpoint: 'https://mcp.example/rpc', environmentId: 'root', transport: 'http', startedAt: '2026-07-20T00:00:00.000Z', status: 'connected', events: [], timeline: [] }];
 
-    const movedMock = moveProjectWorkspace(source, emptyTarget(), 'mock', idFactory());
+    const movedMock = moveProjectWorkspace(source, emptyTarget(), 'mock');
     expect(movedMock.target.mockServers[0]).toMatchObject({ id: 'mock', routes: [expect.objectContaining({ id: 'route' })] });
     expect(movedMock.source.mockServers).toEqual([]);
 
-    const movedEnvironment = moveProjectWorkspace(source, emptyTarget(), 'root', idFactory());
+    const movedEnvironment = moveProjectWorkspace(source, emptyTarget(), 'root');
     expect(movedEnvironment.target.environments).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'root' }), expect.objectContaining({ id: 'child', parentId: 'root' })]));
     expect(movedEnvironment.source.environments).toEqual([]);
     expect(movedEnvironment.source.activeEnvironmentId).toBe('');
 
-    const movedMcp = moveProjectWorkspace(source, emptyTarget(), 'mcp-source', idFactory());
+    const movedMcp = moveProjectWorkspace(source, emptyTarget(), 'mcp-source');
     expect(movedMcp.target.mcpClients[0].id).toBe('mcp-source');
     expect(movedMcp.target.mcpSessions[0].id).toBe('mcp-session');
     expect(movedMcp.source.mcpClients).toEqual([]);
@@ -228,7 +238,7 @@ describe('typed project workspaces', () => {
   it('refuses cross-project identity collisions and same-project moves', () => {
     const source = cloneSeedWorkspace();
     const collectionId = source.collections[0].id;
-    expect(() => moveProjectWorkspace(source, structuredClone(source), collectionId, idFactory())).toThrow('already contains resource identity');
-    expect(() => moveProjectWorkspace(source, source, collectionId, idFactory())).toThrow('different destination');
+    expect(() => moveProjectWorkspace(source, structuredClone(source), collectionId)).toThrow('already contains resource identity');
+    expect(() => moveProjectWorkspace(source, source, collectionId)).toThrow('different destination');
   });
 });

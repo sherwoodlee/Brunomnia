@@ -13,10 +13,12 @@ import { plaintextSecretCandidates } from '../lib/security';
 import { Icon } from './Icon';
 import { McpParameterField } from './McpParameterField';
 import { McpServerRequestPanel } from './McpServerRequestPanel';
+import { emptyWorkspaceFileState, getWorkspaceFileState } from '../lib/workspaceFileState';
 
 type IntegrationWorkbenchProps = {
   workspace: Workspace;
   workspaceId: string;
+  workspaceFileId: string;
   environment: Environment | undefined;
   requestContext: SendRequestContext;
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
@@ -102,10 +104,11 @@ function IntegrationSecretInput({ disabled, label, onChange, placeholder, showPa
   return <span className={`integration-secret-field${showPasswords ? '' : ' masked'}`}><input disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={inputType} value={value} />{!showPasswords ? <button aria-label={masked ? `Show ${label}` : `Hide ${label}`} disabled={disabled} onClick={() => setRevealed((current) => !current)} type="button">{masked ? 'Show' : 'Hide'}</button> : null}</span>;
 }
 
-export function IntegrationWorkbench({ workspace, workspaceId, environment, requestContext: baseRequestContext, onChangeWorkspace }: IntegrationWorkbenchProps) {
-  const requestContext = { ...baseRequestContext, certificates: workspace.certificates, sessionScope: workspaceId };
+export function IntegrationWorkbench({ workspace, workspaceId, workspaceFileId, environment, requestContext: baseRequestContext, onChangeWorkspace }: IntegrationWorkbenchProps) {
   const [tab, setTab] = useState<'mcp' | 'ai' | 'konnect'>('mcp');
   const [activeId, setActiveId] = useState(workspace.mcpClients[0]?.id ?? '');
+  const activeFileState = getWorkspaceFileState(workspace, activeId || workspaceFileId);
+  const requestContext = { ...baseRequestContext, cookies: [...activeFileState.cookies], certificates: activeFileState.certificates, sessionScope: workspaceId };
   const [operationKind, setOperationKind] = useState<'tool' | 'prompt' | 'resource'>('tool');
   const [operationName, setOperationName] = useState('');
   const [parameters, setParameters] = useState('{}');
@@ -525,7 +528,7 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
   const addClient = () => {
     if (!canEdit) return;
     const client = newMcpClient();
-    onChangeWorkspace((current) => ({ ...current, mcpClients: [...current.mcpClients, client] }));
+    onChangeWorkspace((current) => ({ ...current, mcpClients: [...current.mcpClients, client], fileState: { ...current.fileState, [client.id]: emptyWorkspaceFileState() } }));
     setActiveId(client.id);
   };
 
@@ -533,7 +536,11 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
     if (!active || !canEdit || !window.confirm(`Delete MCP client “${active.name}”?`)) return;
     invalidateActiveSession();
     setServerRequests((current) => current.filter((request) => request.clientId !== active.id));
-    onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.filter((client) => client.id !== active.id), mcpSessions: current.mcpSessions.filter((session) => session.clientId !== active.id) }));
+    onChangeWorkspace((current) => {
+      const fileState = { ...current.fileState };
+      delete fileState[active.id];
+      return { ...current, fileState, mcpClients: current.mcpClients.filter((client) => client.id !== active.id), mcpSessions: current.mcpSessions.filter((session) => session.clientId !== active.id) };
+    });
     setActiveId(workspace.mcpClients.find((client) => client.id !== active.id)?.id ?? '');
   };
 

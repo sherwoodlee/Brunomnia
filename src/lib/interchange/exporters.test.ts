@@ -41,7 +41,10 @@ describe('artifact export adapters', () => {
     const testCollection = workspace.collections[0];
     workspace.apiDesigns[0].generatedCollectionId = testCollection.id;
     workspace.testSuites = [{ id: 'contract-suite', name: 'Contract suite', collectionId: testCollection.id, sortKey: -1, tests: [{ id: 'status-test', name: 'Returns success', code: 'const response = await insomnia.send();', requestId: testCollection.requests[0].id, sortKey: -1 }] }];
-    workspace.cookies = [{ id: 'cookie-session', name: 'session', value: 'abc', domain: 'api.acme.dev', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-16T12:00:00.000Z' }];
+    workspace.fileState[workspace.apiDesigns[0].id] = {
+      cookies: [{ id: 'cookie-session', name: 'session', value: 'abc', domain: 'api.acme.dev', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-16T12:00:00.000Z' }],
+      certificates: { ca: { enabled: false, pem: '' }, clients: [] },
+    };
     workspace.mcpClients = [{
       id: 'mcp-http', name: 'Remote tools', enabled: true, transport: 'http', url: 'https://mcp.example/rpc', command: '', args: [],
       env: [{ id: 'mcp-mode', name: 'MODE', value: '{{ region }}', enabled: true }], headers: [{ id: 'mcp-header', name: 'Authorization', value: '{{ vault.mcp_header }}', enabled: true }],
@@ -246,7 +249,7 @@ describe('artifact export adapters', () => {
 
   it('creates scoped Brunomnia and raw OpenAPI exports', () => {
     const workspace = cloneSeedWorkspace();
-    workspace.certificates.clients = [{ id: 'pfx', host: 'api.example.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }];
+    workspace.fileState[workspace.collections[1].id] = { cookies: [], certificates: { ca: { enabled: false, pem: '' }, clients: [{ id: 'pfx', host: 'api.example.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }] } };
     const collection = workspace.collections[1];
     workspace.testSuites = [{ id: 'suite', name: 'Scoped suite', collectionId: collection.id, sortKey: 0, tests: [
       { id: 'included', name: 'Included', code: '', requestId: collection.requests[0].id, sortKey: 0 },
@@ -260,10 +263,12 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(42);
+    expect(parsed.version).toBe(43);
     expect(parsed.testSuites).toEqual([expect.objectContaining({ id: 'suite', tests: [expect.objectContaining({ id: 'included' })] }), expect.objectContaining({ id: 'empty-suite', tests: [] })]);
     expect(parsed.unitTestResults).toEqual([expect.objectContaining({ id: 'run', suiteId: 'suite', tests: [expect.objectContaining({ testId: 'included' })] })]);
-    expect(parsed.certificates.clients[0]).toMatchObject({ pfxBase64: 'cGZ4', passphrase: 'secret' });
+    expect(parsed.certificates).toEqual({ ca: { enabled: false, pem: '' }, clients: [] });
+    expect(parsed.fileState[collection.id].certificates.clients[0]).toMatchObject({ pfxBase64: 'cGZ4', passphrase: 'secret' });
+    expect(Object.keys(parsed.fileState)).toEqual([collection.id]);
 
     const design = workspace.apiDesigns[0];
     const spec = exportArtifact(workspace, { format: 'openapi', scope: 'design', designId: design.id });

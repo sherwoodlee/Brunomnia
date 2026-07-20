@@ -34,6 +34,7 @@ import { evaluateRunnerConfigCode } from './configCode';
 import { createCliPluginTemplateRuntime } from './pluginRuntime';
 import { collectCliApiDesignSources, fetchPublicSpecificationSourceNode } from './apiSpecSources';
 import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, selectRunnerResource, type RunnerInsoConfig } from '../src/lib/runnerCli';
+import { getWorkspaceFileState, workspaceFileIdForCollection, workspaceFileIdForRequest } from '../src/lib/workspaceFileState';
 
 const args = process.argv.slice(2);
 const cliVersion = process.env.VERSION || packageJson.version;
@@ -1130,7 +1131,16 @@ const main = async () => {
       if (outputStats && !outputStats.isFile()) fail(`Output path '${reportOutputPath}' is not a file.`);
       if (outputStats) await access(reportOutputPath, fsConstants.W_OK).catch(() => fail(`Output file '${reportOutputPath}' is not writable.`));
     }
-    let cliCookies = [...workspace.cookies];
+    const cliFileId = workspaceFileIdForCollection(workspace, collection.id);
+    const fileCookies = new Map<string, CookieRecord[]>();
+    const cookiesForFile = (fileId: string) => {
+      const current = fileCookies.get(fileId);
+      if (current) return current;
+      const cookies = structuredClone(getWorkspaceFileState(workspace, fileId).cookies);
+      fileCookies.set(fileId, cookies);
+      return cookies;
+    };
+    const cliCookies = cookiesForFile(cliFileId);
     let cliResponses = [...workspace.responses];
     const dataFolders = await canonicalCliDataFolders(runnerCliVariadicOptionValues(args, '--dataFolders', '--data-folders', '-f'));
     const templateFileReader = hasFlag('--allow-template-files') || hasFlag('--allow-script-files')
@@ -1164,15 +1174,17 @@ const main = async () => {
       variables: Record<string, string>,
       environmentId: string,
       requestChain: string[] = [],
-      cookies: CookieRecord[] = cliCookies,
+      cookies?: CookieRecord[],
       responses: StoredResponse[] = cliResponses,
       collectionEnvironmentId = collection.activeSubEnvironmentId ?? '',
     ): Promise<{ result: HttpResponse; stored: StoredResponse; request: ApiRequest }> => {
+      const requestFileId = workspaceFileIdForRequest(workspace, request.id) || cliFileId;
+      const requestCookies = cookies ?? cookiesForFile(requestFileId);
       const executed = await executeHttp(request, variables, requestTimeoutMs, validateCertificates, proxyPreferences, {
         environmentId,
-        cookies,
+        cookies: requestCookies,
         responses,
-        certificates: workspace.certificates,
+        certificates: getWorkspaceFileState(workspace, requestFileId).certificates,
         readFile: templateFileReader,
         externalSecret,
         resolveResponse,
@@ -1184,8 +1196,8 @@ const main = async () => {
       request = executed.request;
       const requestUrl = result.requestUrl ?? request.url;
       if (request.transport.storeCookies) {
-        const updatedCookies = storeResponseCookies(cookies, requestUrl, result.setCookies ?? []);
-        cookies.splice(0, cookies.length, ...updatedCookies);
+        const updatedCookies = storeResponseCookies(requestCookies, requestUrl, result.setCookies ?? []);
+        requestCookies.splice(0, requestCookies.length, ...updatedCookies);
       }
       const stored: StoredResponse = {
         ...result,
@@ -1204,18 +1216,18 @@ const main = async () => {
       };
       const updatedResponses = retainResponseHistory(responses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
       responses.splice(0, responses.length, ...updatedResponses);
-      cliCookies = cookies;
       cliResponses = responses;
       return { result, stored, request };
     };
-    resolveResponse = async ({ requestId, requestChain, cookies, responses }) => {
+    resolveResponse = async ({ requestId, requestChain, responses }) => {
       const dependencyCollection = subject === 'test'
         ? collection
         : workspace.collections.find((candidate) => candidate.requests.some((request) => request.id === requestId || request.name === requestId));
       const dependency = dependencyCollection?.requests.find((request) => request.id === requestId || request.name === requestId);
       if (!dependencyCollection || !dependency) throw new Error(`Could not find request ${requestId}`);
       const configured = applyCollectionConfiguration(dependencyCollection, dependency, environment);
-      const { stored } = await executeAndStore(configured.request, environmentMap(configured.environment), configured.environment.id, [...new Set([...requestChain, dependency.id])], cookies, responses, dependencyCollection.activeSubEnvironmentId ?? '');
+      const dependencyCookies = cookiesForFile(workspaceFileIdForCollection(workspace, dependencyCollection.id));
+      const { stored } = await executeAndStore(configured.request, environmentMap(configured.environment), configured.environment.id, [...new Set([...requestChain, dependency.id])], dependencyCookies, responses, dependencyCollection.activeSubEnvironmentId ?? '');
       return stored;
     };
     const executeWorkspaceHttp = async (request: ApiRequest, variables: Record<string, string>) => (await executeAndStore(request, variables, environment.id)).result;

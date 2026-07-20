@@ -28,7 +28,7 @@ describe('local project catalog', () => {
 
   it('creates initial and named local projects with no typed files', async () => {
     const initial = await loadWorkspaceCatalog();
-    expect(initial.workspace).toMatchObject({ name: 'Local Workspace', version: 42, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [] });
+    expect(initial.workspace).toMatchObject({ name: 'Local Workspace', version: 43, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
     expect(await listCatalogProjectWorkspaces(initial.activeWorkspaceId)).toEqual([]);
 
     const created = await createCatalogWorkspace(createBlankWorkspace('Empty Project', initial.workspace.preferences), 'empty-project');
@@ -258,7 +258,7 @@ describe('local project catalog', () => {
 describe('workspace migrations', () => {
   it('preserves explicit v42 empty projects while repairing legacy empty documents', () => {
     const empty = createBlankWorkspace('Empty', cloneSeedWorkspace().preferences);
-    expect(migrateWorkspace(empty)).toMatchObject({ version: 42, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [] });
+    expect(migrateWorkspace(empty)).toMatchObject({ version: 43, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
 
     const legacy = { ...empty, version: 41 };
     const migratedLegacy = migrateWorkspace(legacy);
@@ -325,7 +325,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(42);
+    expect(migrated.version).toBe(43);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
@@ -377,7 +377,7 @@ describe('workspace migrations', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(42);
+    expect(migrated.version).toBe(43);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
@@ -401,7 +401,7 @@ describe('workspace migrations', () => {
     }, { id: 'orphan', suiteId: 'missing', tests: [] }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(42);
+    expect(migrated.version).toBe(43);
     expect(migrated.testSuites).toHaveLength(1);
     expect(migrated.testSuites[0].collectionId).toBe(migrated.collections[0].id);
     expect(migrated.testSuites[0].tests.map((test) => [test.id, test.requestId])).toEqual([['test-two', null], ['test-one', requestId]]);
@@ -455,7 +455,7 @@ describe('workspace migrations', () => {
     };
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(42);
+    expect(migrated.version).toBe(43);
     expect(migrated.collections[0].requests[0].grpc).toMatchObject({
       protoText: 'syntax = "proto3"; service Legacy {}',
       protoEntryPath: 'schema.proto',
@@ -480,7 +480,7 @@ describe('workspace migrations', () => {
 
     const migrated = migrateWorkspace(workspace);
     const grpc = migrated.collections[0].requests[0].grpc;
-    expect(migrated.version).toBe(42);
+    expect(migrated.version).toBe(43);
     expect(grpc.descriptorSource).toBe('buf');
     expect(grpc.reflectionApiUrl).toHaveLength(8_192);
     expect(grpc.reflectionApiKey).toHaveLength(65_536);
@@ -496,15 +496,38 @@ describe('workspace migrations', () => {
       ca: { enabled: true, pem: 'ca-pem' },
       clients: [null, { id: 'client', host: 'api.example.test:8443', enabled: true, certificatePem: 'cert-pem', keyPem: 'key-pem' }, { id: 'pfx', host: '*.internal.test', enabled: true, pfxBase64: 'cGZ4', passphrase: 'secret' }],
     };
+    workspace.cookies = [{ id: 'legacy-cookie', name: 'sid', value: 'legacy', domain: 'api.example.test', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-20T00:00:00.000Z' }];
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(42);
-    expect(migrated.certificates).toEqual({
+    expect(migrated.version).toBe(43);
+    expect(migrated.certificates).toEqual({ ca: { enabled: false, pem: '' }, clients: [] });
+    expect(Object.values(migrated.fileState)).not.toHaveLength(0);
+    expect(Object.values(migrated.fileState)).toEqual(expect.arrayContaining([{
       ca: { enabled: true, pem: 'ca-pem' },
       clients: [
         { id: 'client', host: 'api.example.test:8443', enabled: true, certificatePem: 'cert-pem', keyPem: 'key-pem', pfxBase64: '', passphrase: '' },
         { id: 'pfx', host: '*.internal.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' },
       ],
-    });
+    }].map((certificates) => expect.objectContaining({ certificates }))));
+    const states = Object.values(migrated.fileState);
+    expect(states.every((state) => state.cookies[0]?.value === 'legacy')).toBe(true);
+    states[0].cookies[0].value = 'changed';
+    expect(states[1].cookies[0].value).toBe('legacy');
+  });
+
+  it('preserves normalized v43 file state while ignoring legacy project-global values', () => {
+    const workspace = cloneSeedWorkspace();
+    const fileId = workspace.collections[1].id;
+    workspace.cookies = [{ id: 'legacy', name: 'legacy', value: 'ignored', domain: 'legacy.test', path: '/', secure: false, httpOnly: false, sameSite: '', hostOnly: true, createdAt: '' }];
+    workspace.certificates = { ca: { enabled: true, pem: 'legacy-ca' }, clients: [] };
+    workspace.fileState[fileId] = {
+      cookies: [{ id: 'owned', name: 'owned', value: 'kept', domain: 'owned.test', path: '/', secure: true, httpOnly: true, sameSite: 'strict', hostOnly: true, createdAt: '2026-07-20T00:00:00.000Z' }],
+      certificates: { ca: { enabled: true, pem: 'owned-ca' }, clients: [] },
+    };
+
+    const migrated = migrateWorkspace(workspace);
+    expect(migrated.cookies).toEqual([]);
+    expect(migrated.certificates).toEqual({ ca: { enabled: false, pem: '' }, clients: [] });
+    expect(migrated.fileState[fileId]).toMatchObject({ cookies: [expect.objectContaining({ name: 'owned', value: 'kept' })], certificates: { ca: { enabled: true, pem: 'owned-ca' } } });
   });
 
   it('repairs minimal exports with usable collections, environments, and active IDs', () => {
@@ -590,7 +613,7 @@ describe('workspace migrations', () => {
     environments[0].environmentEditorMode = 'raw';
     (environments[0].variables as Array<Record<string, unknown>>).push({ id: 'global-config', name: 'globalConfig', value: '{"enabled":true}', valueType: 'json', enabled: true });
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(42);
+    expect(migrated.version).toBe(43);
     expect(migrated.collections[0]).toMatchObject({ environmentEditorMode: 'raw', environment: [expect.objectContaining({ name: 'config', valueType: 'json' })] });
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', environmentEditorMode: 'raw', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
@@ -669,7 +692,7 @@ describe('workspace migrations', () => {
     }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(42);
+    expect(migrated.version).toBe(43);
     expect(migrated.mcpClients[0].env).toEqual([{ id: 'stdio-env', name: 'MODE', value: 'review', enabled: false, description: '' }]);
     expect(migrated.mcpClients[0].resourceTemplates[0]).toMatchObject({
       uri: 'files://{/path}{?query,limit}',

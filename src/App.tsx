@@ -33,6 +33,7 @@ import { userAgentDisabledAfterHeaderChange } from './lib/userAgent';
 import { calculatedRequestHeaders, type CalculatedHeader } from './lib/calculatedHeaders';
 import { filterScriptTests, scriptTestCategoryLabel, scriptTestDurationLabel, scriptTestPassed, scriptTestStatus, type ScriptTestFilter } from './lib/scriptTests';
 import { isProjectWorkspaceEmpty, listProjectWorkspaces } from './lib/projectWorkspaces';
+import { emptyWorkspaceFileState, getWorkspaceFileState, setWorkspaceFileCookies, workspaceFileIdForCollection, workspaceFileIdForEnvironment, workspaceFileIdForRequest } from './lib/workspaceFileState';
 import type { ClientCodeSnippet, ClientCodeTarget } from './lib/codegen';
 import type { TemplatePromptInput } from './lib/templates';
 import {
@@ -1394,7 +1395,7 @@ function FolderDocumentPanel({ documentTabStrip, onConfigure, onRun, ...editorPr
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 42, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], responses: [], streamSessions: [], mcpSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+    format: 'brunomnia', version: 43, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], fileState: {}, responses: [], streamSessions: [], mcpSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -1657,6 +1658,19 @@ export default function App() {
   activeRequestIdRef.current = workspace.activeRequestId;
   const selectedEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
   const activeEnvironment = useMemo(() => resolveEnvironment(workspace.environments, workspace.activeEnvironmentId), [workspace.activeEnvironmentId, workspace.environments]);
+  const activeRequestFileId = active ? workspaceFileIdForCollection(workspace, active.collectionId) : '';
+  const activeRequestFileState = getWorkspaceFileState(workspace, activeRequestFileId);
+  const activeWorkspaceFileId = (isRequestDocument ? activeRequestFileId : '')
+    || (activeCollectionDocument ? workspaceFileIdForCollection(workspace, activeCollectionDocument.id) : '')
+    || activeDesignDocument?.id
+    || activeMockDocument?.server.id
+    || (activeFolderDocument ? workspaceFileIdForCollection(workspace, activeFolderDocument.collection.id) : '')
+    || (activeRunnerTarget?.collectionId ? workspaceFileIdForCollection(workspace, activeRunnerTarget.collectionId) : '')
+    || (activeTestSuiteDocument?.collectionId ? workspaceFileIdForCollection(workspace, activeTestSuiteDocument.collectionId) : '')
+    || (isEnvironmentDocument ? workspaceFileIdForEnvironment(workspace, workspace.activeEnvironmentId) : '')
+    || listProjectWorkspaces(workspace)[0]?.id
+    || '';
+  const activeWorkspaceFileState = getWorkspaceFileState(workspace, activeWorkspaceFileId);
   const streamViewScope = `${activeWorkspaceId}\n${active?.request.id ?? ''}\n${activeEnvironment?.id ?? ''}\n${workspace.preferences.filterResponsesByEnv ? 'environment' : 'request'}`;
   if (streamViewScopeRef.current !== streamViewScope) {
     streamViewScopeRef.current = streamViewScope;
@@ -1679,13 +1693,13 @@ export default function App() {
   const readTemplateFile = useCallback((path: string) => import('./lib/scriptFiles').then(({ readDesktopTemplateFile }) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)), [workspace.preferences.dataFolders]);
   const templateFileReader = workspace.preferences.allowScriptFileAccess && isTauri() ? readTemplateFile : undefined;
   const sendRequest = useCallback((request: ApiRequest, environment: Environment | undefined, context: SendRequestContext = {}) => sendHttpRequest(request, environment, {
-    certificates: workspace.certificates,
     prompt: requestTemplatePrompt,
     readFile: templateFileReader,
     requestAncestors: requestAncestorNames(workspace.collections, request),
     resolveResponse: templateResponseResolver.current,
     ...context,
-  }), [requestTemplatePrompt, templateFileReader, workspace.certificates, workspace.collections]);
+    certificates: getWorkspaceFileState(workspace, workspaceFileIdForRequest(workspace, request.id) || activeWorkspaceFileId).certificates,
+  }), [activeWorkspaceFileId, requestTemplatePrompt, templateFileReader, workspace]);
   const activeResponseHistory = useMemo(() => visibleResponseHistory(
     workspace.responses,
     active?.request.id ?? '',
@@ -1847,9 +1861,13 @@ export default function App() {
     const sourceRequest = collection?.requests.find((request) => request.id === requestId || request.name === requestId);
     if (!collection || !sourceRequest) throw new Error(`Could not find request ${requestId}`);
     const configured = applyCollectionConfiguration(collection, sourceRequest, activeEnvironment);
+    const dependencyFileId = workspaceFileIdForCollection(workspace, collection.id);
+    const callerRequestId = requestChain.at(-2);
+    const callerFileId = callerRequestId ? workspaceFileIdForRequest(workspace, callerRequestId) : activeRequestFileId;
+    const dependencyCookies = dependencyFileId === callerFileId ? cookies : [...getWorkspaceFileState(workspace, dependencyFileId).cookies];
     const result = await sendHttpRequest(configured.request, configured.environment, {
-      certificates: workspace.certificates,
-      cookies,
+      certificates: getWorkspaceFileState(workspace, dependencyFileId).certificates,
+      cookies: dependencyCookies,
       externalSecret: externalSecretResolver,
       filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
       followRedirects: workspace.preferences.followRedirects,
@@ -1885,16 +1903,14 @@ export default function App() {
       settingStoreCookies: configured.request.transport.storeCookies,
     };
     if (configured.request.transport.storeCookies) {
-      const updatedCookies = storeResponseCookies(cookies, storedResponse.requestUrl, result.setCookies ?? []);
-      cookies.splice(0, cookies.length, ...updatedCookies);
+      dependencyCookies.splice(0, dependencyCookies.length, ...storeResponseCookies(dependencyCookies, storedResponse.requestUrl, result.setCookies ?? []));
     }
     const updatedResponses = retainResponseHistory(responses, storedResponse, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
     responses.splice(0, responses.length, ...updatedResponses);
-    setWorkspace((current) => ({
-      ...current,
-      cookies: configured.request.transport.storeCookies ? [...cookies] : current.cookies,
-      responses: [...responses],
-    }));
+    setWorkspace((current) => {
+      const updated = { ...current, responses: [...responses] };
+      return configured.request.transport.storeCookies ? setWorkspaceFileCookies(updated, dependencyFileId, [...dependencyCookies]) : updated;
+    });
     return storedResponse;
   };
 
@@ -1975,7 +1991,7 @@ export default function App() {
       return;
     }
     const id = uid('design');
-    setWorkspace((current) => ({ ...current, apiDesigns: [...current.apiDesigns, { id, name: 'Untitled API', contents: 'openapi: 3.1.0\ninfo:\n  title: Untitled API\n  version: 1.0.0\npaths: {}\n', ruleset: '' }] }));
+    setWorkspace((current) => ({ ...current, apiDesigns: [...current.apiDesigns, { id, name: 'Untitled API', contents: 'openapi: 3.1.0\ninfo:\n  title: Untitled API\n  version: 1.0.0\npaths: {}\n', ruleset: '' }], fileState: { ...current.fileState, [id]: emptyWorkspaceFileState() } }));
     openWorkspaceDocument(id, 'document');
   };
 
@@ -1985,7 +2001,7 @@ export default function App() {
       return;
     }
     const id = uid('mock');
-    setWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, { id, name: 'Local mock', host: '127.0.0.1', port: 4010, routes: [] }] }));
+    setWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, { id, name: 'Local mock', host: '127.0.0.1', port: 4010, routes: [] }], fileState: { ...current.fileState, [id]: emptyWorkspaceFileState() } }));
     openWorkspaceDocument(id, 'mockServer');
   };
 
@@ -2101,7 +2117,8 @@ export default function App() {
     const request = createBlankRequest(id);
     setWorkspace((current) => {
       if (current.collections.length === 0) {
-        return { ...current, activeRequestId: id, collections: [{ id: uid('collection'), name: 'Requests', expanded: true, requests: [request], folders: [], resourceOrder: [id], environment: [], environmentEditorMode: 'table', subEnvironments: [], activeSubEnvironmentId: '', documentation: '' }] };
+        const collectionId = uid('collection');
+        return { ...current, activeRequestId: id, collections: [{ id: collectionId, name: 'Requests', expanded: true, requests: [request], folders: [], resourceOrder: [id], environment: [], environmentEditorMode: 'table', subEnvironments: [], activeSubEnvironmentId: '', documentation: '' }], fileState: { ...current.fileState, [collectionId]: emptyWorkspaceFileState() } };
       }
       return {
         ...current,
@@ -2121,6 +2138,7 @@ export default function App() {
     setWorkspace((current) => ({
       ...current,
       collections: [...current.collections, { id, name: `Collection ${current.collections.length + 1}`, expanded: true, requests: [], folders: [], resourceOrder: [], environment: [], environmentEditorMode: 'table', subEnvironments: [], activeSubEnvironmentId: '', documentation: '' }],
+      fileState: { ...current.fileState, [id]: emptyWorkspaceFileState() },
     }));
     openCollectionDocument(id);
   };
@@ -2208,8 +2226,8 @@ export default function App() {
     setGrpcSchemaLoading(true);
     try {
       const { loadGrpcSchema } = await import('./lib/grpc');
-      const schema = await loadGrpcSchema(targetRequest, configured.environment, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspace.certificates, {
-        cookies: [...workspace.cookies],
+      const schema = await loadGrpcSchema(targetRequest, configured.environment, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, activeRequestFileState.certificates, {
+        cookies: [...activeRequestFileState.cookies],
         responses: [...workspace.responses],
         filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
         vault: unlockedVault,
@@ -2247,7 +2265,7 @@ export default function App() {
     setGraphqlSchemaError(undefined);
     setGraphqlSchemaLoading(true);
     try {
-      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: [...workspace.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, targetRequest), resolveResponse: templateResponseResolver.current, pluginRuntime: createPersistentTemplatePluginRuntime(activeEnvironment) }, includeInputValueDeprecation);
+      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: [...activeRequestFileState.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeRequestFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, targetRequest), resolveResponse: templateResponseResolver.current, pluginRuntime: createPersistentTemplatePluginRuntime(activeEnvironment) }, includeInputValueDeprecation);
       setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => ({ ...collection, requests: collection.requests.map((request) => request.id === targetRequest.id ? { ...request, graphql: { ...request.graphql, schema, schemaEndpoint: targetRequest.url, schemaFetchedAt: new Date().toISOString(), schemaSource: 'remote', schemaFileName: '', includeInputValueDeprecation, schemaIncludesInputValueDeprecation: includeInputValueDeprecation } } : request) })) }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2287,28 +2305,31 @@ export default function App() {
     }
   };
 
-  const oauthRequestContext = (): SendRequestContext => ({
-    cookies: [...workspace.cookies],
-    responses: [...workspace.responses],
-    preferredHttpVersion: workspace.preferences.preferredHttpVersion,
-    maxRedirects: workspace.preferences.maxRedirects,
-    followRedirects: workspace.preferences.followRedirects,
-    requestTimeoutMs: workspace.preferences.requestTimeoutMs,
-    validateCertificates: workspace.preferences.validateCertificates,
-    validateAuthCertificates: workspace.preferences.validateAuthCertificates,
-    proxy: proxyPreferences,
-    certificates: workspace.certificates,
-    maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
-    filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
-    vault: unlockedVault,
-    externalSecret: externalSecretResolver,
-    readFile: templateFileReader,
-    prompt: requestTemplatePrompt,
-    resolveResponse: templateResponseResolver.current,
-  });
+  const oauthRequestContext = (request?: ApiRequest): SendRequestContext => {
+    const fileState = getWorkspaceFileState(workspace, request ? workspaceFileIdForRequest(workspace, request.id) || activeWorkspaceFileId : activeWorkspaceFileId);
+    return {
+      cookies: [...fileState.cookies],
+      responses: [...workspace.responses],
+      preferredHttpVersion: workspace.preferences.preferredHttpVersion,
+      maxRedirects: workspace.preferences.maxRedirects,
+      followRedirects: workspace.preferences.followRedirects,
+      requestTimeoutMs: workspace.preferences.requestTimeoutMs,
+      validateCertificates: workspace.preferences.validateCertificates,
+      validateAuthCertificates: workspace.preferences.validateAuthCertificates,
+      proxy: proxyPreferences,
+      certificates: fileState.certificates,
+      maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
+      filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
+      vault: unlockedVault,
+      externalSecret: externalSecretResolver,
+      readFile: templateFileReader,
+      prompt: requestTemplatePrompt,
+      resolveResponse: templateResponseResolver.current,
+    };
+  };
 
   const realtimeRequestContext = (request: ApiRequest, pluginRuntime?: SendRequestContext['pluginRuntime']): SendRequestContext => ({
-    ...oauthRequestContext(),
+    ...oauthRequestContext(request),
     pluginRuntime,
     requestAncestors: requestAncestorNames(workspace.collections, request),
   });
@@ -2335,7 +2356,7 @@ export default function App() {
     const prepared = await oauth2.prepareOAuth2Authorization(request, environmentMap(environment), flowId);
     setOAuthAuthorization({ browserMode: prepared.browserMode, flowId, requestName: request.name, authorizationUrl: prepared.authorizationUrl, redirectUrl: prepared.redirectUrl });
     try {
-      const completed = await oauth2.completeOAuth2Authorization(prepared, environment, oauthRequestContext(), (event) => {
+      const completed = await oauth2.completeOAuth2Authorization(prepared, environment, oauthRequestContext(request), (event) => {
         if (oauthFlowId.current === flowId) setOAuthAuthorization({ browserMode: event.browserMode, flowId, requestName: request.name, authorizationUrl: event.authorizationUrl, redirectUrl: event.redirectUrl });
       });
       return completed.auth;
@@ -2354,7 +2375,7 @@ export default function App() {
   ): Promise<ApiRequest> => {
     if (request.auth.type !== 'oauth2' || request.auth.disabled) return request;
     const oauth2 = await import('./lib/oauth2');
-    let auth = await oauth2.acquireOAuth2TokenWithoutBrowser(request, environment, oauthRequestContext());
+    let auth = await oauth2.acquireOAuth2TokenWithoutBrowser(request, environment, oauthRequestContext(request));
     auth ??= await authorizeOAuth2WithStatus(request, environment);
     if (auth !== request.auth) persistOAuth2Auth(collectionId, request.id, auth);
     return { ...request, auth };
@@ -2506,7 +2527,7 @@ export default function App() {
       }));
       const realtimePlugins = createRealtimePluginContext(executionEnvironment);
       try {
-        const metadata = await connectStream(request, executionEnvironment, sessionId, onStreamEvent, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, workspace.cookies, workspace.certificates, realtimeRequestContext(request, realtimePlugins.runtime));
+        const metadata = await connectStream(request, executionEnvironment, sessionId, onStreamEvent, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, activeRequestFileState.cookies, activeRequestFileState.certificates, realtimeRequestContext(request, realtimePlugins.runtime));
         setStreamSessionView((current) => current?.id === sessionId ? applyStreamConnectionMetadata([current], sessionId, metadata)[0] : current);
         setWorkspace((current) => ({ ...current, streamSessions: applyStreamConnectionMetadata(current.streamSessions, sessionId, metadata) }));
         if (streamSession.current !== sessionId) {
@@ -2528,7 +2549,7 @@ export default function App() {
     setResponseTab('preview');
     setScriptTests([]);
     setScriptLogs([]);
-    let scriptCookies = [...workspace.cookies];
+    let scriptCookies = [...activeRequestFileState.cookies];
     let scriptResponses = [...workspace.responses];
     const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const pluginCallbacks: PluginHostCallbacks = {
@@ -2615,7 +2636,7 @@ export default function App() {
         const message = 'Request skipped by pre-request script.';
         setScriptTests(preRequest.tests);
         setResponse({ status: 0, statusText: 'Request skipped', headers: {}, body: message, durationMs: 0, sizeBytes: message.length });
-        setWorkspace((current) => ({ ...current, cookies: scriptCookies, responses: scriptResponses, pluginData: pluginState.data }));
+        setWorkspace((current) => setWorkspaceFileCookies({ ...current, responses: scriptResponses, pluginData: pluginState.data }, activeRequestFileId, scriptCookies));
         return;
       }
       let result: HttpResponse;
@@ -2640,7 +2661,7 @@ export default function App() {
         const output = await invokeGrpc(callRequest, {
           ...executionEnvironment,
           variables: Object.entries({ ...requestVariables, ...unlockedVault }).map(([name, value]) => ({ id: `script-${name}`, name, value, enabled: true })),
-        }, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspace.certificates, {
+        }, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, activeRequestFileState.certificates, {
           cookies: scriptCookies,
           responses: scriptResponses,
           filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
@@ -2687,15 +2708,14 @@ export default function App() {
         settingStoreCookies: executableRequest.transport.storeCookies,
       };
       setSelectedResponseId(workspace.preferences.maxHistoryResponses === 0 ? '' : storedResponse.id);
-      setWorkspace((current) => ({
+      setWorkspace((current) => setWorkspaceFileCookies({
         ...current,
         history: [historyEntry, ...current.history].slice(0, 100),
         responses: retainResponseHistory(scriptResponses, storedResponse, current.preferences.maxHistoryResponses, current.preferences.filterResponsesByEnv),
-        cookies: executableRequest.transport.storeCookies
-          ? storeResponseCookies(scriptCookies, storedResponse.requestUrl, result.setCookies ?? [])
-          : scriptCookies,
         pluginData: pluginState.data,
-      }));
+      }, activeRequestFileId, executableRequest.transport.storeCookies
+        ? storeResponseCookies(scriptCookies, storedResponse.requestUrl, result.setCookies ?? [])
+        : scriptCookies));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const failedResponse: HttpResponse = error instanceof HttpTransportError
@@ -2721,15 +2741,14 @@ export default function App() {
           settingStoreCookies: request.transport.storeCookies,
         };
         setSelectedResponseId(workspace.preferences.maxHistoryResponses === 0 ? '' : storedResponse.id);
-        setWorkspace((current) => ({
+        setWorkspace((current) => setWorkspaceFileCookies({
           ...current,
           history: [{ id: uid('history'), requestId: active.request.id, name: active.request.name, method: active.request.method, url: error.requestUrl, status: 0, durationMs: error.durationMs, createdAt: receivedAt }, ...current.history].slice(0, 100),
-          cookies: scriptCookies,
           responses: retainResponseHistory(scriptResponses, storedResponse, current.preferences.maxHistoryResponses, current.preferences.filterResponsesByEnv),
           pluginData: pluginState.data,
-        }));
+        }, activeRequestFileId, scriptCookies));
       } else {
-        setWorkspace((current) => ({ ...current, cookies: scriptCookies, responses: scriptResponses, pluginData: pluginState.data }));
+        setWorkspace((current) => setWorkspaceFileCookies({ ...current, responses: scriptResponses, pluginData: pluginState.data }, activeRequestFileId, scriptCookies));
       }
     } finally {
       setIsSending(false);
@@ -3039,7 +3058,7 @@ export default function App() {
     request.bodyMode = 'none';
     request.preRequestScript = '';
     request.tests = '';
-    const result = await sendRequest(request, activeEnvironment, { cookies: [...workspace.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv });
+    const result = await sendRequest(request, activeEnvironment, { cookies: [...activeWorkspaceFileState.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv });
     if (result.status < 200 || result.status >= 300) throw new Error(`Import URL returned ${result.status} ${result.statusText}.`);
     if (result.sizeBytes > 20_000_000) throw new Error('The import exceeds the 20 MB local conversion limit.');
     return result.body;
@@ -3064,7 +3083,7 @@ export default function App() {
     const id = uid('environment');
     setWorkspace((current) => {
       const publicIds = new Set(publicEnvironments(current.environments).map((environment) => environment.id));
-      return { ...current, activeEnvironmentId: id, environments: [...current.environments, { id, name: parentId ? 'New Sub-environment' : 'New Base Environment', variables: [], environmentEditorMode: 'table', parentId, private: Boolean(parentId) && !publicIds.has(parentId), color: '#69bddd' }] };
+      return { ...current, activeEnvironmentId: id, environments: [...current.environments, { id, name: parentId ? 'New Sub-environment' : 'New Base Environment', variables: [], environmentEditorMode: 'table', parentId, private: Boolean(parentId) && !publicIds.has(parentId), color: '#69bddd' }], fileState: parentId ? current.fileState : { ...current.fileState, [id]: emptyWorkspaceFileState() } };
     });
   };
 
@@ -3075,7 +3094,14 @@ export default function App() {
       const deleted = current.environments.find((environment) => environment.id === id);
       if (!deleted) return current;
       const environments = current.environments.filter((environment) => environment.id !== id).map((environment) => environment.parentId === id ? { ...environment, parentId: deleted.parentId ?? '', private: environment.private || deleted.private === true } : environment);
-      return { ...current, environments, activeEnvironmentId: current.activeEnvironmentId === id ? environments.find((environment) => environment.id === deleted.parentId)?.id ?? environments[0].id : current.activeEnvironmentId };
+      const fileState = { ...current.fileState };
+      if (!deleted.parentId) {
+        const deletedState = getWorkspaceFileState(current, deleted.id);
+        environments.filter((environment) => !environment.parentId && current.environments.find((candidate) => candidate.id === environment.id)?.parentId === deleted.id)
+          .forEach((environment) => { fileState[environment.id] = structuredClone(deletedState); });
+        delete fileState[deleted.id];
+      }
+      return { ...current, environments, fileState, activeEnvironmentId: current.activeEnvironmentId === id ? environments.find((environment) => environment.id === deleted.parentId)?.id ?? environments[0].id : current.activeEnvironmentId };
     });
   };
 
@@ -3149,11 +3175,12 @@ export default function App() {
   /></Suspense>;
   };
   const generateCode = async (target: ClientCodeTarget, request: ApiRequest, variables: Record<string, string>): Promise<ClientCodeSnippet> => {
+    const codegenFileState = getWorkspaceFileState(workspace, workspaceFileIdForRequest(workspace, request.id) || activeWorkspaceFileId);
     const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const initialPluginData = JSON.stringify(pluginState.data);
     const pluginCallbacks: PluginHostCallbacks = {
       network: (pluginRequest) => sendRequest(pluginRequest, codegenConfiguration.environment, {
-        cookies: [...workspace.cookies],
+        cookies: [...codegenFileState.cookies],
         responses: [...workspace.responses],
         preferredHttpVersion: workspace.preferences.preferredHttpVersion,
         maxRedirects: workspace.preferences.maxRedirects,
@@ -3176,7 +3203,7 @@ export default function App() {
     try {
       const { generateClientCodeWithAuth } = await import('./lib/codegen');
       const snippet = await generateClientCodeWithAuth(target, request, variables, {}, {
-        cookies: workspace.cookies,
+        cookies: getWorkspaceFileState(workspace, workspaceFileIdForRequest(workspace, request.id) || activeWorkspaceFileId).cookies,
         environmentId: codegenConfiguration.environment.id,
         responses: workspace.preferences.filterResponsesByEnv
           ? workspace.responses.filter((response) => response.environmentId === codegenConfiguration.environment.id)
@@ -3305,7 +3332,7 @@ export default function App() {
           onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))}
         /> : activeCollectionDocument ? <CollectionDocumentPanel collection={activeCollectionDocument} documentTabStrip={renderDocumentTabStrip()} onChange={(collection) => { promoteRequestDocument(collection.id); updateCollection(collection); }} /> : activeDesignDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('design')}</section> : activeMockDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('mocks')}</section> : activeTestSuiteDocument ? <Suspense fallback={<div className="dialog-loading">Loading unit tests…</div>}><UnitTestWorkbench activeEnvironment={runtimeEnvironment} documentTabStrip={renderDocumentTabStrip()} key={activeTestSuiteDocument.id} onChangeWorkspace={(updater) => setWorkspace(updater)} onDeleteSuite={deleteTestSuite} onOpenSuite={openTestSuiteDocument} onPromote={() => promoteRequestDocument(activeTestSuiteDocument.id)} suite={activeTestSuiteDocument} templatePrompt={requestTemplatePrompt} vault={unlockedVault} workspace={workspace} /></Suspense> : activeFolderDocument ? <FolderDocumentPanel
           collection={activeFolderDocument.collection}
-          cookies={workspace.cookies}
+          cookies={activeWorkspaceFileState.cookies}
           documentTabStrip={renderDocumentTabStrip()}
           environment={runtimeEnvironment}
           folder={activeFolderDocument.folder}
@@ -3338,14 +3365,14 @@ export default function App() {
             onSocketIoListenerToggle={(eventName, enabled) => void toggleSocketIoListener(eventName, enabled)}
             onTabChange={setRequestTab}
             request={runtimeActive.request}
-            requestContext={{ cookies: [...workspace.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, runtimeActive.request), resolveResponse: templateResponseResolver.current, authorizeOAuth2: authorizeOAuth2WithStatus, pluginRuntime: createPersistentTemplatePluginRuntime(runtimeEnvironment) }}
+            requestContext={{ cookies: [...activeRequestFileState.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeRequestFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, runtimeActive.request), resolveResponse: templateResponseResolver.current, authorizeOAuth2: authorizeOAuth2WithStatus, pluginRuntime: createPersistentTemplatePluginRuntime(runtimeEnvironment) }}
             scheduledSendLabel={scheduledSendLabel}
             showPasswords={workspace.preferences.showPasswords}
             storedResponses={workspace.responses}
             streamStatus={streamStatus}
             templateVariableNames={Object.keys(environmentMap(codegenConfiguration.environment)).sort()}
             urlInputRef={urlInputRef}
-            workspaceCookies={workspace.cookies}
+            workspaceCookies={activeRequestFileState.cookies}
             useBulkHeaderEditor={workspace.preferences.useBulkHeaderEditor}
             useBulkParametersEditor={workspace.preferences.useBulkParametersEditor}
           />
@@ -3356,7 +3383,7 @@ export default function App() {
             allowHtmlPreviewRemoteResources={workspace.preferences.allowHtmlPreviewRemoteResources}
             allowHtmlPreviewScripts={workspace.preferences.allowHtmlPreviewScripts}
             disableResponsePreviewLinks={workspace.preferences.disableResponsePreviewLinks}
-            cookies={workspace.cookies}
+            cookies={activeRequestFileState.cookies}
             isSending={isSending}
             mockEnvironmentId={runtimeEnvironment.id}
             mockRequest={runtimeActive.request}
@@ -3364,7 +3391,7 @@ export default function App() {
             mockSourceResponse={selectedResponseId ? activeResponseHistory.find((candidate) => candidate.id === selectedResponseId) : undefined}
             isMockServerRunning={(serverId) => Boolean(runningMocks[serverId])}
             onApplyResponseToMock={(result) => setWorkspace((current) => ({ ...current, mockServers: result.mockServers }))}
-            onChangeCookies={(cookies) => setWorkspace((current) => ({ ...current, cookies }))}
+            onChangeCookies={(cookies) => setWorkspace((current) => setWorkspaceFileCookies(current, activeRequestFileId, cookies))}
             onClearHistory={clearActiveEnvironmentHistory}
             onClearStreamHistory={() => void clearActiveStreamHistory()}
             onDeleteResponse={deleteSelectedSavedResponse}
@@ -3398,7 +3425,7 @@ export default function App() {
             streamSession={streamSessionView}
             streamStatus={streamStatus}
           />
-        </div>) : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} templatePrompt={requestTemplatePrompt} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : renderAutomationWorkbench(workbenchSection)}
+        </div>) : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ cookies: [...activeWorkspaceFileState.cookies], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeWorkspaceFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} templatePrompt={requestTemplatePrompt} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} workspaceFileId={activeWorkspaceFileId} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ cookies: [...activeWorkspaceFileState.cookies], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeWorkspaceFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} workspaceFileId={activeWorkspaceFileId} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : renderAutomationWorkbench(workbenchSection)}
       </div>
 
       <footer className="statusbar">
@@ -3412,7 +3439,7 @@ export default function App() {
         <span>{workbenchSection === 'requests' ? isRequestDashboard ? 'Project' : activeCollectionDocument ? 'Collection' : activeDesignDocument ? 'API Design' : activeMockDocument?.route ? 'Mock Route' : activeMockDocument ? 'Mock Server' : activeTestSuiteDocument ? 'Test Suite' : isEnvironmentDocument ? 'Environment' : activeFolderDocument ? 'Folder' : isRunnerDocument ? 'Runner' : protocolLabel(runtimeActive.request) : titleCase(workbenchSection)}</span>
       </footer>
 
-      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={workspace.cookies} environment={runtimeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} onDuplicate={() => duplicateFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
+      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={getWorkspaceFileState(workspace, workspaceFileIdForCollection(workspace, editingCollection.id)).cookies} environment={runtimeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} onDuplicate={() => duplicateFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
       {showSendOptions ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSendOptions(false)}>
         <section aria-labelledby="send-options-title" aria-modal="true" className="modal send-options-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
           <header><div><small>Request scheduling</small><h2 id="send-options-title">Send options</h2></div><button aria-label="Close" className="icon-button subtle" onClick={() => setShowSendOptions(false)} type="button"><Icon name="x" /></button></header>

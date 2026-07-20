@@ -91,6 +91,7 @@ export const createBlankWorkspace = (name: string, preferences: AppPreferences):
     runnerReports: [],
     imports: [],
     cookies: [],
+    fileState: {},
     responses: [],
     streamSessions: [],
     mcpSessions: [],

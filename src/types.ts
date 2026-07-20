@@ -223,6 +223,11 @@ export type WorkspaceCertificates = {
   clients: WorkspaceClientCertificate[];
 };
 
+export type WorkspaceFileState = {
+  cookies: CookieRecord[];
+  certificates: WorkspaceCertificates;
+};
+
 export type SseConfig = {
   autoReconnect: boolean;
   reconnectDelayMs: number;
@@ -433,7 +438,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 42;
+  version: 43;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -447,6 +452,7 @@ export type Workspace = {
   runnerReports: RunnerReport[];
   imports: ImportRecord[];
   cookies: CookieRecord[];
+  fileState: Record<string, WorkspaceFileState>;
   responses: StoredResponse[];
   streamSessions: StoredStreamSession[];
   mcpSessions: McpHistorySession[];

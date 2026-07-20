@@ -35,6 +35,7 @@ import { generateMockWithAi } from '../lib/ai';
 import { buildMockAiContext, buildMockSpecUrlContext, composeMockAiInput, findActiveRequest, findLatestResponseForActiveRequest, validateMockSpecUrl, type MockAiContext, type MockAiContextSource } from '../lib/mockAiContext';
 import { createMockRouteFromResponse, overwriteMockRouteFromResponse } from '../lib/mockRouteFromResponse';
 import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
+import { emptyWorkspaceFileState, getWorkspaceFileState, setWorkspaceFileCookies, workspaceFileIdForCollection, workspaceFileIdForRequest } from '../lib/workspaceFileState';
 import { Icon } from './Icon';
 import { OAuthAuthorizationDialog, type OAuthAuthorizationStatus } from './OAuthAuthorizationDialog';
 import { CodeEditor } from './ProtocolEditors';
@@ -172,7 +173,7 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection, desig
 
   if (!design) return <AutomationEmpty title="No API designs" action="Create design" onAction={() => {
     const created = { id: uid('design'), name: 'Untitled API', contents: 'openapi: 3.1.0\ninfo:\n  title: Untitled API\n  version: 1.0.0\npaths: {}\n', ruleset: '' };
-    onChangeWorkspace((current) => ({ ...current, apiDesigns: [...current.apiDesigns, created] }));
+    onChangeWorkspace((current) => ({ ...current, apiDesigns: [...current.apiDesigns, created], fileState: { ...current.fileState, [created.id]: emptyWorkspaceFileState() } }));
     onOpenDesign?.(created.id);
   }} />;
 
@@ -219,13 +220,13 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection, desig
 
 function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onChangeWorkspace, onOpenRequest, templatePrompt, runnerTarget, onRunnerStart, runnerDraft, runnerDraftKey, onRunnerDraftChange }: AutomationWorkbenchProps) {
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
-    certificates: workspace.certificates,
     prompt: templatePrompt,
     readFile: workspace.preferences.allowScriptFileAccess && isTauri()
       ? (path) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)
       : undefined,
     requestAncestors: requestAncestorNames(workspace.collections, request),
     ...context,
+    certificates: getWorkspaceFileState(workspace, workspaceFileIdForRequest(workspace, request.id) || workspaceFileIdForCollection(workspace, collectionId)).certificates,
   });
   const initialTarget = resolveRunnerTarget(workspace, { collectionId: runnerTarget?.collectionId ?? runnerDraft?.collectionId, folderId: runnerTarget?.folderId });
   const initialCollection = initialTarget.collection;
@@ -394,7 +395,16 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
     if (!requestIds.length) { setError('Select at least one request for this run.'); return; }
     setRunning(true); setCanceledRun(false); setResults([]); setLiveItems([]); setSelectedReportId(''); setError(''); cancelled.current = false; skippedKeys.current.clear(); activeItem.current = undefined;
     try {
-      let runnerCookies = [...workspace.cookies];
+      const runnerFileId = workspaceFileIdForCollection(workspace, collection.id);
+      const fileCookies = new Map<string, Workspace['fileState'][string]['cookies']>();
+      const cookiesForFile = (fileId: string) => {
+        const current = fileCookies.get(fileId);
+        if (current) return current;
+        const cookies = structuredClone(getWorkspaceFileState(workspace, fileId).cookies);
+        fileCookies.set(fileId, cookies);
+        return cookies;
+      };
+      let runnerCookies = cookiesForFile(runnerFileId);
       let runnerResponses = [...workspace.responses];
       let activeRunnerSignal: AbortSignal | undefined;
       const authorizeOAuth2 = async (request: ApiRequest, requestEnvironment: Environment | undefined): Promise<ApiRequest['auth']> => {
@@ -404,10 +414,11 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
         const flowId = oauth2.createOAuth2FlowId();
         oauthFlowId.current = flowId;
         const prepared = await oauth2.prepareOAuth2Authorization(request, Object.fromEntries(requestEnvironment.variables.filter((variable) => variable.enabled).map((variable) => [variable.name, variable.value])), flowId);
+        const requestFileId = workspaceFileIdForRequest(workspace, request.id) || runnerFileId;
         setOAuthAuthorization({ browserMode: prepared.browserMode, flowId, requestName: request.name, authorizationUrl: prepared.authorizationUrl, redirectUrl: prepared.redirectUrl });
         try {
           const completed = await oauth2.completeOAuth2Authorization(prepared, requestEnvironment, {
-            cookies: runnerCookies,
+            cookies: cookiesForFile(requestFileId),
             responses: runnerResponses,
             preferredHttpVersion: workspace.preferences.preferredHttpVersion,
             maxRedirects: workspace.preferences.maxRedirects,
@@ -416,7 +427,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
             validateCertificates: workspace.preferences.validateCertificates,
             validateAuthCertificates: workspace.preferences.validateAuthCertificates,
             proxy: workspaceProxyPreferences(workspace),
-            certificates: workspace.certificates,
+            certificates: getWorkspaceFileState(workspace, requestFileId).certificates,
             maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
             filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
             vault,
@@ -433,13 +444,15 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
         }
       };
       let resolveResponse: NonNullable<SendRequestContext['resolveResponse']>;
-      resolveResponse = async ({ requestId, requestChain, cookies, responses }) => {
+      resolveResponse = async ({ requestId, requestChain, responses }) => {
         const dependencyCollection = workspace.collections.find((candidate) => candidate.requests.some((request) => request.id === requestId || request.name === requestId));
         const dependency = dependencyCollection?.requests.find((request) => request.id === requestId || request.name === requestId);
         if (!dependencyCollection || !dependency) throw new Error(`Could not find request ${requestId}`);
         const configured = applyCollectionConfiguration(dependencyCollection, dependency, environment);
+        const dependencyFileId = workspaceFileIdForCollection(workspace, dependencyCollection.id);
+        const dependencyCookies = cookiesForFile(dependencyFileId);
         const result = await sendRequest(configured.request, configured.environment, {
-          cookies,
+          cookies: dependencyCookies,
           responses,
           preferredHttpVersion: workspace.preferences.preferredHttpVersion,
           maxRedirects: workspace.preferences.maxRedirects,
@@ -459,8 +472,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
         });
         const requestUrl = result.requestUrl ?? configured.request.url;
         if (configured.request.transport.storeCookies) {
-          const updatedCookies = storeResponseCookies(cookies, requestUrl, result.setCookies ?? []);
-          cookies.splice(0, cookies.length, ...updatedCookies);
+          dependencyCookies.splice(0, dependencyCookies.length, ...storeResponseCookies(dependencyCookies, requestUrl, result.setCookies ?? []));
         }
         const stored = {
           ...result,
@@ -479,7 +491,6 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
         };
         const updatedResponses = retainResponseHistory(responses, stored, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv);
         responses.splice(0, responses.length, ...updatedResponses);
-        runnerCookies = cookies;
         runnerResponses = responses;
         return stored;
       };
@@ -515,7 +526,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
           variables: Object.entries(variables).map(([name, value]) => ({ id: `runner-${name}`, name, value, enabled: true })),
         };
         const result = isStreamingRequest(request)
-          ? await runStreamSample(request, requestEnvironment, streamWindowMs, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspaceProxyPreferences(workspace), runnerCookies, workspace.certificates, {
+          ? await runStreamSample(request, requestEnvironment, streamWindowMs, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, workspaceProxyPreferences(workspace), runnerCookies, getWorkspaceFileState(workspace, runnerFileId).certificates, {
             cookies: runnerCookies,
             responses: runnerResponses,
             filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
@@ -531,7 +542,10 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
           }, execution.signal)
           : await sendRequest(request, requestEnvironment, { cookies: runnerCookies, responses: runnerResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, pluginRuntime, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input), authorizeOAuth2, resolveResponse, signal: execution.signal, cancellationId: `${execution.key}-${execution.attempt}`, onOAuth2Token: (updated) => onChangeWorkspace((current) => ({ ...current, collections: current.collections.map((candidate) => candidate.id === collection.id ? persistEffectiveAuthentication(candidate, request.id, updated.auth) : candidate) })) });
         const requestUrl = result.requestUrl ?? request.url;
-        if (request.transport.storeCookies) runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
+        if (request.transport.storeCookies) {
+          runnerCookies = storeResponseCookies(runnerCookies, requestUrl, result.setCookies ?? []);
+          fileCookies.set(runnerFileId, runnerCookies);
+        }
         const stored = {
           ...result,
           id: uid('response'),
@@ -579,13 +593,18 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
           });
           const state = applyScriptSubresponse(runnerCookies, runnerResponses, subrequest, subresponse, undefined, environment.id, workspace.preferences.maxHistoryResponses, workspace.preferences.filterResponsesByEnv, selectedEnvironment.id, collection.activeSubEnvironmentId ?? '');
           runnerCookies = state.cookies;
+          fileCookies.set(runnerFileId, runnerCookies);
           runnerResponses = state.responses;
           return subresponse;
         } : undefined,
       }));
       setLiveItems(report.liveItems ?? []);
       if (report.flowError) setError(report.flowError);
-      onChangeWorkspace((current) => ({ ...current, cookies: runnerCookies, responses: runnerResponses, pluginData: pluginState.data, runnerReports: [report, ...current.runnerReports].slice(0, 30) }));
+      onChangeWorkspace((current) => {
+        let updated = { ...current, responses: runnerResponses, pluginData: pluginState.data, runnerReports: [report, ...current.runnerReports].slice(0, 30) };
+        fileCookies.forEach((cookies, fileId) => { updated = setWorkspaceFileCookies(updated, fileId, cookies); });
+        return updated;
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -683,14 +702,16 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
 }
 
 function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace, runningMocks, mockTarget, onMockChange, onOpenMock, onStartMock, onStopMock, templatePrompt }: AutomationWorkbenchProps) {
+  const mockFileId = mockTarget?.serverId ?? workspace.mockServers[0]?.id ?? '';
+  const mockFileState = getWorkspaceFileState(workspace, mockFileId);
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
-    certificates: workspace.certificates,
     prompt: templatePrompt,
     readFile: workspace.preferences.allowScriptFileAccess && isTauri()
       ? (path) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)
       : undefined,
     requestAncestors: requestAncestorNames(workspace.collections, request),
     ...context,
+    certificates: mockFileState.certificates,
   });
   const [error, setError] = useState('');
   const [showAi, setShowAi] = useState(false);
@@ -762,8 +783,8 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     setGenerating(true); setError('');
     try {
       const input = composeMockAiInput(aiPrompt, selectedAiContext);
-      const generated = await generateMockWithAi(workspace.ai, input, aiPort, activeEnvironment, { preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), certificates: workspace.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
-      onChangeWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, generated] }));
+      const generated = await generateMockWithAi(workspace.ai, input, aiPort, activeEnvironment, { cookies: [...mockFileState.cookies], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: workspaceProxyPreferences(workspace), certificates: mockFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault, externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input) });
+      onChangeWorkspace((current) => ({ ...current, mockServers: [...current.mockServers, generated], fileState: { ...current.fileState, [generated.id]: emptyWorkspaceFileState() } }));
       onOpenMock?.(generated.id, generated.routes[0]?.id); setShowAi(false); setAiPrompt('');
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setGenerating(false); }

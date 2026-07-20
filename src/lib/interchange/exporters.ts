@@ -4,6 +4,7 @@ import type { ArtifactExport, ExportFormat, ExportScope } from './types';
 import { normalizeGrpcProtoTree } from '../grpcProto';
 import { orderedCollectionChildren, publicEnvironments } from '../resources';
 import { environmentRowsToObject } from '../environmentJson';
+import { emptyWorkspaceFileState, getWorkspaceFileState, workspaceFileIdForCollection } from '../workspaceFileState';
 
 export type ExportOptions = {
   format: ExportFormat;
@@ -46,6 +47,9 @@ const scopedWorkspace = (workspace: Workspace, options: ExportOptions): Workspac
     return { ...suite, tests };
   });
   const testIdsBySuite = new Map(testSuites.map((suite) => [suite.id, new Set(suite.tests.map((test) => test.id))]));
+  const fileIds = new Set(options.scope === 'design'
+    ? designs.map((design) => design.id)
+    : collections.map((collection) => workspaceFileIdForCollection(workspace, collection.id)));
   return {
     ...workspace,
     activeRequestId: collections.flatMap((collection) => collection.requests)[0]?.id ?? '',
@@ -60,6 +64,9 @@ const scopedWorkspace = (workspace: Workspace, options: ExportOptions): Workspac
     environments,
     activeEnvironmentId,
     runnerReports: workspace.runnerReports.filter((report) => collections.some((collection) => collection.id === report.collectionId)),
+    cookies: [],
+    fileState: Object.fromEntries(Object.entries(workspace.fileState).filter(([fileId]) => fileIds.has(fileId))),
+    certificates: emptyWorkspaceFileState().certificates,
   };
 };
 
@@ -237,8 +244,9 @@ const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): Artifac
   if (publicEnvironments(workspace.environments).some((environment) => environment.variables.length) && !(options.scope === 'all' && workspace.mcpClients.length)) warnings.push({ code: 'global-environment-export', message: 'Insomnia v4 workspace exports have no separate global-environment resource; collection environments are preserved and Brunomnia global environments are omitted.' });
   collections.forEach((collection, collectionIndex) => {
     const workspaceId = `__WORKSPACE_${collectionIndex + 1}__`;
+    const fileState = getWorkspaceFileState(workspace, workspaceFileIdForCollection(workspace, collection.id));
     resources.push({ _id: workspaceId, parentId: null, modified: Date.now(), created: Date.now(), name: collection.name, description: collection.documentation ?? '', scope: 'collection', _type: 'workspace' });
-    resources.push({ _id: `__COOKIE_JAR_${collectionIndex + 1}__`, parentId: workspaceId, modified: Date.now(), created: Date.now(), name: 'Default Jar', cookies: workspace.cookies.map(insomniaCookie), _type: 'cookie_jar' });
+    resources.push({ _id: `__COOKIE_JAR_${collectionIndex + 1}__`, parentId: workspaceId, modified: Date.now(), created: Date.now(), name: 'Default Jar', cookies: fileState.cookies.map(insomniaCookie), _type: 'cookie_jar' });
     const baseEnvironmentId = `__BASE_ENVIRONMENT_${collectionIndex + 1}__`;
     resources.push({ _id: baseEnvironmentId, parentId: workspaceId, modified: Date.now(), created: Date.now(), name: 'Base Environment', ...insomniaV4EnvironmentFields(collection.environment ?? [], collection.environmentEditorMode), _type: 'environment' });
     (collection.subEnvironments ?? []).forEach((environment, environmentIndex) => resources.push({ _id: `__ENVIRONMENT_${collectionIndex + 1}_${environmentIndex + 1}__`, parentId: baseEnvironmentId, modified: Date.now(), created: Date.now(), name: environment.name, ...insomniaV4EnvironmentFields(environment.variables, environment.environmentEditorMode), _type: 'environment' }));
@@ -396,14 +404,16 @@ const exportInsomniaV5 = (workspace: Workspace, options: ExportOptions): Artifac
   const standaloneCollections = options.scope === 'design' ? [] : selectedCollections(workspace, options);
   standaloneCollections.forEach((collection, index) => {
     const exported = v5Collection(collection, warnings, `wrk_${index + 1}`);
-    documents.push({ type: 'collection.insomnia.rest/5.0', schema_version: '5.1', name: collection.name, meta: { id: `wrk_${index + 1}`, description: collection.documentation || 'Exported by Brunomnia' }, collection: exported.collection, environments: v5CollectionEnvironment(collection, `wrk_${index + 1}`), cookieJar: { name: 'Default Jar', meta: { id: `jar_${index + 1}` }, cookies: workspace.cookies.map(insomniaCookie) }, certificates: [] });
+    const fileState = getWorkspaceFileState(workspace, workspaceFileIdForCollection(workspace, collection.id));
+    documents.push({ type: 'collection.insomnia.rest/5.0', schema_version: '5.1', name: collection.name, meta: { id: `wrk_${index + 1}`, description: collection.documentation || 'Exported by Brunomnia' }, collection: exported.collection, environments: v5CollectionEnvironment(collection, `wrk_${index + 1}`), cookieJar: { name: 'Default Jar', meta: { id: `jar_${index + 1}` }, cookies: fileState.cookies.map(insomniaCookie) }, certificates: [] });
   });
   const designs = selectedDesigns(workspace, options);
   designs.forEach((design, index) => {
     const collection = workspace.collections.find((candidate) => candidate.id === design.generatedCollectionId);
     const prefix = `spc_${index + 1}`;
     const exported = collection ? v5Collection(collection, warnings, prefix) : undefined;
-    documents.push({ type: 'spec.insomnia.rest/5.0', schema_version: '5.1', name: design.name, meta: { id: prefix, description: 'Exported by Brunomnia' }, spec: { contents: design.contents }, collection: exported?.collection ?? [], environments: collection ? v5CollectionEnvironment(collection, prefix) : v5GlobalEnvironment([], prefix), testSuites: collection && exported ? v5TestSuites(workspace, collection.id, exported.requestIds, prefix) : [], certificates: [] });
+    const fileState = getWorkspaceFileState(workspace, design.id);
+    documents.push({ type: 'spec.insomnia.rest/5.0', schema_version: '5.1', name: design.name, meta: { id: prefix, description: 'Exported by Brunomnia' }, spec: { contents: design.contents }, collection: exported?.collection ?? [], environments: collection ? v5CollectionEnvironment(collection, prefix) : v5GlobalEnvironment([], prefix), cookieJar: { name: 'Default Jar', meta: { id: `${prefix}-jar` }, cookies: fileState.cookies.map(insomniaCookie) }, testSuites: collection && exported ? v5TestSuites(workspace, collection.id, exported.requestIds, prefix) : [], certificates: [] });
   });
   const representableCollectionIds = new Set(designs.flatMap((design) => design.generatedCollectionId ? [design.generatedCollectionId] : []));
   const selectedCollectionIds = new Set(selectedCollections(workspace, options).map((collection) => collection.id));

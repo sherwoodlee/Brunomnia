@@ -13,6 +13,7 @@ import { readDesktopScriptFile, readDesktopTemplateFile } from '../lib/scriptFil
 import { resolveAuthorizedExternalSecret } from '../lib/security';
 import { createUnitTest, createUnitTestSuite, moveUnitTest, moveUnitTestSuite, moveUnitTestSuiteToCollection, orderedTestSuites, orderedUnitTests, unitTestScript, type UnitTestPlacement } from '../lib/unitTests';
 import { scriptTestFailed } from '../lib/scriptTests';
+import { getWorkspaceFileState, setWorkspaceFileCookies, workspaceFileIdForCollection, workspaceFileIdForRequest } from '../lib/workspaceFileState';
 import { CodeEditor } from './ProtocolEditors';
 import { Icon } from './Icon';
 import { OAuthAuthorizationDialog, type OAuthAuthorizationStatus } from './OAuthAuthorizationDialog';
@@ -57,6 +58,8 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
   const suites = useMemo(() => orderedTestSuites(workspace.testSuites), [workspace.testSuites]);
   const tests = useMemo(() => orderedUnitTests(suite.tests), [suite.tests]);
   const suiteCollection = workspace.collections.find((collection) => collection.id === suite.collectionId) ?? workspace.collections[0];
+  const suiteFileId = workspaceFileIdForCollection(workspace, suite.collectionId);
+  const suiteFileState = getWorkspaceFileState(workspace, suiteFileId);
   const requests = useMemo(() => workspace.collections.filter((collection) => collection.id === suite.collectionId).flatMap((collection) => collection.requests
     .filter((request) => request.protocol === 'http' || request.protocol === 'graphql')
     .map((request) => ({ collection, request }))), [suite.collectionId, workspace.collections]);
@@ -153,7 +156,7 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
     setLiveResults([]);
     setMessage('');
     const startedAt = new Date().toISOString();
-    let runCookies = [...workspace.cookies];
+    let runCookies = [...suiteFileState.cookies];
     let runResponses = [...workspace.responses];
     const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const selectedGlobalEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId) ?? activeEnvironment;
@@ -167,11 +170,11 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
       ? (path: string) => readDesktopTemplateFile(path, workspace.preferences.dataFolders)
       : undefined;
     const sendHttp = (request: ApiRequest, environment: Environment, context: SendRequestContext = {}) => sendHttpRequest(request, environment, {
-      certificates: workspace.certificates,
       prompt: templatePrompt,
       readFile: readTemplateFile,
       requestAncestors: requestAncestorNames(workspace.collections, request),
       ...context,
+      certificates: getWorkspaceFileState(workspace, workspaceFileIdForRequest(workspace, request.id) || suiteFileId).certificates,
     });
     const authorizeOAuth2 = async (request: ApiRequest, environment: Environment | undefined): Promise<ApiRequest['auth']> => {
       if (!environment) throw new Error('OAuth 2 browser authorization requires an active environment.');
@@ -193,7 +196,7 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
           validateCertificates: workspace.preferences.validateCertificates,
           validateAuthCertificates: workspace.preferences.validateAuthCertificates,
           proxy: proxyPreferences(workspace),
-          certificates: workspace.certificates,
+          certificates: getWorkspaceFileState(workspace, workspaceFileIdForRequest(workspace, request.id) || suiteFileId).certificates,
           maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
           filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
           vault,
@@ -348,15 +351,14 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
       finishedAt: new Date().toISOString(),
       tests: completed,
     };
-    onChangeWorkspace((current) => ({
+    onChangeWorkspace((current) => setWorkspaceFileCookies({
       ...current,
-      cookies: runCookies,
       responses: runResponses,
       pluginData: pluginState.data,
       unitTestResults: current.testSuites.some((candidate) => candidate.id === suite.id)
         ? [runResult, ...current.unitTestResults].slice(0, 100)
         : current.unitTestResults,
-    }));
+    }, suiteFileId, runCookies));
     setSelectedRunId(runResult.id);
     setRunning(false);
   };

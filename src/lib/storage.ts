@@ -3,7 +3,7 @@ import { cloneSeedWorkspace } from '../data/seed';
 import type { AiSettings, ApiRequest, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ScriptTestResult, ShortcutAction, StoredResponse, StoredStreamSession, StreamMessage, Workspace } from '../types';
 import { normalizeGraphqlSchema } from './graphqlSchema';
 import { normalizeGrpcProtoTree } from './grpcProto';
-import { normalizeCertificatePassphrase, normalizeCertificatePfxBase64, normalizeWorkspaceCertificates } from './certificates';
+import { emptyWorkspaceCertificates, normalizeCertificatePassphrase, normalizeCertificatePfxBase64, normalizeWorkspaceCertificates } from './certificates';
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 import { normalizeHttpMethod } from './request';
 import { normalizeMcpHistorySessions } from './mcpHistory';
@@ -30,6 +30,26 @@ const normalizeRows = (value: unknown, prefix: string): KeyValue[] => !Array.isA
   const valueType = row.valueType === 'json' ? 'json' as const : 'string' as const;
   return [{ id: stringValue(row.id, `${prefix}-${index}`), name: stringValue(row.name), value: stringValue(row.value), enabled: row.enabled !== false, description: stringValue(row.description).slice(0, 20_000), ...(row.multiline === true ? { multiline: true } : {}), ...(valueType === 'json' ? { valueType } : {}) }];
 }).slice(0, 1_000);
+
+const normalizeCookies = (value: unknown): Workspace['cookies'] => !Array.isArray(value) ? [] : value.flatMap((item, index): Workspace['cookies'] => {
+  const cookie = record(item);
+  if (!cookie) return [];
+  const sameSite = cookie.sameSite === 'strict' || cookie.sameSite === 'lax' || cookie.sameSite === 'none' ? cookie.sameSite : '';
+  const expires = typeof cookie.expires === 'string' ? cookie.expires.slice(0, 128) : undefined;
+  return [{
+    id: stringValue(cookie.id, `migrated-cookie-${index}`).slice(0, 500),
+    name: stringValue(cookie.name).slice(0, 4_096),
+    value: stringValue(cookie.value).slice(0, 65_536),
+    domain: stringValue(cookie.domain).slice(0, 4_096),
+    path: stringValue(cookie.path, '/').slice(0, 4_096),
+    ...(expires ? { expires } : {}),
+    secure: cookie.secure === true,
+    httpOnly: cookie.httpOnly === true,
+    sameSite,
+    hostOnly: cookie.hostOnly !== false,
+    createdAt: stringValue(cookie.createdAt, new Date(0).toISOString()).slice(0, 128),
+  }];
+}).slice(0, 10_000);
 
 const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
   if (!item || typeof item !== 'object') return [];
@@ -629,6 +649,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     collections: Array<{ requests: Array<Partial<Workspace['collections'][number]['requests'][number]>> } & Omit<Workspace['collections'][number], 'requests'>>;
   };
   const supportsEmptyProjects = (workspace.version ?? 0) >= 42;
+  const supportsWorkspaceFileState = (workspace.version ?? 0) >= 43;
   const completeGraphqlSchemaModel = (workspace.version ?? 0) >= 34;
   const defaults = requestDefaults();
   const importedCollections = workspace.collections.map((collection) => ({
@@ -805,9 +826,28 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   const testSuites = normalizeTestSuites(workspace.testSuites, collections as Workspace['collections'], requestIds);
   const mcpClients = normalizeMcpClients(workspace.mcpClients);
+  const generatedCollectionIds = new Set((workspace.apiDesigns ?? []).flatMap((design) => design.generatedCollectionId ? [design.generatedCollectionId] : []));
+  const environmentIdsWithParents = new Set(environments.map((environment) => environment.id));
+  const fileIds = [
+    ...collections.filter((collection) => !generatedCollectionIds.has(collection.id)).map((collection) => collection.id),
+    ...(workspace.apiDesigns ?? []).map((design) => design.id),
+    ...(workspace.mockServers ?? []).map((server) => server.id),
+    ...environments.filter((environment) => !environment.parentId || !environmentIdsWithParents.has(environment.parentId)).map((environment) => environment.id),
+    ...mcpClients.map((client) => client.id),
+  ];
+  const persistedFileState = record(workspace.fileState);
+  const legacyCookies = normalizeCookies(workspace.cookies);
+  const legacyCertificates = normalizeWorkspaceCertificates(workspace.certificates);
+  const fileState = Object.fromEntries(fileIds.map((fileId) => {
+    const persisted = supportsWorkspaceFileState ? record(persistedFileState?.[fileId]) : undefined;
+    return [fileId, {
+      cookies: persisted ? normalizeCookies(persisted.cookies) : legacyCookies.map((cookie) => ({ ...cookie })),
+      certificates: persisted ? normalizeWorkspaceCertificates(persisted.certificates) : structuredClone(legacyCertificates),
+    }];
+  }));
   return {
     ...workspace,
-    version: 42,
+    version: 43,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',
@@ -823,12 +863,13 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     unitTestResults: normalizeUnitTestResults(workspace.unitTestResults, new Set(testSuites.map((suite) => suite.id))),
     runnerReports: workspace.runnerReports ?? [],
     imports: workspace.imports ?? [],
-    cookies: workspace.cookies ?? [],
+    cookies: [],
+    fileState,
     responses: normalizeStoredResponses(workspace.responses),
     streamSessions: normalizeStoredStreamSessions(workspace.streamSessions, requestIds),
     mcpSessions: normalizeMcpHistorySessions(workspace.mcpSessions, new Set(mcpClients.map((client) => client.id)), environmentIds),
     responseFilters: normalizeResponseFilters(workspace.responseFilters, requestIds),
-    certificates: normalizeWorkspaceCertificates(workspace.certificates),
+    certificates: emptyWorkspaceCertificates(),
     project: { ...seed.project, ...workspace.project },
     plugins: normalizePlugins(workspace.plugins),
     pluginData: workspace.pluginData ?? {},

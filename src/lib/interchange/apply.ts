@@ -1,4 +1,5 @@
-import type { Collection, CookieRecord, Environment, ImportRecord, McpClient, MockServer, UnitTestSuite, Workspace } from '../../types';
+import type { Collection, Environment, ImportRecord, McpClient, MockServer, UnitTestSuite, Workspace } from '../../types';
+import { emptyWorkspaceFileState } from '../workspaceFileState';
 import { sourceId } from './common';
 import type { ArtifactImport } from './types';
 
@@ -77,12 +78,6 @@ const rekeyTestSuites = (suites: UnitTestSuite[], collectionIds: Map<string, str
   }];
 });
 
-const mergeCookies = (current: CookieRecord[], imported: CookieRecord[], batch: string) => {
-  const cookies = new Map(current.map((cookie) => [`${cookie.name}\n${cookie.domain}\n${cookie.path}`, cookie]));
-  imported.forEach((cookie) => cookies.set(`${cookie.name}\n${cookie.domain}\n${cookie.path}`, { ...cookie, id: `${batch}-${cookie.id}` }));
-  return [...cookies.values()];
-};
-
 export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport): Workspace => {
   const batch = nextBatch(result);
   const record: ImportRecord = {
@@ -93,7 +88,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
     warnings: result.warnings,
     metadata: result.metadata,
   };
-  if (result.replacement) return { ...result.replacement, version: 42, imports: [record, ...result.replacement.imports].slice(0, 100) };
+  if (result.replacement) return { ...result.replacement, version: 43, imports: [record, ...result.replacement.imports].slice(0, 100) };
 
   const collections = result.collections.map((collection) => rekeyCollection(collection, batch));
   const collectionIds = new Map(result.collections.map((collection, index) => [collection.id, collections[index].id]));
@@ -107,10 +102,23 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
   const mockServers = result.mockServers.map((server) => rekeyMock(server, batch));
   const testSuites = rekeyTestSuites(result.testSuites, collectionIds, requestIds, batch);
   const mcpClients = result.mcpClients.map((client) => rekeyMcpClient(client, batch));
+  const generatedCollectionIds = new Set(apiDesigns.flatMap((design) => design.generatedCollectionId ? [design.generatedCollectionId] : []));
+  const importedFileIds = [
+    ...collections.filter((collection) => !generatedCollectionIds.has(collection.id)).map((collection) => collection.id),
+    ...apiDesigns.map((design) => design.id),
+    ...mockServers.map((server) => server.id),
+    ...environments.filter((environment) => !environment.parentId).map((environment) => environment.id),
+    ...mcpClients.map((client) => client.id),
+  ];
+  const importedCookies = result.cookies.map((cookie) => ({ ...cookie, id: `${batch}-${cookie.id}` }));
+  const fileState = Object.fromEntries(importedFileIds.map((fileId) => [fileId, {
+    ...emptyWorkspaceFileState(),
+    cookies: importedCookies.map((cookie) => ({ ...cookie })),
+  }]));
   const firstRequest = collections.flatMap((collection) => collection.requests)[0];
   return {
     ...workspace,
-    version: 42,
+    version: 43,
     activeRequestId: firstRequest?.id ?? workspace.activeRequestId,
     activeEnvironmentId: environments[0]?.id ?? workspace.activeEnvironmentId,
     collections: [...workspace.collections, ...collections],
@@ -119,7 +127,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
     mockServers: [...workspace.mockServers, ...mockServers],
     testSuites: [...workspace.testSuites, ...testSuites],
     mcpClients: [...workspace.mcpClients, ...mcpClients],
-    cookies: mergeCookies(workspace.cookies, result.cookies, batch),
+    fileState: { ...workspace.fileState, ...fileState },
     imports: [record, ...workspace.imports].slice(0, 100),
   };
 };

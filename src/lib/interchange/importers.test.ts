@@ -217,6 +217,10 @@ paths:
 schema_version: "5.1"
 name: V5 Workspace
 meta: { id: wrk_v5 }
+cookieJar:
+  name: Default Jar
+  cookies:
+    - { id: cookie_v5, key: sid, value: imported, domain: api.example.com, path: / }
 spec: { contents: "openapi: 3.1.0" }
 collection:
   - name: Folder
@@ -262,6 +266,7 @@ testSuites:
     expect(appliedCollection.requests[0].folderId).toBe(appliedCollection.folders?.[0].id);
     expect(appliedCollection.folders?.[0].id).not.toBe(v5.collections[0].folders?.[0].id);
     expect(applied.testSuites.at(-1)).toMatchObject({ collectionId: appliedCollection.id, tests: [expect.objectContaining({ requestId: appliedCollection.requests[0].id })] });
+    expect(applied.fileState[applied.apiDesigns.at(-1)!.id].cookies).toEqual([expect.objectContaining({ name: 'sid', value: 'imported' })]);
     const appliedAgain = applyArtifactImport(applied, v5);
     expect(new Set(appliedAgain.testSuites.map((suite) => suite.id)).size).toBe(appliedAgain.testSuites.length);
     expect(new Set(appliedAgain.testSuites.flatMap((suite) => suite.tests.map((test) => test.id))).size).toBe(appliedAgain.testSuites.reduce((total, suite) => total + suite.tests.length, 0));
@@ -334,7 +339,7 @@ mcpRequest:
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(42);
+    expect(second.version).toBe(43);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });
