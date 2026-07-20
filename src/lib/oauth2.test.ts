@@ -5,6 +5,7 @@ import {
   acquireOAuth2TokenWithoutBrowser,
   authorizeOAuth2,
   cancelOAuth2Authorization,
+  clearOAuth2BrowserSession,
   completeOAuth2Authorization,
   prepareOAuth2Authorization,
   type OAuth2CallbackReady,
@@ -69,6 +70,14 @@ describe('OAuth 2 callback preparation', () => {
 
     expect(prepared.request.auth.responseType).toBe('token');
     expect(new URL(prepared.authorizationUrl).searchParams.get('response_type')).toBe('token');
+    expect(prepared.browserMode).toBe('embedded');
+  });
+
+  it('uses the built-in browser by default and the system browser only when selected', async () => {
+    const request = oauthRequest();
+    await expect(prepareOAuth2Authorization(request, {}, 'oauth2-embedded')).resolves.toMatchObject({ browserMode: 'embedded' });
+    request.auth.useDefaultBrowser = true;
+    await expect(prepareOAuth2Authorization(request, {}, 'oauth2-system')).resolves.toMatchObject({ browserMode: 'system' });
   });
 });
 
@@ -210,6 +219,7 @@ describe('OAuth 2 native bridge', () => {
       const channel = arguments_.onEvent as { onmessage?: (event: OAuth2CallbackReady) => void };
       channel.onmessage?.({
         kind: 'ready',
+        browserMode: 'embedded',
         authorizationUrl: prepared.authorizationUrl,
         redirectUrl: 'http://127.0.0.1:49154/callback',
       });
@@ -219,15 +229,29 @@ describe('OAuth 2 native bridge', () => {
       };
     });
 
-    await expect(authorizeOAuth2(prepared, onReady)).resolves.toMatchObject({ parameters: { code: 'code-123' } });
+    await expect(authorizeOAuth2(prepared, onReady, { proxy: { enabled: true, httpProxy: 'http://http-proxy.test:8080', httpsProxy: 'http://https-proxy.test:8443', noProxy: 'localhost,.internal' } })).resolves.toMatchObject({ parameters: { code: 'code-123' } });
     expect(onReady).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ready', redirectUrl: 'http://127.0.0.1:49154/callback' }));
     expect(tauri.invoke).toHaveBeenCalledWith('oauth2_authorize', expect.objectContaining({
-      input: expect.objectContaining({ flowId: 'oauth2-channel' }),
+      input: expect.objectContaining({ flowId: 'oauth2-channel', useDefaultBrowser: false, proxyUrl: 'http://https-proxy.test:8443', proxyExclusions: 'localhost,.internal' }),
       onEvent: tauri.channels[0],
     }));
 
     await cancelOAuth2Authorization('oauth2-channel');
     expect(tauri.invoke).toHaveBeenLastCalledWith('oauth2_cancel', { flowId: 'oauth2-channel' });
+
+    await clearOAuth2BrowserSession();
+    expect(tauri.invoke).toHaveBeenLastCalledWith('oauth2_clear_session');
+  });
+
+  it('does not forward app proxy settings to the system browser', async () => {
+    const request = oauthRequest();
+    request.auth.useDefaultBrowser = true;
+    const prepared = await prepareOAuth2Authorization(request, {}, 'oauth2-system');
+    tauri.invoke.mockResolvedValue({ redirectUrl: prepared.redirectUrl, parameters: { code: 'code-1', state: prepared.expectedState } });
+
+    await authorizeOAuth2(prepared, undefined, { proxy: { enabled: true, httpProxy: 'http://proxy', httpsProxy: 'http://proxy', noProxy: '' } });
+
+    expect(tauri.invoke).toHaveBeenCalledWith('oauth2_authorize', expect.objectContaining({ input: expect.objectContaining({ useDefaultBrowser: true, proxyUrl: '', proxyExclusions: '' }) }));
   });
 
   it('completes authorization-code callbacks through token exchange', async () => {
@@ -235,7 +259,7 @@ describe('OAuth 2 native bridge', () => {
     tauri.invoke.mockImplementation(async (command: string, arguments_: Record<string, unknown>) => {
       if (command === 'oauth2_authorize') {
         const channel = arguments_.onEvent as { onmessage?: (event: OAuth2CallbackReady) => void };
-        channel.onmessage?.({ kind: 'ready', authorizationUrl: prepared.authorizationUrl, redirectUrl: 'http://127.0.0.1:49155/callback' });
+        channel.onmessage?.({ kind: 'ready', browserMode: 'embedded', authorizationUrl: prepared.authorizationUrl, redirectUrl: 'http://127.0.0.1:49155/callback' });
         return { redirectUrl: 'http://127.0.0.1:49155/callback', parameters: { code: 'code-456', state: prepared.expectedState } };
       }
       if (command === 'send_http_request') {

@@ -2428,6 +2428,20 @@ Compatibility bounds remain explicit: Insomnia v5 cannot represent standalone su
 
 Compatibility bounds remain explicit: Brunomnia does not download, update, or bundle model files, and direct inference remains a desktop capability rather than a browser or headless-CLI authority. The fixed context/output limits are safety constraints. GGUF loading closes the AI row's only named gap; exactly 15 parity rows remain incomplete, so Brunomnia is not declared feature-complete.
 
+## Milestone 245 — built-in OAuth browser and custom callbacks (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned source audit | Complete | Pinned Insomnia defaults authorization-code requests to an Electron `BrowserWindow`, always uses it for implicit grants, detects arbitrary configured redirects across navigation/redirect/failure paths, reuses a persisted isolated partition, applies auth proxy/TLS settings, handles client-certificate selection, and exposes explicit plus restart-time session clearing |
+| Browser choice | Complete baseline | Workspace v41 stores pinned-compatible **Use system browser** state, defaults false/unset to the built-in browser, keeps implicit grants embedded, and round-trips the field through Insomnia v4/v5 interchange |
+| Redirect capture | Complete | The Tauri window structurally matches bounded configured scheme/credentials/host/port/path plus configured query pairs, rejects lookalike paths, extracts query and fragment code/token/error responses, verifies state, catches navigation and completed loads, folds popup requests into the same isolated window, and returns the configured redirect for code exchange |
+| Session lifecycle | Complete baseline | A persisted UUID selects an OAuth-only data directory and Apple custom data-store identifier; explicit clear and the device-local clear-on-restart setting rotate that ID without granting remote pages a matching Tauri capability |
+| Proxy and lifecycle | Complete baseline | The embedded window applies the authorization scheme's manual HTTP/SOCKS5 proxy unless shared host/suffix/port/IP-CIDR No proxy policy bypasses it; readiness identifies embedded/system mode, user close, explicit cancel, duplicate IDs, popup navigation failure, and five-minute timeout settle the exact flow and destroy its window |
+| System fallback | Complete | Authorization-code requests can retain the existing shell-free system browser with bounded plain-HTTP loopback listener, ephemeral port rewrite, fragment bridge, state validation, cancellation, and timeout |
+| Executable evidence | Complete baseline | Focused frontend migration/interchange/IPC tests and native structural matcher/extraction/session/loopback/cancellation tests pass alongside strict TypeScript, Rust format/check/clippy, full suites, CLI/audit, and packaged-app gates recorded in the milestone verification file |
+
+Compatibility bounds remain explicit: Tauri/Wry does not expose Insomnia's per-session certificate-verification callback or Electron client-certificate picker, so embedded-browser insecure-TLS override and explicit workspace client-identity selection remain open. No credentialed live provider or cross-platform rendered fixture is claimed. Request authentication stays `Baseline`; exactly 15 parity rows remain incomplete, so Brunomnia is not declared feature-complete.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

@@ -272,9 +272,10 @@ fn template_os_info() -> Value {
 async fn oauth2_authorize(
     input: oauth2_callback::OAuthCallbackInput,
     on_event: Channel<oauth2_callback::OAuthCallbackEvent>,
+    app: AppHandle,
     state: State<'_, oauth2_callback::OAuthCallbackState>,
 ) -> Result<oauth2_callback::OAuthCallbackOutput, String> {
-    oauth2_callback::authorize(input, on_event, state.inner().clone()).await
+    oauth2_callback::authorize(input, on_event, app, state.inner().clone()).await
 }
 
 #[tauri::command]
@@ -283,6 +284,23 @@ async fn oauth2_cancel(
     state: State<'_, oauth2_callback::OAuthCallbackState>,
 ) -> Result<(), String> {
     oauth2_callback::cancel(flow_id, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn oauth2_clear_session(
+    app: AppHandle,
+    state: State<'_, oauth2_callback::OAuthCallbackState>,
+) -> Result<(), String> {
+    oauth2_callback::clear_session(app, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn oauth2_configure_session(
+    clear_on_restart: bool,
+    app: AppHandle,
+    state: State<'_, oauth2_callback::OAuthCallbackState>,
+) -> Result<(), String> {
+    oauth2_callback::configure_session(app, clear_on_restart, state.inner().clone()).await
 }
 
 #[tauri::command]
@@ -927,6 +945,8 @@ pub fn run() {
             close_mcp_http_session,
             oauth2_authorize,
             oauth2_cancel,
+            oauth2_clear_session,
+            oauth2_configure_session,
             open_external_url,
             script_read_file,
             project_write,

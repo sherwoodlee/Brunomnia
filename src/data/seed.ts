@@ -39,7 +39,7 @@ const createRequest = (id: string, name: string, method: HttpMethod, url: string
     apiKeyValue: '',
     apiKeyLocation: 'header',
     oauth1SignatureMethod: 'HMAC-SHA1', consumerKey: '', consumerSecret: '', tokenKey: '', tokenSecret: '', privateKey: '', version: '1.0', nonce: '', timestamp: '', callback: '', realm: '', verifier: '', includeBodyHash: false,
-    oauth2GrantType: 'authorization_code', accessTokenUrl: '', authorizationUrl: '', clientId: '', clientSecret: '', audience: '', scope: '', resource: '', origin: '', redirectUrl: 'http://localhost/', credentialsInBody: false, state: '', code: '', accessToken: '', identityToken: '', refreshToken: '', expiresAt: 0, tokenPrefix: 'Bearer', usePkce: false, pkceMethod: 'S256', codeVerifier: '', responseType: 'code',
+    oauth2GrantType: 'authorization_code', accessTokenUrl: '', authorizationUrl: '', clientId: '', clientSecret: '', audience: '', scope: '', resource: '', origin: '', redirectUrl: 'http://localhost/', useDefaultBrowser: false, credentialsInBody: false, state: '', code: '', accessToken: '', identityToken: '', refreshToken: '', expiresAt: 0, tokenPrefix: 'Bearer', usePkce: false, pkceMethod: 'S256', codeVerifier: '', responseType: 'code',
     ntlmDomain: '', ntlmWorkstation: 'BRUNOMNIA',
     awsAccessKeyId: '', awsSecretAccessKey: '', awsSessionToken: '', awsRegion: 'us-east-1', awsService: 'execute-api',
     hawkId: '', hawkKey: '', hawkExt: '', hawkAlgorithm: 'sha256', hawkValidatePayload: true,
@@ -139,7 +139,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 40,
+  version: 41,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',

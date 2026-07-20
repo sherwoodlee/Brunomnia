@@ -23,6 +23,7 @@ describe('artifact export adapters', () => {
       { id: 'disabled', name: 'optional', value: 'off', enabled: false, description: 'Disabled field', kind: 'text', multiline: false, contentType: '' },
     ];
     workspace.collections[0].requests[1].name = 'Form controls';
+    workspace.collections[0].requests[1].auth = { ...workspace.collections[0].requests[1].auth, type: 'oauth2', useDefaultBrowser: true };
     workspace.collections[0].requests[1].bodyMode = 'form-urlencoded';
     workspace.collections[0].requests[1].formBody = [{ id: 'form-value', name: 'notes', value: 'one\ntwo', enabled: false, description: 'Multiline notes', multiline: true }];
     workspace.collections[0].folders = [{ id: 'orders-folder', name: 'Secured orders', parentId: '', expanded: true, headers: [{ id: 'folder-header', name: 'X-Team', value: 'orders', enabled: true }], environment: [{ id: 'folder-variable', name: 'scope', value: 'orders', enabled: true }, { id: 'folder-json', name: 'limits', value: '{"retries":3}', valueType: 'json', enabled: true }], environmentEditorMode: 'raw', auth: { ...workspace.collections[0].requests[0].auth, type: 'bearer', token: '{{ vault.orders }}' }, preRequestScript: 'folderPre();', tests: 'folderAfter();', documentation: 'Folder docs' }];
@@ -77,6 +78,7 @@ describe('artifact export adapters', () => {
       expect.objectContaining({ name: 'optional', multiline: false, description: 'Disabled field', enabled: false }),
     ]);
     expect(v4Import.collections[0].requests.find((request) => request.name === 'Form controls')?.formBody[0]).toMatchObject({ name: 'notes', value: 'one\ntwo', enabled: false, description: 'Multiline notes', multiline: true });
+    expect(v4Import.collections[0].requests.find((request) => request.name === 'Form controls')?.auth).toMatchObject({ type: 'oauth2', useDefaultBrowser: true });
     expect(v4Import.collections[0].folders?.[0]).toMatchObject({ name: 'Secured orders', documentation: 'Folder docs' });
     expect(v4Import.collections[0].requests[0].folderId).toBe(v4Import.collections[0].folders?.[0].id);
     expect(v4Import.cookies[0]).toMatchObject({ name: 'session', sameSite: 'lax' });
@@ -116,6 +118,7 @@ describe('artifact export adapters', () => {
     expect(v5Import.collections[0].requests[0].disableUserAgentHeader).toBe(true);
     expect(v5Import.collections[0].requests[0].multipartBody[0]).toMatchObject({ multiline: true, contentType: 'application/json', description: 'JSON document' });
     expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.name === 'Form controls')?.formBody[0]).toMatchObject({ enabled: false, description: 'Multiline notes', multiline: true });
+    expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.name === 'Form controls')?.auth).toMatchObject({ type: 'oauth2', useDefaultBrowser: true });
     expect(v5Import.collections[0].folders?.[0]).toMatchObject({ name: 'Secured orders', documentation: 'Folder docs' });
     expect(v5Import.collections[0].requests[0].folderId).toBe(v5Import.collections[0].folders?.[0].id);
     expect(v5Import.cookies[0]).toMatchObject({ name: 'session', sameSite: 'lax' });
@@ -257,7 +260,7 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(40);
+    expect(parsed.version).toBe(41);
     expect(parsed.testSuites).toEqual([expect.objectContaining({ id: 'suite', tests: [expect.objectContaining({ id: 'included' })] }), expect.objectContaining({ id: 'empty-suite', tests: [] })]);
     expect(parsed.unitTestResults).toEqual([expect.objectContaining({ id: 'run', suiteId: 'suite', tests: [expect.objectContaining({ testId: 'included' })] })]);
     expect(parsed.certificates.clients[0]).toMatchObject({ pfxBase64: 'cGZ4', passphrase: 'secret' });

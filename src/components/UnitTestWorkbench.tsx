@@ -181,7 +181,7 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
       oauthFlowId.current = flowId;
       const variables = Object.fromEntries(environment.variables.filter((variable) => variable.enabled).map((variable) => [variable.name, variable.value]));
       const prepared = await oauth2.prepareOAuth2Authorization(request, variables, flowId);
-      setOAuthAuthorization({ flowId, requestName: request.name, authorizationUrl: prepared.authorizationUrl, redirectUrl: prepared.redirectUrl });
+      setOAuthAuthorization({ browserMode: prepared.browserMode, flowId, requestName: request.name, authorizationUrl: prepared.authorizationUrl, redirectUrl: prepared.redirectUrl });
       try {
         const completed = await oauth2.completeOAuth2Authorization(prepared, environment, {
           cookies: runCookies,
@@ -199,7 +199,7 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
           vault,
           externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input),
         }, (event) => {
-          if (oauthFlowId.current === flowId) setOAuthAuthorization({ flowId, requestName: request.name, authorizationUrl: event.authorizationUrl, redirectUrl: event.redirectUrl });
+          if (oauthFlowId.current === flowId) setOAuthAuthorization({ browserMode: event.browserMode, flowId, requestName: request.name, authorizationUrl: event.authorizationUrl, redirectUrl: event.redirectUrl });
         });
         return completed.auth;
       } finally {

@@ -172,6 +172,8 @@ describe('workspace migrations', () => {
     const collections = legacy.collections as Array<{ requests: Array<Record<string, unknown>> }>;
     const first = collections[0].requests[0];
     (first.auth as Record<string, unknown>).expiresAt = 'invalid';
+    delete (first.auth as Record<string, unknown>).useDefaultBrowser;
+    (collections[0].requests[1].auth as Record<string, unknown>).useDefaultBrowser = true;
     delete first.protocol;
     delete first.bodyMode;
     delete first.renderBodyTemplates;
@@ -186,7 +188,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(40);
+    expect(migrated.version).toBe(41);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
@@ -223,6 +225,8 @@ describe('workspace migrations', () => {
     expect(migrated.preferences.shortcuts['generate-code']).toBe('Mod+Shift+G');
     expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaEndpoint: '', schemaFetchedAt: '' });
     expect(migrated.collections[0].requests[0].auth.expiresAt).toBe(0);
+    expect(migrated.collections[0].requests[0].auth.useDefaultBrowser).toBe(false);
+    expect(migrated.collections[0].requests[1].auth.useDefaultBrowser).toBe(true);
   });
 
   it('preserves body rendering policy and normalizes multipart editor modes', () => {
@@ -236,7 +240,7 @@ describe('workspace migrations', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(40);
+    expect(migrated.version).toBe(41);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
@@ -260,7 +264,7 @@ describe('workspace migrations', () => {
     }, { id: 'orphan', suiteId: 'missing', tests: [] }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(40);
+    expect(migrated.version).toBe(41);
     expect(migrated.testSuites).toHaveLength(1);
     expect(migrated.testSuites[0].collectionId).toBe(migrated.collections[0].id);
     expect(migrated.testSuites[0].tests.map((test) => [test.id, test.requestId])).toEqual([['test-two', null], ['test-one', requestId]]);
@@ -314,7 +318,7 @@ describe('workspace migrations', () => {
     };
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(40);
+    expect(migrated.version).toBe(41);
     expect(migrated.collections[0].requests[0].grpc).toMatchObject({
       protoText: 'syntax = "proto3"; service Legacy {}',
       protoEntryPath: 'schema.proto',
@@ -339,7 +343,7 @@ describe('workspace migrations', () => {
 
     const migrated = migrateWorkspace(workspace);
     const grpc = migrated.collections[0].requests[0].grpc;
-    expect(migrated.version).toBe(40);
+    expect(migrated.version).toBe(41);
     expect(grpc.descriptorSource).toBe('buf');
     expect(grpc.reflectionApiUrl).toHaveLength(8_192);
     expect(grpc.reflectionApiKey).toHaveLength(65_536);
@@ -356,7 +360,7 @@ describe('workspace migrations', () => {
       clients: [null, { id: 'client', host: 'api.example.test:8443', enabled: true, certificatePem: 'cert-pem', keyPem: 'key-pem' }, { id: 'pfx', host: '*.internal.test', enabled: true, pfxBase64: 'cGZ4', passphrase: 'secret' }],
     };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(40);
+    expect(migrated.version).toBe(41);
     expect(migrated.certificates).toEqual({
       ca: { enabled: true, pem: 'ca-pem' },
       clients: [
@@ -449,7 +453,7 @@ describe('workspace migrations', () => {
     environments[0].environmentEditorMode = 'raw';
     (environments[0].variables as Array<Record<string, unknown>>).push({ id: 'global-config', name: 'globalConfig', value: '{"enabled":true}', valueType: 'json', enabled: true });
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(40);
+    expect(migrated.version).toBe(41);
     expect(migrated.collections[0]).toMatchObject({ environmentEditorMode: 'raw', environment: [expect.objectContaining({ name: 'config', valueType: 'json' })] });
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', environmentEditorMode: 'raw', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
@@ -528,7 +532,7 @@ describe('workspace migrations', () => {
     }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(40);
+    expect(migrated.version).toBe(41);
     expect(migrated.mcpClients[0].env).toEqual([{ id: 'stdio-env', name: 'MODE', value: 'review', enabled: false, description: '' }]);
     expect(migrated.mcpClients[0].resourceTemplates[0]).toMatchObject({
       uri: 'files://{/path}{?query,limit}',
@@ -589,6 +593,7 @@ describe('workspace migrations', () => {
     workspace.preferences.filterResponsesByEnv = true;
     workspace.preferences.validateCertificates = false;
     workspace.preferences.validateAuthCertificates = false;
+    workspace.preferences.clearOAuth2SessionOnRestart = true;
     workspace.preferences.proxyEnabled = true;
     workspace.preferences.httpProxy = 'http://http-proxy.test:8080';
     workspace.preferences.httpsProxy = 'http://https-proxy.test:8443';
@@ -609,7 +614,7 @@ describe('workspace migrations', () => {
     workspace.preferences.allowHtmlPreviewScripts = true;
     workspace.preferences.disableResponsePreviewLinks = true;
     workspace.preferences.dataFolders = ['/Users/example/fixtures', '/Volumes/shared/data'];
-    expect(migrateWorkspace(workspace).preferences).toMatchObject({ preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 77, maxHistoryResponses: -1, filterResponsesByEnv: true, validateCertificates: false, validateAuthCertificates: false, proxyEnabled: true, httpProxy: 'http://http-proxy.test:8080', httpsProxy: 'http://https-proxy.test:8443', noProxy: 'localhost,.internal', useBulkHeaderEditor: true, useBulkParametersEditor: true, forceVerticalLayout: true, editorIndentWithTabs: false, editorIndentSize: 8, editorLineWrapping: false, fontVariantLigatures: true, fontSize: 18, interfaceFontSize: 17, fontInterface: 'Avenir Next, sans-serif', fontMonospace: 'JetBrains Mono, monospace', showPasswords: true, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: true, dataFolders: ['/Users/example/fixtures', '/Volumes/shared/data'] });
+    expect(migrateWorkspace(workspace).preferences).toMatchObject({ preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 77, maxHistoryResponses: -1, filterResponsesByEnv: true, validateCertificates: false, validateAuthCertificates: false, clearOAuth2SessionOnRestart: true, proxyEnabled: true, httpProxy: 'http://http-proxy.test:8080', httpsProxy: 'http://https-proxy.test:8443', noProxy: 'localhost,.internal', useBulkHeaderEditor: true, useBulkParametersEditor: true, forceVerticalLayout: true, editorIndentWithTabs: false, editorIndentSize: 8, editorLineWrapping: false, fontVariantLigatures: true, fontSize: 18, interfaceFontSize: 17, fontInterface: 'Avenir Next, sans-serif', fontMonospace: 'JetBrains Mono, monospace', showPasswords: true, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: true, dataFolders: ['/Users/example/fixtures', '/Volumes/shared/data'] });
   });
 
   it('migrates legacy redirect booleans and preserves supported three-state overrides', () => {

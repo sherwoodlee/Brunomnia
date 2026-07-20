@@ -515,7 +515,7 @@ fn no_proxy_host_port(pattern: &str) -> (String, Option<u16>) {
     (pattern.trim_matches(['[', ']']).to_ascii_lowercase(), None)
 }
 
-fn proxy_bypassed(exclusions: &str, target: &Url) -> bool {
+pub(crate) fn proxy_bypassed(exclusions: &str, target: &Url) -> bool {
     let Some(hostname) = url_hostname(target).map(str::to_ascii_lowercase) else {
         return false;
     };

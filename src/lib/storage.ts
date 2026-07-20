@@ -283,6 +283,7 @@ const normalizePreferences = (value: unknown): AppPreferences => {
       : defaultPreferences.requestTimeoutMs,
     validateCertificates: source?.validateCertificates !== false,
     validateAuthCertificates: source?.validateAuthCertificates !== false,
+    clearOAuth2SessionOnRestart: source?.clearOAuth2SessionOnRestart === true,
     proxyEnabled: source?.proxyEnabled === true,
     httpProxy: stringValue(source?.httpProxy).slice(0, 4_096),
     httpsProxy: stringValue(source?.httpsProxy).slice(0, 4_096),
@@ -700,6 +701,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         auth: {
           ...defaults.auth,
           ...request.auth,
+          useDefaultBrowser: request.auth?.useDefaultBrowser === true,
           expiresAt: typeof request.auth?.expiresAt === 'number' && Number.isFinite(request.auth.expiresAt)
             ? Math.max(0, Math.trunc(request.auth.expiresAt))
             : 0,
@@ -804,7 +806,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const mcpClients = normalizeMcpClients(workspace.mcpClients);
   return {
     ...workspace,
-    version: 40,
+    version: 41,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,

@@ -404,7 +404,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
         const flowId = oauth2.createOAuth2FlowId();
         oauthFlowId.current = flowId;
         const prepared = await oauth2.prepareOAuth2Authorization(request, Object.fromEntries(requestEnvironment.variables.filter((variable) => variable.enabled).map((variable) => [variable.name, variable.value])), flowId);
-        setOAuthAuthorization({ flowId, requestName: request.name, authorizationUrl: prepared.authorizationUrl, redirectUrl: prepared.redirectUrl });
+        setOAuthAuthorization({ browserMode: prepared.browserMode, flowId, requestName: request.name, authorizationUrl: prepared.authorizationUrl, redirectUrl: prepared.redirectUrl });
         try {
           const completed = await oauth2.completeOAuth2Authorization(prepared, requestEnvironment, {
             cookies: runnerCookies,
@@ -422,7 +422,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
             vault,
             externalSecret: (input) => resolveAuthorizedExternalSecret(workspace, input),
           }, (event) => {
-            if (oauthFlowId.current === flowId) setOAuthAuthorization({ flowId, requestName: request.name, authorizationUrl: event.authorizationUrl, redirectUrl: event.redirectUrl });
+            if (oauthFlowId.current === flowId) setOAuthAuthorization({ browserMode: event.browserMode, flowId, requestName: request.name, authorizationUrl: event.authorizationUrl, redirectUrl: event.redirectUrl });
           });
           return completed.auth;
         } finally {

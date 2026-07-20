@@ -48,6 +48,7 @@ export const defaultPreferences: AppPreferences = {
   requestTimeoutMs: 30_000,
   validateCertificates: true,
   validateAuthCertificates: true,
+  clearOAuth2SessionOnRestart: false,
   proxyEnabled: false,
   httpProxy: '',
   httpsProxy: '',

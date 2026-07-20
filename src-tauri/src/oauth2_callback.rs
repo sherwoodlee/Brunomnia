@@ -1,17 +1,23 @@
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    fs,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    path::{Path, PathBuf},
     sync::Arc,
 };
-use tauri::ipc::Channel;
+use tauri::{
+    ipc::Channel, webview::NewWindowResponse, AppHandle, Manager, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::{oneshot, Mutex},
+    sync::{mpsc, oneshot, Mutex},
     time::{timeout, Duration, Instant},
 };
-use url::Url;
+use url::{form_urlencoded, Url};
+use uuid::Uuid;
 
 const MAX_URL_BYTES: usize = 8_192;
 const MAX_REQUEST_BYTES: usize = 16_384;
@@ -19,10 +25,14 @@ const MAX_FLOW_ID_BYTES: usize = 128;
 const MAX_STATE_BYTES: usize = 1_024;
 const AUTHORIZATION_TIMEOUT: Duration = Duration::from_secs(300);
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
+const SESSION_ID_FILE: &str = "oauth2-session-id";
+const SESSION_RESTART_FILE: &str = "oauth2-clear-on-restart";
 
 #[derive(Clone, Default)]
 pub struct OAuthCallbackState {
     flows: Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>,
+    session_id: Arc<Mutex<Option<Uuid>>>,
+    session_initialized: Arc<Mutex<bool>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -31,12 +41,19 @@ pub struct OAuthCallbackInput {
     pub flow_id: String,
     pub authorization_url: String,
     pub redirect_url: String,
+    #[serde(default)]
+    pub use_default_browser: bool,
+    #[serde(default)]
+    pub proxy_url: String,
+    #[serde(default)]
+    pub proxy_exclusions: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthCallbackEvent {
     pub kind: String,
+    pub browser_mode: String,
     pub authorization_url: String,
     pub redirect_url: String,
 }
@@ -49,6 +66,13 @@ pub struct OAuthCallbackOutput {
 }
 
 #[derive(Debug)]
+struct PreparedAuthorization {
+    authorization_url: Url,
+    redirect_url: Url,
+    expected_state: String,
+}
+
+#[derive(Debug)]
 struct PreparedCallback {
     listener: TcpListener,
     authorization_url: String,
@@ -56,6 +80,12 @@ struct PreparedCallback {
     callback_path: String,
     expected_state: String,
     response_type: String,
+}
+
+enum EmbeddedEvent {
+    Redirect(Url),
+    Popup(Url),
+    Closed,
 }
 
 fn validate_flow_id(flow_id: &str) -> Result<(), String> {
@@ -80,9 +110,36 @@ fn bounded_url(value: &str, label: &str) -> Result<Url, String> {
     Url::parse(value).map_err(|_| format!("The OAuth {label} URL is malformed."))
 }
 
+fn prepare_authorization(input: &OAuthCallbackInput) -> Result<PreparedAuthorization, String> {
+    validate_flow_id(&input.flow_id)?;
+    let authorization_url = bounded_url(&input.authorization_url, "authorization")?;
+    if !matches!(authorization_url.scheme(), "http" | "https") {
+        return Err("OAuth authorization URLs must use HTTP or HTTPS.".into());
+    }
+    let redirect_url = bounded_url(&input.redirect_url, "redirect")?;
+    let expected_state = authorization_url
+        .query_pairs()
+        .find(|(key, _)| key == "state")
+        .map(|(_, value)| value.into_owned())
+        .unwrap_or_default();
+    if expected_state.is_empty() || expected_state.len() > MAX_STATE_BYTES {
+        return Err(
+            "Automatic OAuth authorization requires a bounded non-empty state value.".into(),
+        );
+    }
+    Ok(PreparedAuthorization {
+        authorization_url,
+        redirect_url,
+        expected_state,
+    })
+}
+
 fn loopback_address(url: &Url) -> Result<IpAddr, String> {
     if url.scheme() != "http" || url.username() != "" || url.password().is_some() {
-        return Err("Automatic OAuth callbacks require a plain HTTP loopback redirect URL.".into());
+        return Err(
+            "Automatic system-browser OAuth callbacks require a plain HTTP loopback redirect URL."
+                .into(),
+        );
     }
     match url
         .host_str()
@@ -92,7 +149,10 @@ fn loopback_address(url: &Url) -> Result<IpAddr, String> {
     {
         "localhost" | "127.0.0.1" => Ok(IpAddr::V4(Ipv4Addr::LOCALHOST)),
         "::1" | "[::1]" => Ok(IpAddr::V6(Ipv6Addr::LOCALHOST)),
-        _ => Err("Automatic OAuth callbacks may bind only localhost, 127.0.0.1, or ::1.".into()),
+        _ => Err(
+            "Automatic system-browser OAuth callbacks may bind only localhost, 127.0.0.1, or ::1."
+                .into(),
+        ),
     }
 }
 
@@ -108,26 +168,13 @@ fn replace_query_parameter(url: &mut Url, name: &str, value: &str) {
         .append_pair(name, value);
 }
 
-async fn prepare(input: &OAuthCallbackInput) -> Result<PreparedCallback, String> {
-    validate_flow_id(&input.flow_id)?;
-    let mut authorization = bounded_url(&input.authorization_url, "authorization")?;
-    if !matches!(authorization.scheme(), "http" | "https") {
-        return Err("OAuth authorization URLs must use HTTP or HTTPS.".into());
-    }
-    let mut redirect = bounded_url(&input.redirect_url, "redirect")?;
+async fn prepare_callback(input: &OAuthCallbackInput) -> Result<PreparedCallback, String> {
+    let prepared = prepare_authorization(input)?;
+    let mut authorization = prepared.authorization_url;
+    let mut redirect = prepared.redirect_url;
     let address = loopback_address(&redirect)?;
     if redirect.fragment().is_some() {
-        return Err("OAuth redirect URLs cannot contain a fragment.".into());
-    }
-    let expected_state = authorization
-        .query_pairs()
-        .find(|(key, _)| key == "state")
-        .map(|(_, value)| value.into_owned())
-        .unwrap_or_default();
-    if expected_state.is_empty() || expected_state.len() > MAX_STATE_BYTES {
-        return Err(
-            "Automatic OAuth authorization requires a bounded non-empty state value.".into(),
-        );
+        return Err("System-browser OAuth redirect URLs cannot contain a fragment.".into());
     }
     let response_type = authorization
         .query_pairs()
@@ -151,7 +198,7 @@ async fn prepare(input: &OAuthCallbackInput) -> Result<PreparedCallback, String>
         authorization_url: authorization.to_string(),
         redirect_url,
         callback_path: redirect.path().to_string(),
-        expected_state,
+        expected_state: prepared.expected_state,
         response_type,
     })
 }
@@ -268,14 +315,8 @@ async fn wait_for_callback(
             .await;
             continue;
         }
-        let parameters = callback
-            .query_pairs()
-            .map(|(key, value)| (key.into_owned(), value.into_owned()))
-            .collect::<HashMap<_, _>>();
-        let has_response = parameters.contains_key("code")
-            || parameters.contains_key("access_token")
-            || parameters.contains_key("id_token")
-            || parameters.contains_key("error");
+        let parameters = url_parameters(&callback);
+        let has_response = has_oauth_response(&parameters);
         if !has_response && prepared.response_type != "code" {
             send_page(
                 &mut stream,
@@ -319,6 +360,257 @@ async fn wait_for_callback(
     }
 }
 
+fn url_parameters(url: &Url) -> HashMap<String, String> {
+    let mut parameters = url
+        .query_pairs()
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect::<HashMap<_, _>>();
+    if let Some(fragment) = url.fragment() {
+        parameters.extend(
+            form_urlencoded::parse(fragment.as_bytes())
+                .map(|(key, value)| (key.into_owned(), value.into_owned())),
+        );
+    }
+    parameters
+}
+
+fn has_oauth_response(parameters: &HashMap<String, String>) -> bool {
+    ["code", "access_token", "id_token", "error"]
+        .iter()
+        .any(|name| parameters.contains_key(*name))
+}
+
+fn redirect_target_matches(expected: &Url, current: &Url) -> bool {
+    if expected.scheme() != current.scheme()
+        || expected.username() != current.username()
+        || expected.password() != current.password()
+        || expected.host_str() != current.host_str()
+        || expected.port() != current.port()
+        || expected.path() != current.path()
+    {
+        return false;
+    }
+    let current_query = current.query_pairs().collect::<Vec<_>>();
+    expected
+        .query_pairs()
+        .all(|expected_pair| current_query.iter().any(|pair| pair == &expected_pair))
+}
+
+fn redirect_parameters(expected: &Url, current: &Url) -> Option<HashMap<String, String>> {
+    if !redirect_target_matches(expected, current) {
+        return None;
+    }
+    let parameters = url_parameters(current);
+    has_oauth_response(&parameters).then_some(parameters)
+}
+
+fn checked_redirect_parameters(
+    expected: &Url,
+    current: &Url,
+    expected_state: &str,
+) -> Option<Result<HashMap<String, String>, String>> {
+    redirect_parameters(expected, current).map(|parameters| {
+        if parameters.get("state").map(String::as_str) != Some(expected_state) {
+            Err("OAuth callback state did not match this authorization attempt.".into())
+        } else {
+            Ok(parameters)
+        }
+    })
+}
+
+fn session_id_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&app_data).map_err(|error| error.to_string())?;
+    Ok(app_data.join(SESSION_ID_FILE))
+}
+
+fn session_restart_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(session_id_path(app)?.with_file_name(SESSION_RESTART_FILE))
+}
+
+fn session_id_from_text(value: &str) -> Option<Uuid> {
+    Uuid::parse_str(value.trim()).ok()
+}
+
+fn write_session_id(path: &Path, session_id: Uuid) -> Result<(), String> {
+    let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4().simple()));
+    fs::write(&temporary, session_id.hyphenated().to_string())
+        .map_err(|error| error.to_string())?;
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+async fn oauth_session(
+    app: &AppHandle,
+    state: &OAuthCallbackState,
+) -> Result<(Uuid, PathBuf), String> {
+    let path = session_id_path(app)?;
+    let mut initialized = state.session_initialized.lock().await;
+    if !*initialized {
+        let clear_on_restart = fs::read_to_string(session_restart_path(app)?)
+            .map(|value| value.trim() == "true")
+            .unwrap_or(false);
+        if clear_on_restart {
+            let session_id = Uuid::new_v4();
+            write_session_id(&path, session_id)?;
+            *state.session_id.lock().await = Some(session_id);
+        }
+        *initialized = true;
+    }
+    drop(initialized);
+    let mut cached = state.session_id.lock().await;
+    let session_id = match *cached {
+        Some(session_id) => session_id,
+        None => {
+            let stored = fs::read_to_string(&path)
+                .ok()
+                .and_then(|value| session_id_from_text(&value));
+            let session_id = stored.unwrap_or_else(Uuid::new_v4);
+            if stored.is_none() {
+                write_session_id(&path, session_id)?;
+            }
+            *cached = Some(session_id);
+            session_id
+        }
+    };
+    let directory = path
+        .with_file_name("oauth2-sessions")
+        .join(session_id.simple().to_string());
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok((session_id, directory))
+}
+
+fn configured_proxy(input: &OAuthCallbackInput, target: &Url) -> Result<Option<Url>, String> {
+    let value = input.proxy_url.trim();
+    if value.is_empty() || crate::streaming::proxy_bypassed(&input.proxy_exclusions, target) {
+        return Ok(None);
+    }
+    let proxy = bounded_url(value, "proxy")?;
+    if !matches!(proxy.scheme(), "http" | "socks5") {
+        return Err("OAuth browser proxies must use HTTP or SOCKS5.".into());
+    }
+    Ok(Some(proxy))
+}
+
+fn build_embedded_window(
+    app: &AppHandle,
+    input: &OAuthCallbackInput,
+    prepared: &PreparedAuthorization,
+    session_id: Uuid,
+    session_directory: PathBuf,
+    sender: mpsc::UnboundedSender<EmbeddedEvent>,
+) -> Result<WebviewWindow, String> {
+    let navigation_redirect = prepared.redirect_url.clone();
+    let navigation_sender = sender.clone();
+    let load_redirect = prepared.redirect_url.clone();
+    let load_sender = sender.clone();
+    let popup_sender = sender.clone();
+    let label = format!("oauth2-auth-{}", input.flow_id);
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        label,
+        WebviewUrl::External(prepared.authorization_url.clone()),
+    )
+    .title("OAuth 2 Authorization")
+    .inner_size(960.0, 720.0)
+    .min_inner_size(480.0, 360.0)
+    .data_directory(session_directory)
+    .data_store_identifier(*session_id.as_bytes())
+    .on_navigation(move |url| {
+        if redirect_parameters(&navigation_redirect, url).is_some() {
+            let _ = navigation_sender.send(EmbeddedEvent::Redirect(url.clone()));
+            false
+        } else {
+            true
+        }
+    })
+    .on_page_load(move |_window, payload| {
+        if redirect_parameters(&load_redirect, payload.url()).is_some() {
+            let _ = load_sender.send(EmbeddedEvent::Redirect(payload.url().clone()));
+        }
+    })
+    .on_new_window(move |url, _features| {
+        let _ = popup_sender.send(EmbeddedEvent::Popup(url));
+        NewWindowResponse::Deny
+    });
+    if let Some(proxy) = configured_proxy(input, &prepared.authorization_url)? {
+        builder = builder.proxy_url(proxy);
+    }
+    let window = builder.build().map_err(|error| error.to_string())?;
+    window.on_window_event(move |event| {
+        if matches!(event, WindowEvent::CloseRequested { .. }) {
+            let _ = sender.send(EmbeddedEvent::Closed);
+        }
+    });
+    Ok(window)
+}
+
+async fn wait_for_embedded_redirect(
+    window: &WebviewWindow,
+    prepared: &PreparedAuthorization,
+    mut receiver: mpsc::UnboundedReceiver<EmbeddedEvent>,
+    cancellation: oneshot::Receiver<()>,
+) -> Result<HashMap<String, String>, String> {
+    let deadline = Instant::now() + AUTHORIZATION_TIMEOUT;
+    tokio::pin!(cancellation);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("OAuth authorization timed out after five minutes.".into());
+        }
+        let event = tokio::select! {
+            _ = &mut cancellation => return Err("OAuth authorization was canceled.".into()),
+            result = timeout(remaining, receiver.recv()) => result
+                .map_err(|_| "OAuth authorization timed out after five minutes.".to_string())?
+                .ok_or_else(|| "The OAuth authorization window stopped unexpectedly.".to_string())?,
+        };
+        match event {
+            EmbeddedEvent::Redirect(url) => {
+                if let Some(result) = checked_redirect_parameters(
+                    &prepared.redirect_url,
+                    &url,
+                    &prepared.expected_state,
+                ) {
+                    return result;
+                }
+            }
+            EmbeddedEvent::Popup(url) => {
+                if let Some(result) = checked_redirect_parameters(
+                    &prepared.redirect_url,
+                    &url,
+                    &prepared.expected_state,
+                ) {
+                    return result;
+                }
+                window.navigate(url).map_err(|error| error.to_string())?;
+            }
+            EmbeddedEvent::Closed => {
+                return Err("OAuth authorization window was closed.".into());
+            }
+        }
+    }
+}
+
+async fn register_flow(
+    input: &OAuthCallbackInput,
+    state: &OAuthCallbackState,
+) -> Result<oneshot::Receiver<()>, String> {
+    validate_flow_id(&input.flow_id)?;
+    let (cancel, cancellation) = oneshot::channel();
+    let mut flows = state.flows.lock().await;
+    if flows.contains_key(&input.flow_id) {
+        return Err("This OAuth authorization flow is already running.".into());
+    }
+    flows.insert(input.flow_id.clone(), cancel);
+    Ok(cancellation)
+}
+
 async fn authorize_with_opener<F, E>(
     input: OAuthCallbackInput,
     state: OAuthCallbackState,
@@ -329,21 +621,13 @@ where
     F: FnOnce(&str) -> Result<(), String>,
     E: FnMut(OAuthCallbackEvent) -> Result<(), String>,
 {
-    validate_flow_id(&input.flow_id)?;
-    let (cancel, mut cancellation) = oneshot::channel();
-    {
-        let mut flows = state.flows.lock().await;
-        if flows.contains_key(&input.flow_id) {
-            return Err("This OAuth authorization flow is already running.".into());
-        }
-        flows.insert(input.flow_id.clone(), cancel);
-    }
+    let mut cancellation = register_flow(&input, &state).await?;
     let prepared = tokio::select! {
         _ = &mut cancellation => {
             state.flows.lock().await.remove(&input.flow_id);
             return Err("OAuth authorization was canceled.".into());
         }
-        result = prepare(&input) => match result {
+        result = prepare_callback(&input) => match result {
             Ok(prepared) => prepared,
             Err(error) => {
                 state.flows.lock().await.remove(&input.flow_id);
@@ -357,6 +641,7 @@ where
     }
     let ready = OAuthCallbackEvent {
         kind: "ready".into(),
+        browser_mode: "system".into(),
         authorization_url: prepared.authorization_url.clone(),
         redirect_url: prepared.redirect_url.clone(),
     };
@@ -373,24 +658,120 @@ where
     })
 }
 
+async fn authorize_in_window<E>(
+    input: OAuthCallbackInput,
+    app: AppHandle,
+    state: OAuthCallbackState,
+    mut event: E,
+) -> Result<OAuthCallbackOutput, String>
+where
+    E: FnMut(OAuthCallbackEvent) -> Result<(), String>,
+{
+    let cancellation = register_flow(&input, &state).await?;
+    let prepared = match prepare_authorization(&input) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            state.flows.lock().await.remove(&input.flow_id);
+            return Err(error);
+        }
+    };
+    let (session_id, session_directory) = match oauth_session(&app, &state).await {
+        Ok(session) => session,
+        Err(error) => {
+            state.flows.lock().await.remove(&input.flow_id);
+            return Err(error);
+        }
+    };
+    let (sender, receiver) = mpsc::unbounded_channel();
+    let window = match build_embedded_window(
+        &app,
+        &input,
+        &prepared,
+        session_id,
+        session_directory,
+        sender,
+    ) {
+        Ok(window) => window,
+        Err(error) => {
+            state.flows.lock().await.remove(&input.flow_id);
+            return Err(error);
+        }
+    };
+    let ready = OAuthCallbackEvent {
+        kind: "ready".into(),
+        browser_mode: "embedded".into(),
+        authorization_url: prepared.authorization_url.to_string(),
+        redirect_url: prepared.redirect_url.to_string(),
+    };
+    let result = match event(ready) {
+        Ok(()) => wait_for_embedded_redirect(&window, &prepared, receiver, cancellation).await,
+        Err(error) => Err(error),
+    };
+    let _ = window.destroy();
+    state.flows.lock().await.remove(&input.flow_id);
+    result.map(|parameters| OAuthCallbackOutput {
+        redirect_url: prepared.redirect_url.to_string(),
+        parameters,
+    })
+}
+
 pub async fn authorize(
     input: OAuthCallbackInput,
     on_event: Channel<OAuthCallbackEvent>,
+    app: AppHandle,
     state: OAuthCallbackState,
 ) -> Result<OAuthCallbackOutput, String> {
-    authorize_with_opener(
-        input,
-        state,
-        |event| on_event.send(event).map_err(|error| error.to_string()),
-        crate::external_url::open,
-    )
-    .await
+    if input.use_default_browser {
+        authorize_with_opener(
+            input,
+            state,
+            |event| on_event.send(event).map_err(|error| error.to_string()),
+            crate::external_url::open,
+        )
+        .await
+    } else {
+        authorize_in_window(input, app, state, |event| {
+            on_event.send(event).map_err(|error| error.to_string())
+        })
+        .await
+    }
 }
 
 pub async fn cancel(flow_id: String, state: OAuthCallbackState) -> Result<(), String> {
     validate_flow_id(&flow_id)?;
     if let Some(cancel) = state.flows.lock().await.remove(&flow_id) {
         let _ = cancel.send(());
+    }
+    Ok(())
+}
+
+pub async fn clear_session(app: AppHandle, state: OAuthCallbackState) -> Result<(), String> {
+    let path = session_id_path(&app)?;
+    let session_id = Uuid::new_v4();
+    write_session_id(&path, session_id)?;
+    *state.session_id.lock().await = Some(session_id);
+    *state.session_initialized.lock().await = true;
+    Ok(())
+}
+
+pub async fn configure_session(
+    app: AppHandle,
+    clear_on_restart: bool,
+    state: OAuthCallbackState,
+) -> Result<(), String> {
+    fs::write(
+        session_restart_path(&app)?,
+        if clear_on_restart { "true" } else { "false" },
+    )
+    .map_err(|error| error.to_string())?;
+    let mut initialized = state.session_initialized.lock().await;
+    if !*initialized {
+        if clear_on_restart {
+            let session_id = Uuid::new_v4();
+            write_session_id(&session_id_path(&app)?, session_id)?;
+            *state.session_id.lock().await = Some(session_id);
+        }
+        *initialized = true;
     }
     Ok(())
 }
@@ -406,6 +787,9 @@ mod tests {
                 "https://identity.example/authorize?client_id=test&response_type=code&state={state}"
             ),
             redirect_url: "http://127.0.0.1/callback".into(),
+            use_default_browser: true,
+            proxy_url: String::new(),
+            proxy_exclusions: String::new(),
         }
     }
 
@@ -426,9 +810,12 @@ mod tests {
                     .into_owned();
                 tokio::spawn(async move {
                     let redirect = Url::parse(&redirect).unwrap();
-                    let mut stream = TcpStream::connect((redirect.host_str().unwrap(), redirect.port().unwrap()))
-                        .await
-                        .unwrap();
+                    let mut stream = TcpStream::connect((
+                        redirect.host_str().unwrap(),
+                        redirect.port().unwrap(),
+                    ))
+                    .await
+                    .unwrap();
                     stream
                         .write_all(b"GET /callback?code=abc123&state=expected HTTP/1.1\r\nHost: localhost\r\n\r\n")
                         .await
@@ -444,11 +831,108 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_non_loopback_redirects_and_missing_state() {
+    async fn rejects_non_loopback_system_redirects_and_missing_state() {
         let mut invalid = input("expected");
         invalid.redirect_url = "https://example.test/callback".into();
-        assert!(prepare(&invalid).await.unwrap_err().contains("loopback"));
-        assert!(prepare(&input("")).await.unwrap_err().contains("state"));
+        assert!(prepare_callback(&invalid)
+            .await
+            .unwrap_err()
+            .contains("loopback"));
+        assert!(prepare_callback(&input(""))
+            .await
+            .unwrap_err()
+            .contains("state"));
+    }
+
+    #[test]
+    fn embedded_redirects_support_custom_schemes_queries_and_fragments() {
+        let expected = Url::parse("brunomnia://oauth/callback?tenant=acme").unwrap();
+        let code = Url::parse("brunomnia://oauth/callback?tenant=acme&code=abc123&state=expected")
+            .unwrap();
+        let implicit = Url::parse(
+            "brunomnia://oauth/callback?tenant=acme#access_token=token-1&id_token=id-1&state=expected",
+        )
+        .unwrap();
+        assert_eq!(
+            checked_redirect_parameters(&expected, &code, "expected")
+                .unwrap()
+                .unwrap()
+                .get("code")
+                .map(String::as_str),
+            Some("abc123")
+        );
+        let parameters = checked_redirect_parameters(&expected, &implicit, "expected")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            parameters.get("access_token").map(String::as_str),
+            Some("token-1")
+        );
+        assert_eq!(parameters.get("id_token").map(String::as_str), Some("id-1"));
+    }
+
+    #[test]
+    fn embedded_redirect_matching_rejects_lookalikes_and_wrong_state() {
+        let expected = Url::parse("https://client.example/oauth/callback").unwrap();
+        let lookalike =
+            Url::parse("https://client.example/oauth/callback.evil?code=abc&state=expected")
+                .unwrap();
+        let wrong_state =
+            Url::parse("https://client.example/oauth/callback?code=abc&state=wrong").unwrap();
+        assert!(checked_redirect_parameters(&expected, &lookalike, "expected").is_none());
+        assert!(
+            checked_redirect_parameters(&expected, &wrong_state, "expected")
+                .unwrap()
+                .unwrap_err()
+                .contains("state")
+        );
+    }
+
+    #[test]
+    fn embedded_authorization_accepts_non_loopback_redirects() {
+        let mut embedded = input("expected");
+        embedded.use_default_browser = false;
+        embedded.redirect_url = "com.example.app:/oauth/callback".into();
+        assert_eq!(
+            prepare_authorization(&embedded)
+                .unwrap()
+                .redirect_url
+                .as_str(),
+            "com.example.app:/oauth/callback"
+        );
+    }
+
+    #[test]
+    fn session_ids_are_strict_uuids() {
+        let session_id = Uuid::new_v4();
+        assert_eq!(
+            session_id_from_text(&format!("  {session_id}\n")),
+            Some(session_id)
+        );
+        assert_eq!(session_id_from_text("../../shared"), None);
+    }
+
+    #[test]
+    fn session_ids_rotate_through_atomic_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(SESSION_ID_FILE);
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        write_session_id(&path, first).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path)
+                .ok()
+                .and_then(|value| session_id_from_text(&value)),
+            Some(first)
+        );
+        write_session_id(&path, second).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path)
+                .ok()
+                .and_then(|value| session_id_from_text(&value)),
+            Some(second)
+        );
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[tokio::test]

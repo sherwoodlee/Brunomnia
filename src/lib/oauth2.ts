@@ -5,9 +5,12 @@ import { fetchOAuth2Token, OAuth2TokenRequestError, type SendRequestContext } fr
 
 export type OAuth2CallbackReady = {
   kind: 'ready';
+  browserMode: OAuth2BrowserMode;
   authorizationUrl: string;
   redirectUrl: string;
 };
+
+export type OAuth2BrowserMode = 'embedded' | 'system';
 
 export type OAuth2CallbackOutput = {
   redirectUrl: string;
@@ -16,6 +19,7 @@ export type OAuth2CallbackOutput = {
 
 export type PreparedOAuth2Authorization = {
   authorizationUrl: string;
+  browserMode: OAuth2BrowserMode;
   expectedState: string;
   flowId: string;
   redirectUrl: string;
@@ -56,9 +60,10 @@ export const prepareOAuth2Authorization = async (
   const parsed = new URL(authorizationUrl);
   const expectedState = parsed.searchParams.get('state') ?? '';
   const redirectUrl = parsed.searchParams.get('redirect_uri') ?? '';
+  const browserMode: OAuth2BrowserMode = grantType === 'authorization_code' && auth.useDefaultBrowser ? 'system' : 'embedded';
   if (!expectedState) throw new Error('OAuth state resolved to an empty value.');
   if (!redirectUrl) throw new Error('Enter an OAuth redirect URL.');
-  return { authorizationUrl, expectedState, flowId, redirectUrl, request: preparedRequest, sourceAuth: { ...request.auth } };
+  return { authorizationUrl, browserMode, expectedState, flowId, redirectUrl, request: preparedRequest, sourceAuth: { ...request.auth } };
 };
 
 const providerError = (parameters: Record<string, string>) => {
@@ -151,17 +156,26 @@ export const acquireOAuth2TokenWithoutBrowser = async (
 export const authorizeOAuth2 = async (
   prepared: PreparedOAuth2Authorization,
   onReady?: (event: OAuth2CallbackReady) => void,
+  context: SendRequestContext = {},
 ): Promise<OAuth2CallbackOutput> => {
   if (!isTauri()) throw new Error('Automatic OAuth callbacks require the Tauri desktop app.');
   const channel = new Channel<OAuth2CallbackReady>();
   channel.onmessage = (event) => {
     if (event.kind === 'ready') onReady?.(event);
   };
+  const proxy = context.proxy;
+  const authorizationProtocol = new URL(prepared.authorizationUrl).protocol;
+  const proxyUrl = prepared.browserMode === 'embedded' && proxy?.enabled
+    ? (authorizationProtocol === 'http:' ? proxy.httpProxy : proxy.httpsProxy).trim()
+    : '';
   return invoke<OAuth2CallbackOutput>('oauth2_authorize', {
     input: {
       flowId: prepared.flowId,
       authorizationUrl: prepared.authorizationUrl,
       redirectUrl: prepared.redirectUrl,
+      useDefaultBrowser: prepared.browserMode === 'system',
+      proxyUrl,
+      proxyExclusions: proxyUrl ? proxy?.noProxy.trim() ?? '' : '',
     },
     onEvent: channel,
   });
@@ -173,7 +187,7 @@ export const completeOAuth2Authorization = async (
   context: SendRequestContext = {},
   onReady?: (event: OAuth2CallbackReady) => void,
 ): Promise<AppliedOAuth2Callback> => {
-  const callback = await authorizeOAuth2(prepared, onReady);
+  const callback = await authorizeOAuth2(prepared, onReady, context);
   const applied = applyOAuth2Callback(prepared.request.auth, callback, prepared.expectedState);
   const stableConfiguration = { redirectUrl: prepared.sourceAuth.redirectUrl, state: prepared.sourceAuth.state };
   if (applied.auth.oauth2GrantType !== 'authorization_code') {
@@ -186,4 +200,9 @@ export const completeOAuth2Authorization = async (
 export const cancelOAuth2Authorization = async (flowId: string) => {
   if (!isTauri()) return;
   await invoke('oauth2_cancel', { flowId });
+};
+
+export const clearOAuth2BrowserSession = async () => {
+  if (!isTauri()) throw new Error('OAuth browser sessions are available only in the Tauri desktop app.');
+  await invoke('oauth2_clear_session');
 };

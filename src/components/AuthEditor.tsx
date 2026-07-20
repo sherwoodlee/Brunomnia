@@ -6,6 +6,7 @@ import {
   acquireOAuth2TokenWithoutBrowser,
   cancelOAuth2Authorization,
   canCaptureOAuth2Callback,
+  clearOAuth2BrowserSession,
   completeOAuth2Authorization,
   createOAuth2FlowId,
   prepareOAuth2Authorization,
@@ -137,6 +138,16 @@ export function AuthEditor({ request, environment, cookies, responses, requestCo
     } finally { setBusyAction(''); }
   };
 
+  const clearBrowserSession = async () => {
+    setMessage('');
+    try {
+      await clearOAuth2BrowserSession();
+      setMessage('OAuth 2 built-in browser session cleared. The next authorization starts signed out.');
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
   return (
     <div className="auth-editor">
       <label>Auth type
@@ -174,7 +185,7 @@ export function AuthEditor({ request, environment, cookies, responses, requestCo
       {auth.type === 'oauth2' ? <>
         <label>Grant type<select value={auth.oauth2GrantType} onChange={(event) => update({ oauth2GrantType: event.target.value as ApiRequest['auth']['oauth2GrantType'] })}><option value="authorization_code">Authorization code</option><option value="client_credentials">Client credentials</option><option value="implicit">Implicit</option><option value="password">Resource owner password</option><option value="refresh_token">Refresh token</option></select></label>
         {field('authorizationUrl', 'Authorization URL', { placeholder: 'https://identity.example.com/authorize' })}{field('accessTokenUrl', 'Access token URL', { placeholder: 'https://identity.example.com/token' })}
-        {field('clientId', 'Client ID')}{field('clientSecret', 'Client secret', { secret: true })}{field('redirectUrl', 'Redirect URL')}{field('scope', 'Scope')}{field('audience', 'Audience')}{field('resource', 'Resource')}{auth.oauth2GrantType !== 'implicit' ? field('origin', 'Origin header') : null}{field('state', 'State')}
+        {field('clientId', 'Client ID')}{field('clientSecret', 'Client secret', { secret: true })}{field('redirectUrl', 'Redirect URL')}{auth.oauth2GrantType === 'authorization_code' ? <label className="auth-toggle"><input checked={auth.useDefaultBrowser} onChange={(event) => update({ useDefaultBrowser: event.target.checked })} type="checkbox" /><span>Use system browser</span></label> : null}{field('scope', 'Scope')}{field('audience', 'Audience')}{field('resource', 'Resource')}{auth.oauth2GrantType !== 'implicit' ? field('origin', 'Origin header') : null}{field('state', 'State')}
         {auth.oauth2GrantType === 'implicit' ? <label>Response type<select value={auth.responseType === 'code' ? 'token' : auth.responseType} onChange={(event) => update({ responseType: event.target.value as ApiRequest['auth']['responseType'] })}><option value="token">Access token</option><option value="id_token">ID token</option><option value="id_token token">ID and access token</option></select></label> : null}
         {auth.oauth2GrantType === 'password' ? <>{field('username', 'Username')}{field('password', 'Password', { secret: true })}</> : null}
         {auth.oauth2GrantType === 'authorization_code' ? field('code', 'Authorization code', { secret: true }) : null}
@@ -190,6 +201,7 @@ export function AuthEditor({ request, environment, cookies, responses, requestCo
         {field('tokenPrefix', 'Token prefix', { placeholder: 'Bearer or NO_PREFIX' })}{field('accessToken', 'Access token', { secret: true })}{field('identityToken', 'Identity token', { secret: true })}
         {auth.oauth2GrantType !== 'implicit' ? <button className="auth-action primary" disabled={busy || !auth.accessTokenUrl} onClick={() => void acquireToken()} type="button">{busyAction === 'token' ? 'Requesting token…' : auth.accessToken && auth.refreshToken ? 'Refresh token' : 'Fetch token'}</button> : null}
         {auth.accessToken || auth.identityToken || auth.refreshToken ? <button className="auth-action" disabled={busy} onClick={() => update({ accessToken: '', identityToken: '', refreshToken: '', expiresAt: 0 })} type="button">Clear tokens</button> : null}
+        <button className="auth-action" disabled={busy || !canCaptureOAuth2Callback()} onClick={() => void clearBrowserSession()} type="button">Clear OAuth 2 session</button>
       </> : null}
       {auth.type === 'ntlm' ? <>{field('username', 'Username')}{field('password', 'Password', { secret: true })}{field('ntlmDomain', 'Domain')}{field('ntlmWorkstation', 'Workstation')}</> : null}
       {auth.type === 'iam' ? <>{field('awsAccessKeyId', 'Access key ID')}{field('awsSecretAccessKey', 'Secret access key', { secret: true })}{field('awsSessionToken', 'Session token', { secret: true })}{field('awsRegion', 'Region')}{field('awsService', 'Service')}</> : null}
@@ -202,7 +214,7 @@ export function AuthEditor({ request, environment, cookies, responses, requestCo
         <label className="auth-wide">PKCS#8 private key<textarea value={auth.asapPrivateKey} onChange={(event) => update({ asapPrivateKey: event.target.value })} placeholder="-----BEGIN PRIVATE KEY-----" /></label>
       </> : null}
       {auth.type === 'netrc' ? <label className="auth-wide auth-file">Netrc contents<textarea value={auth.netrc} onChange={(event) => update({ netrc: event.target.value })} placeholder="machine api.example.com login user password secret" /><span>Parsed locally and matched to the request hostname.</span><input aria-label="Choose Netrc file" type="file" onChange={(event) => { const file = event.target.files?.[0]; if (file) void file.text().then((netrc) => update({ netrc })); }} /></label> : null}
-      {authorizationReady ? <div className="auth-callback-status"><strong>Browser authorization active</strong><span>Callback · {authorizationReady.redirectUrl}</span><code>{authorizationReady.authorizationUrl}</code></div> : null}
+      {authorizationReady ? <div className="auth-callback-status"><strong>{authorizationReady.browserMode === 'embedded' ? 'Built-in browser authorization active' : 'System browser authorization active'}</strong><span>Callback · {authorizationReady.redirectUrl}</span><code>{authorizationReady.authorizationUrl}</code></div> : null}
       {message ? <div className="auth-message" role="status">{message}</div> : null}
     </div>
   );

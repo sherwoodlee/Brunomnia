@@ -52,6 +52,7 @@ export type AuthConfig = {
   resource: string;
   origin: string;
   redirectUrl: string;
+  useDefaultBrowser: boolean;
   credentialsInBody: boolean;
   state: string;
   code: string;
@@ -432,7 +433,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 40;
+  version: 41;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -487,6 +488,7 @@ export type AppPreferences = {
   requestTimeoutMs: number;
   validateCertificates: boolean;
   validateAuthCertificates: boolean;
+  clearOAuth2SessionOnRestart: boolean;
   proxyEnabled: boolean;
   httpProxy: string;
   httpsProxy: string;
