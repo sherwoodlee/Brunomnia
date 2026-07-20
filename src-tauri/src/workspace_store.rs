@@ -1720,6 +1720,7 @@ mod tests {
         let initial = load(&root, None, &workspace("Initial")).unwrap();
         let workspace_id = initial.active_workspace_id;
         let baseline = create_snapshot(&root, &workspace_id, "Baseline").unwrap();
+        assert_eq!(baseline.file_count, 0);
         save(&root, &workspace_id, &workspace("Changed")).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(2));
         create_snapshot(&root, &workspace_id, "Changed version").unwrap();

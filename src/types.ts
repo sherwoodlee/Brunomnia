@@ -433,7 +433,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 41;
+  version: 42;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

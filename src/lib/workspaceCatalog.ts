@@ -1,5 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { cloneSeedWorkspace, createBlankRequest } from '../data/seed';
+import { cloneSeedWorkspace } from '../data/seed';
 import type { AppPreferences, Workspace } from '../types';
 import { duplicateProjectWorkspace, listProjectWorkspaces, moveProjectWorkspace, type ProjectWorkspaceSummary } from './projectWorkspaces';
 import { migrateWorkspace } from './storage';
@@ -76,26 +76,13 @@ const isWorkspaceEnvelope = (value: unknown): value is Record<string, unknown> =
 
 export const createBlankWorkspace = (name: string, preferences: AppPreferences): Workspace => {
   const workspace = cloneSeedWorkspace();
-  const request = createBlankRequest(`request-${crypto.randomUUID()}`);
-  const environmentId = `environment-${crypto.randomUUID()}`;
   return {
     ...workspace,
     name: name.trim().slice(0, 200) || 'Untitled Project',
-    activeRequestId: request.id,
-    activeEnvironmentId: environmentId,
-    collections: [{
-      id: `collection-${crypto.randomUUID()}`,
-      name: 'Requests',
-      expanded: true,
-      requests: [request],
-      folders: [],
-      resourceOrder: [request.id],
-      environment: [],
-      subEnvironments: [],
-      activeSubEnvironmentId: '',
-      documentation: '',
-    }],
-    environments: [{ id: environmentId, name: 'Base Environment', variables: [], parentId: '', private: false }],
+    activeRequestId: '',
+    activeEnvironmentId: '',
+    collections: [],
+    environments: [],
     history: [],
     apiDesigns: [],
     mockServers: [],
@@ -377,7 +364,7 @@ const initializeBrowserCatalog = (): WorkspaceCatalogSnapshot => {
   if (!catalog?.entries.length) {
     const legacyRaw = localStorage.getItem(legacyStorageKey);
     const legacy = parseBrowserWorkspace(legacyRaw);
-    const workspace = legacy ?? cloneSeedWorkspace();
+    const workspace = legacy ?? createBlankWorkspace('Local Workspace', cloneSeedWorkspace().preferences);
     const id = legacy ? 'local-workspace' : catalogWorkspaceId();
     localStorage.setItem(projectStorageKey(id), JSON.stringify(workspace));
     catalog = { version: 1, activeWorkspaceId: id, entries: [browserCatalogEntry(id, workspace)] };
@@ -435,7 +422,7 @@ const normalizeSnapshotEntries = (value: unknown): WorkspaceSnapshotEntry[] => {
 
 export const loadWorkspaceCatalog = async (): Promise<WorkspaceCatalogSnapshot> => {
   if (isTauri()) {
-    const snapshot = await invoke<Omit<WorkspaceCatalogSnapshot, 'workspace'> & { workspace: unknown }>('workspace_catalog_load', { defaultWorkspace: cloneSeedWorkspace() });
+    const snapshot = await invoke<Omit<WorkspaceCatalogSnapshot, 'workspace'> & { workspace: unknown }>('workspace_catalog_load', { defaultWorkspace: createBlankWorkspace('Local Workspace', cloneSeedWorkspace().preferences) });
     return normalizeCatalogSnapshot(snapshot);
   }
   return initializeBrowserCatalog();

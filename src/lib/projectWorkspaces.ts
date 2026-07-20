@@ -1,4 +1,3 @@
-import { createBlankRequest } from '../data/seed';
 import type { Collection, CookieRecord, Environment, KeyValue, UnitTestSuite, Workspace } from '../types';
 
 export type ProjectWorkspaceScope = 'collection' | 'design' | 'mock-server' | 'environment' | 'mcp';
@@ -42,6 +41,8 @@ export const listProjectWorkspaces = (workspace: Workspace): ProjectWorkspaceSum
     ...workspace.mcpClients.map((client): ProjectWorkspaceSummary => ({ id: client.id, name: client.name, scope: 'mcp', label: 'MCP Client' })),
   ];
 };
+
+export const isProjectWorkspaceEmpty = (workspace: Workspace) => listProjectWorkspaces(workspace).length === 0 && workspace.testSuites.length === 0;
 
 const cloneCollection = (source: Collection, name: string, id: IdFactory) => {
   const collectionId = id('collection');
@@ -245,32 +246,13 @@ const partition = <Item>(items: Item[], belongs: (item: Item) => boolean) => ({
   remaining: items.filter((item) => !belongs(item)),
 });
 
-const fallbackCollection = (id: IdFactory): Collection => {
-  const request = createBlankRequest(id('request'));
-  return {
-    id: id('collection'),
-    name: 'Requests',
-    expanded: true,
-    requests: [request],
-    folders: [],
-    resourceOrder: [request.id],
-    environment: [],
-    environmentEditorMode: 'table',
-    subEnvironments: [],
-    activeSubEnvironmentId: '',
-    documentation: '',
-  };
-};
-
-const repairSourceCollections = (workspace: Workspace, id: IdFactory) => {
-  if (!workspace.collections.length) workspace.collections.push(fallbackCollection(id));
+const repairSourceCollections = (workspace: Workspace) => {
   const requestIds = new Set(workspace.collections.flatMap((collection) => collection.requests.map((request) => request.id)));
   if (!requestIds.has(workspace.activeRequestId)) workspace.activeRequestId = workspace.collections.flatMap((collection) => collection.requests)[0]?.id ?? '';
 };
 
-const repairSourceEnvironments = (workspace: Workspace, id: IdFactory) => {
-  if (!workspace.environments.length) workspace.environments.push({ id: id('environment'), name: 'Base Environment', variables: [], environmentEditorMode: 'table', parentId: '', private: false });
-  if (!workspace.environments.some((environment) => environment.id === workspace.activeEnvironmentId)) workspace.activeEnvironmentId = workspace.environments[0].id;
+const repairSourceEnvironments = (workspace: Workspace) => {
+  if (!workspace.environments.some((environment) => environment.id === workspace.activeEnvironmentId)) workspace.activeEnvironmentId = workspace.environments[0]?.id ?? '';
 };
 
 const splitResponseFilters = (filters: Workspace['responseFilters'], requestIds: Set<string>) => {
@@ -342,7 +324,7 @@ export const moveProjectWorkspace = (
   if (summary.scope === 'collection') {
     const collection = source.collections.find((candidate) => candidate.id === summary.id)!;
     moveCollectionOwnedResources(source, target, collection, id);
-    repairSourceCollections(source, id);
+    repairSourceCollections(source);
   } else if (summary.scope === 'design') {
     const design = source.apiDesigns.find((candidate) => candidate.id === summary.id)!;
     const generated = source.collections.find((collection) => collection.id === design.generatedCollectionId);
@@ -350,7 +332,7 @@ export const moveProjectWorkspace = (
     if (generated) moveCollectionOwnedResources(source, target, generated, id);
     source.apiDesigns = source.apiDesigns.filter((candidate) => candidate.id !== design.id);
     target.apiDesigns.push(design);
-    repairSourceCollections(source, id);
+    repairSourceCollections(source);
   } else if (summary.scope === 'mock-server') {
     const server = source.mockServers.find((candidate) => candidate.id === summary.id)!;
     assertNoIdentityCollisions(target, [server.id, ...server.routes.map((route) => route.id)]);
@@ -363,7 +345,7 @@ export const moveProjectWorkspace = (
     source.environments = source.environments.filter((environment) => !branchIds.has(environment.id));
     target.environments.push(...branch);
     target.activeEnvironmentId = summary.id;
-    repairSourceEnvironments(source, id);
+    repairSourceEnvironments(source);
   } else {
     const client = source.mcpClients.find((candidate) => candidate.id === summary.id)!;
     const sessions = partition(source.mcpSessions, (session) => session.clientId === client.id);

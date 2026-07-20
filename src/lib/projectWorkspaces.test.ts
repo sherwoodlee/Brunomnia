@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
 import type { McpClient } from '../types';
-import { duplicateProjectWorkspace, listProjectWorkspaces, moveProjectWorkspace } from './projectWorkspaces';
+import { duplicateProjectWorkspace, isProjectWorkspaceEmpty, listProjectWorkspaces, moveProjectWorkspace } from './projectWorkspaces';
 
 const idFactory = () => {
   let sequence = 0;
@@ -18,8 +18,8 @@ const emptyTarget = () => {
   const workspace = cloneSeedWorkspace();
   workspace.collections = [];
   workspace.activeRequestId = '';
-  workspace.environments = [{ id: 'target-environment', name: 'Target', variables: [] }];
-  workspace.activeEnvironmentId = 'target-environment';
+  workspace.environments = [];
+  workspace.activeEnvironmentId = '';
   workspace.history = [];
   workspace.apiDesigns = [];
   workspace.mockServers = [];
@@ -36,6 +36,14 @@ const emptyTarget = () => {
 };
 
 describe('typed project workspaces', () => {
+  it('recognizes a project with no typed files or standalone suites as empty', () => {
+    const workspace = emptyTarget();
+    expect(listProjectWorkspaces(workspace)).toEqual([]);
+    expect(isProjectWorkspaceEmpty(workspace)).toBe(true);
+    workspace.testSuites.push({ id: 'suite', name: 'Standalone', collectionId: '', sortKey: 0, tests: [] });
+    expect(isProjectWorkspaceEmpty(workspace)).toBe(false);
+  });
+
   it('lists every pinned workspace scope from top-level project resources', () => {
     const workspace = cloneSeedWorkspace();
     workspace.apiDesigns = [{ id: 'design', name: 'Orders API', contents: '{}' }];
@@ -169,8 +177,8 @@ describe('typed project workspaces', () => {
     expect(result.target.streamSessions[0].id).toBe('stream');
     expect(result.target.responseFilters?.[request.id].filter).toBe('$.id');
     expect(result.target.cookies).toContainEqual(expect.objectContaining({ name: 'sid', value: 'secret' }));
-    expect(result.source.collections).toHaveLength(1);
-    expect(result.source.collections[0].id).not.toBe(collection.id);
+    expect(result.source.collections).toEqual([]);
+    expect(result.source.activeRequestId).toBe('');
     expect(result.source.history).toEqual([]);
     expect(source.collections[0].id).toBe(collection.id);
   });
@@ -189,8 +197,8 @@ describe('typed project workspaces', () => {
     expect(result.target.collections).toContainEqual(expect.objectContaining({ id: generated.id }));
     expect(result.target.testSuites).toContainEqual(expect.objectContaining({ id: 'suite', collectionId: generated.id }));
     expect(result.source.apiDesigns).toEqual([]);
-    expect(result.source.collections).toHaveLength(1);
-    expect(result.source.collections[0].id).not.toBe(generated.id);
+    expect(result.source.collections).toEqual([]);
+    expect(result.source.activeRequestId).toBe('');
   });
 
   it('moves mock, environment, and MCP scopes with their owned children', () => {
@@ -207,8 +215,8 @@ describe('typed project workspaces', () => {
 
     const movedEnvironment = moveProjectWorkspace(source, emptyTarget(), 'root', idFactory());
     expect(movedEnvironment.target.environments).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'root' }), expect.objectContaining({ id: 'child', parentId: 'root' })]));
-    expect(movedEnvironment.source.environments).toHaveLength(1);
-    expect(movedEnvironment.source.environments[0].id).not.toBe('root');
+    expect(movedEnvironment.source.environments).toEqual([]);
+    expect(movedEnvironment.source.activeEnvironmentId).toBe('');
 
     const movedMcp = moveProjectWorkspace(source, emptyTarget(), 'mcp-source', idFactory());
     expect(movedMcp.target.mcpClients[0].id).toBe('mcp-source');

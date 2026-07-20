@@ -628,6 +628,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     version?: number;
     collections: Array<{ requests: Array<Partial<Workspace['collections'][number]['requests'][number]>> } & Omit<Workspace['collections'][number], 'requests'>>;
   };
+  const supportsEmptyProjects = (workspace.version ?? 0) >= 42;
   const completeGraphqlSchemaModel = (workspace.version ?? 0) >= 34;
   const defaults = requestDefaults();
   const importedCollections = workspace.collections.map((collection) => ({
@@ -780,7 +781,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
       };
     }),
   }));
-  const collections = (importedCollections.length ? importedCollections : seed.collections).map((collection) => {
+  const collections = (importedCollections.length || supportsEmptyProjects ? importedCollections : seed.collections).map((collection) => {
     const folderIds = new Set((collection.folders ?? []).map((folder) => folder.id));
     const resourceIds = new Set([...folderIds, ...collection.requests.map((request) => request.id)]);
     const orderedIds = Array.isArray(collection.resourceOrder) ? collection.resourceOrder : [];
@@ -798,7 +799,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
       requests: collection.requests.map((request) => ({ ...request, folderId: request.folderId && folderIds.has(request.folderId) ? request.folderId : '' })),
     };
   });
-  const environments = normalizeEnvironments(workspace.environments, seed.environments);
+  const environments = normalizeEnvironments(workspace.environments, supportsEmptyProjects ? [] : seed.environments);
   const requestIds = new Set(collections.flatMap((collection) => collection.requests.map((request) => request.id)));
   const environmentIds = new Set(environments.map((environment) => environment.id));
   const governance = normalizeGovernance(workspace.governance, seed.governance);
@@ -806,10 +807,10 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const mcpClients = normalizeMcpClients(workspace.mcpClients);
   return {
     ...workspace,
-    version: 41,
+    version: 42,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
-    activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
+    activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',
     environments,
     history: Array.isArray(workspace.history) ? workspace.history : [],
     apiDesigns: (workspace.apiDesigns ?? seed.apiDesigns).map((design) => ({

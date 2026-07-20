@@ -20,6 +20,23 @@ describe('local project catalog', () => {
     Object.defineProperty(globalThis, 'isTauri', { configurable: true, value: false });
   });
 
+  const seedActiveCatalog = async () => {
+    const initial = await loadWorkspaceCatalog();
+    await saveCatalogWorkspace(initial.activeWorkspaceId, { ...cloneSeedWorkspace(), name: initial.workspace.name, preferences: initial.workspace.preferences });
+    return openCatalogWorkspace(initial.activeWorkspaceId);
+  };
+
+  it('creates initial and named local projects with no typed files', async () => {
+    const initial = await loadWorkspaceCatalog();
+    expect(initial.workspace).toMatchObject({ name: 'Local Workspace', version: 42, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [] });
+    expect(await listCatalogProjectWorkspaces(initial.activeWorkspaceId)).toEqual([]);
+
+    const created = await createCatalogWorkspace(createBlankWorkspace('Empty Project', initial.workspace.preferences), 'empty-project');
+    expect(created.workspace).toMatchObject({ name: 'Empty Project', collections: [], environments: [], apiDesigns: [], mockServers: [], mcpClients: [] });
+    expect(await listCatalogProjectWorkspaces('empty-project')).toEqual([]);
+    expect((await createCatalogWorkspaceSnapshot('empty-project', 'Empty baseline')).fileCount).toBe(0);
+  });
+
   it('migrates the legacy browser workspace and manages project lifecycle', async () => {
     localStorage.setItem('brunomnia.workspace.v1', JSON.stringify({ ...cloneSeedWorkspace(), name: 'Legacy' }));
     const migrated = await loadWorkspaceCatalog();
@@ -87,7 +104,7 @@ describe('local project catalog', () => {
   });
 
   it('duplicates one typed project file into another local project', async () => {
-    const initial = await loadWorkspaceCatalog();
+    const initial = await seedActiveCatalog();
     const sourceCollectionId = initial.workspace.collections[0].id;
     const sourceCollectionCount = initial.workspace.collections.length;
     await createCatalogWorkspace(createBlankWorkspace('Destination', initial.workspace.preferences), 'destination');
@@ -102,7 +119,7 @@ describe('local project catalog', () => {
   });
 
   it('moves one typed project file between local projects without changing its identity', async () => {
-    const initial = await loadWorkspaceCatalog();
+    const initial = await seedActiveCatalog();
     const mockServerId = initial.workspace.mockServers[0].id;
     await createCatalogWorkspace(createBlankWorkspace('Destination', initial.workspace.preferences), 'destination');
     await openCatalogWorkspace(initial.activeWorkspaceId);
@@ -119,7 +136,7 @@ describe('local project catalog', () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date('2026-07-20T10:00:00.000Z'));
-      const initial = await loadWorkspaceCatalog();
+      const initial = await seedActiveCatalog();
       const workspaceId = initial.activeWorkspaceId;
       await createCatalogWorkspaceSnapshot(workspaceId, 'Baseline');
       await saveCatalogWorkspace(workspaceId, { ...initial.workspace, name: 'Changed' });
@@ -239,6 +256,16 @@ describe('local project catalog', () => {
 });
 
 describe('workspace migrations', () => {
+  it('preserves explicit v42 empty projects while repairing legacy empty documents', () => {
+    const empty = createBlankWorkspace('Empty', cloneSeedWorkspace().preferences);
+    expect(migrateWorkspace(empty)).toMatchObject({ version: 42, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [] });
+
+    const legacy = { ...empty, version: 41 };
+    const migratedLegacy = migrateWorkspace(legacy);
+    expect(migratedLegacy.collections.length).toBeGreaterThan(0);
+    expect(migratedLegacy.environments.length).toBeGreaterThan(0);
+  });
+
   it('normalizes persisted GGUF settings with Insomnia-compatible defaults and bounds', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
     workspace.version = 39;
@@ -298,7 +325,7 @@ describe('workspace migrations', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(41);
+    expect(migrated.version).toBe(42);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
@@ -350,7 +377,7 @@ describe('workspace migrations', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(41);
+    expect(migrated.version).toBe(42);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
@@ -374,7 +401,7 @@ describe('workspace migrations', () => {
     }, { id: 'orphan', suiteId: 'missing', tests: [] }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(41);
+    expect(migrated.version).toBe(42);
     expect(migrated.testSuites).toHaveLength(1);
     expect(migrated.testSuites[0].collectionId).toBe(migrated.collections[0].id);
     expect(migrated.testSuites[0].tests.map((test) => [test.id, test.requestId])).toEqual([['test-two', null], ['test-one', requestId]]);
@@ -428,7 +455,7 @@ describe('workspace migrations', () => {
     };
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(41);
+    expect(migrated.version).toBe(42);
     expect(migrated.collections[0].requests[0].grpc).toMatchObject({
       protoText: 'syntax = "proto3"; service Legacy {}',
       protoEntryPath: 'schema.proto',
@@ -453,7 +480,7 @@ describe('workspace migrations', () => {
 
     const migrated = migrateWorkspace(workspace);
     const grpc = migrated.collections[0].requests[0].grpc;
-    expect(migrated.version).toBe(41);
+    expect(migrated.version).toBe(42);
     expect(grpc.descriptorSource).toBe('buf');
     expect(grpc.reflectionApiUrl).toHaveLength(8_192);
     expect(grpc.reflectionApiKey).toHaveLength(65_536);
@@ -470,7 +497,7 @@ describe('workspace migrations', () => {
       clients: [null, { id: 'client', host: 'api.example.test:8443', enabled: true, certificatePem: 'cert-pem', keyPem: 'key-pem' }, { id: 'pfx', host: '*.internal.test', enabled: true, pfxBase64: 'cGZ4', passphrase: 'secret' }],
     };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(41);
+    expect(migrated.version).toBe(42);
     expect(migrated.certificates).toEqual({
       ca: { enabled: true, pem: 'ca-pem' },
       clients: [
@@ -563,7 +590,7 @@ describe('workspace migrations', () => {
     environments[0].environmentEditorMode = 'raw';
     (environments[0].variables as Array<Record<string, unknown>>).push({ id: 'global-config', name: 'globalConfig', value: '{"enabled":true}', valueType: 'json', enabled: true });
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(41);
+    expect(migrated.version).toBe(42);
     expect(migrated.collections[0]).toMatchObject({ environmentEditorMode: 'raw', environment: [expect.objectContaining({ name: 'config', valueType: 'json' })] });
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', environmentEditorMode: 'raw', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
@@ -642,7 +669,7 @@ describe('workspace migrations', () => {
     }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(41);
+    expect(migrated.version).toBe(42);
     expect(migrated.mcpClients[0].env).toEqual([{ id: 'stdio-env', name: 'MODE', value: 'review', enabled: false, description: '' }]);
     expect(migrated.mcpClients[0].resourceTemplates[0]).toMatchObject({
       uri: 'files://{/path}{?query,limit}',

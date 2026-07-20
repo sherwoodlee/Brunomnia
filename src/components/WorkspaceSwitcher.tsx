@@ -374,7 +374,7 @@ export function WorkspaceSwitcher({
         <form aria-labelledby="workspace-file-move-title" aria-modal="true" className="modal workspace-file-duplicate-modal" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => void submitProjectWorkspaceMove(event)} role="dialog">
           <header><div><small>Move {moveFile.label.toLowerCase()}</small><h2 id="workspace-file-move-title">{moveFile.name}</h2></div><button aria-label="Close" className="icon-button subtle" onClick={() => setMoveFile(undefined)} type="button"><Icon name="x" /></button></header>
           <label>Destination project<select autoFocus onChange={(event) => setMoveTargetId(event.target.value)} value={moveTargetId}>{entries.filter((entry) => entry.id !== activeWorkspaceId && entry.status !== 'unavailable').map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
-          <p>The file keeps its resource identities, moves its owned local evidence, and opens in the destination. A minimal Requests or Base Environment file is created if the source would otherwise be unusable.</p>
+          <p>The file keeps its resource identities, moves its owned local evidence, and opens in the destination. Moving the final file leaves the source project empty.</p>
           <footer><button className="secondary-button" onClick={() => setMoveFile(undefined)} type="button">Cancel</button><button className="primary-button" disabled={busy || !moveTargetId} type="submit"><Icon name="folder" size={13} /> Move file</button></footer>
         </form>
       </div> : null}
