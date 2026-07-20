@@ -2538,6 +2538,18 @@ Compatibility bounds remain explicit: managed project ownership is scoped to the
 
 Compatibility bounds remain explicit: built-in GitHub/GitLab authentication uses user-created provider tokens rather than a Brunomnia-hosted OAuth client or account broker; custom credentials deliberately support user-selected HTTP as well as HTTPS to match the pinned generic provider. System Git helpers and SSH remain available for enterprise hosts and native authentication. Git Sync and version control is now `Complete`; exactly 12 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 255 — corrective local-project boundary audit (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned project-type audit | Complete | Pinned `project-type-select.tsx` defines Local Vault, Cloud Sync, and Git Sync as three separate storage types; Local Vault is device-local/offline, Cloud Sync is organization-backed, and Git Sync uses the provider flow completed in Milestone 254 |
+| Local persistence | Complete | Account-free create/switch/rename/duplicate/reorder/delete/trash/restore/snapshot flows, genuinely empty projects, project-scoped vaults, typed-file duplication/moves, per-file cookies/certificates, physical records, backups, corruption recovery, legacy migration, and CLI assembly already cover the pinned local storage contract |
+| Cloud boundary | Complete | Pinned organization synchronization reads an authenticated user session, downloads organizations/projects, and redirects into a discovered cloud project; those capabilities belong only to Cloud sync and collaboration and remain honestly open in that row |
+| Git boundary | Complete | Local Vault may add Git Sync, but credential/provider/repository onboarding and the ordinary Git lifecycle are owned by the now-complete Git Sync row rather than duplicated as local-persistence gaps |
+| No false requirement | Complete | Local-project completion does not claim hosted organization discovery, real-time collaboration, comments, cloud branches/history, or per-user key wrapping; it removes only the cross-row double counting |
+
+Compatibility bounds remain explicit: Brunomnia's richer local snapshots, physical typed-file records, and browser fallback are account-free extensions, not substitutes for the still-open Cloud Sync service. Local projects and persistence is now `Complete`; exactly 11 parity rows remain incomplete, so Brunomnia is not declared feature-complete. No executable behavior changed in this corrective audit.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.
