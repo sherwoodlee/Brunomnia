@@ -89,6 +89,7 @@ export const createBlankWorkspace = (name: string, preferences: AppPreferences):
     cookies: [],
     responses: [],
     streamSessions: [],
+    mcpSessions: [],
     responseFilters: {},
     project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
     plugins: [],

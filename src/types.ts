@@ -300,6 +300,31 @@ export type StoredStreamSession = {
   timeline?: ResponseTimelineEntry[];
 };
 
+export type McpHistoryEventCategory = 'message' | 'notification' | 'open' | 'close' | 'error';
+
+export type McpHistoryEvent = {
+  id: string;
+  direction: 'client' | 'server' | 'stderr';
+  method: string;
+  detail: string;
+  timestamp: string;
+  category: McpHistoryEventCategory;
+};
+
+export type McpHistorySession = {
+  id: string;
+  clientId: string;
+  clientName: string;
+  endpoint: string;
+  environmentId: string;
+  transport: 'http' | 'stdio';
+  startedAt: string;
+  endedAt?: string;
+  status: 'connecting' | 'connected' | 'disconnected' | 'error';
+  events: McpHistoryEvent[];
+  timeline: ResponseTimelineEntry[];
+};
+
 export type StreamConnectionMetadata = {
   status: number;
   statusText: string;
@@ -407,7 +432,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 38;
+  version: 39;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -423,6 +448,7 @@ export type Workspace = {
   cookies: CookieRecord[];
   responses: StoredResponse[];
   streamSessions: StoredStreamSession[];
+  mcpSessions: McpHistorySession[];
   responseFilters?: Record<string, { filter: string; history: string[]; previewMode: ResponsePreviewMode }>;
   certificates: WorkspaceCertificates;
   project: ProjectConfig;

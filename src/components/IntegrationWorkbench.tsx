@@ -1,10 +1,11 @@
 import { isTauri } from '@tauri-apps/api/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Environment, JsonValue, KeyValue, McpClient, Workspace } from '../types';
+import type { Environment, JsonValue, KeyValue, McpClient, McpHistoryEventCategory, Workspace } from '../types';
 import { generateAiText } from '../lib/ai';
 import type { SendRequestContext } from '../lib/http';
 import { loadKonnectControlPlanes, syncKonnectRoutes } from '../lib/konnect';
-import { disconnectMcpClient, discoverMcpClient, hasMcpClientSession, invokeMcpOperation, mcpResourceSubscriptionState, notifyMcpRootsChanged, respondMcpServerRequest, setMcpResourceSubscription, type McpEvent, type McpReviewedServerRequest, type McpServerRequest, type McpServerRequestResponse } from '../lib/mcp';
+import { disconnectMcpClient, discoverMcpClient, hasMcpClientSession, invokeMcpOperation, mcpClientSessionState, mcpResourceSubscriptionState, notifyMcpRootsChanged, respondMcpServerRequest, setMcpResourceSubscription, type McpEvent, type McpReviewedServerRequest, type McpServerRequest, type McpServerRequestResponse } from '../lib/mcp';
+import { appendMcpHistoryEvents, clearMcpHistorySessions, createMcpHistorySession, deleteMcpHistorySession, filterMcpHistoryEvents, finishMcpHistorySession, markMcpHistoryConnected, mcpHistorySections, retainMcpHistorySession, visibleMcpHistory } from '../lib/mcpHistory';
 import { initialMcpToolParameters, mcpParameterIssues, renameMcpParameterValue, withMcpParameterValue, withoutMcpParameterValue, type McpParameterPath } from '../lib/mcpParameterSchema';
 import { expandMcpUriTemplate } from '../lib/mcpUriTemplate';
 import { plaintextSecretCandidates } from '../lib/security';
@@ -102,6 +103,13 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
   const [parameterDrafts, setParameterDrafts] = useState<Record<string, string>>({});
   const [parameterVariants, setParameterVariants] = useState<Record<string, number>>({});
   const [events, setEvents] = useState<McpEvent[]>([]);
+  const [selectedMcpHistoryId, setSelectedMcpHistoryId] = useState('');
+  const [mcpHistoryTab, setMcpHistoryTab] = useState<'events' | 'notifications' | 'console'>('events');
+  const [mcpEventCategory, setMcpEventCategory] = useState<'' | Exclude<McpHistoryEventCategory, 'notification'>>('');
+  const [mcpEventSearch, setMcpEventSearch] = useState('');
+  const [mcpNotificationSearch, setMcpNotificationSearch] = useState('');
+  const [mcpEventsClearedThrough, setMcpEventsClearedThrough] = useState('');
+  const [selectedMcpEventId, setSelectedMcpEventId] = useState('');
   const [serverRequests, setServerRequests] = useState<McpReviewedServerRequest[]>([]);
   const [respondingServerRequest, setRespondingServerRequest] = useState('');
   const [result, setResult] = useState('');
@@ -110,10 +118,23 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
   const [message, setMessage] = useState('');
   const [, setSessionRevision] = useState(0);
   const activeMcpAbort = useRef<AbortController | undefined>(undefined);
+  const mcpEnvironmentScope = useRef({ clientId: '', environmentId: '' });
   const native = isTauri();
   const active = workspace.mcpClients.find((client) => client.id === activeId) ?? workspace.mcpClients[0];
   const activeServerRequests = serverRequests.filter((request) => request.clientId === active?.id);
   const connected = Boolean(active && hasMcpClientSession(active, workspaceId));
+  const activeEnvironmentId = environment?.id ?? workspace.activeEnvironmentId;
+  const activeMcpHistory = active ? visibleMcpHistory(workspace.mcpSessions, active.id, activeEnvironmentId, workspace.preferences.filterResponsesByEnv) : [];
+  const selectedMcpHistory = activeMcpHistory.find((session) => session.id === selectedMcpHistoryId) ?? activeMcpHistory[0];
+  const visibleMcpEvents = selectedMcpHistory
+    ? filterMcpHistoryEvents(selectedMcpHistory.events, 'events', mcpEventCategory, mcpEventSearch, mcpEventsClearedThrough)
+    : [];
+  const visibleMcpNotifications = selectedMcpHistory
+    ? filterMcpHistoryEvents(selectedMcpHistory.events, 'notifications', '', mcpNotificationSearch)
+    : [];
+  const displayedMcpEvents = mcpHistoryTab === 'notifications' ? visibleMcpNotifications : visibleMcpEvents;
+  const selectedMcpEvent = displayedMcpEvents.find((event) => event.id === selectedMcpEventId);
+  const activeEnvironmentMcpHistoryCount = activeMcpHistory.filter((session) => session.environmentId === activeEnvironmentId).length;
   const oauthClientStatus = active?.oauthClientId ? 'manual client' : active?.oauthRegisteredClientId ? 'dynamically registered client' : 'client discovery pending';
   const oauthTokenStatus = active?.authType !== 'oauth2' || !active.token
     ? 'Not authorized'
@@ -126,6 +147,25 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
   const secretCandidates = plaintextSecretCandidates(workspace).filter((candidate) => /^(MCP|AI provider|Konnect)/.test(candidate));
 
   useEffect(() => () => activeMcpAbort.current?.abort(new DOMException('MCP operation canceled.', 'AbortError')), []);
+  useEffect(() => {
+    setSelectedMcpHistoryId('');
+    setMcpHistoryTab('events');
+    setMcpEventCategory('');
+    setMcpEventSearch('');
+    setMcpNotificationSearch('');
+    setMcpEventsClearedThrough('');
+    setSelectedMcpEventId('');
+  }, [active?.id]);
+  useEffect(() => {
+    setMcpEventCategory('');
+    setMcpEventSearch('');
+    setMcpNotificationSearch('');
+    setMcpEventsClearedThrough('');
+    setSelectedMcpEventId('');
+  }, [selectedMcpHistory?.id]);
+  useEffect(() => {
+    if (mcpHistoryTab === 'events') setSelectedMcpEventId(visibleMcpEvents[0]?.id ?? '');
+  }, [mcpHistoryTab, visibleMcpEvents[0]?.id]);
 
   const run = async (label: string, operation: (signal?: AbortSignal) => Promise<void>, cancelable = false) => {
     if (busy) return;
@@ -147,12 +187,60 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
   };
   const cancelMcpOperation = () => activeMcpAbort.current?.abort(new DOMException('MCP operation canceled.', 'AbortError'));
   const refreshSessionState = () => setSessionRevision((current) => current + 1);
+  const prepareMcpHistorySession = (client: McpClient) => {
+    const runtime = mcpClientSessionState(client, workspaceId);
+    const id = runtime?.connectionId ?? `mcp-response-${crypto.randomUUID()}`;
+    const history = createMcpHistorySession(client, activeEnvironmentId, id, runtime?.connectedAt);
+    onChangeWorkspace((current) => current.mcpSessions.some((session) => session.id === id) ? current : {
+      ...current,
+      mcpSessions: retainMcpHistorySession(current.mcpSessions, history, current.preferences.maxHistoryResponses, current.preferences.filterResponsesByEnv),
+    });
+    setSelectedMcpHistoryId(id);
+    return id;
+  };
+  const appendHistoryEvents = (sessionId: string, nextEvents: McpEvent[]) => {
+    if (!sessionId || !nextEvents.length) return;
+    onChangeWorkspace((current) => ({ ...current, mcpSessions: appendMcpHistoryEvents(current.mcpSessions, sessionId, nextEvents) }));
+  };
+  const markHistoryConnected = (sessionId: string) => {
+    if (!sessionId) return;
+    onChangeWorkspace((current) => ({ ...current, mcpSessions: markMcpHistoryConnected(current.mcpSessions, sessionId) }));
+  };
+  const finishHistory = (sessionId: string, status: 'disconnected' | 'error', detail: string) => {
+    if (!sessionId) return;
+    onChangeWorkspace((current) => ({ ...current, mcpSessions: finishMcpHistorySession(current.mcpSessions, sessionId, status, detail) }));
+  };
+  const uniqueOperationEvents = (outputEvents: McpEvent[], liveEvents: McpEvent[]) => outputEvents.filter((event) => !liveEvents.some((candidate) => candidate.method === event.method && candidate.detail === event.detail));
+  const recordMcpOutput = (sessionId: string, outputEvents: McpEvent[], liveEvents: McpEvent[], replace = true) => {
+    const pending = uniqueOperationEvents(outputEvents, liveEvents);
+    appendHistoryEvents(sessionId, pending);
+    const combined = [...outputEvents, ...liveEvents].slice(-1000);
+    setEvents((current) => replace ? combined : [...current, ...pending].slice(-1000));
+  };
+  const recordMcpFailure = (client: McpClient, sessionId: string, caught: unknown) => {
+    const detail = caught instanceof Error ? caught.message : String(caught);
+    const event: McpEvent = { direction: 'server', method: 'MCP error', detail, timestamp: new Date().toISOString() };
+    appendHistoryEvents(sessionId, [event]);
+    setEvents((current) => [...current, event].slice(-1000));
+    if (hasMcpClientSession(client, workspaceId)) markHistoryConnected(sessionId);
+    else finishHistory(sessionId, 'error', detail);
+  };
   const invalidateActiveSession = () => {
     if (!active) return;
+    const historySessionId = mcpClientSessionState(active, workspaceId)?.connectionId ?? '';
+    if (historySessionId) {
+      appendHistoryEvents(historySessionId, [{ direction: 'client', method: 'MCP session', detail: 'Connection settings changed; terminated the active connection.', timestamp: new Date().toISOString() }]);
+      finishHistory(historySessionId, 'disconnected', 'Connection settings changed; terminated the active connection.');
+    }
     activeMcpAbort.current?.abort(new DOMException('MCP operation canceled by connection change.', 'AbortError'));
     void disconnectMcpClient(active, environment, requestContext).catch(() => undefined);
     refreshSessionState();
   };
+  useEffect(() => {
+    const previous = mcpEnvironmentScope.current;
+    if (active && previous.clientId === active.id && previous.environmentId && previous.environmentId !== activeEnvironmentId && connected) invalidateActiveSession();
+    mcpEnvironmentScope.current = { clientId: active?.id ?? '', environmentId: activeEnvironmentId };
+  }, [active?.id, activeEnvironmentId]);
 
   const updateClient = (patch: Partial<McpClient>, revoke = false) => {
     if (!active || !canEdit) return;
@@ -177,7 +265,7 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
     setMessage('Cleared this MCP client’s local OAuth tokens.');
   };
   const persistMcpClient = (updated: McpClient) => onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === updated.id ? updated : client) }));
-  const liveMcpEventCollector = () => {
+  const liveMcpEventCollector = (historySessionId = '') => {
     const collected: McpEvent[] = [];
     return {
       collected,
@@ -185,6 +273,7 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
         collected.push(event);
         if (collected.length > 1000) collected.splice(0, collected.length - 1000);
         setEvents((current) => [...current, event].slice(-1000));
+        appendHistoryEvents(historySessionId, [event]);
       },
       onMcpServerRequest: (request: McpServerRequest) => {
         if (request.method === 'roots/list') return;
@@ -203,17 +292,27 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
   }, [active?.id, active?.roots, connected]);
 
   const discover = () => active && canEdit && run('Discovering MCP capabilities', async (signal) => {
-    const live = liveMcpEventCollector();
-    const discovered = await discoverMcpClient(active, environment, { ...requestContext, signal, cancellationId: `mcp-discover-${active.id}-${crypto.randomUUID()}`, onMcpClient: persistMcpClient, onMcpEvent: live.onMcpEvent, onMcpServerRequest: live.onMcpServerRequest, onMcpServerRequestCancelled: live.onMcpServerRequestCancelled });
-    onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === active.id ? discovered.client : client) }));
-    setEvents([...discovered.events, ...live.collected].slice(-1000));
-    refreshSessionState();
-    setMessage(`Discovered ${discovered.client.tools.length} tools, ${discovered.client.prompts.length} prompts, ${discovered.client.resources.length} resources, and ${discovered.client.resourceTemplates.length} templates${discovered.warnings.length ? ` · ${discovered.warnings.length} optional list calls unavailable` : ''}.`);
+    const historySessionId = prepareMcpHistorySession(active);
+    const live = liveMcpEventCollector(historySessionId);
+    try {
+      const discovered = await discoverMcpClient(active, environment, { ...requestContext, mcpHistorySessionId: historySessionId, signal, cancellationId: `mcp-discover-${active.id}-${crypto.randomUUID()}`, onMcpClient: persistMcpClient, onMcpEvent: live.onMcpEvent, onMcpServerRequest: live.onMcpServerRequest, onMcpServerRequestCancelled: live.onMcpServerRequestCancelled });
+      onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === active.id ? discovered.client : client) }));
+      recordMcpOutput(historySessionId, discovered.events, live.collected);
+      markHistoryConnected(historySessionId);
+      refreshSessionState();
+      setMessage(`Discovered ${discovered.client.tools.length} tools, ${discovered.client.prompts.length} prompts, ${discovered.client.resources.length} resources, and ${discovered.client.resourceTemplates.length} templates${discovered.warnings.length ? ` · ${discovered.warnings.length} optional list calls unavailable` : ''}.`);
+    } catch (caught) {
+      recordMcpFailure(active, historySessionId, caught);
+      throw caught;
+    }
   }, true);
   const disconnect = () => active && canEdit && run('Disconnecting MCP client', async () => {
+    const historySessionId = mcpClientSessionState(active, workspaceId)?.connectionId ?? '';
     const output = await disconnectMcpClient(active, environment, requestContext);
     setServerRequests((current) => current.filter((request) => request.clientId !== active.id));
+    appendHistoryEvents(historySessionId, output.events);
     setEvents((current) => [...current, ...output.events].slice(-1000));
+    finishHistory(historySessionId, 'disconnected', 'MCP connection closed by the user.');
     refreshSessionState();
     setMessage(output.terminated ? `Disconnected and terminated the MCP ${active.transport === 'stdio' ? 'STDIO process' : 'HTTP session'}.` : `Disconnected the local MCP ${active.transport === 'stdio' ? 'STDIO connection' : 'HTTP session'}.`);
   });
@@ -313,22 +412,36 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
       parsed = value as Record<string, unknown>;
     }
     catch { throw new Error('MCP parameters must be a JSON object.'); }
-    const live = liveMcpEventCollector();
-    const output = await invokeMcpOperation(active, operationKind, operationName, parsed, environment, { ...requestContext, signal, cancellationId: `mcp-invoke-${active.id}-${crypto.randomUUID()}`, onMcpClient: persistMcpClient, onMcpEvent: live.onMcpEvent, onMcpServerRequest: live.onMcpServerRequest, onMcpServerRequestCancelled: live.onMcpServerRequestCancelled });
-    onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === active.id ? output.client : client) }));
-    setEvents([...output.events, ...live.collected].slice(-1000));
-    refreshSessionState();
-    setResult(JSON.stringify(output.result, null, 2));
-    setMessage(`${operationKind} operation completed.`);
+    const historySessionId = prepareMcpHistorySession(active);
+    const live = liveMcpEventCollector(historySessionId);
+    try {
+      const output = await invokeMcpOperation(active, operationKind, operationName, parsed, environment, { ...requestContext, mcpHistorySessionId: historySessionId, signal, cancellationId: `mcp-invoke-${active.id}-${crypto.randomUUID()}`, onMcpClient: persistMcpClient, onMcpEvent: live.onMcpEvent, onMcpServerRequest: live.onMcpServerRequest, onMcpServerRequestCancelled: live.onMcpServerRequestCancelled });
+      onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === active.id ? output.client : client) }));
+      recordMcpOutput(historySessionId, output.events, live.collected);
+      markHistoryConnected(historySessionId);
+      refreshSessionState();
+      setResult(JSON.stringify(output.result, null, 2));
+      setMessage(`${operationKind} operation completed.`);
+    } catch (caught) {
+      recordMcpFailure(active, historySessionId, caught);
+      throw caught;
+    }
   }, true);
 
   const toggleResourceSubscription = () => active && selectedResource && canEdit && run(resourceSubscription.subscribed ? 'Unsubscribing from MCP resource' : 'Subscribing to MCP resource', async () => {
-    const live = liveMcpEventCollector();
-    const output = await setMcpResourceSubscription(active, selectedResource.uri, !resourceSubscription.subscribed, environment, { ...requestContext, onMcpClient: persistMcpClient, onMcpEvent: live.onMcpEvent, onMcpServerRequest: live.onMcpServerRequest, onMcpServerRequestCancelled: live.onMcpServerRequestCancelled });
-    persistMcpClient(output.client);
-    setEvents((current) => [...current, ...output.events.filter((event) => !live.collected.some((candidate) => candidate.method === event.method && candidate.detail === event.detail))].slice(-1000));
-    refreshSessionState();
-    setMessage(`${output.subscribed ? 'Subscribed to' : 'Unsubscribed from'} ${selectedResource.name || selectedResource.uri}.`);
+    const historySessionId = prepareMcpHistorySession(active);
+    const live = liveMcpEventCollector(historySessionId);
+    try {
+      const output = await setMcpResourceSubscription(active, selectedResource.uri, !resourceSubscription.subscribed, environment, { ...requestContext, mcpHistorySessionId: historySessionId, onMcpClient: persistMcpClient, onMcpEvent: live.onMcpEvent, onMcpServerRequest: live.onMcpServerRequest, onMcpServerRequestCancelled: live.onMcpServerRequestCancelled });
+      persistMcpClient(output.client);
+      recordMcpOutput(historySessionId, output.events, live.collected, false);
+      markHistoryConnected(historySessionId);
+      refreshSessionState();
+      setMessage(`${output.subscribed ? 'Subscribed to' : 'Unsubscribed from'} ${selectedResource.name || selectedResource.uri}.`);
+    } catch (caught) {
+      recordMcpFailure(active, historySessionId, caught);
+      throw caught;
+    }
   });
 
   const respondToServerRequest = async (serverRequest: McpReviewedServerRequest, response: McpServerRequestResponse) => {
@@ -338,6 +451,7 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
     try {
       const output = await respondMcpServerRequest(active, serverRequest, response, environment, { ...requestContext, onMcpClient: persistMcpClient });
       persistMcpClient(output.client);
+      appendHistoryEvents(mcpClientSessionState(active, workspaceId)?.connectionId ?? '', [output.event]);
       setEvents((current) => [...current, output.event].slice(-1000));
       setServerRequests((current) => current.filter((request) => mcpServerRequestKey(request) !== key));
       setMessage(`${serverRequest.method === 'elicitation/create' ? 'Elicitation' : 'Sampling'} response sent.`);
@@ -346,10 +460,43 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
 
   const notifyRoots = () => {
     if (!active || !connected) return;
-    const live = liveMcpEventCollector();
+    const live = liveMcpEventCollector(mcpClientSessionState(active, workspaceId)?.connectionId ?? '');
     void notifyMcpRootsChanged(active, environment, { ...requestContext, onMcpClient: persistMcpClient, onMcpEvent: live.onMcpEvent, onMcpServerRequest: live.onMcpServerRequest, onMcpServerRequestCancelled: live.onMcpServerRequestCancelled })
       .catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
   };
+
+  const selectMcpHistory = (sessionId: string) => {
+    if (!active || !sessionId) return;
+    const currentSessionId = mcpClientSessionState(active, workspaceId)?.connectionId;
+    if (!currentSessionId || currentSessionId === sessionId) {
+      setSelectedMcpHistoryId(sessionId);
+      return;
+    }
+    void run('Opening saved MCP response', async () => {
+      const output = await disconnectMcpClient(active, environment, requestContext);
+      appendHistoryEvents(currentSessionId, output.events);
+      finishHistory(currentSessionId, 'disconnected', 'MCP connection closed before opening saved history.');
+      setSelectedMcpHistoryId(sessionId);
+      refreshSessionState();
+    });
+  };
+
+  const deleteSelectedMcpHistory = () => selectedMcpHistory && active && canEdit && run('Deleting MCP response history', async () => {
+    const currentSessionId = mcpClientSessionState(active, workspaceId)?.connectionId;
+    if (currentSessionId === selectedMcpHistory.id) await disconnectMcpClient(active, environment, requestContext);
+    onChangeWorkspace((current) => ({ ...current, mcpSessions: deleteMcpHistorySession(current.mcpSessions, selectedMcpHistory.id) }));
+    setSelectedMcpHistoryId('');
+    refreshSessionState();
+  });
+
+  const clearActiveMcpHistory = () => active && canEdit && run('Clearing MCP response history', async () => {
+    const currentSessionId = mcpClientSessionState(active, workspaceId)?.connectionId;
+    const currentHistory = currentSessionId ? workspace.mcpSessions.find((session) => session.id === currentSessionId) : undefined;
+    if (currentSessionId && currentHistory?.environmentId === activeEnvironmentId) await disconnectMcpClient(active, environment, requestContext);
+    onChangeWorkspace((current) => ({ ...current, mcpSessions: clearMcpHistorySessions(current.mcpSessions, active.id, activeEnvironmentId) }));
+    setSelectedMcpHistoryId('');
+    refreshSessionState();
+  });
 
   const addClient = () => {
     if (!canEdit) return;
@@ -362,7 +509,7 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
     if (!active || !canEdit || !window.confirm(`Delete MCP client “${active.name}”?`)) return;
     invalidateActiveSession();
     setServerRequests((current) => current.filter((request) => request.clientId !== active.id));
-    onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.filter((client) => client.id !== active.id) }));
+    onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.filter((client) => client.id !== active.id), mcpSessions: current.mcpSessions.filter((session) => session.clientId !== active.id) }));
     setActiveId(workspace.mcpClients.find((client) => client.id !== active.id)?.id ?? '');
   };
 
@@ -410,7 +557,17 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
               </div>
             </div>
           </section>
-          <section className="integration-card mcp-console"><header><div><small>Runtime detail</small><h2>Events and console</h2></div><span>{events.length}</span></header><div>{events.map((event, index) => <article key={`${event.timestamp}-${index}`}><time>{new Date(event.timestamp).toLocaleTimeString()}</time><strong>{event.direction} · {event.method}</strong><pre>{event.detail}</pre></article>)}{!events.length ? <p>No runtime events yet.</p> : null}</div></section>
+          <section className="integration-card mcp-console">
+            <header><div><small>Device-local connection records</small><h2>Response history</h2></div><div className="mcp-history-actions">{activeMcpHistory.length ? <select aria-label="Saved MCP response" onChange={(event) => selectMcpHistory(event.target.value)} value={selectedMcpHistory?.id ?? ''}>{mcpHistorySections(activeMcpHistory).map((section) => <optgroup key={section.label} label={section.label}>{section.sessions.map((session) => <option key={session.id} value={session.id}>{new Date(session.startedAt).toLocaleTimeString()} · {session.status} · {session.transport.toUpperCase()} · {session.events.length} events</option>)}</optgroup>)}</select> : null}<button disabled={!canEdit || !selectedMcpHistory} onClick={deleteSelectedMcpHistory} type="button"><Icon name="trash" size={13} /> Delete</button><button disabled={!canEdit || !activeEnvironmentMcpHistoryCount} onClick={clearActiveMcpHistory} type="button">Clear {activeEnvironmentMcpHistoryCount}</button></div></header>
+            {selectedMcpHistory ? <>
+              <div className="mcp-history-summary"><span className={`status ${selectedMcpHistory.status}`}>{selectedMcpHistory.status}</span><code>{selectedMcpHistory.endpoint || selectedMcpHistory.clientName}</code><time>{new Date(selectedMcpHistory.startedAt).toLocaleString()}</time></div>
+              <div className="mcp-history-tabs"><button className={mcpHistoryTab === 'events' ? 'active' : ''} onClick={() => setMcpHistoryTab('events')} type="button">Events {selectedMcpHistory.events.filter((event) => event.category !== 'notification').length}</button><button className={mcpHistoryTab === 'notifications' ? 'active' : ''} onClick={() => setMcpHistoryTab('notifications')} type="button">Notifications {selectedMcpHistory.events.filter((event) => event.category === 'notification').length}</button><button className={mcpHistoryTab === 'console' ? 'active' : ''} onClick={() => setMcpHistoryTab('console')} type="button">Console {selectedMcpHistory.timeline.length}</button></div>
+              {mcpHistoryTab === 'events' ? <div className="mcp-history-filter"><select aria-label="MCP event type" onChange={(event) => setMcpEventCategory(event.target.value as typeof mcpEventCategory)} value={mcpEventCategory}><option value="">All</option><option value="message">Message</option><option value="open">Open</option><option value="close">Close</option><option value="error">Error</option></select><input aria-label="MCP event search" onChange={(event) => setMcpEventSearch(event.target.value)} placeholder="Search method or payload" value={mcpEventSearch} /><button disabled={!visibleMcpEvents.length} onClick={() => setMcpEventsClearedThrough(visibleMcpEvents[0]?.timestamp ?? '')} type="button">Clear view</button></div> : null}
+              {mcpHistoryTab === 'notifications' ? <div className="mcp-history-filter"><input aria-label="MCP notification search" onChange={(event) => setMcpNotificationSearch(event.target.value)} placeholder="Search notification payload" value={mcpNotificationSearch} /></div> : null}
+              {mcpHistoryTab === 'console' ? <div className="mcp-history-console">{selectedMcpHistory.timeline.map((entry, index) => <article key={`${entry.elapsedMs}-${index}`}><time>+{entry.elapsedMs} ms</time><pre>{entry.value}</pre></article>)}</div> : <div className="mcp-history-events">{displayedMcpEvents.map((event) => <button className={selectedMcpEventId === event.id ? 'active' : ''} key={event.id} onClick={() => setSelectedMcpEventId((current) => current === event.id ? '' : event.id)} type="button"><time>{new Date(event.timestamp).toLocaleTimeString()}</time><strong>{event.direction} · {event.method}</strong><small>{event.category}</small></button>)}{!displayedMcpEvents.length ? <p>{mcpHistoryTab === 'notifications' ? 'No notifications found.' : 'No events found.'}</p> : null}</div>}
+              {selectedMcpEvent && mcpHistoryTab !== 'console' ? <div className="mcp-history-detail"><header><strong>{selectedMcpEvent.method}</strong><small>{selectedMcpEvent.direction} · {new Date(selectedMcpEvent.timestamp).toLocaleString()}</small></header><pre>{selectedMcpEvent.detail}</pre></div> : null}
+            </> : <div>{events.map((event, index) => <article key={`${event.timestamp}-${index}`}><time>{new Date(event.timestamp).toLocaleTimeString()}</time><strong>{event.direction} · {event.method}</strong><pre>{event.detail}</pre></article>)}{!events.length ? <p>No runtime events yet.</p> : null}</div>}
+          </section>
         </div> : <div className="empty-state"><Icon name="globe" size={30} /><strong>No MCP client selected</strong><span>Create one to begin.</span></div>}
       </div> : null}
 

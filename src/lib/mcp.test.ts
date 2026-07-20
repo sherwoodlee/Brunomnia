@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { McpClient } from '../types';
-import { disconnectMcpClient, discoverMcpClient, forgetMcpClientSession, hasMcpClientSession, invokeMcpOperation, mcpResourceSubscriptionState, notifyMcpRootsChanged, parseMcpJsonRpcResponse, respondMcpServerRequest, setMcpResourceSubscription, type McpServerRequest } from './mcp';
+import { disconnectMcpClient, discoverMcpClient, forgetMcpClientSession, hasMcpClientSession, invokeMcpOperation, mcpClientSessionState, mcpResourceSubscriptionState, notifyMcpRootsChanged, parseMcpJsonRpcResponse, respondMcpServerRequest, setMcpResourceSubscription, type McpServerRequest } from './mcp';
 
 const tauri = vi.hoisted(() => {
   class Channel<T> {
@@ -96,9 +96,11 @@ describe('MCP JSON-RPC transport parsing', () => {
       return Promise.reject(new Error(`Unexpected command ${command}`));
     });
 
-    const output = await invokeMcpOperation(client, 'tool', 'search', {}, undefined, { sessionScope: 'native-project', onMcpEvent: (event) => liveEvents.push(event) });
+    const output = await invokeMcpOperation(client, 'tool', 'search', {}, undefined, { sessionScope: 'native-project', mcpHistorySessionId: 'mcp-response-native', onMcpEvent: (event) => liveEvents.push(event) });
     expect(output.result).toEqual({ content: [{ type: 'text', text: 'done' }] });
+    expect(output.events).toContainEqual(expect.objectContaining({ direction: 'server', method: 'tools/call', detail: JSON.stringify({ result: { content: [{ type: 'text', text: 'done' }] } }) }));
     expect(liveEvents).toEqual([expect.objectContaining({ method: 'notifications/tools/list_changed' })]);
+    expect(mcpClientSessionState(output.client, 'native-project')).toEqual(expect.objectContaining({ connectionId: 'mcp-response-native' }));
     expect(mcpResourceSubscriptionState(output.client, 'file:///resource', 'native-project')).toEqual({ supported: true, subscribed: false });
     await setMcpResourceSubscription(output.client, 'file:///resource', true, undefined, { sessionScope: 'native-project' });
     expect(mcpResourceSubscriptionState(output.client, 'file:///resource', 'native-project')).toEqual({ supported: true, subscribed: true });

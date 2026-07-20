@@ -6,6 +6,7 @@ import { normalizeGrpcProtoTree } from './grpcProto';
 import { normalizeCertificatePassphrase, normalizeCertificatePfxBase64, normalizeWorkspaceCertificates } from './certificates';
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 import { normalizeHttpMethod } from './request';
+import { normalizeMcpHistorySessions } from './mcpHistory';
 
 const storageKey = 'brunomnia.workspace.v1';
 
@@ -792,9 +793,10 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   const environmentIds = new Set(environments.map((environment) => environment.id));
   const governance = normalizeGovernance(workspace.governance, seed.governance);
   const testSuites = normalizeTestSuites(workspace.testSuites, collections as Workspace['collections'], requestIds);
+  const mcpClients = normalizeMcpClients(workspace.mcpClients);
   return {
     ...workspace,
-    version: 38,
+    version: 39,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
@@ -809,6 +811,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     cookies: workspace.cookies ?? [],
     responses: normalizeStoredResponses(workspace.responses),
     streamSessions: normalizeStoredStreamSessions(workspace.streamSessions, requestIds),
+    mcpSessions: normalizeMcpHistorySessions(workspace.mcpSessions, new Set(mcpClients.map((client) => client.id)), environmentIds),
     responseFilters: normalizeResponseFilters(workspace.responseFilters, requestIds),
     certificates: normalizeWorkspaceCertificates(workspace.certificates),
     project: { ...seed.project, ...workspace.project },
@@ -817,7 +820,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     activePluginTheme: workspace.activePluginTheme ?? '',
     collaboration: normalizeCollaboration(workspace.collaboration, seed.collaboration),
     governance,
-    mcpClients: normalizeMcpClients(workspace.mcpClients),
+    mcpClients,
     ai: normalizeAi(workspace.ai, seed.ai),
     konnect: normalizeKonnect(workspace.konnect, seed.konnect),
     preferences: normalizePreferences(workspace.preferences),
@@ -832,6 +835,7 @@ export const secureImportedWorkspace = (value: unknown): Workspace => {
     plugins: workspace.plugins.map((plugin) => ({ ...plugin, enabled: false, grantedPermissions: [] })),
     pluginData: {},
     activePluginTheme: '',
+    mcpSessions: [],
     mcpClients: workspace.mcpClients.map((client) => ({ ...client, enabled: false, token: '', password: '', oauthClientSecret: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none' })),
     ai: { ...workspace.ai, enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false },
     konnect: { ...workspace.konnect, enabled: false, token: '' },

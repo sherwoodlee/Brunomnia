@@ -16,10 +16,11 @@ export type McpRequestContext = SendRequestContext & {
   onMcpEvent?: (event: McpEvent) => void;
   onMcpServerRequest?: (request: McpServerRequest) => void;
   onMcpServerRequestCancelled?: (clientId: string, requestId: string | number) => void;
+  mcpHistorySessionId?: string;
   sessionScope?: string;
 };
 type StdioOutput = { result: unknown; events: unknown[]; stderr: string; serverCapabilities?: unknown };
-type McpSessionRuntime = { fingerprint: string; resourceSubscriptionsSupported: boolean; subscribedResourceUris: Set<string> };
+type McpSessionRuntime = { fingerprint: string; connectionId: string; connectedAt: string; resourceSubscriptionsSupported: boolean; subscribedResourceUris: Set<string> };
 type McpHttpSession = McpSessionRuntime & { client: McpClient; sessionId: string };
 
 const now = () => new Date().toISOString();
@@ -84,12 +85,16 @@ const sessionFingerprint = (client: McpClient) => JSON.stringify({
 const stdioSessionFingerprint = (client: McpClient) => JSON.stringify([client.command.trim(), client.args, client.env.map(({ name, value, enabled }) => ({ name, value, enabled }))]);
 const stdioSessionRevision = (key: string) => stdioSessionRevisions.get(key) ?? 0;
 const supportsResourceSubscriptions = (capabilities: unknown) => asRecord(asRecord(capabilities)?.resources)?.subscribe === true;
-const rememberStdioSession = (key: string, fingerprint: string, revision: number, resourceSubscriptionsSupported?: boolean) => {
+const runtimeIdentity = (current: McpSessionRuntime | undefined, reusable: boolean, requestedId = '') => reusable && current
+  ? { connectionId: current.connectionId, connectedAt: current.connectedAt }
+  : { connectionId: requestedId || `mcp-response-${crypto.randomUUID()}`, connectedAt: now() };
+const rememberStdioSession = (key: string, fingerprint: string, revision: number, resourceSubscriptionsSupported?: boolean, requestedId = '') => {
   if (stdioSessionRevision(key) !== revision) return;
   const current = stdioSessions.get(key);
   const reusable = current?.fingerprint === fingerprint;
   stdioSessions.set(key, {
     fingerprint,
+    ...runtimeIdentity(current, reusable, requestedId),
     resourceSubscriptionsSupported: resourceSubscriptionsSupported ?? (reusable ? current.resourceSubscriptionsSupported : false),
     subscribedResourceUris: reusable ? current.subscribedResourceUris : new Set(),
   });
@@ -117,7 +122,7 @@ const matchingHttpSession = (client: McpClient, context: Pick<McpRequestContext,
   httpSessions.set(key, session);
   return session;
 };
-const rememberHttpSession = (client: McpClient, context: Pick<McpRequestContext, 'sessionScope'>, sessionId: string) => {
+const rememberHttpSession = (client: McpClient, context: Pick<McpRequestContext, 'sessionScope' | 'mcpHistorySessionId'>, sessionId: string) => {
   const normalized = normalizeSessionId(sessionId);
   const key = sessionKey(client.id, context.sessionScope);
   const fingerprint = sessionFingerprint(client);
@@ -128,6 +133,7 @@ const rememberHttpSession = (client: McpClient, context: Pick<McpRequestContext,
     client,
     fingerprint,
     sessionId: normalized,
+    ...runtimeIdentity(current, reusable, context.mcpHistorySessionId),
     resourceSubscriptionsSupported: reusable ? current.resourceSubscriptionsSupported : false,
     subscribedResourceUris: reusable ? current.subscribedResourceUris : new Set(),
   });
@@ -164,6 +170,11 @@ const mcpSessionRuntime = (client: McpClient, sessionScope = ''): McpSessionRunt
 export const mcpResourceSubscriptionState = (client: McpClient, uri: string, sessionScope = '') => {
   const runtime = mcpSessionRuntime(client, sessionScope);
   return { supported: runtime?.resourceSubscriptionsSupported === true, subscribed: runtime?.subscribedResourceUris.has(uri) === true };
+};
+
+export const mcpClientSessionState = (client: McpClient, sessionScope = '') => {
+  const runtime = mcpSessionRuntime(client, sessionScope);
+  return runtime ? { connectionId: runtime.connectionId, connectedAt: runtime.connectedAt } : undefined;
 };
 
 const validateHttpEndpoint = (value: string) => {
@@ -443,7 +454,7 @@ const httpRequest = async (
   const events: McpEvent[] = [{ direction: 'client', method, detail: notification ? 'notification' : id, timestamp: now() }];
   if (notification || !response.body.trim()) return { result: undefined, events, client: updatedClient, sessionId: nextSession };
   const parsed = parseMcpJsonRpcResponse(response.body, id);
-  return { result: parsed.result, events: [...events, ...parsed.events], client: updatedClient, sessionId: nextSession };
+  return { result: parsed.result, events: [...events, ...parsed.events, { direction: 'server', method, detail: JSON.stringify({ result: parsed.result }), timestamp: now() } as McpEvent], client: updatedClient, sessionId: nextSession };
 };
 
 const httpSession = async (client: McpClient, environment: Environment | undefined, context: McpRequestContext) => {
@@ -660,10 +671,10 @@ const stdioRequest = async (client: McpClient, method: string, params: unknown, 
   };
   try {
     output = await invoke<StdioOutput>('mcp_stdio_call', { input: { command: client.command, args: client.args, env: processEnvironment, method, params, roots: client.roots, timeoutMs: 30_000, cancellationId, sessionKey: sessionKeyValue }, onEvent: channel });
-    if (!transportFailed) rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision, supportsResourceSubscriptions(output.serverCapabilities));
+    if (!transportFailed) rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision, supportsResourceSubscriptions(output.serverCapabilities), context.mcpHistorySessionId);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    if (detail.startsWith('The MCP server returned an error:')) rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision);
+    if (detail.startsWith('The MCP server returned an error:')) rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision, undefined, context.mcpHistorySessionId);
     else if (context.signal?.aborted) {
       try {
         const active = await invoke<boolean>('has_mcp_stdio_session', { sessionKey: sessionKeyValue });
@@ -677,6 +688,7 @@ const stdioRequest = async (client: McpClient, method: string, params: unknown, 
   }
   const events = output.events.map((event): McpEvent => ({ direction: 'server', method: asString(asRecord(event)?.method) || 'message', detail: JSON.stringify(event), timestamp: now() })).filter((event) => !delivered.has(`${event.method}\n${event.detail}`));
   if (output.stderr) events.push({ direction: 'stderr', method: 'stderr', detail: output.stderr, timestamp: now() });
+  events.push({ direction: 'server', method, detail: JSON.stringify({ result: output.result }), timestamp: now() });
   return { result: output.result, events, client };
 };
 

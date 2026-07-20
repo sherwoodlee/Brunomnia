@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
+import { createMcpHistorySession } from './mcpHistory';
 import { appendAudit, externalSecretReferenceKey, isProtectedSecretReference, mergeSyncedWorkspace, plaintextSecretCandidates, resolveAuthorizedExternalSecret, shareableWorkspace, vaultVariables } from './security';
 
 describe('encrypted collaboration boundaries', () => {
@@ -8,6 +9,7 @@ describe('encrypted collaboration boundaries', () => {
     workspace.history = [{ id: 'history', requestId: 'request', name: 'Private', method: 'GET', url: 'https://private.example', status: 200, durationMs: 1, createdAt: new Date().toISOString() }];
     const request = workspace.collections[0].requests[0];
     workspace.streamSessions = [{ id: 'stream', requestId: request.id, requestName: request.name, requestUrl: request.url, environmentId: workspace.activeEnvironmentId, protocol: 'socketio', startedAt: new Date().toISOString(), messages: [] }];
+    workspace.mcpSessions = [createMcpHistorySession(workspace.mcpClients[0] ?? { id: 'mcp-local', name: 'Local MCP', enabled: true, transport: 'http', url: 'https://private.example/mcp', command: '', args: [], env: [], headers: [], authType: 'none', token: '', username: '', password: '', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [] }, workspace.activeEnvironmentId, 'mcp-history')];
     workspace.cookies = [{ id: 'cookie', name: 'session', value: 'secret', domain: 'private.example', path: '/', secure: true, httpOnly: true, sameSite: 'strict', hostOnly: true, createdAt: new Date().toISOString() }];
     workspace.project.path = '/private/repository';
     workspace.plugins = [{ id: 'plugin', name: 'Private plugin', version: '1', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true, requestedPermissions: [], grantedPermissions: [], installedAt: new Date().toISOString() }];
@@ -19,6 +21,7 @@ describe('encrypted collaboration boundaries', () => {
     expect(shared.history).toEqual([]);
     expect(shared.cookies).toEqual([]);
     expect(shared.streamSessions).toEqual([]);
+    expect(shared.mcpSessions).toEqual([]);
     expect(shared.project.path).toBe('');
     expect(shared.plugins).toEqual([]);
     expect(shared.collaboration.path).toBe('');
@@ -45,6 +48,7 @@ describe('encrypted collaboration boundaries', () => {
     const current = cloneSeedWorkspace();
     const request = current.collections[0].requests[0];
     current.streamSessions = [{ id: 'stream', requestId: request.id, requestName: request.name, requestUrl: request.url, environmentId: current.activeEnvironmentId, protocol: 'sse', startedAt: new Date().toISOString(), messages: [] }];
+    current.mcpSessions = [{ ...createMcpHistorySession({ id: 'mcp-local', name: 'Local MCP', enabled: true, transport: 'http', url: 'https://local.example/mcp', command: '', args: [], env: [], headers: [], authType: 'none', token: '', username: '', password: '', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [] }, current.activeEnvironmentId, 'mcp-history'), clientId: current.mcpClients[0]?.id ?? 'mcp-local' }];
     current.history = [{ id: 'history', requestId: 'request', name: 'Keep', method: 'GET', url: 'https://local.example', status: 200, durationMs: 1, createdAt: new Date().toISOString() }];
     current.collaboration.path = '/local/team.enc.json';
     current.certificates = { ca: { enabled: true, pem: 'local-ca' }, clients: [{ id: 'cert', host: 'local.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }] };
@@ -59,6 +63,7 @@ describe('encrypted collaboration boundaries', () => {
     expect(merged.name).toBe('Remote workspace');
     expect(merged.history[0].name).toBe('Keep');
     expect(merged.streamSessions.map((session) => session.id)).toEqual(['stream']);
+    expect(merged.mcpSessions.map((session) => session.id)).toEqual(['mcp-history']);
     expect(merged.collaboration.path).toBe('/local/team.enc.json');
     expect(merged.collaboration.revision).toBe(4);
     expect(merged.certificates).toEqual(current.certificates);

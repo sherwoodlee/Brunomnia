@@ -139,7 +139,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 38,
+  version: 39,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -295,6 +295,7 @@ paths:
   cookies: [],
   responses: [],
   streamSessions: [],
+  mcpSessions: [],
   responseFilters: {},
   certificates: { ca: { enabled: false, pem: '' }, clients: [] },
   project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
