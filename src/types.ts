@@ -702,14 +702,24 @@ export type ApiDesign = {
   name: string;
   contents: string;
   ruleset?: string;
+  sourceFiles?: ApiDesignSourceFile[];
   generatedCollectionId?: string;
   source?: SourceMetadata;
 };
 
+export type ApiDesignSourceFile = {
+  path: string;
+  contents: string;
+};
+
 export type OpenApiIssue = {
-  severity: 'error' | 'warning';
+  severity: 'error' | 'warning' | 'info' | 'hint';
   path: string;
   message: string;
+  code?: string;
+  source?: string;
+  line?: number;
+  character?: number;
 };
 
 export type MockRoute = {

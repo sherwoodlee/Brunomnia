@@ -802,7 +802,11 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0].id,
     environments,
     history: Array.isArray(workspace.history) ? workspace.history : [],
-    apiDesigns: (workspace.apiDesigns ?? seed.apiDesigns).map((design) => ({ ...design, ruleset: design.ruleset ?? '' })),
+    apiDesigns: (workspace.apiDesigns ?? seed.apiDesigns).map((design) => ({
+      ...design,
+      ruleset: design.ruleset ?? '',
+      sourceFiles: Array.isArray(design.sourceFiles) ? design.sourceFiles.filter((file) => file && typeof file.path === 'string' && typeof file.contents === 'string') : [],
+    })),
     mockServers: workspace.mockServers ?? seed.mockServers,
     testSuites,
     unitTestResults: normalizeUnitTestResults(workspace.unitTestResults, new Set(testSuites.map((suite) => suite.id))),

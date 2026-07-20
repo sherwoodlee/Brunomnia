@@ -22,6 +22,7 @@ export type IconName =
   | 'pin'
   | 'play'
   | 'plus'
+  | 'refresh'
   | 'search'
   | 'settings'
   | 'spark'
@@ -65,6 +66,7 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
     pin: <><path d="m8 4 8 8M9.5 2.5l12 12M14 10l-5 5M6 18l-3 3" /><path d="m8 4-3 5 10 10 5-3" /></>,
     play: <path d="m8 5 11 7-11 7z" />,
     plus: <path d="M12 5v14M5 12h14" />,
+    refresh: <><path d="M20 7v5h-5" /><path d="M4 17v-5h5" /><path d="M6.1 8.2A7.5 7.5 0 0 1 18.7 7L20 12M4 12l1.3 5a7.5 7.5 0 0 0 12.6-1.2" /></>,
     search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19 13.5v-3l-2.1-.7a7 7 0 0 0-.6-1.5l1-2-2.1-2.1-2 1a7 7 0 0 0-1.5-.6L10.5 2h-3l-.7 2.1a7 7 0 0 0-1.5.6l-2-1-2.1 2.1 1 2a7 7 0 0 0-.6 1.5L0 10.5v3l2.1.7a7 7 0 0 0 .6 1.5l-1 2 2.1 2.1 2-1a7 7 0 0 0 1.5.6l.7 2.1h3l.7-2.1a7 7 0 0 0 1.5-.6l2 1 2.1-2.1-1-2a7 7 0 0 0 .6-1.5z" transform="translate(1.5 .25) scale(.88)" /></>,
     spark: <><path d="m12 3 1.3 4.2L17.5 9l-4.2 1.8L12 15l-1.3-4.2L6.5 9l4.2-1.8z" /><path d="m18.5 15 .6 1.9 1.9.6-1.9.6-.6 1.9-.6-1.9-1.9-.6 1.9-.6z" /></>,

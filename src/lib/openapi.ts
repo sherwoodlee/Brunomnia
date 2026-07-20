@@ -231,8 +231,8 @@ const schemaExample = (schema: UnknownRecord | undefined): unknown => {
   return '';
 };
 
-export const generateCollectionFromOpenApi = (design: ApiDesign): Collection => {
-  const analysis = analyzeOpenApi(design.contents, design.ruleset);
+export const generateCollectionFromOpenApi = (design: ApiDesign, preparedAnalysis?: OpenApiAnalysis): Collection => {
+  const analysis = preparedAnalysis ?? analyzeOpenApi(design.contents, design.ruleset);
   if (!analysis.document || analysis.issues.some((issue) => issue.severity === 'error')) {
     throw new Error('Resolve OpenAPI errors before generating a collection.');
   }

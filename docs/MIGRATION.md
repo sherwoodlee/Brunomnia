@@ -38,8 +38,8 @@ Streaming gRPC currently returns up to 100 messages within the configured deadli
 
 | Capability | Status | Notes |
 | --- | --- | --- |
-| OpenAPI design editor | Complete baseline | OpenAPI 3.x YAML/JSON editing, formatting, parsed preview, and version/title/operation metadata |
-| OpenAPI linting | Complete baseline | Structural rules cover document metadata, paths, operations, responses, operation IDs, and path parameters; Spectral-compatible custom rulesets are deferred |
+| OpenAPI design editor | Complete | OpenAPI 3.x YAML/JSON editing, formatting, resolved local/public-HTTPS multi-file preview, source-aware diagnostics, and request generation |
+| OpenAPI linting | Complete | Pinned Spectral 1.22 OAS defaults, every runtime-exported safe built-in function, nested local/public-HTTPS ruleset extends, bounded native public-source resolution, and explicit refresh work without executing custom JavaScript |
 | Request generation | Complete baseline | Generates or refreshes a runnable collection from servers, paths, parameters, and request-body examples |
 | Pre-request scripts | Complete baseline | Two-second worker/VM boundary with environment mutation, request header mutation, and captured console output; Node modules, DOM, and script-originated network access are unavailable |
 | After-response tests | Complete baseline | `insomnia.test`, response helpers, console output, and a focused `expect` matcher set with results in the response pane |
@@ -48,7 +48,7 @@ Streaming gRPC currently returns up to 100 messages within the configured deadli
 | Headless CLI | Complete baseline | Lint/generate/export plus collection/test runs using the shared OpenAPI and runner modules; package-backed version output, scoped parent/leaf help with local/global flags, unambiguous resource selection, bounded prompts, environment boundaries, and private test-source retention are covered |
 | Workspace migration | Complete | Version 1 and 2 workspaces migrate in place to version 3 design, mock, and report resources |
 
-Current compatibility bounds are explicit: linting is not yet Spectral ruleset parity; the script API is a safe compatibility subset; mock templating is not yet Liquid/Faker parity; browser-only mock start/stop is a UI simulation because a browser cannot bind a server; CLI collection execution currently supports HTTP and GraphQL; and streaming runner semantics for WebSocket/SSE are deferred.
+Current compatibility bounds are tracked in [PARITY.md](PARITY.md). Milestone 241 closes desktop API-specification lint/reference parity; the headless CLI retains its separately documented local safe-rule boundary, and unrelated scripting, mock, protocol, and packaging gaps remain in their own ledger rows.
 
 ## Milestone 4 — import and export interoperability (complete)
 
@@ -76,11 +76,11 @@ Compatibility bounds remain explicit: nested source folders are represented in f
 | Chaining and dynamic values | Complete baseline | Latest-response body/status/header/URL chaining, JSONPath extraction, iteration/request-local/environment variables, UUID/time/Faker/encoding/hash/cookie/prompt/request tags, and actionable missing-dependency errors |
 | Transport fidelity | Complete baseline | Proxy exclusions, exact/wildcard certificate domains, editable multipart filename/content type, duplicate parts, and text/file/binary payloads |
 | WebSocket and runner fidelity | Complete baseline | Text and base64/file binary composition; bounded WebSocket/SSE collection-run samples with optional WebSocket startup frames |
-| Custom lint | Complete baseline | Safe local Spectral-style `rules`/`given`/`then` support for truthy/falsy/defined/enumeration/length/pattern/casing; CLI accepts `--ruleset`. Milestone 215 later adds pinned file/stored-design/CI input resolution and sibling `.spectral*` discovery. |
+| Custom lint | Complete | Desktop designs use the pinned Spectral runtime, all 13 functions actually exported by `@stoplight/spectral-functions` 1.10.1, nested selected YAML/HTTPS extends, and bounded multi-file/HTTPS references. The CLI retains its safe local subset and accepts `--ruleset`; Milestone 215 adds pinned file/stored-design/CI input resolution and sibling `.spectral*` discovery. |
 | Script/test API | Complete baseline | Environment/base/collection/local/iteration variable APIs, replacement helpers, request getters/setters, response header/cookie helpers, console capture, and Jest/Chai-style expectation aliases |
 | Interoperability and migration | Complete | Workspace v5, advanced Insomnia/Postman auth mapping, Insomnia v4/v5 cookie-jar round trips, and collision-safe cookie import |
 
-Compatibility bounds at Milestone 5 were explicit: OAuth 2 authorization used a copied URL and manual returned code/token. Milestone 88 adds native system-browser loopback capture while retaining that browser-development fallback. Netrc contents were project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, and arbitrary Spectral JavaScript/functions/remote `extends` remained deferred. Milestone 131 later closes the File/external-vault/Faker/JSONPath dynamic-variable gaps. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. Milestone 109 closes WSS client identity and validation overrides, and Milestone 110 closes custom WebSocket proxy transport; headless CLI streaming/auth parity remains later closure work. The later permission-bounded scripting expansion is recorded in Milestone 12.
+Compatibility bounds at Milestone 5 were explicit: OAuth 2 authorization used a copied URL and manual returned code/token. Milestone 88 adds native system-browser loopback capture while retaining that browser-development fallback. Netrc contents were project data until the secrets milestone; MD5, file/external-vault template tags, full Faker/JSONPath breadth, and Spectral parity remained deferred. Milestone 131 later closes the File/external-vault/Faker/JSONPath dynamic-variable gaps, and Milestone 241 closes the desktop Spectral/multi-file/remote-source gap while preserving pinned custom-JavaScript rejection. Browser-only HTTP still obeys browser CORS and forbidden-header behavior. Milestone 109 closes WSS client identity and validation overrides, and Milestone 110 closes custom WebSocket proxy transport; headless CLI streaming/auth parity remains later closure work. The later permission-bounded scripting expansion is recorded in Milestone 12.
 
 ## Milestone 6 — Git Sync and extensibility (complete)
 
@@ -2335,7 +2335,7 @@ Compatibility bounds remain explicit: this document represents Brunomnia's proje
 | Entry paths | Complete | Activity rail, command palette, and project-dashboard design cards open the shared document; an empty project creates and opens a valid starter OpenAPI design through the same path |
 | Executable evidence | Complete baseline | Focused typed-tab/OpenAPI regressions, strict React/TypeScript compilation, full frontend/native suites, CLI/audit gates, and a rebuilt macOS app verify the milestone without rendered Browser QA |
 
-Compatibility bounds remain explicit: this milestone changes document navigation, not the API-design engine's existing scope. Full Spectral functions, remote/package ruleset extension, multi-file references, and richer tooling remain. Mock-server/route and test-suite resources still do not participate in the shared strip, and collection workspaces remain represented by their request/folder documents rather than a separate collection tab. Collections and API specification design stay `Baseline`; 19 parity rows remain incomplete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+Compatibility bounds at this historical milestone were explicit: it changed document navigation, not the API-design engine's then-existing scope. Milestone 241 later closes the pinned Spectral, safe remote/local ruleset extension, multi-file reference, and diagnostic-tooling gap. Mock-server/route and test-suite resources did not yet participate in the shared strip at M159, and collection workspaces remained represented by their request/folder documents rather than a separate collection tab. Rendered interaction and assistive-technology QA remained omitted by standing direction.
 
 ## Milestone 160 — mock server and route document tabs (complete baseline)
 

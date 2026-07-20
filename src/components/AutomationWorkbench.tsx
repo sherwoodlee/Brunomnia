@@ -13,7 +13,8 @@ import type {
   Workspace,
   WorkbenchSection,
 } from '../types';
-import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi } from '../lib/openapi';
+import { analyzeOpenApi, formatOpenApi, generateCollectionFromOpenApi, type OpenApiAnalysis } from '../lib/openapi';
+import { API_DESIGN_SOURCE_LIMITS, clearSpecificationSourceCache, normalizeApiDesignSourceFiles } from '../lib/apiDesignSources';
 import { aggregateRunnerTimeline, discardRunnerReport, parseRunnerData, resolveRunnerTarget, runnerResultForLiveItem, runCollection, runnerReportsForTarget, type RunnerWorkbenchDraft } from '../lib/runner';
 import { createRunnerReportArtifact, type RunnerReporter } from '../lib/runnerReport';
 import { formatRunnerHistoryTimestamp, summarizeRunnerAssertions, summarizeRunnerHistory } from '../lib/runnerHistory';
@@ -88,9 +89,33 @@ export function AutomationWorkbench(props: AutomationWorkbenchProps) {
 function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection, designTargetId, onDesignChange, onOpenDesign }: AutomationWorkbenchProps) {
   const [message, setMessage] = useState('');
   const [editorMode, setEditorMode] = useState<'document' | 'ruleset'>('document');
+  const [linting, setLinting] = useState(false);
+  const [sourceRefresh, setSourceRefresh] = useState(0);
+  const [analyzedInput, setAnalyzedInput] = useState<{ contents: string; ruleset?: string; sourceFiles?: ApiDesign['sourceFiles'] }>();
   const design = workspace.apiDesigns.find((candidate) => candidate.id === designTargetId) ?? workspace.apiDesigns[0];
   const deferredContents = useDeferredValue(design?.contents ?? '');
-  const analysis = useMemo(() => analyzeOpenApi(deferredContents, design?.ruleset), [deferredContents, design?.ruleset]);
+  const [analysis, setAnalysis] = useState<OpenApiAnalysis>(() => analyzeOpenApi(design?.contents ?? ''));
+
+  useEffect(() => {
+    let active = true;
+    if (!design) return () => { active = false; };
+    const input = { contents: deferredContents, ruleset: design.ruleset, sourceFiles: design.sourceFiles };
+    setLinting(true);
+    void import('../lib/openapiSpectral').then(({ analyzeOpenApiDesign }) => analyzeOpenApiDesign(input)).then((next) => {
+      if (active) {
+        setAnalysis(next);
+        setAnalyzedInput(input);
+      }
+    }).catch((error) => {
+      if (active) {
+        setAnalysis({ ...analyzeOpenApi(deferredContents), issues: [{ severity: 'error', path: '$ruleset', code: 'spectral-runtime', message: error instanceof Error ? error.message : String(error) }] });
+        setAnalyzedInput(input);
+      }
+    }).finally(() => {
+      if (active) setLinting(false);
+    });
+    return () => { active = false; };
+  }, [deferredContents, design?.id, design?.ruleset, design?.sourceFiles, sourceRefresh]);
 
   const updateDesign = (patch: Partial<ApiDesign>) => {
     if (!design) return;
@@ -102,7 +127,7 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection, desig
     if (!design) return;
     onDesignChange?.();
     try {
-      const collection = generateCollectionFromOpenApi(design);
+      const collection = generateCollectionFromOpenApi(design, analysis);
       const id = design.generatedCollectionId ?? collection.id;
       const generated = { ...collection, id };
       onChangeWorkspace((current) => ({
@@ -120,6 +145,31 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection, desig
     }
   };
 
+  const addSourceFiles = async (selected: FileList | null) => {
+    if (!design || !selected?.length) return;
+    try {
+      if (selected.length > API_DESIGN_SOURCE_LIMITS.files) throw new Error(`Select at most ${API_DESIGN_SOURCE_LIMITS.files} source files at once.`);
+      const selectedFiles = Array.from(selected);
+      const oversized = selectedFiles.find((file) => file.size > API_DESIGN_SOURCE_LIMITS.fileBytes);
+      if (oversized) throw new Error(`Source file '${oversized.name}' exceeds the 1 MB limit.`);
+      if (selectedFiles.reduce((total, file) => total + file.size, 0) > API_DESIGN_SOURCE_LIMITS.totalBytes) throw new Error('Selected source files exceed the 10 MB combined limit.');
+      const folderRoot = selectedFiles.every((file) => file.webkitRelativePath)
+        ? selectedFiles[0].webkitRelativePath.split('/')[0]
+        : '';
+      const incoming = await Promise.all(selectedFiles.map(async (file) => ({
+        path: folderRoot ? file.webkitRelativePath.split('/').slice(1).join('/') : file.name,
+        contents: await file.text(),
+      })));
+      const byPath = new Map((design.sourceFiles ?? []).map((file) => [file.path, file]));
+      incoming.forEach((file) => byPath.set(file.path, file));
+      const sourceFiles = normalizeApiDesignSourceFiles([...byPath.values()]);
+      updateDesign({ sourceFiles });
+      setMessage(`${incoming.length} source file${incoming.length === 1 ? '' : 's'} added for local references and ruleset extends.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   if (!design) return <AutomationEmpty title="No API designs" action="Create design" onAction={() => {
     const created = { id: uid('design'), name: 'Untitled API', contents: 'openapi: 3.1.0\ninfo:\n  title: Untitled API\n  version: 1.0.0\npaths: {}\n', ruleset: '' };
     onChangeWorkspace((current) => ({ ...current, apiDesigns: [...current.apiDesigns, created] }));
@@ -127,18 +177,27 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection, desig
   }} />;
 
   const errors = analysis.issues.filter((issue) => issue.severity === 'error').length;
-  const warnings = analysis.issues.length - errors;
+  const warnings = analysis.issues.filter((issue) => issue.severity === 'warning').length;
+  const informational = analysis.issues.length - errors - warnings;
+  const analysisReady = !linting && analyzedInput?.contents === design.contents && analyzedInput.ruleset === design.ruleset && analyzedInput.sourceFiles === design.sourceFiles;
   return (
     <section className="automation-workbench design-workbench">
       <AutomationHeader eyebrow="Design" title="API design document" subtitle="Edit, lint, preview, and turn OpenAPI operations into runnable requests.">
         <select aria-label="API design" value={design.id} onChange={(event) => onOpenDesign?.(event.target.value)}>{workspace.apiDesigns.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         <button className="secondary-action" onClick={() => { try { updateDesign({ contents: formatOpenApi(design.contents) }); setMessage('Document formatted.'); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }} type="button">Format</button>
         <button className="secondary-action" onClick={() => setEditorMode((current) => current === 'document' ? 'ruleset' : 'document')} type="button">{editorMode === 'document' ? 'Custom rules' : 'API document'}</button>
-        <button className="primary-action" disabled={errors > 0} onClick={generate} type="button">Generate requests</button>
+        <button className="primary-action" disabled={!analysisReady || errors > 0} onClick={generate} type="button">Generate requests</button>
       </AutomationHeader>
       <div className="design-grid">
         <div className="design-editor-pane">
-          <div className="pane-title"><input aria-label="Design name" value={design.name} onChange={(event) => updateDesign({ name: event.target.value })} /><span>{editorMode === 'document' ? 'OpenAPI YAML / JSON' : 'Spectral-style YAML / JSON'}</span></div>
+          <div className="pane-title"><input aria-label="Design name" value={design.name} onChange={(event) => updateDesign({ name: event.target.value })} /><span>{editorMode === 'document' ? 'OpenAPI YAML / JSON' : 'Spectral YAML / JSON'}</span></div>
+          <div className="design-source-toolbar">
+            <label><Icon name="import" size={15} /><span>Add files</span><input accept=".json,.yaml,.yml,application/json,application/yaml,text/yaml" aria-label="Add API design source files" multiple type="file" onChange={(event) => { void addSourceFiles(event.target.files); event.target.value = ''; }} /></label>
+            <label><Icon name="folder" size={15} /><span>Add folder</span><input accept=".json,.yaml,.yml" aria-label="Add API design source folder" multiple type="file" {...{ webkitdirectory: '' }} onChange={(event) => { void addSourceFiles(event.target.files); event.target.value = ''; }} /></label>
+            <button onClick={() => { clearSpecificationSourceCache(); setAnalyzedInput(undefined); setSourceRefresh((current) => current + 1); setMessage('Refreshing HTTPS specification and ruleset sources.'); }} type="button"><Icon name="refresh" size={15} />Refresh HTTPS</button>
+            <small>{design.sourceFiles?.length ?? 0} local source{design.sourceFiles?.length === 1 ? '' : 's'} · HTTPS references resolve through a bounded public-host fetch</small>
+          </div>
+          {design.sourceFiles?.length ? <div className="design-source-list">{design.sourceFiles.map((file) => <span key={file.path}><code>{file.path}</code><button aria-label={`Remove source ${file.path}`} onClick={() => updateDesign({ sourceFiles: design.sourceFiles?.filter((candidate) => candidate.path !== file.path) })} type="button">×</button></span>)}</div> : null}
           {editorMode === 'document' ? <CodeEditor ariaLabel="OpenAPI document" value={design.contents} onChange={(contents) => updateDesign({ contents })} /> : <CodeEditor ariaLabel="Custom lint ruleset" value={design.ruleset ?? ''} onChange={(ruleset) => updateDesign({ ruleset })} />}
         </div>
         <div className="design-preview-pane">
@@ -149,8 +208,8 @@ function DesignWorkbench({ workspace, onChangeWorkspace, onOpenCollection, desig
           </div>
         </div>
         <aside className="lint-pane">
-          <header><strong>Lint results</strong><span className={errors ? 'bad' : 'ok'}>{errors} errors · {warnings} warnings</span></header>
-          <div>{analysis.issues.map((issue, index) => <article className={issue.severity} key={`${issue.path}-${index}`}><span>{issue.severity}</span><strong>{issue.path}</strong><p>{issue.message}</p></article>)}{!analysis.issues.length ? <div className="lint-clean"><Icon name="spark" size={23} /><strong>Document is clean</strong><span>{analysis.operations.length} operations are ready.</span></div> : null}</div>
+          <header><strong>Lint results</strong><span className={errors ? 'bad' : 'ok'}>{linting ? 'Linting…' : `${errors} errors · ${warnings} warnings${informational ? ` · ${informational} info` : ''}`}</span></header>
+          <div>{analysis.issues.map((issue, index) => <article className={issue.severity} key={`${issue.code}-${issue.source}-${issue.path}-${index}`}><span>{issue.severity}</span><strong>{issue.code ? `${issue.code} · ` : ''}{issue.path}</strong><p>{issue.message}</p>{issue.source || issue.line ? <small>{issue.source ?? 'openapi.yaml'}{issue.line ? `:${issue.line}${issue.character ? `:${issue.character}` : ''}` : ''}</small> : null}</article>)}{!analysis.issues.length && !linting ? <div className="lint-clean"><Icon name="spark" size={23} /><strong>Document is clean</strong><span>{analysis.operations.length} operations are ready.</span></div> : null}</div>
         </aside>
       </div>
       {message ? <div className="automation-message" role="status">{message}</div> : null}

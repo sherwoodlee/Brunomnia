@@ -13,6 +13,7 @@ mod plugin;
 mod project;
 mod runtime_credentials;
 mod secure_store;
+mod specification_source;
 mod streaming;
 mod template_os;
 mod workspace_store;
@@ -197,6 +198,11 @@ async fn send_http_request(
     state: State<'_, http_client::HttpCancellationState>,
 ) -> Result<HttpResponseOutput, HttpRequestError> {
     http_client::send_cancellable(input, cancellation_id, state.inner()).await
+}
+
+#[tauri::command]
+async fn fetch_public_specification_source(url: String) -> Result<String, String> {
+    specification_source::fetch(&url).await
 }
 
 #[tauri::command]
@@ -889,6 +895,7 @@ pub fn run() {
             workspace_catalog_restore_backup,
             template_os_info,
             send_http_request,
+            fetch_public_specification_source,
             cancel_http_request,
             send_mcp_http_request,
             close_mcp_http_session,
