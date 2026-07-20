@@ -267,7 +267,7 @@ testSuites:
     expect(new Set(appliedAgain.testSuites.flatMap((suite) => suite.tests.map((test) => test.id))).size).toBe(appliedAgain.testSuites.reduce((total, suite) => total + suite.tests.length, 0));
   });
 
-  it('imports Socket.IO requests and preserves unsupported MCP details with a warning', () => {
+  it('imports Socket.IO requests and promotes legacy nested MCP data to a disabled client', () => {
     const result = importArtifact(`type: collection.insomnia.rest/5.0
 schema_version: "5.1"
 name: Realtime
@@ -283,6 +283,12 @@ collection:
     url: https://mcp.example
     transportType: streamable-http
     meta: { id: mcp-req-abc }
+    headers: [{ name: Authorization, value: Bearer plaintext }]
+    env:
+      - { id: mode, name: MODE, value: review, type: str, enabled: false }
+      - { id: token, name: API_TOKEN, value: plaintext-token, type: str, enabled: true }
+    roots: [{ uri: file:///workspace }]
+    authentication: { type: bearer, token: plaintext-token }
 `, 'realtime.yaml');
 
     expect(result.collections[0].requests[0]).toMatchObject({
@@ -295,8 +301,32 @@ collection:
         eventListeners: [{ id: 'ev1', eventName: 'join', description: '', enabled: true }],
       },
     });
-    expect(result.collections[0].requests[1]).toMatchObject({ protocol: 'http', method: 'POST' });
-    expect(result.warnings.filter((warning) => warning.code === 'unsupported-protocol')).toHaveLength(1);
+    expect(result.collections[0].requests).toHaveLength(1);
+    expect(result.mcpClients).toEqual([expect.objectContaining({
+      name: 'Tools', enabled: false, transport: 'http', url: 'https://mcp.example', authType: 'bearer', token: '',
+      headers: [expect.objectContaining({ name: 'Authorization', value: '' })],
+      env: [expect.objectContaining({ id: 'mode', name: 'MODE', value: 'review', enabled: false }), expect.objectContaining({ id: 'token', name: 'API_TOKEN', value: '' })],
+      roots: ['file:///workspace'],
+    })]);
+    expect(result.warnings).toContainEqual(expect.objectContaining({ code: 'integrations-disabled', resource: 'Tools' }));
+    expect(result.warnings.filter((warning) => warning.code === 'unsupported-protocol')).toHaveLength(0);
+  });
+
+  it('imports a first-class v5 MCP document without interpreting shell operators', () => {
+    const result = importArtifact(`type: mcpClient.insomnia/5.0
+schema_version: "5.1"
+name: Unsafe local tools
+meta: { id: mcp-workspace }
+mcpRequest:
+  name: Unsafe local tools
+  url: node server.js && touch /tmp/should-not-run
+  transportType: stdio
+  meta: { id: mcp-req-unsafe }
+`, 'mcp.insomnia.yaml');
+
+    expect(result.collections).toEqual([]);
+    expect(result.mcpClients).toEqual([expect.objectContaining({ transport: 'stdio', command: 'node server.js && touch /tmp/should-not-run', args: [], enabled: false })]);
+    expect(result.warnings).toContainEqual(expect.objectContaining({ code: 'mcp-command', resource: 'Unsafe local tools' }));
   });
 
   it('imports Postman environments and applies resources with collision-safe IDs', () => {

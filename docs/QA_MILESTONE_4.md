@@ -47,4 +47,4 @@ The in-app browser did not expose its advertised file-chooser helper in this ses
 
 ## Scope conclusion
 
-This evidence accepts the **Milestone 4 interoperability baseline**, not full Insomnia parity. Folder flattening, translated script breadth, local-file reselection, WSDL placeholders, Socket.IO/MCP downgrade behavior, and binary-export omissions remain named compatibility limits in [MIGRATION.md](MIGRATION.md) and [PARITY.md](PARITY.md).
+This evidence accepts the **Milestone 4 interoperability baseline**, not full Insomnia parity. Folder flattening, translated script breadth, local-file reselection, WSDL placeholders, and binary-export omissions remain named compatibility limits in [MIGRATION.md](MIGRATION.md) and [PARITY.md](PARITY.md); Milestones 98 and 233 later close the original Socket.IO and MCP downgrade behavior.

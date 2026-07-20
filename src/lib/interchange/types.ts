@@ -1,4 +1,4 @@
-import type { ApiDesign, Collection, CookieRecord, Environment, ImportFormat, ImportWarning, MockServer, UnitTestSuite, Workspace } from '../../types';
+import type { ApiDesign, Collection, CookieRecord, Environment, ImportFormat, ImportWarning, McpClient, MockServer, UnitTestSuite, Workspace } from '../../types';
 
 export type ArtifactResources = {
   collections: Collection[];
@@ -7,6 +7,7 @@ export type ArtifactResources = {
   mockServers: MockServer[];
   cookies: CookieRecord[];
   testSuites: UnitTestSuite[];
+  mcpClients: McpClient[];
 };
 
 export type ArtifactImport = ArtifactResources & {
@@ -34,4 +35,5 @@ export const emptyResources = (): ArtifactResources => ({
   mockServers: [],
   cookies: [],
   testSuites: [],
+  mcpClients: [],
 });

@@ -20,6 +20,8 @@ Credential fields are masked by default. Each MCP bearer token, Basic password, 
 
 Brunomnia imports workspace integrations in a non-authoritative state: MCP clients are disabled; bearer, Basic, OAuth client-secret, and OAuth runtime-token fields are cleared; AI and Konnect are disabled; and their credential fields are cleared. Changing an MCP URL, transport, command, argument list, process environment, authentication family, or OAuth configuration also disables the client and clears its discovery cache.
 
+Insomnia v4 `mcp_request` resources and v5 `mcpClient.insomnia/5.0` documents import as first-class project clients instead of HTTP placeholders. HTTP/STDIO transport, safely tokenized quoted arguments, enabled/disabled process variables, headers, public auth configuration, roots, and per-client environments are retained; imported clients remain disabled, plaintext sensitive header/environment values and credential fields are cleared, and unsupported shell operators are never interpreted. Full-project v4/v5 exports emit one native MCP workspace/document per client, duplicate the public project environment into each self-contained Insomnia MCP workspace, preserve protected references, and omit device-local OAuth/runtime registration credentials. Collection/design-only exports omit project clients with an explicit warning.
+
 ## MCP clients
 
 MCP clients are project-scoped resources. Standard folder/Git projects serialize each client as YAML under `mcp-clients/`; cached operations travel with the project so collaborators can review them before reconnecting. Credentials should be references, not secret values.
@@ -76,7 +78,7 @@ The native boundary limits:
 - cancellation and session identities to 512 bytes, with at most 1,024 pending cancellations and 100 active sessions; and
 - the operation deadline to 1–120 seconds (the UI uses 30 seconds).
 
-Servers may call `roots/list`; Brunomnia returns the reviewed project roots. Other server requests, including sampling and elicitation, receive an explicit JSON-RPC “method not found” response explaining that interactive approval UI is required. First-class Insomnia v4/v5 MCP-resource interchange, sampling review, elicitation forms, and user-reviewed responses to other server requests remain parity work.
+Servers may call `roots/list`; Brunomnia returns the reviewed project roots. Other server requests, including sampling and elicitation, receive an explicit JSON-RPC “method not found” response explaining that interactive approval UI is required. Sampling review, elicitation forms, and user-reviewed responses to other server requests remain parity work.
 
 ## AI providers and workflows
 

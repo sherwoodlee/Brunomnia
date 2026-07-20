@@ -43,4 +43,4 @@ Rendered interaction QA is omitted by standing direction. No screenshot, DOM, co
 
 ## Acceptance boundary
 
-This milestone closes complete Insomnia v4 gRPC proto-resource interchange and makes the current v5 limitation explicit. Partial/deprecated scripts, external payload files, WSDL placeholders, MCP downgrade metadata, and omitted binary bytes remain. Related ledger rows stay `Baseline`; Brunomnia is not declared feature-complete.
+This milestone closes complete Insomnia v4 gRPC proto-resource interchange and makes the current v5 limitation explicit. Milestone 233 later closes MCP downgrade metadata. Partial/deprecated scripts, external payload files, WSDL placeholders, and omitted binary bytes remain. Related ledger rows stay `Baseline`; Brunomnia is not declared feature-complete.

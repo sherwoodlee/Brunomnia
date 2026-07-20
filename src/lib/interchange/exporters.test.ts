@@ -3,7 +3,7 @@ import { parseAllDocuments, stringify } from 'yaml';
 import { cloneSeedWorkspace } from '../../data/seed';
 import { orderedCollectionChildren } from '../resources';
 import { exportArtifact } from './exporters';
-import { importArtifact } from './index';
+import { applyArtifactImport, importArtifact } from './index';
 
 describe('artifact export adapters', () => {
   it('round-trips Insomnia v4 and v5 compatibility exports', () => {
@@ -41,6 +41,23 @@ describe('artifact export adapters', () => {
     workspace.apiDesigns[0].generatedCollectionId = testCollection.id;
     workspace.testSuites = [{ id: 'contract-suite', name: 'Contract suite', collectionId: testCollection.id, sortKey: -1, tests: [{ id: 'status-test', name: 'Returns success', code: 'const response = await insomnia.send();', requestId: testCollection.requests[0].id, sortKey: -1 }] }];
     workspace.cookies = [{ id: 'cookie-session', name: 'session', value: 'abc', domain: 'api.acme.dev', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-16T12:00:00.000Z' }];
+    workspace.mcpClients = [{
+      id: 'mcp-http', name: 'Remote tools', enabled: true, transport: 'http', url: 'https://mcp.example/rpc', command: '', args: [],
+      env: [{ id: 'mcp-mode', name: 'MODE', value: '{{ region }}', enabled: true }], headers: [{ id: 'mcp-header', name: 'Authorization', value: '{{ vault.mcp_header }}', enabled: true }],
+      authType: 'oauth2', token: 'device-runtime-token', username: '', password: '', oauthAuthorizationUrl: 'https://identity.example/authorize', oauthAccessTokenUrl: 'https://identity.example/token', oauthClientId: 'client-id', oauthClientSecret: '{{ vault.mcp_client_secret }}', oauthScope: 'mcp.read', oauthState: '', oauthRefreshToken: 'device-refresh', oauthIdentityToken: 'device-identity', oauthExpiresAt: 123, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: 'registered-runtime', oauthRegisteredClientSecret: 'registered-secret', oauthRegisteredClientIdIssuedAt: 1, oauthRegisteredClientSecretExpiresAt: 2, oauthRegisteredTokenEndpointAuthMethod: 'client_secret_post',
+      roots: ['file:///workspace'], tools: [], prompts: [], resources: [], resourceTemplates: [],
+    }, {
+      id: 'mcp-stdio', name: 'Local tools', enabled: false, transport: 'stdio', url: '', command: '/Applications/MCP Server/bin/server', args: ['--mode', 'value with spaces', "quote'arg", ''],
+      env: [{ id: 'mcp-secret', name: 'API_TOKEN', value: '{{ vault.mcp_token }}', enabled: true }, { id: 'mcp-disabled', name: 'DISABLED', value: 'kept', enabled: false }], headers: [],
+      authType: 'none', token: '', username: '', password: '', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none',
+      roots: ['file:///local'], tools: [], prompts: [], resources: [], resourceTemplates: [],
+    }];
+    const scopedV4 = exportArtifact(workspace, { format: 'insomnia-v4', scope: 'collection', collectionId: workspace.collections[0].id });
+    const scopedV5 = exportArtifact(workspace, { format: 'insomnia-v5', scope: 'collection', collectionId: workspace.collections[0].id });
+    expect(scopedV4.warnings).toContainEqual(expect.objectContaining({ code: 'mcp-scope-export' }));
+    expect(scopedV5.warnings).toContainEqual(expect.objectContaining({ code: 'mcp-scope-export' }));
+    expect(scopedV4.contents).not.toContain('mcp_request');
+    expect(scopedV5.contents).not.toContain('mcpClient.insomnia/5.0');
     const v4Export = exportArtifact(workspace, { format: 'insomnia-v4', scope: 'all' });
     const v4Import = importArtifact(v4Export.contents, v4Export.fileName);
     expect(v4Import.format).toBe('insomnia-v4');
@@ -74,6 +91,15 @@ describe('artifact export adapters', () => {
     expect(v4Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'grpc')).toMatchObject({ disableUserAgentHeader: true, grpc: { descriptorSource: 'buf', reflectionApiUrl: 'https://buf.example.com', reflectionApiKey: '{{ vault.buf }}', reflectionApiModule: 'buf.build/acme/greeter' } });
     expect(v4Import.testSuites).toEqual([expect.objectContaining({ name: 'Contract suite', tests: [expect.objectContaining({ name: 'Returns success', requestId: expect.any(String) })] })]);
     expect(v4Import.collections.find((collection) => collection.id === v4Import.testSuites[0].collectionId)?.requests.some((request) => request.id === v4Import.testSuites[0].tests[0].requestId)).toBe(true);
+    expect(v4Import.mcpClients).toHaveLength(2);
+    expect(v4Import.mcpClients.find((client) => client.transport === 'stdio')).toMatchObject({ command: '/Applications/MCP Server/bin/server', args: ['--mode', 'value with spaces', "quote'arg", ''], roots: ['file:///local'], enabled: false, env: [expect.objectContaining({ name: 'API_TOKEN', value: '{{ vault.mcp_token }}', enabled: true }), expect.objectContaining({ name: 'DISABLED', enabled: false })] });
+    expect(v4Import.mcpClients.find((client) => client.transport === 'http')).toMatchObject({ authType: 'oauth2', token: '', oauthClientSecret: '', oauthAuthorizationUrl: 'https://identity.example/authorize', oauthAccessTokenUrl: 'https://identity.example/token', oauthClientId: 'client-id', oauthScope: 'mcp.read', headers: [expect.objectContaining({ name: 'Authorization', value: '{{ vault.mcp_header }}' })] });
+    const v4Raw = JSON.parse(v4Export.contents) as { resources: Array<Record<string, unknown>> };
+    expect(v4Raw.resources.filter((resource) => resource.scope === 'mcp')).toHaveLength(2);
+    expect(v4Raw.resources.filter((resource) => resource._type === 'mcp_request')).toHaveLength(2);
+    expect(v4Export.contents).not.toContain('device-runtime-token');
+    expect(v4Export.contents).not.toContain('device-refresh');
+    expect(v4Export.contents).not.toContain('registered-secret');
 
     const v5Export = exportArtifact(workspace, { format: 'insomnia-v5', scope: 'all' });
     const v5Import = importArtifact(v5Export.contents, v5Export.fileName);
@@ -103,6 +129,21 @@ describe('artifact export adapters', () => {
     expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.protocol === 'grpc')).toMatchObject({ disableUserAgentHeader: true, grpc: { descriptorSource: 'buf', reflectionApiUrl: 'https://buf.example.com', reflectionApiKey: '{{ vault.buf }}', reflectionApiModule: 'buf.build/acme/greeter' } });
     expect(v5Import.testSuites).toEqual([expect.objectContaining({ name: 'Contract suite', tests: [expect.objectContaining({ name: 'Returns success', requestId: expect.any(String) })] })]);
     expect(v5Import.collections.find((collection) => collection.id === v5Import.testSuites[0].collectionId)?.requests.some((request) => request.id === v5Import.testSuites[0].tests[0].requestId)).toBe(true);
+    expect(v5Import.mcpClients).toHaveLength(2);
+    expect(v5Import.mcpClients.find((client) => client.transport === 'stdio')).toMatchObject({ command: '/Applications/MCP Server/bin/server', args: ['--mode', 'value with spaces', "quote'arg", ''], roots: ['file:///local'], enabled: false });
+    expect(v5Import.mcpClients.find((client) => client.transport === 'http')).toMatchObject({ authType: 'oauth2', token: '', oauthClientSecret: '', oauthClientId: 'client-id' });
+    const v5Documents = parseAllDocuments(v5Export.contents).map((document) => document.toJSON() as Record<string, unknown>);
+    expect(v5Documents.filter((document) => document.type === 'mcpClient.insomnia/5.0')).toHaveLength(2);
+    expect(v5Export.contents).not.toContain('device-runtime-token');
+    expect(v5Export.contents).not.toContain('device-refresh');
+    expect(v5Export.contents).not.toContain('registered-secret');
+    const appliedMcp = applyArtifactImport(cloneSeedWorkspace(), v5Import);
+    expect(appliedMcp.mcpClients).toHaveLength(2);
+    expect(new Set(appliedMcp.mcpClients.map((client) => client.id)).size).toBe(2);
+    expect(appliedMcp.mcpClients.every((client) => !client.enabled)).toBe(true);
+    const appliedMcpAgain = applyArtifactImport(appliedMcp, v5Import);
+    expect(appliedMcpAgain.mcpClients).toHaveLength(4);
+    expect(new Set(appliedMcpAgain.mcpClients.map((client) => client.id)).size).toBe(4);
   });
 
   it('exports and reimports HAR while warning about streaming protocols', () => {

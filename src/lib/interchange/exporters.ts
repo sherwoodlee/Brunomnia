@@ -1,5 +1,5 @@
 import { stringify } from 'yaml';
-import type { ApiRequest, Environment, ImportWarning, Workspace } from '../../types';
+import type { ApiRequest, Environment, ImportWarning, McpClient, Workspace } from '../../types';
 import type { ArtifactExport, ExportFormat, ExportScope } from './types';
 import { normalizeGrpcProtoTree } from '../grpcProto';
 import { orderedCollectionChildren, publicEnvironments } from '../resources';
@@ -77,6 +77,42 @@ const insomniaAuth = (auth: ApiRequest['auth']) => {
   if (auth.type === 'netrc') return { type: 'netrc', disabled };
   return { type: 'none', disabled };
 };
+
+const insomniaMcpAuth = (client: McpClient) => {
+  if (client.authType === 'basic') return { type: 'basic', username: client.username, password: client.password, disabled: false };
+  if (client.authType === 'bearer') return { type: 'bearer', token: client.token, prefix: 'Bearer', disabled: false };
+  if (client.authType === 'oauth2') return {
+    type: 'oauth2',
+    grantType: 'mcp_auth_flow',
+    authorizationUrl: client.oauthAuthorizationUrl,
+    accessTokenUrl: client.oauthAccessTokenUrl,
+    clientId: client.oauthClientId,
+    clientSecret: client.oauthClientSecret,
+    scope: client.oauthScope,
+    state: client.oauthState,
+    tokenPrefix: client.oauthTokenPrefix || 'Bearer',
+    usePkce: true,
+    pkceMethod: 'S256',
+    responseType: 'code',
+    disabled: false,
+  };
+  return {};
+};
+
+const quoteMcpCommandToken = (value: string) => value && /^[A-Za-z0-9_@%+=:,./-]+$/.test(value)
+  ? value
+  : `'${value.replace(/'/g, `'"'"'`)}'`;
+
+const insomniaMcpRequest = (client: McpClient, index: number) => ({
+  name: client.name,
+  url: client.transport === 'stdio' ? [client.command, ...client.args].map(quoteMcpCommandToken).join(' ') : client.url,
+  transportType: client.transport === 'stdio' ? 'stdio' : 'streamable-http',
+  headers: client.headers.map((header) => ({ name: header.name, value: header.value, description: header.description, disabled: !header.enabled })),
+  authentication: insomniaMcpAuth(client),
+  env: client.env.map((variable) => ({ id: variable.id, name: variable.name, value: variable.value, type: 'str', enabled: variable.enabled })),
+  roots: client.roots.map((uri) => ({ uri })),
+  meta: { id: `mcp-req_${index + 1}` },
+});
 
 const insomniaCookie = (cookie: Workspace['cookies'][number]) => ({ key: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expires ?? null, secure: cookie.secure, httpOnly: cookie.httpOnly, sameSite: cookie.sameSite || undefined, hostOnly: cookie.hostOnly, creation: cookie.createdAt });
 
@@ -162,11 +198,43 @@ const pushV4ProtoResources = (resources: unknown[], request: ApiRequest, workspa
   return entryId || `${prefix}_FILE_1__`;
 };
 
+const pushV4McpWorkspace = (resources: unknown[], workspace: Workspace, client: McpClient, index: number) => {
+  const workspaceId = `__MCP_WORKSPACE_${index + 1}__`;
+  const now = Date.now();
+  resources.push({ _id: workspaceId, parentId: null, modified: now, created: now, name: client.name, scope: 'mcp', _type: 'workspace' });
+  const publicEnvironment = publicEnvironments(workspace.environments);
+  const environmentIds = new Map(publicEnvironment.map((environment, environmentIndex) => [environment.id, `__MCP_ENVIRONMENT_${index + 1}_${environmentIndex + 1}__`]));
+  publicEnvironment.forEach((environment) => resources.push({
+    _id: environmentIds.get(environment.id),
+    parentId: environment.parentId ? environmentIds.get(environment.parentId) ?? workspaceId : workspaceId,
+    modified: now,
+    created: now,
+    name: environment.name,
+    ...insomniaV4EnvironmentFields(environment.variables, environment.environmentEditorMode),
+    _type: 'environment',
+  }));
+  const { meta: _meta, ...request } = insomniaMcpRequest(client, index);
+  resources.push({
+    ...request,
+    _id: `__MCP_CLIENT_${index + 1}__`,
+    parentId: workspaceId,
+    modified: now,
+    created: now,
+    description: '',
+    mcpStdioAccess: false,
+    subscribeResources: [],
+    connected: false,
+    sslValidation: true,
+    disableUserAgentHeader: false,
+    _type: 'mcp_request',
+  });
+};
+
 const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): ArtifactExport => {
   const warnings: ImportWarning[] = [];
   const collections = selectedCollections(workspace, options);
   const resources: unknown[] = [];
-  if (publicEnvironments(workspace.environments).some((environment) => environment.variables.length)) warnings.push({ code: 'global-environment-export', message: 'Insomnia v4 workspace exports have no separate global-environment resource; collection environments are preserved and Brunomnia global environments are omitted.' });
+  if (publicEnvironments(workspace.environments).some((environment) => environment.variables.length) && !(options.scope === 'all' && workspace.mcpClients.length)) warnings.push({ code: 'global-environment-export', message: 'Insomnia v4 workspace exports have no separate global-environment resource; collection environments are preserved and Brunomnia global environments are omitted.' });
   collections.forEach((collection, collectionIndex) => {
     const workspaceId = `__WORKSPACE_${collectionIndex + 1}__`;
     resources.push({ _id: workspaceId, parentId: null, modified: Date.now(), created: Date.now(), name: collection.name, description: collection.documentation ?? '', scope: 'collection', _type: 'workspace' });
@@ -216,6 +284,8 @@ const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): Artifac
       }));
     });
   });
+  if (options.scope === 'all') workspace.mcpClients.forEach((client, index) => pushV4McpWorkspace(resources, workspace, client, index));
+  else if (workspace.mcpClients.length) warnings.push({ code: 'mcp-scope-export', message: 'Project-scoped MCP clients are omitted from collection/design-only Insomnia exports. Export the full project to include them.' });
   selectedDesigns(workspace, options).forEach((design, index) => resources.push({ _id: `__API_SPEC_${index + 1}__`, parentId: resources.length ? '__WORKSPACE_1__' : null, name: design.name, contents: design.contents, _type: 'api_spec' }));
   if (options.scope === 'all') workspace.mockServers.forEach((server, index) => resources.push({ _id: `__MOCK_${index + 1}__`, parentId: resources.length ? '__WORKSPACE_1__' : null, name: server.name, url: `http://${server.host}:${server.port}`, routes: server.routes.map((route) => ({ name: route.name, method: route.method, path: route.path, statusCode: route.status, headers: route.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })), body: route.body, delayMs: route.delayMs })), _type: 'mock_server' }));
   const output = { _type: 'export', __export_format: 4, __export_date: new Date().toISOString(), __export_source: 'brunomnia.desktop.app:0.1.0', resources };
@@ -353,6 +423,18 @@ const exportInsomniaV5 = (workspace: Workspace, options: ExportOptions): Artifac
     };
     documents.push({ type: 'environment.insomnia.rest/5.0', schema_version: '5.1', name: base.name, meta: { id: `global_${index + 1}` }, environments: v5GlobalEnvironment(globalEnvironments.filter(belongsToBase), `global_${index + 1}`) });
   });
+  if (options.scope === 'all') workspace.mcpClients.forEach((client, index) => {
+    const prefix = `mcp_${index + 1}`;
+    documents.push({
+      type: 'mcpClient.insomnia/5.0',
+      schema_version: '5.1',
+      name: client.name,
+      meta: { id: prefix, description: 'Exported by Brunomnia' },
+      mcpRequest: insomniaMcpRequest(client, index),
+      environments: v5GlobalEnvironment(globalEnvironments, prefix),
+    });
+  });
+  else if (workspace.mcpClients.length) warnings.push({ code: 'mcp-scope-export', message: 'Project-scoped MCP clients are omitted from collection/design-only Insomnia exports. Export the full project to include them.' });
   if (options.scope === 'all') workspace.mockServers.forEach((server, index) => documents.push({ type: 'mock.insomnia.rest/5.0', schema_version: '5.1', name: server.name, meta: { id: `mock_${index + 1}` }, server: { meta: { id: `mock-server_${index + 1}` }, url: `http://${server.host}:${server.port}`, useInsomniaCloud: false }, routes: server.routes.map((route, routeIndex) => ({ name: route.path || route.name, meta: { id: `mock-route_${index + 1}_${routeIndex + 1}`, description: route.name }, body: route.body, headers: route.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })), method: route.method, statusCode: route.status })) }));
   if (!documents.length) throw new Error('The selected scope has no Insomnia v5 resources to export.');
   const contents = documents.map((document) => stringify(document, { lineWidth: 100 })).join('---\n');

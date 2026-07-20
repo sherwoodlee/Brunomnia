@@ -1,6 +1,7 @@
 import { stringify } from 'yaml';
-import type { ApiDesign, ApiRequest, Collection, CookieRecord, Environment, ImportWarning, JsonValue, KeyValue, MockRoute, MockServer, RequestFolder, UnitTestSuite } from '../../types';
+import type { ApiDesign, ApiRequest, Collection, CookieRecord, Environment, ImportWarning, JsonValue, KeyValue, McpClient, MockRoute, MockServer, RequestFolder, UnitTestSuite } from '../../types';
 import { normalizeGrpcProtoTree } from '../grpcProto';
+import { isProtectedSecretReference, isSensitiveSecretName } from '../security';
 import { asArray, asBoolean, asNumber, asRecord, asString, keyValues, normalizeMethod, objectVariables, requestFrom, sourceId, sourceMetadata, toJsonValue, type UnknownRecord } from './common';
 import { emptyResources, type ArtifactImport } from './types';
 
@@ -21,6 +22,144 @@ const insomniaEnvironmentRows = (raw: UnknownRecord, dataKey: 'data' | 'environm
     }];
   });
   return raw.environmentType === 'kv' && pairs.length ? pairs : objectVariables(raw[dataKey], prefix);
+};
+
+const isInsomniaMcpRequest = (raw: UnknownRecord) => asString(raw._type) === 'mcp_request' || asString(asRecord(raw.meta)?.id).startsWith('mcp-req');
+
+const parseMcpStdioCommand = (value: string): string[] | undefined => {
+  const tokens: string[] = [];
+  let token = '';
+  let quote = '';
+  let escaped = false;
+  let started = false;
+  const push = () => {
+    if (!started) return;
+    tokens.push(token);
+    token = '';
+    started = false;
+  };
+  for (const character of value) {
+    if (escaped) {
+      token += character;
+      escaped = false;
+      started = true;
+    } else if (character === '\\' && quote !== "'") {
+      escaped = true;
+      started = true;
+    } else if (quote) {
+      if (character === quote) quote = '';
+      else token += character;
+      started = true;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+      started = true;
+    } else if (/[\r\n|&;<>()`$#]/.test(character)) {
+      return undefined;
+    } else if (/\s/.test(character)) push();
+    else {
+      token += character;
+      started = true;
+    }
+  }
+  if (escaped || quote) return undefined;
+  push();
+  return tokens.length <= 101 && tokens.every((entry) => entry.length <= 8_192) ? tokens : undefined;
+};
+
+const protectedMcpRows = (value: unknown, prefix: string): KeyValue[] => asArray(value).flatMap((entry, index): KeyValue[] => {
+  const item = asRecord(entry);
+  if (!item) return [];
+  const name = asString(item.name ?? item.key);
+  const rawValue = asString(item.value);
+  return [{
+    id: asString(item.id, `${prefix}-${index}`),
+    name,
+    value: isSensitiveSecretName(name) && rawValue && !isProtectedSecretReference(rawValue) ? '' : rawValue,
+    enabled: item.enabled !== false && item.disabled !== true,
+    description: asString(item.description),
+  }];
+});
+
+const mapInsomniaMcpClient = (
+  raw: UnknownRecord,
+  format: 'insomnia-v4' | 'insomnia-v5',
+  index: number,
+  warnings: ImportWarning[],
+): McpClient => {
+  const meta = asRecord(raw.meta);
+  const identity = asString(raw._id ?? meta?.id, `mcp-${index}`);
+  const name = asString(raw.name, `MCP Client ${index + 1}`);
+  const transport = raw.transportType === 'stdio' ? 'stdio' : 'http';
+  if (raw.transportType !== undefined && raw.transportType !== 'stdio' && raw.transportType !== 'streamable-http') warnings.push({ code: 'unsupported-protocol', message: `Unknown MCP transport '${asString(raw.transportType)}' was imported as Streamable HTTP.`, resource: name });
+  const parsedCommand = transport === 'stdio' ? parseMcpStdioCommand(asString(raw.url)) : [];
+  if (transport === 'stdio' && !parsedCommand) warnings.push({ code: 'mcp-command', message: 'The STDIO command contains unsupported shell syntax and was preserved as one disabled executable value for review.', resource: name });
+  const authentication = asRecord(raw.authentication);
+  const authenticationType = asString(authentication?.type);
+  let authType: McpClient['authType'] = 'none';
+  if (authenticationType === 'bearer' || authenticationType === 'singleToken') authType = 'bearer';
+  else if (authenticationType === 'basic') authType = 'basic';
+  else if (authenticationType === 'oauth2') authType = 'oauth2';
+  else if (authenticationType && authenticationType !== 'none' && authenticationType !== 'apikey') warnings.push({ code: 'unsupported-auth', message: `Insomnia MCP authentication '${authenticationType}' was omitted.`, resource: name });
+  const headers = protectedMcpRows(raw.headers, `${identity}-header`);
+  if (authenticationType === 'apikey') {
+    const key = asString(authentication?.key, 'X-API-Key');
+    const value = asString(authentication?.value);
+    headers.push({ id: `${identity}-api-key`, name: key, value: value && !isProtectedSecretReference(value) ? '' : value, enabled: authentication?.disabled !== true });
+  }
+  const env = protectedMcpRows(raw.env, `${identity}-environment`).slice(0, 100);
+  const roots = asArray(raw.roots).flatMap((root): string[] => {
+    const uri = asString(asRecord(root)?.uri);
+    return uri ? [uri] : [];
+  }).slice(0, 100);
+  warnings.push({ code: 'integrations-disabled', message: 'Imported MCP clients are disabled and credential fields are cleared until their endpoints, commands, and authority are reviewed.', resource: name });
+  return {
+    id: sourceId('mcp-client', format, identity, index),
+    name,
+    enabled: false,
+    transport,
+    url: transport === 'http' ? asString(raw.url) : '',
+    command: transport === 'stdio' ? parsedCommand?.[0] ?? asString(raw.url).trim().slice(0, 8_192) : '',
+    args: transport === 'stdio' ? parsedCommand?.slice(1) ?? [] : [],
+    env,
+    headers,
+    authType,
+    token: '',
+    username: authType === 'basic' ? asString(authentication?.username) : '',
+    password: '',
+    oauthAuthorizationUrl: authType === 'oauth2' ? asString(authentication?.authorizationUrl) : '',
+    oauthAccessTokenUrl: authType === 'oauth2' ? asString(authentication?.accessTokenUrl) : '',
+    oauthClientId: authType === 'oauth2' ? asString(authentication?.clientId) : '',
+    oauthClientSecret: '',
+    oauthScope: authType === 'oauth2' ? asString(authentication?.scope) : '',
+    oauthState: authType === 'oauth2' ? asString(authentication?.state) : '',
+    oauthRefreshToken: '',
+    oauthIdentityToken: '',
+    oauthExpiresAt: 0,
+    oauthTokenPrefix: authType === 'oauth2' ? asString(authentication?.tokenPrefix, 'Bearer') : 'Bearer',
+    oauthRegisteredClientId: '',
+    oauthRegisteredClientSecret: '',
+    oauthRegisteredClientIdIssuedAt: 0,
+    oauthRegisteredClientSecretExpiresAt: 0,
+    oauthRegisteredTokenEndpointAuthMethod: 'none',
+    roots,
+    tools: [],
+    prompts: [],
+    resources: [],
+    resourceTemplates: [],
+  };
+};
+
+const appendInsomniaMcpClient = (
+  target: McpClient[],
+  raw: UnknownRecord,
+  format: 'insomnia-v4' | 'insomnia-v5',
+  warnings: ImportWarning[],
+) => {
+  if (target.length >= 100) {
+    if (!warnings.some((warning) => warning.code === 'mcp-client-limit')) warnings.push({ code: 'mcp-client-limit', message: 'Only the first 100 MCP clients were imported.' });
+    return;
+  }
+  target.push(mapInsomniaMcpClient(raw, format, target.length, warnings));
 };
 
 const applyInsomniaAuth = (request: ApiRequest, rawValue: unknown, format: string, warnings: ImportWarning[]) => {
@@ -138,7 +277,6 @@ const mapInsomniaRequest = (
   const metaId = asString(meta?.id);
   const isWebsocket = type === 'websocket_request' || metaId.startsWith('ws-req');
   const isSocketIo = type === 'socketio_request' || metaId.startsWith('socketio-req');
-  const isMcp = type === 'mcp_request' || metaId.startsWith('mcp-req');
   const isGrpc = type === 'grpc_request' || Boolean(raw.protoMethodName) || Boolean(raw.reflectionApi);
   request.disableUserAgentHeader = asBoolean(raw.disableUserAgentHeader);
   if (isWebsocket) {
@@ -185,15 +323,13 @@ const mapInsomniaRequest = (
       reflectionApiKey: asString(reflectionApi?.apiKey),
       reflectionApiModule: asString(reflectionApi?.module, request.grpc.reflectionApiModule),
     };
-  } else if (isMcp) {
-    request.method = 'POST';
   } else {
     request.method = normalizeMethod(raw.method, warnings, request.name);
   }
   request.pathParams = keyValues(raw.pathParameters, `${request.id}-path`);
   request.params = keyValues(raw.parameters, `${request.id}-query`);
   request.headers = [...inherited.headers, ...keyValues(raw.headers, `${request.id}-header`)];
-  if (!isGrpc && !isWebsocket && !isSocketIo && !isMcp) applyInsomniaBody(request, raw.body, format, warnings);
+  if (!isGrpc && !isWebsocket && !isSocketIo) applyInsomniaBody(request, raw.body, format, warnings);
   applyInsomniaAuth(request, raw.authentication ?? inherited.authentication, format, warnings);
   const scripts = asRecord(raw.scripts);
   request.preRequestScript = joinScripts(inherited.preRequestScript, raw.preRequestScript, scripts?.preRequest);
@@ -210,10 +346,6 @@ const mapInsomniaRequest = (
     request.transport.followRedirects = followRedirectsMode !== 'off';
   }
   const unsupported: Record<string, JsonValue> = { ...(request.source?.unsupported ?? {}) };
-  if (isMcp) {
-    unsupported.mcp = toJsonValue({ transportType: raw.transportType, env: raw.env, roots: raw.roots });
-    warnings.push({ code: 'unsupported-protocol', message: 'MCP was imported as an HTTP baseline; transport settings were preserved as source metadata.', resource: request.name });
-  }
   if (raw.pathParameters && request.pathParams.length === 0) unsupported.pathParameters = toJsonValue(raw.pathParameters);
   request.source = {
     ...(request.source ?? sourceMetadata(format, sourceIdentity)),
@@ -295,6 +427,20 @@ const collectionEnvironmentFields = (environments: Environment[]) => {
     subEnvironments: environments.filter((environment) => environment.id !== base?.id).map((environment) => ({ id: environment.id, name: environment.name, variables: environment.variables, environmentEditorMode: environment.environmentEditorMode })),
     activeSubEnvironmentId: '',
   };
+};
+
+const appendUniqueEnvironmentTree = (target: Environment[], incoming: Environment[], fingerprints: Set<string>) => {
+  if (!incoming.length) return;
+  const indexes = new Map(incoming.map((environment, index) => [environment.id, index]));
+  const fingerprint = JSON.stringify(incoming.map((environment) => ({
+    name: environment.name,
+    parent: environment.parentId ? indexes.get(environment.parentId) ?? -1 : -1,
+    mode: environment.environmentEditorMode,
+    variables: environment.variables.map((variable) => ({ name: variable.name, value: variable.value, enabled: variable.enabled, valueType: variable.valueType ?? 'string' })),
+  })));
+  if (fingerprints.has(fingerprint)) return;
+  fingerprints.add(fingerprint);
+  target.push(...incoming);
 };
 
 const v4Mocks = (resources: UnknownRecord[], workspaceId: string): MockServer[] => {
@@ -384,9 +530,24 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
   const protoFiles = new Map(resources.filter((resource) => resource._type === 'proto_file').map((file) => [asString(file._id), file]));
   const protoDirectories = new Map(resources.filter((resource) => resource._type === 'proto_directory').map((directory) => [asString(directory._id), directory]));
   const socketIoPayloads = new Map(resources.filter((resource) => resource._type === 'socketio_payload' || resource._type === 'socket_io_payload').map((payload) => [asString(payload.parentId), payload]));
-  const collectionWorkspaces = workspaces.length ? workspaces : [{ _id: '__WORKSPACE_ID__', name: sourceName }];
+  const mcpResources = resources.filter(isInsomniaMcpRequest);
+  const mcpClients: McpClient[] = [];
+  mcpResources.forEach((resource) => appendInsomniaMcpClient(mcpClients, resource, 'insomnia-v4', warnings));
+  const mcpWorkspaceIds = new Set([
+    ...workspaces.filter((workspace) => workspace.scope === 'mcp').map((workspace) => asString(workspace._id)),
+    ...mcpResources.map((resource) => asString(resource.parentId)).filter(Boolean),
+  ]);
+  const ordinaryRequestTypes = new Set(['request', 'websocket_request', 'grpc_request', 'socketio_request']);
+  const collectionWorkspaces = workspaces.filter((workspace) => {
+    const workspaceId = asString(workspace._id);
+    if (workspace.scope === 'mcp') return false;
+    if (!mcpWorkspaceIds.has(workspaceId)) return true;
+    return resources.some((resource) => resource.parentId === workspaceId && (ordinaryRequestTypes.has(asString(resource._type)) || resource._type === 'request_group'));
+  });
+  if (!workspaces.length && !mcpResources.length) collectionWorkspaces.push({ _id: '__WORKSPACE_ID__', name: sourceName });
   const collections: Collection[] = [];
   const environments: Environment[] = [];
+  const environmentFingerprints = new Set<string>();
   const mockServers: MockServer[] = [];
   const testSuites: UnitTestSuite[] = [];
   const cookieMap = new Map<string, CookieRecord>();
@@ -395,6 +556,7 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
     if (mapped) cookieMap.set(`${mapped.name}\n${mapped.domain}\n${mapped.path}`, mapped);
   });
   const cookies = [...cookieMap.values()];
+  mcpWorkspaceIds.forEach((workspaceId) => appendUniqueEnvironmentTree(environments, v4Environments(resources, workspaceId, 'insomnia-v4'), environmentFingerprints));
 
   for (const [workspaceIndex, workspace] of collectionWorkspaces.entries()) {
     const workspaceId = asString(workspace._id, '__WORKSPACE_ID__');
@@ -414,7 +576,7 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
       ...folderConfig(folder, 'insomnia-v4', folderIds.get(asString(folder._id))!, index, warnings),
       parentId: folderIds.get(asString(folder.parentId)) ?? '',
     }));
-    const rawRequests = resources.filter((resource) => ['request', 'websocket_request', 'grpc_request', 'socketio_request', 'mcp_request'].includes(asString(resource._type)))
+    const rawRequests = resources.filter((resource) => ordinaryRequestTypes.has(asString(resource._type)))
       .filter((resource) => resource.parentId === workspaceId || folders.has(asString(resource.parentId)))
       .filter((resource) => {
         const path = folderPath(asString(resource.parentId), folders);
@@ -482,11 +644,11 @@ export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): A
     contents: typeof resource.contents === 'string' ? resource.contents : stringify(resource.contents ?? {}),
     source: sourceMetadata('insomnia-v4', resource._id),
   }));
-  if (!collections.some((collection) => collection.requests.length) && !apiDesigns.length && !environments.length) warnings.push({ code: 'empty-export', message: 'The Insomnia v4 export contained no supported request, environment, or design resources.' });
+  if (!collections.some((collection) => collection.requests.length) && !apiDesigns.length && !environments.length && !mcpClients.length) warnings.push({ code: 'empty-export', message: 'The Insomnia v4 export contained no supported request, environment, design, or MCP resources.' });
   return {
     ...emptyResources(), format: 'insomnia-v4', sourceName, warnings,
     metadata: { source: asString(document.__export_source), date: asString(document.__export_date), resources: String(resources.length) },
-    collections, environments, apiDesigns, mockServers, cookies, testSuites,
+    collections, environments, apiDesigns, mockServers, cookies, testSuites, mcpClients,
   };
 };
 
@@ -494,6 +656,7 @@ const nestedV5Requests = (
   children: unknown,
   parentId: string,
   warnings: ImportWarning[],
+  mcpClients: McpClient[],
   output: ApiRequest[],
   folders: RequestFolder[],
   resourceOrder: string[],
@@ -502,12 +665,16 @@ const nestedV5Requests = (
   const rawChildren = asArray(children).map(asRecord).filter((child): child is UnknownRecord => Boolean(child));
   const orderedChildren = byDeclaredSortKey(rawChildren, (child) => asRecord(child.meta)?.sortKey);
   for (const child of orderedChildren) {
+    if (isInsomniaMcpRequest(child)) {
+      appendInsomniaMcpClient(mcpClients, child, 'insomnia-v5', warnings);
+      continue;
+    }
     if (Array.isArray(child.children)) {
       const meta = asRecord(child.meta);
       const folderId = sourceId('folder', 'insomnia-v5', `${identityPrefix}:${asString(meta?.id, `${parentId}:${folders.length}`)}`, folders.length);
       folders.push({ ...folderConfig(child, 'insomnia-v5', folderId, folders.length, warnings), parentId });
       resourceOrder.push(folderId);
-      nestedV5Requests(child.children, folderId, warnings, output, folders, resourceOrder, identityPrefix);
+      nestedV5Requests(child.children, folderId, warnings, mcpClients, output, folders, resourceOrder, identityPrefix);
     } else {
       const request = mapInsomniaRequest(child, 'insomnia-v5', output.length, [], { headers: [], preRequestScript: '', tests: '' }, warnings, identityPrefix);
       const protoFileId = asString(child.protoFileId);
@@ -537,16 +704,18 @@ const v5Environments = (document: UnknownRecord, prefix: string): Environment[] 
   return environments;
 };
 
-export const isInsomniaV5 = (document: UnknownRecord) => /^(collection|spec|mock|environment)\.insomnia\.rest\/5\.0$/.test(asString(document.type));
+export const isInsomniaV5 = (document: UnknownRecord) => /^(?:(?:collection|spec|mock|environment)\.insomnia\.rest|mcpClient\.insomnia)\/5\.0$/.test(asString(document.type));
 
 export const importInsomniaV5 = (sourceName: string, documents: UnknownRecord[]): ArtifactImport => {
   const warnings: ImportWarning[] = [];
   const collections: Collection[] = [];
   const environments: Environment[] = [];
+  const environmentFingerprints = new Set<string>();
   const apiDesigns: ApiDesign[] = [];
   const mockServers: MockServer[] = [];
   const cookies: CookieRecord[] = [];
   const testSuites: UnitTestSuite[] = [];
+  const mcpClients: McpClient[] = [];
   for (const [documentIndex, document] of documents.entries()) {
     const type = asString(document.type);
     const meta = asRecord(document.meta);
@@ -559,7 +728,7 @@ export const importInsomniaV5 = (sourceName: string, documents: UnknownRecord[])
       const requests: ApiRequest[] = [];
       const folders: RequestFolder[] = [];
       const resourceOrder: string[] = [];
-      nestedV5Requests(document.collection, '', warnings, requests, folders, resourceOrder, identity);
+      nestedV5Requests(document.collection, '', warnings, mcpClients, requests, folders, resourceOrder, identity);
       const name = asString(document.name, `Collection ${documentIndex + 1}`);
       const collectionEnvironments = v5Environments(document, identity);
       const collectionId = sourceId('collection', 'insomnia-v5', identity);
@@ -601,8 +770,13 @@ export const importInsomniaV5 = (sourceName: string, documents: UnknownRecord[])
         return [{ id: sourceId('route', 'insomnia-v5', asString(asRecord(route.meta)?.id, routeName), routeIndex), name: routeName, enabled: true, method: normalizeMethod(route.method, warnings, routeName), path: routeName.startsWith('/') ? routeName : `/${routeName.replace(/\s+/g, '-').toLowerCase()}`, status: asNumber(route.statusCode, 200), headers: keyValues(route.headers, `v5-mock-${routeIndex}`), body: asString(route.body, '{}'), delayMs: 0 }];
       });
       mockServers.push({ id: sourceId('mock', 'insomnia-v5', identity), name: asString(document.name, `Mock ${documentIndex + 1}`), host: '127.0.0.1', port, routes, source: sourceMetadata('insomnia-v5', identity, { originalUrl: server?.url }) });
-    } else if (type.startsWith('environment.')) environments.push(...v5Environments(document, identity));
+    } else if (type.startsWith('environment.')) appendUniqueEnvironmentTree(environments, v5Environments(document, identity), environmentFingerprints);
+    else if (type.startsWith('mcpClient.')) {
+      const mcpRequest = asRecord(document.mcpRequest) ?? {};
+      appendInsomniaMcpClient(mcpClients, { ...mcpRequest, name: asString(mcpRequest.name, asString(document.name, `MCP Client ${documentIndex + 1}`)) }, 'insomnia-v5', warnings);
+      appendUniqueEnvironmentTree(environments, v5Environments(document, identity), environmentFingerprints);
+    }
   }
-  if (!collections.length && !environments.length && !mockServers.length) warnings.push({ code: 'empty-export', message: 'The Insomnia v5 file contained no supported resources.' });
-  return { ...emptyResources(), format: 'insomnia-v5', sourceName, warnings, metadata: { documents: String(documents.length), schemaVersions: [...new Set(documents.map((document) => asString(document.schema_version)).filter(Boolean))].join(', ') }, collections, environments, apiDesigns, mockServers, cookies, testSuites };
+  if (!collections.length && !environments.length && !mockServers.length && !mcpClients.length) warnings.push({ code: 'empty-export', message: 'The Insomnia v5 file contained no supported resources.' });
+  return { ...emptyResources(), format: 'insomnia-v5', sourceName, warnings, metadata: { documents: String(documents.length), schemaVersions: [...new Set(documents.map((document) => asString(document.schema_version)).filter(Boolean))].join(', ') }, collections, environments, apiDesigns, mockServers, cookies, testSuites, mcpClients };
 };

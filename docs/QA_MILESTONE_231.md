@@ -10,7 +10,7 @@ Scope: add reviewed per-client MCP STDIO process environments, isolate direct ch
 - Pinned `insomnia-data/src/models/mcp-request.ts` stores ordered `EnvironmentKvPairData` on every MCP request. The STDIO request pane alone exposes a text-only **Environment** editor and locks it while connected.
 - Pinned `mcp-url-bar.tsx` renders enabled environment rows through the active Insomnia environment before opening the connection.
 - Pinned `main/mcp/transport-stdio.ts` filters blank names and creates the SDK `StdioClientTransport` with an explicit environment containing shell-resolved `PATH` plus reviewed values instead of the complete Electron process environment.
-- Pinned Insomnia v5 interchange retains MCP environment rows. Brunomnia's first-class Insomnia MCP-resource import/export remains a separate open gap; M231 covers its own v38 JSON and split-YAML persistence without claiming that interchange closure.
+- Pinned Insomnia v5 interchange retains MCP environment rows. M231 covers its own v38 JSON and split-YAML persistence; Milestone 233 later closes first-class Insomnia MCP-resource import/export.
 
 ## Implementation
 
@@ -54,4 +54,4 @@ Independent `cosign verify` passed issuer `https://token.actions.githubuserconte
 
 ## Acceptance boundary
 
-M231 closes reviewed project-scoped STDIO environment rows, template/vault resolution, plaintext-sensitive-value refusal, ambient-environment isolation, bounded native dispatch, workspace v38 persistence, and environment-triggered persistent-process replacement. Milestone 232 later adds bounded login-shell `PATH` discovery; first-class Insomnia v4/v5 MCP-resource import/export remains. Recursive/conditional schema forms, long-lived GET/POST SSE resumption/reconnect, elicitation and reviewed sampling UI, notification/server-request response UI, multiple authorization-server failover, DPoP, live third-party fixtures, and OS-keychain-wrapped runtime credentials also remain. MCP clients and Import/export stay `Baseline`; exactly 19 parity rows remain incomplete, so Brunomnia is not feature-complete.
+M231 closes reviewed project-scoped STDIO environment rows, template/vault resolution, plaintext-sensitive-value refusal, ambient-environment isolation, bounded native dispatch, workspace v38 persistence, and environment-triggered persistent-process replacement. Milestones 232–233 later add bounded login-shell `PATH` discovery and first-class Insomnia v4/v5 MCP-resource import/export. Recursive/conditional schema forms, long-lived GET/POST SSE resumption/reconnect, elicitation and reviewed sampling UI, notification/server-request response UI, multiple authorization-server failover, DPoP, live third-party fixtures, and OS-keychain-wrapped runtime credentials also remain. MCP clients and Import/export stay `Baseline`; exactly 19 parity rows remain incomplete, so Brunomnia is not feature-complete.

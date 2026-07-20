@@ -1,4 +1,4 @@
-import type { Collection, CookieRecord, Environment, ImportRecord, MockServer, UnitTestSuite, Workspace } from '../../types';
+import type { Collection, CookieRecord, Environment, ImportRecord, McpClient, MockServer, UnitTestSuite, Workspace } from '../../types';
 import { sourceId } from './common';
 import type { ArtifactImport } from './types';
 
@@ -59,6 +59,13 @@ const rekeyMock = (server: MockServer, batch: string): MockServer => ({
   routes: server.routes.map((route) => ({ ...route, id: `${batch}-${route.id}`, headers: route.headers.map((header) => ({ ...header, id: `${batch}-${header.id}` })) })),
 });
 
+const rekeyMcpClient = (client: McpClient, batch: string): McpClient => ({
+  ...client,
+  id: `${batch}-${client.id}`,
+  env: client.env.map((variable) => ({ ...variable, id: `${batch}-${variable.id}` })),
+  headers: client.headers.map((header) => ({ ...header, id: `${batch}-${header.id}` })),
+});
+
 const rekeyTestSuites = (suites: UnitTestSuite[], collectionIds: Map<string, string>, requestIds: Map<string, string>, batch: string): UnitTestSuite[] => suites.flatMap((suite) => {
   const collectionId = collectionIds.get(suite.collectionId);
   if (!collectionId) return [];
@@ -99,6 +106,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
   }));
   const mockServers = result.mockServers.map((server) => rekeyMock(server, batch));
   const testSuites = rekeyTestSuites(result.testSuites, collectionIds, requestIds, batch);
+  const mcpClients = result.mcpClients.map((client) => rekeyMcpClient(client, batch));
   const firstRequest = collections.flatMap((collection) => collection.requests)[0];
   return {
     ...workspace,
@@ -110,6 +118,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
     apiDesigns: [...workspace.apiDesigns, ...apiDesigns],
     mockServers: [...workspace.mockServers, ...mockServers],
     testSuites: [...workspace.testSuites, ...testSuites],
+    mcpClients: [...workspace.mcpClients, ...mcpClients],
     cookies: mergeCookies(workspace.cookies, result.cookies, batch),
     imports: [record, ...workspace.imports].slice(0, 100),
   };
