@@ -54,7 +54,13 @@ Rendered interaction QA remains omitted by standing direction. No credentialed p
 
 ## Remote gate
 
-The implementation workflow and signed-image evidence will be recorded after the milestone commit reaches remote `main`.
+Main implementation commit `08635fbaaa494908df03564945ad6d3e23f217d6` completed verify and publish in [Actions run 29756109367](https://github.com/sherwoodlee/Brunomnia/actions/runs/29756109367). Both jobs passed. The verify job reproduced the committed CLI under the configured Node runtime, passed freshness, built the verification image, and passed ordinary plus extended non-root/no-network container smokes. The publish job emitted AMD64/ARM64 provenance and SBOM attestations and keylessly signed:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:96c4fdccc9db3922545114b57855377ef324fbce32ac7a83bb131f168fcb6d50
+```
+
+Independent manifest inspection resolved AMD64 `sha256:e7aa22fe7920616b340d535adb414ab28bd5f7efa6f33c4242d6050af735b9c3`, ARM64 `sha256:5f704cae3681f6f0a7f89a3fbbbc773c4284066d19a58d181b34ae8e5eeab9f0`, and attached attestation manifests `sha256:b76c7d7232e3d30f6037029d6f5cf0b6bff9b9d085f217272569069753e0c40d` plus `sha256:51ef61c9b4240cd2f9926edea895503ad8cc6df3e47b443a51b6c7cd8aa91f5a`. Independent Cosign verification passed trusted certificate-chain validation, exact issuer `https://token.actions.githubusercontent.com`, exact subject `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, branch, repository, workflow, implementation SHA, digest claims, and offline transparency-log inclusion at Rekor index `2206819273`.
 
 ## Acceptance boundary
 
