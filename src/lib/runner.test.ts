@@ -69,7 +69,7 @@ describe('collection runner', () => {
     expect(detectRunnerDataEncoding(utf16)).toBe('utf-16le');
     expect(decodeRunnerDataBytes(utf16, 'utf-16le')).toBe('id\n1');
     const western = new Uint8Array([0x69, 0x64, 0x2c, 0x6e, 0x61, 0x6d, 0x65, 0x0a, 0x31, 0x2c, 0xe9]);
-    expect(detectRunnerDataEncoding(western)).toBe('windows-1252');
+    expect(detectRunnerDataEncoding(western)).toBe('iso-8859-1');
     expect(decodeRunnerDataBytes(western, 'windows-1252')).toBe('id,name\n1,é');
     const utf32le = new Uint8Array([0xff, 0xfe, 0x00, 0x00, 0x69, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00]);
     const utf32be = new Uint8Array([0x00, 0x00, 0xfe, 0xff, 0x00, 0x01, 0xf6, 0x80]);
@@ -80,6 +80,11 @@ describe('collection runner', () => {
     expect(decodeRunnerDataBytes(new Uint8Array([0x41, 0x80]), 'iso-8859-1')).toBe('A\u0080');
     expect(decodeRunnerDataBytes(new Uint8Array([0xae, 0xbe]), 'koi8-ru')).toBe('ўЎ');
     expect(decodeRunnerDataBytes(new Uint8Array([0x80, 0x81, 0x8a, 0xc0]), 'koi8-t')).toBe('қғҳю');
+    const shiftJisLine = Uint8Array.from('82b182ea82cd93fa967b8cea82cc95b68e9a8352815b836894bb92e882f08a6d944682b782e982bd82df82cc92b782a295b68fcd82c582b78142938c8b9e937391e58de3957b966b8a4393b981418e52936391be985982c68db293a189d48e7182aa8a4a94ad959482c689638bc6959482c593ad82a282c482a282dc82b781420a'.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16));
+    const shiftJis = new Uint8Array(shiftJisLine.length * 20);
+    for (let index = 0; index < 20; index += 1) shiftJis.set(shiftJisLine, index * shiftJisLine.length);
+    expect(detectRunnerDataEncoding(shiftJis)).toBe('shift_jis');
+    expect(decodeRunnerDataBytes(shiftJis, 'shift_jis')).toContain('これは日本語の文字コード判定を確認するための長い文章です。');
     expect(RUNNER_DATA_ENCODINGS).toHaveLength(41);
     expect(RUNNER_DATA_ENCODINGS.map((encoding) => encoding.key)).toEqual(expect.arrayContaining(['utf-8', 'utf-16le', 'utf-32be', 'ascii', 'iso-8859-12', 'windows-1252', 'euc-cn', 'shift_jis', 'koi8-ru', 'koi8-t']));
     expect(() => decodeRunnerDataBytes(western, 'utf-8')).toThrow(/not valid utf-8/);
@@ -321,7 +326,7 @@ describe('collection runner', () => {
       async (_activeRequest, _variables, execution) => {
         expect(execution).toMatchObject({ key: buildRunnerItemKey(1, 0, request.id), attempt: 1 });
         expect(execution.signal.aborted).toBe(false);
-        return { status: 201, statusText: 'Created', headers: {}, body: '{}', durationMs: 12, sizeBytes: 2, requestUrl: 'https://example.test/rendered' };
+        return { status: 201, statusText: 'Created', headers: {}, body: 'decoded body', durationMs: 12, sizeBytes: 12, wireSizeBytes: 2, requestUrl: 'https://example.test/rendered' };
       },
       async (_script, activeRequest, environment, response) => ({ request: activeRequest, environment, logs: [], tests: response ? [{ name: 'created', passed: true }] : [] }),
     );
@@ -334,6 +339,7 @@ describe('collection runner', () => {
     expect(snapshots.at(-1)).toEqual(['completed']);
     expect(report).toMatchObject({ sourceName: 'Collection / Folder', folderId: 'folder', planned: 1, completed: 1, skipped: 0, canceled: 0 });
     expect(report.liveItems?.[0]).toMatchObject({ status: 'completed', statusCode: 201, statusMessage: 'Created', responseTime: 12, responseSize: 2, requestUrl: 'https://example.test/rendered', tests: [{ name: 'created', passed: true }] });
+    expect(report.results[0].response?.sizeBytes).toBe(2);
   });
 
   it('skips queued items without executing or counting them as failures', async () => {

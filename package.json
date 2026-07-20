@@ -30,6 +30,7 @@
     "@stoplight/spectral-rulesets": "^1.22.1",
     "@tauri-apps/api": "^2.0.0",
     "@xmldom/xmldom": "0.8.13",
+    "chardet": "2.1.1",
     "date-fns": "3.6.0",
     "fuzzysort": "1.9.0",
     "graphql": "16.10.0",

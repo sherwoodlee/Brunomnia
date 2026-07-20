@@ -1,3 +1,4 @@
+import { detect as detectCharacterEncoding } from 'chardet';
 import type {
   ApiRequest,
   Collection,
@@ -239,7 +240,7 @@ export const captureRunnerResponse = (response: HttpResponse, budget: ResponseSn
     headersTruncated,
     bodyPreview: body.value,
     bodyTruncated: body.truncated,
-    sizeBytes: response.sizeBytes,
+    sizeBytes: response.wireSizeBytes ?? response.sizeBytes,
     storedBytes,
   };
 };
@@ -618,7 +619,7 @@ export const runCollection = async (
                 statusCode: response?.status,
                 statusMessage: response?.statusText,
                 responseTime: response?.durationMs ?? Date.now() - started,
-                responseSize: response?.sizeBytes,
+                responseSize: response ? response.wireSizeBytes ?? response.sizeBytes : undefined,
                 errorMessage: control === 'skipped' ? 'Skipped by user.' : 'Canceled by user.',
                 tests,
               });
@@ -665,7 +666,7 @@ export const runCollection = async (
             statusCode: response?.status,
             statusMessage: response?.statusText,
             responseTime: result.durationMs,
-            responseSize: response?.sizeBytes,
+            responseSize: response ? response.wireSizeBytes ?? response.sizeBytes : undefined,
             errorMessage: error,
             tests,
           });
@@ -758,11 +759,8 @@ export const parseRunnerData = (contents: string): Record<string, string>[] => {
 export type RunnerDataFilePreview = { rows: Record<string, string>[]; headers: string[] };
 
 export const detectRunnerDataEncoding = (bytes: Uint8Array) => {
-  if (bytes[0] === 0xff && bytes[1] === 0xfe && bytes[2] === 0x00 && bytes[3] === 0x00) return 'utf-32le';
-  if (bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0xfe && bytes[3] === 0xff) return 'utf-32be';
-  if (bytes[0] === 0xff && bytes[1] === 0xfe) return 'utf-16le';
-  if (bytes[0] === 0xfe && bytes[1] === 0xff) return 'utf-16be';
-  try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); return 'utf-8'; } catch { return 'windows-1252'; }
+  const detected = detectCharacterEncoding(bytes);
+  return detected ? detected.toLowerCase().replace('shift-jis', 'shift_jis') : 'utf-8';
 };
 
 const decodeUtf32 = (bytes: Uint8Array, littleEndian: boolean) => {
