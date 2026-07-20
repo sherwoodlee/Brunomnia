@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { McpClient } from '../types';
-import { disconnectMcpClient, discoverMcpClient, forgetMcpClientSession, invokeMcpOperation } from './mcp';
+import { disconnectMcpClient, discoverMcpClient, forgetMcpClientSession, invokeMcpOperation, mcpResourceSubscriptionState, setMcpResourceSubscription } from './mcp';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => false }));
 
@@ -25,6 +25,7 @@ describe('MCP Streamable HTTP session lifecycle', () => {
     let rejectFirstSession = false;
     let terminatedSession = '';
     const operationSessions: string[] = [];
+    const subscriptionMethods: string[] = [];
     const protocolHeaders: string[] = [];
     server = createServer(async (request, response) => {
       response.setHeader('Connection', 'close');
@@ -42,7 +43,7 @@ describe('MCP Streamable HTTP session lifecycle', () => {
       if (message.method === 'initialize') {
         initializeCount += 1;
         response.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': `loopback-session-${initializeCount}` });
-        response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-06-18', capabilities: {} } }));
+        response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-06-18', capabilities: { resources: { subscribe: true } } } }));
         return;
       }
       if (message.method === 'notifications/initialized') {
@@ -57,6 +58,12 @@ describe('MCP Streamable HTTP session lifecycle', () => {
         }
         response.writeHead(200, { 'Content-Type': 'application/json' });
         response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: 'ok' }] } }));
+        return;
+      }
+      if (message.method === 'resources/subscribe' || message.method === 'resources/unsubscribe') {
+        subscriptionMethods.push(`${message.method}:${sessionId}`);
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
         return;
       }
       const result = message.method === 'tools/list'
@@ -84,6 +91,11 @@ describe('MCP Streamable HTTP session lifecycle', () => {
     expect(invoked.result).toEqual({ content: [{ type: 'text', text: 'ok' }] });
     expect(initializeCount).toBe(2);
     expect(operationSessions).toEqual(['loopback-session-1', 'loopback-session-2']);
+    expect(mcpResourceSubscriptionState(invoked.client, 'file:///loopback', 'loopback-project')).toEqual({ supported: true, subscribed: false });
+    await setMcpResourceSubscription(invoked.client, 'file:///loopback', true, undefined, context);
+    expect(mcpResourceSubscriptionState(invoked.client, 'file:///loopback', 'loopback-project')).toEqual({ supported: true, subscribed: true });
+    await setMcpResourceSubscription(invoked.client, 'file:///loopback', false, undefined, context);
+    expect(subscriptionMethods).toEqual(['resources/subscribe:loopback-session-2', 'resources/unsubscribe:loopback-session-2']);
 
     expect((await disconnectMcpClient(invoked.client, undefined, context)).terminated).toBe(true);
     expect(terminatedSession).toBe('loopback-session-2');

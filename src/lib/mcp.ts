@@ -18,8 +18,9 @@ export type McpRequestContext = SendRequestContext & {
   onMcpServerRequestCancelled?: (clientId: string, requestId: string | number) => void;
   sessionScope?: string;
 };
-type StdioOutput = { result: unknown; events: unknown[]; stderr: string };
-type McpHttpSession = { client: McpClient; fingerprint: string; sessionId: string };
+type StdioOutput = { result: unknown; events: unknown[]; stderr: string; serverCapabilities?: unknown };
+type McpSessionRuntime = { fingerprint: string; resourceSubscriptionsSupported: boolean; subscribedResourceUris: Set<string> };
+type McpHttpSession = McpSessionRuntime & { client: McpClient; sessionId: string };
 
 const now = () => new Date().toISOString();
 const requestId = () => `mcp-${Date.now().toString(36)}-${crypto.randomUUID()}`;
@@ -30,8 +31,9 @@ const throwIfMcpAborted = (signal?: AbortSignal) => { if (signal?.aborted) throw
 const MCP_PROTOCOL_VERSION = '2025-06-18';
 const MAX_HTTP_SESSIONS = 100;
 const MAX_SESSION_ID_BYTES = 4_096;
+const MAX_RESOURCE_SUBSCRIPTIONS = 5_000;
 const httpSessions = new Map<string, McpHttpSession>();
-const stdioSessions = new Map<string, string>();
+const stdioSessions = new Map<string, McpSessionRuntime>();
 const stdioSessionRevisions = new Map<string, number>();
 const reviewedServerRequestMethods = new Set<McpServerRequest['method']>(['elicitation/create', 'sampling/createMessage']);
 
@@ -81,8 +83,16 @@ const sessionFingerprint = (client: McpClient) => JSON.stringify({
 });
 const stdioSessionFingerprint = (client: McpClient) => JSON.stringify([client.command.trim(), client.args, client.env.map(({ name, value, enabled }) => ({ name, value, enabled }))]);
 const stdioSessionRevision = (key: string) => stdioSessionRevisions.get(key) ?? 0;
-const rememberStdioSession = (key: string, fingerprint: string, revision: number) => {
-  if (stdioSessionRevision(key) === revision) stdioSessions.set(key, fingerprint);
+const supportsResourceSubscriptions = (capabilities: unknown) => asRecord(asRecord(capabilities)?.resources)?.subscribe === true;
+const rememberStdioSession = (key: string, fingerprint: string, revision: number, resourceSubscriptionsSupported?: boolean) => {
+  if (stdioSessionRevision(key) !== revision) return;
+  const current = stdioSessions.get(key);
+  const reusable = current?.fingerprint === fingerprint;
+  stdioSessions.set(key, {
+    fingerprint,
+    resourceSubscriptionsSupported: resourceSubscriptionsSupported ?? (reusable ? current.resourceSubscriptionsSupported : false),
+    subscribedResourceUris: reusable ? current.subscribedResourceUris : new Set(),
+  });
 };
 const invalidateStdioSession = (key: string) => {
   const active = stdioSessions.delete(key);
@@ -110,8 +120,17 @@ const matchingHttpSession = (client: McpClient, context: Pick<McpRequestContext,
 const rememberHttpSession = (client: McpClient, context: Pick<McpRequestContext, 'sessionScope'>, sessionId: string) => {
   const normalized = normalizeSessionId(sessionId);
   const key = sessionKey(client.id, context.sessionScope);
+  const fingerprint = sessionFingerprint(client);
+  const current = httpSessions.get(key);
+  const reusable = current?.fingerprint === fingerprint;
   httpSessions.delete(key);
-  httpSessions.set(key, { client, fingerprint: sessionFingerprint(client), sessionId: normalized });
+  httpSessions.set(key, {
+    client,
+    fingerprint,
+    sessionId: normalized,
+    resourceSubscriptionsSupported: reusable ? current.resourceSubscriptionsSupported : false,
+    subscribedResourceUris: reusable ? current.subscribedResourceUris : new Set(),
+  });
   while (httpSessions.size > MAX_HTTP_SESSIONS) {
     const evicted = httpSessions.keys().next().value!;
     httpSessions.delete(evicted);
@@ -127,7 +146,24 @@ export const forgetMcpClientSession = (clientId: string, sessionScope = '') => {
 };
 export const hasMcpClientSession = (client: McpClient, sessionScope = '') => {
   const key = sessionKey(client.id, sessionScope);
-  return client.transport === 'stdio' ? stdioSessions.get(key) === stdioSessionFingerprint(client) : httpSessions.get(key)?.fingerprint === sessionFingerprint(client);
+  return client.transport === 'stdio' ? stdioSessions.get(key)?.fingerprint === stdioSessionFingerprint(client) : httpSessions.get(key)?.fingerprint === sessionFingerprint(client);
+};
+
+const setHttpSessionCapabilities = (client: McpClient, context: Pick<McpRequestContext, 'sessionScope'>, capabilities: unknown) => {
+  const session = httpSessions.get(sessionKey(client.id, context.sessionScope));
+  if (session?.fingerprint === sessionFingerprint(client)) session.resourceSubscriptionsSupported = supportsResourceSubscriptions(capabilities);
+};
+
+const mcpSessionRuntime = (client: McpClient, sessionScope = ''): McpSessionRuntime | undefined => {
+  const key = sessionKey(client.id, sessionScope);
+  const runtime = client.transport === 'stdio' ? stdioSessions.get(key) : httpSessions.get(key);
+  const fingerprint = client.transport === 'stdio' ? stdioSessionFingerprint(client) : sessionFingerprint(client);
+  return runtime?.fingerprint === fingerprint ? runtime : undefined;
+};
+
+export const mcpResourceSubscriptionState = (client: McpClient, uri: string, sessionScope = '') => {
+  const runtime = mcpSessionRuntime(client, sessionScope);
+  return { supported: runtime?.resourceSubscriptionsSupported === true, subscribed: runtime?.subscribedResourceUris.has(uri) === true };
 };
 
 const validateHttpEndpoint = (value: string) => {
@@ -427,6 +463,7 @@ const httpSession = async (client: McpClient, environment: Environment | undefin
   const notification = await httpRequest(initialized.client, 'notifications/initialized', {}, environment, context, initialized.sessionId, true);
   const sessionId = notification.sessionId ?? initialized.sessionId ?? '';
   rememberHttpSession(notification.client, context, sessionId);
+  setHttpSessionCapabilities(notification.client, context, asRecord(initialized.result)?.capabilities);
   return { client: notification.client, sessionId, events: [...initialized.events, ...notification.events] };
 };
 
@@ -564,6 +601,37 @@ export const notifyMcpRootsChanged = async (
   return true;
 };
 
+export const setMcpResourceSubscription = async (
+  client: McpClient,
+  uri: string,
+  subscribe: boolean,
+  environment: Environment | undefined,
+  context: McpRequestContext,
+): Promise<{ client: McpClient; events: McpEvent[]; subscribed: boolean }> => {
+  if (!uri || uri.length > 32_768 || /[\0\r\n]/.test(uri)) throw new Error('The MCP resource URI exceeds its safety limit.');
+  const runtime = mcpSessionRuntime(client, context.sessionScope);
+  if (!runtime) throw new Error('Connect this MCP client before changing resource subscriptions.');
+  if (!runtime.resourceSubscriptionsSupported) throw new Error('This MCP server does not advertise resource subscriptions.');
+  if (subscribe && !runtime.subscribedResourceUris.has(uri) && runtime.subscribedResourceUris.size >= MAX_RESOURCE_SUBSCRIPTIONS) {
+    throw new Error(`This MCP client has reached its ${MAX_RESOURCE_SUBSCRIPTIONS}-subscription safety limit.`);
+  }
+  const session = client.transport === 'http' ? matchingHttpSession(client, context) : undefined;
+  if (client.transport === 'http' && !session) throw new Error('The MCP HTTP session is no longer connected.');
+  const response = await operationWithSessionRecovery(
+    client,
+    subscribe ? 'resources/subscribe' : 'resources/unsubscribe',
+    { uri },
+    environment,
+    context,
+    session?.sessionId ?? '',
+  );
+  const activeRuntime = mcpSessionRuntime(response.client, context.sessionScope);
+  if (!activeRuntime) throw new Error('The MCP session closed before the subscription state could be retained.');
+  if (subscribe) activeRuntime.subscribedResourceUris.add(uri);
+  else activeRuntime.subscribedResourceUris.delete(uri);
+  return { client: response.client, events: response.events, subscribed: subscribe };
+};
+
 const stdioRequest = async (client: McpClient, method: string, params: unknown, environment: Environment | undefined, context: McpRequestContext): Promise<McpOperationResult> => {
   throwIfMcpAborted(context.signal);
   if (!isTauri()) throw new Error('MCP STDIO servers require the Tauri desktop app.');
@@ -579,14 +647,20 @@ const stdioRequest = async (client: McpClient, method: string, params: unknown, 
   context.signal?.addEventListener('abort', cancel, { once: true });
   let output: StdioOutput;
   const delivered = new Set<string>();
+  let transportFailed = false;
   const channel = new Channel<McpEvent>();
   channel.onmessage = (event) => {
     delivered.add(`${event.method}\n${event.detail}`);
+    if (event.method === 'transport/error') {
+      transportFailed = true;
+      const active = stdioSessions.get(sessionKeyValue);
+      if (stdioSessionRevision(sessionKeyValue) === sessionRevision && active?.fingerprint === fingerprint) invalidateStdioSession(sessionKeyValue);
+    }
     publishMcpEvent(client, context, event);
   };
   try {
     output = await invoke<StdioOutput>('mcp_stdio_call', { input: { command: client.command, args: client.args, env: processEnvironment, method, params, roots: client.roots, timeoutMs: 30_000, cancellationId, sessionKey: sessionKeyValue }, onEvent: channel });
-    rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision);
+    if (!transportFailed) rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision, supportsResourceSubscriptions(output.serverCapabilities));
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     if (detail.startsWith('The MCP server returned an error:')) rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision);

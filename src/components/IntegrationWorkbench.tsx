@@ -4,7 +4,7 @@ import type { Environment, JsonValue, KeyValue, McpClient, Workspace } from '../
 import { generateAiText } from '../lib/ai';
 import type { SendRequestContext } from '../lib/http';
 import { loadKonnectControlPlanes, syncKonnectRoutes } from '../lib/konnect';
-import { disconnectMcpClient, discoverMcpClient, hasMcpClientSession, invokeMcpOperation, notifyMcpRootsChanged, respondMcpServerRequest, type McpEvent, type McpReviewedServerRequest, type McpServerRequest, type McpServerRequestResponse } from '../lib/mcp';
+import { disconnectMcpClient, discoverMcpClient, hasMcpClientSession, invokeMcpOperation, mcpResourceSubscriptionState, notifyMcpRootsChanged, respondMcpServerRequest, setMcpResourceSubscription, type McpEvent, type McpReviewedServerRequest, type McpServerRequest, type McpServerRequestResponse } from '../lib/mcp';
 import { initialMcpToolParameters, mcpParameterIssues, renameMcpParameterValue, withMcpParameterValue, withoutMcpParameterValue, type McpParameterPath } from '../lib/mcpParameterSchema';
 import { expandMcpUriTemplate } from '../lib/mcpUriTemplate';
 import { plaintextSecretCandidates } from '../lib/security';
@@ -228,6 +228,8 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
   const selectedResourceTemplate = operationKind === 'resource'
     ? active?.resourceTemplates.find((resource) => resource.uri === operationName || resource.uriTemplate === operationName)
     : undefined;
+  const selectedResource = operationKind === 'resource' ? active?.resources.find((resource) => resource.uri === operationName) : undefined;
+  const resourceSubscription = active && selectedResource ? mcpResourceSubscriptionState(active, selectedResource.uri, workspaceId) : { supported: false, subscribed: false };
   const selectedTool = operationKind === 'tool' ? active?.tools.find((tool) => tool.name === operationName) : undefined;
   const selectedPrompt = operationKind === 'prompt' ? active?.prompts.find((prompt) => prompt.name === operationName) : undefined;
   const parameterValues = useMemo(() => {
@@ -320,6 +322,15 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
     setMessage(`${operationKind} operation completed.`);
   }, true);
 
+  const toggleResourceSubscription = () => active && selectedResource && canEdit && run(resourceSubscription.subscribed ? 'Unsubscribing from MCP resource' : 'Subscribing to MCP resource', async () => {
+    const live = liveMcpEventCollector();
+    const output = await setMcpResourceSubscription(active, selectedResource.uri, !resourceSubscription.subscribed, environment, { ...requestContext, onMcpClient: persistMcpClient, onMcpEvent: live.onMcpEvent, onMcpServerRequest: live.onMcpServerRequest, onMcpServerRequestCancelled: live.onMcpServerRequestCancelled });
+    persistMcpClient(output.client);
+    setEvents((current) => [...current, ...output.events.filter((event) => !live.collected.some((candidate) => candidate.method === event.method && candidate.detail === event.detail))].slice(-1000));
+    refreshSessionState();
+    setMessage(`${output.subscribed ? 'Subscribed to' : 'Unsubscribed from'} ${selectedResource.name || selectedResource.uri}.`);
+  });
+
   const respondToServerRequest = async (serverRequest: McpReviewedServerRequest, response: McpServerRequestResponse) => {
     if (!active || active.id !== serverRequest.clientId) throw new Error('Select the MCP client that owns this request.');
     const key = mcpServerRequestKey(serverRequest);
@@ -394,7 +405,7 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
               <div className="mcp-operation-list">{operations.map((operation, index) => <button className={operationName === operation.name ? 'active' : ''} key={`${operation.name}-${index}`} onClick={() => selectOperation(operation.name)} type="button"><strong>{operation.name}</strong><small>{operation.description || 'No description'}</small></button>)}</div>
               <div className="mcp-operation-run">
                 {selectedResourceTemplate ? <div className="mcp-template-parameters"><header><strong>URI template parameters</strong><small>All discovered variables are strings.</small></header>{selectedResourceTemplate.variables.map((variable) => <label key={variable}>{variable}<input onChange={(event) => updateTemplateVariable(variable, event.target.value)} required value={String(parameterValues[variable] ?? '')} /></label>)}{!selectedResourceTemplate.variables.length ? <p>This template has no valid variables. Review its syntax before invoking it.</p> : null}<div className="mcp-template-preview"><small>Expanded URI</small><code>{resourceTemplatePreview.error || resourceTemplatePreview.uri || selectedResourceTemplate.uriTemplate}</code></div></div> : selectedPrompt ? <><div className="mcp-template-parameters mcp-guided-parameters"><header><strong>Prompt arguments</strong><small>String arguments from the server schema.</small></header>{selectedPrompt.arguments.map((argument) => <label key={argument.name}><span>{argument.name}{argument.required ? ' *' : ''}</span><input onChange={(event) => updateGuidedParameter(argument.name, event.target.value)} required={argument.required} value={String(parameterValues[argument.name] ?? '')} />{argument.description ? <small>{argument.description}</small> : null}</label>)}{!selectedPrompt.arguments.length ? <p>This prompt accepts no arguments.</p> : null}</div><label>Parameter overview<textarea value={parameters} onChange={(event) => setParameterText(event.target.value)} /></label></> : selectedTool ? <><div className="mcp-template-parameters mcp-guided-parameters mcp-schema-builder"><header><strong>Tool parameters</strong><small>Bounded recursive JSON Schema form.</small></header><McpParameterField schema={selectedTool.inputSchema} rootSchema={selectedTool.inputSchema} value={parameterValues} path={[]} label={selectedTool.name} required variantPrefix={selectedToolVariantPrefix} variants={parameterVariants} onSet={updateSchemaParameter} onRemove={removeSchemaParameter} onRename={renameSchemaParameter} onVariant={updateSchemaVariant} />{toolParameterIssues.length ? <div className="mcp-schema-issues"><strong>{toolParameterIssues.length} schema issue{toolParameterIssues.length === 1 ? '' : 's'}</strong><ul>{toolParameterIssues.slice(0, 8).map((issue) => <li key={issue}>{issue}</li>)}</ul><small>Like Insomnia’s debug form, validation is advisory and does not block invocation.</small></div> : <small className="mcp-schema-valid">Current parameters satisfy the guided schema.</small>}</div><label>Parameter overview<textarea value={parameters} onChange={(event) => setParameterText(event.target.value)} /></label></> : operationKind === 'resource' ? <div className="mcp-template-preview"><small>Resource URI</small><code>{operationName || 'Select a resource.'}</code></div> : <label>JSON parameters<textarea value={parameters} onChange={(event) => setParameterText(event.target.value)} /></label>}
-                <button disabled={!canEdit || !operationName || Boolean(busy) || Boolean(resourceTemplatePreview.error)} onClick={invokeOperation} type="button">Invoke {operationKind}</button>
+                <div className="integration-actions"><button disabled={!canEdit || !operationName || Boolean(busy) || Boolean(resourceTemplatePreview.error)} onClick={invokeOperation} type="button">Invoke {operationKind}</button>{selectedResource && resourceSubscription.supported ? <button disabled={!canEdit || Boolean(busy) || !connected} onClick={toggleResourceSubscription} type="button">{resourceSubscription.subscribed ? 'Unsubscribe' : 'Subscribe'}</button> : null}</div>
                 <pre>{result || 'Operation output appears here.'}</pre>
               </div>
             </div>

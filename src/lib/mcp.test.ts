@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { McpClient } from '../types';
-import { disconnectMcpClient, discoverMcpClient, forgetMcpClientSession, hasMcpClientSession, invokeMcpOperation, notifyMcpRootsChanged, parseMcpJsonRpcResponse, respondMcpServerRequest, type McpServerRequest } from './mcp';
+import { disconnectMcpClient, discoverMcpClient, forgetMcpClientSession, hasMcpClientSession, invokeMcpOperation, mcpResourceSubscriptionState, notifyMcpRootsChanged, parseMcpJsonRpcResponse, respondMcpServerRequest, setMcpResourceSubscription, type McpServerRequest } from './mcp';
 
 const tauri = vi.hoisted(() => {
   class Channel<T> {
@@ -87,7 +87,7 @@ describe('MCP JSON-RPC transport parsing', () => {
           return Promise.resolve(nativeResponse(202));
         }
         const result = message.method === 'initialize'
-          ? { protocolVersion: '2025-06-18', capabilities: {} }
+          ? { protocolVersion: '2025-06-18', capabilities: { resources: { subscribe: true } } }
           : { content: [{ type: 'text', text: 'done' }] };
         return Promise.resolve(nativeResponse(200, JSON.stringify([{ jsonrpc: '2.0', id: message.id, result }]), message.method === 'initialize' ? { 'mcp-session-id': 'native-session' } : {}));
       }
@@ -99,15 +99,22 @@ describe('MCP JSON-RPC transport parsing', () => {
     const output = await invokeMcpOperation(client, 'tool', 'search', {}, undefined, { sessionScope: 'native-project', onMcpEvent: (event) => liveEvents.push(event) });
     expect(output.result).toEqual({ content: [{ type: 'text', text: 'done' }] });
     expect(liveEvents).toEqual([expect.objectContaining({ method: 'notifications/tools/list_changed' })]);
+    expect(mcpResourceSubscriptionState(output.client, 'file:///resource', 'native-project')).toEqual({ supported: true, subscribed: false });
+    await setMcpResourceSubscription(output.client, 'file:///resource', true, undefined, { sessionScope: 'native-project' });
+    expect(mcpResourceSubscriptionState(output.client, 'file:///resource', 'native-project')).toEqual({ supported: true, subscribed: true });
+    await setMcpResourceSubscription(output.client, 'file:///resource', false, undefined, { sessionScope: 'native-project' });
     const calls = tauri.invoke.mock.calls.filter(([command]) => command === 'send_mcp_http_request');
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(5);
     expect(calls[0][1]).toMatchObject({ input: { sessionKey: '["native-project","http-stream"]', startGetStream: false } });
     expect(calls[1][1]).toMatchObject({ input: { requestId: '', startGetStream: true } });
     expect(calls[2][1]).toMatchObject({ input: { startGetStream: false } });
+    expect(JSON.parse(calls[3][1].input.request.body)).toMatchObject({ method: 'resources/subscribe', params: { uri: 'file:///resource' } });
+    expect(JSON.parse(calls[4][1].input.request.body)).toMatchObject({ method: 'resources/unsubscribe', params: { uri: 'file:///resource' } });
 
     await disconnectMcpClient(output.client, undefined, { sessionScope: 'native-project' });
     expect(tauri.invoke).toHaveBeenCalledWith('close_mcp_http_session', { sessionKey: '["native-project","http-stream"]' });
     expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ method: 'DELETE' }) }));
+    expect(mcpResourceSubscriptionState(output.client, 'file:///resource', 'native-project')).toEqual({ supported: false, subscribed: false });
   });
 
   it('cancels an in-flight native STDIO operation with the same identity', async () => {
@@ -168,6 +175,62 @@ describe('MCP JSON-RPC transport parsing', () => {
     expect(canceled).toEqual(['sample-1']);
     resolveCall?.({ result: { content: [] }, events: [], stderr: '' });
     await expect(pending).resolves.toEqual(expect.objectContaining({ result: { content: [] } }));
+  });
+
+  it('negotiates and toggles retained STDIO resource subscriptions', async () => {
+    const client = stdioClient();
+    const methods: string[] = [];
+    const liveEvents: string[] = [];
+    let channel: { onmessage: (message: { direction: 'server' | 'stderr'; method: string; detail: string; timestamp: string }) => void } | undefined;
+    tauri.invoke.mockImplementation((command: string, args?: Record<string, any>) => {
+      if (command === 'mcp_stdio_call') {
+        methods.push(args?.input.method);
+        channel = args?.onEvent;
+        return Promise.resolve({ result: args?.input.method === 'resources/read' ? { contents: [] } : {}, events: [], stderr: '', serverCapabilities: { resources: { subscribe: true } } });
+      }
+      if (command === 'close_mcp_stdio_session') return Promise.resolve(true);
+      return Promise.reject(new Error(`Unexpected command ${command}`));
+    });
+    const context = { sessionScope: 'project-a', onMcpEvent: (event: { method: string }) => liveEvents.push(event.method) };
+    await invokeMcpOperation(client, 'resource', 'file:///project', {}, undefined, context);
+    expect(mcpResourceSubscriptionState(client, 'file:///project', 'project-a')).toEqual({ supported: true, subscribed: false });
+    await setMcpResourceSubscription(client, 'file:///project', true, undefined, context);
+    expect(mcpResourceSubscriptionState(client, 'file:///project', 'project-a')).toEqual({ supported: true, subscribed: true });
+    channel?.onmessage({ direction: 'server', method: 'notifications/resources/updated', detail: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/resources/updated', params: { uri: 'file:///project' } }), timestamp: new Date().toISOString() });
+    expect(liveEvents).toContain('notifications/resources/updated');
+    await setMcpResourceSubscription(client, 'file:///project', false, undefined, context);
+    expect(methods).toEqual(['resources/read', 'resources/subscribe', 'resources/unsubscribe']);
+    expect(mcpResourceSubscriptionState(client, 'file:///project', 'project-a')).toEqual({ supported: true, subscribed: false });
+    channel?.onmessage({ direction: 'stderr', method: 'transport/error', detail: 'The MCP STDIO server closed.', timestamp: new Date().toISOString() });
+    expect(liveEvents).toContain('transport/error');
+    expect(mcpResourceSubscriptionState(client, 'file:///project', 'project-a')).toEqual({ supported: false, subscribed: false });
+    await disconnectMcpClient(client, undefined, context);
+    expect(mcpResourceSubscriptionState(client, 'file:///project', 'project-a')).toEqual({ supported: false, subscribed: false });
+  });
+
+  it('refuses resource subscriptions when the server does not advertise them', async () => {
+    const client = stdioClient();
+    tauri.invoke.mockResolvedValue({ result: { contents: [] }, events: [], stderr: '', serverCapabilities: { resources: {} } });
+    const context = { sessionScope: 'project-a' };
+    await invokeMcpOperation(client, 'resource', 'file:///project', {}, undefined, context);
+    const calls = tauri.invoke.mock.calls.length;
+    await expect(setMcpResourceSubscription(client, 'file:///project', true, undefined, context)).rejects.toThrow('does not advertise');
+    expect(tauri.invoke.mock.calls).toHaveLength(calls);
+  });
+
+  it('does not retain a STDIO session when idle failure wins the invoke race', async () => {
+    const client = stdioClient();
+    const events: string[] = [];
+    tauri.invoke.mockImplementation((command: string, args?: Record<string, any>) => {
+      if (command !== 'mcp_stdio_call') return Promise.reject(new Error(`Unexpected command ${command}`));
+      args?.onEvent.onmessage({ direction: 'stderr', method: 'transport/error', detail: 'The MCP STDIO dispatcher failed.', timestamp: new Date().toISOString() });
+      return Promise.resolve({ result: { contents: [] }, events: [], stderr: '', serverCapabilities: { resources: { subscribe: true } } });
+    });
+
+    await invokeMcpOperation(client, 'resource', 'file:///project', {}, undefined, { sessionScope: 'race', onMcpEvent: (event) => events.push(event.method) });
+
+    expect(events).toEqual(['transport/error']);
+    expect(mcpResourceSubscriptionState(client, 'file:///project', 'race')).toEqual({ supported: false, subscribed: false });
   });
 
   it('routes an HTTP server-request response through the authenticated session', async () => {

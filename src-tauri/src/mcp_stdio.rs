@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     io::{BufRead, BufReader, BufWriter, Read, Write},
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, RecvTimeoutError, TryRecvError},
+        mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError},
         Arc, Mutex,
     },
     thread,
@@ -39,6 +39,7 @@ const MAX_SESSION_KEY_BYTES: usize = 512;
 const MAX_SESSIONS: usize = 100;
 const MAX_SERVER_REQUESTS: usize = 100;
 const MAX_ROOTS: usize = 100;
+const MAX_SESSION_EVENTS: usize = 1_000;
 const CANCELLATION_POLL: Duration = Duration::from_millis(50);
 #[cfg(unix)]
 const SHELL_PATH_POLL: Duration = Duration::from_millis(10);
@@ -69,6 +70,7 @@ struct McpStdioSessionEntry {
     roots: SharedRoots,
     server_requests: SharedServerRequests,
     event_channel: SharedEventChannel,
+    transport_error: SharedTransportError,
 }
 
 struct McpStdioSession {
@@ -77,10 +79,15 @@ struct McpStdioSession {
     roots: SharedRoots,
     server_requests: SharedServerRequests,
     event_channel: SharedEventChannel,
-    stdout_receiver: Receiver<Result<Vec<u8>, String>>,
+    response_waiters: SharedResponseWaiters,
+    event_queue: SharedEventQueue,
+    transport_error: SharedTransportError,
+    closing: SharedClosing,
     stderr_receiver: Receiver<Result<Vec<u8>, String>>,
     stdout_reader: Option<thread::JoinHandle<()>>,
+    dispatcher: Option<thread::JoinHandle<()>>,
     stderr_reader: Option<thread::JoinHandle<()>>,
+    server_capabilities: Value,
     next_id: u64,
 }
 
@@ -88,6 +95,22 @@ type SharedWriter = Arc<Mutex<BufWriter<std::process::ChildStdin>>>;
 type SharedRoots = Arc<Mutex<Vec<String>>>;
 type SharedServerRequests = Arc<Mutex<HashMap<String, Value>>>;
 type SharedEventChannel = Arc<Mutex<Channel<McpStdioEvent>>>;
+type SharedResponseWaiters = Arc<Mutex<HashMap<String, SyncSender<Result<Value, String>>>>>;
+type SharedEventQueue = Arc<Mutex<VecDeque<Value>>>;
+type SharedTransportError = Arc<Mutex<Option<String>>>;
+type SharedClosing = Arc<AtomicBool>;
+
+#[derive(Clone)]
+struct McpStdioDispatcherState {
+    writer: SharedWriter,
+    roots: SharedRoots,
+    server_requests: SharedServerRequests,
+    event_channel: SharedEventChannel,
+    response_waiters: SharedResponseWaiters,
+    event_queue: SharedEventQueue,
+    transport_error: SharedTransportError,
+    closing: SharedClosing,
+}
 
 struct McpResponseWait<'a> {
     receiver: &'a Receiver<Result<Vec<u8>, String>>,
@@ -237,6 +260,7 @@ pub struct McpStdioOutput {
     pub result: Value,
     pub events: Vec<Value>,
     pub stderr: String,
+    pub server_capabilities: Value,
 }
 
 fn default_timeout() -> u64 {
@@ -574,20 +598,42 @@ impl McpStdioSession {
         let roots = Arc::new(Mutex::new(input.roots.clone()));
         let server_requests = Arc::new(Mutex::new(HashMap::new()));
         let event_channel = Arc::new(Mutex::new(on_event));
-        let session = Self {
+        let response_waiters = Arc::new(Mutex::new(HashMap::new()));
+        let event_queue = Arc::new(Mutex::new(VecDeque::new()));
+        let transport_error = Arc::new(Mutex::new(None));
+        let closing = Arc::new(AtomicBool::new(false));
+        let dispatcher = spawn_message_dispatcher(
+            stdout_receiver,
+            McpStdioDispatcherState {
+                writer: writer.clone(),
+                roots: roots.clone(),
+                server_requests: server_requests.clone(),
+                event_channel: event_channel.clone(),
+                response_waiters: response_waiters.clone(),
+                event_queue: event_queue.clone(),
+                transport_error: transport_error.clone(),
+                closing: closing.clone(),
+            },
+        );
+        let mut session = Self {
             child,
             writer,
             roots,
             server_requests,
             event_channel,
-            stdout_receiver,
+            response_waiters,
+            event_queue,
+            transport_error,
+            closing,
             stderr_receiver,
             stdout_reader: Some(stdout_reader),
+            dispatcher: Some(dispatcher),
             stderr_reader: Some(stderr_reader),
+            server_capabilities: json!({}),
             next_id: 2,
         };
-        send_shared(
-            &session.writer,
+        let initialized = wait_for_client_response(
+            1,
             &json!({
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -598,22 +644,16 @@ impl McpStdioSession {
                     "clientInfo": { "name": "Brunomnia", "version": env!("CARGO_PKG_VERSION") }
                 }
             }),
+            &session.writer,
+            &session.response_waiters,
+            &session.transport_error,
+            deadline,
+            cancelled,
         )?;
-        let mut events = Vec::new();
-        wait_for_response(
-            1,
-            &mut McpResponseWait {
-                receiver: &session.stdout_receiver,
-                writer: &session.writer,
-                roots: &session.roots,
-                server_requests: &session.server_requests,
-                event_channel: &session.event_channel,
-                allow_review: true,
-                deadline,
-                events: &mut events,
-                cancelled,
-            },
-        )?;
+        session.server_capabilities = initialized
+            .get("capabilities")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
         send_shared(
             &session.writer,
             &json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
@@ -641,24 +681,16 @@ impl McpStdioSession {
         if let Ok(mut roots) = self.roots.lock() {
             *roots = input.roots.clone();
         }
-        send_shared(
-            &self.writer,
-            &json!({ "jsonrpc": "2.0", "id": id, "method": input.method, "params": input.params }),
-        )?;
-        let result = wait_for_response(
+        let result = wait_for_client_response(
             id,
-            &mut McpResponseWait {
-                receiver: &self.stdout_receiver,
-                writer: &self.writer,
-                roots: &self.roots,
-                server_requests: &self.server_requests,
-                event_channel: &self.event_channel,
-                allow_review: true,
-                deadline,
-                events: &mut events,
-                cancelled,
-            },
+            &json!({ "jsonrpc": "2.0", "id": id, "method": input.method, "params": input.params }),
+            &self.writer,
+            &self.response_waiters,
+            &self.transport_error,
+            deadline,
+            cancelled,
         )?;
+        events.extend(drain_event_queue(&self.event_queue)?);
         let trailing_stderr = self.drain_stderr()?;
         if !trailing_stderr.is_empty() {
             if !stderr.is_empty() {
@@ -670,6 +702,7 @@ impl McpStdioSession {
             result,
             events,
             stderr,
+            server_capabilities: self.server_capabilities.clone(),
         })
     }
 
@@ -694,10 +727,14 @@ impl McpStdioSession {
     }
 
     fn close(&mut self) {
+        self.closing.store(true, Ordering::Release);
         let _ = self.child.kill();
         let _ = self.child.wait();
         if let Some(reader) = self.stdout_reader.take() {
             let _ = reader.join();
+        }
+        if let Some(dispatcher) = self.dispatcher.take() {
+            let _ = dispatcher.join();
         }
         if let Some(reader) = self.stderr_reader.take() {
             let _ = reader.join();
@@ -793,7 +830,9 @@ impl McpStdioSessionState {
                 .lock()
                 .map_err(|_| "MCP STDIO session registry lock poisoned.".to_string())?;
             match sessions.get(&input.session_key) {
-                Some(entry) if entry.fingerprint == fingerprint => {
+                Some(entry)
+                    if entry.fingerprint == fingerprint && session_entry_is_reusable(entry) =>
+                {
                     refresh_session_entry(entry, input, on_event);
                     return Ok(entry.clone());
                 }
@@ -821,6 +860,7 @@ impl McpStdioSessionState {
             roots: opened.roots.clone(),
             server_requests: opened.server_requests.clone(),
             event_channel: opened.event_channel.clone(),
+            transport_error: opened.transport_error.clone(),
             session: Arc::new(Mutex::new(opened)),
         };
         let session = entry.session.clone();
@@ -830,7 +870,7 @@ impl McpStdioSessionState {
                 .lock()
                 .map_err(|_| "MCP STDIO session registry lock poisoned.".to_string())?;
             if let Some(existing) = sessions.get(&input.session_key) {
-                if existing.fingerprint == fingerprint {
+                if existing.fingerprint == fingerprint && session_entry_is_reusable(existing) {
                     refresh_session_entry(existing, input, on_event);
                     (existing.clone(), Some(session))
                 } else {
@@ -975,10 +1015,19 @@ impl McpStdioSessionState {
         {
             return false;
         }
-        self.sessions
-            .lock()
-            .is_ok_and(|sessions| sessions.contains_key(session_key))
+        self.sessions.lock().is_ok_and(|sessions| {
+            sessions
+                .get(session_key)
+                .is_some_and(session_entry_is_reusable)
+        })
     }
+}
+
+fn session_entry_is_reusable(entry: &McpStdioSessionEntry) -> bool {
+    entry
+        .transport_error
+        .lock()
+        .is_ok_and(|error| error.is_none())
 }
 
 fn refresh_session_entry(
@@ -1051,6 +1100,8 @@ fn validate(input: &McpStdioInput) -> Result<(), String> {
             | "tools/call"
             | "prompts/get"
             | "resources/read"
+            | "resources/subscribe"
+            | "resources/unsubscribe"
             | "ping"
     ) {
         return Err("The requested MCP method is not supported by this client boundary.".into());
@@ -1107,7 +1158,7 @@ fn is_reviewable_server_request(method: &str) -> bool {
     matches!(method, "elicitation/create" | "sampling/createMessage")
 }
 
-fn emit_stdio_event(channel: &SharedEventChannel, direction: &str, value: &Value) {
+fn emit_stdio_event(channel: &SharedEventChannel, direction: &str, value: &Value) -> bool {
     let method = value
         .get("method")
         .and_then(Value::as_str)
@@ -1120,8 +1171,9 @@ fn emit_stdio_event(channel: &SharedEventChannel, direction: &str, value: &Value
         timestamp: chrono::Utc::now().to_rfc3339(),
     };
     if let Ok(channel) = channel.lock() {
-        let _ = channel.send(event);
+        return channel.send(event).is_ok();
     }
+    false
 }
 
 fn server_request_response(value: &Value, roots: &[String], allow_review: bool) -> Option<Value> {
@@ -1142,6 +1194,291 @@ fn server_request_response(value: &Value, roots: &[String], allow_review: bool) 
         "id": id,
         "error": { "code": -32601, "message": format!("Brunomnia requires interactive approval UI before handling {method}.") }
     }))
+}
+
+fn record_stdio_event(
+    event_queue: &SharedEventQueue,
+    event_channel: &SharedEventChannel,
+    value: Value,
+) {
+    if emit_stdio_event(event_channel, "server", &value) {
+        return;
+    }
+    if let Ok(mut events) = event_queue.lock() {
+        if events.len() >= MAX_SESSION_EVENTS {
+            events.pop_front();
+        }
+        events.push_back(value.clone());
+    }
+}
+
+fn fail_response_waiters(
+    response_waiters: &SharedResponseWaiters,
+    transport_error: &SharedTransportError,
+    event_channel: &SharedEventChannel,
+    closing: &SharedClosing,
+    error: String,
+) {
+    if closing.load(Ordering::Acquire) {
+        return;
+    }
+    let first_error = match transport_error.lock() {
+        Ok(mut state) => {
+            let first_error = state.is_none();
+            *state = Some(error.clone());
+            first_error
+        }
+        Err(_) => true,
+    };
+    if first_error {
+        emit_transport_error(event_channel, &error);
+    }
+    if let Ok(mut waiters) = response_waiters.lock() {
+        for (_, waiter) in waiters.drain() {
+            let _ = waiter.send(Err(error.clone()));
+        }
+    }
+}
+
+fn emit_transport_error(channel: &SharedEventChannel, error: &str) {
+    let event = McpStdioEvent {
+        direction: "stderr".into(),
+        method: "transport/error".into(),
+        detail: error.into(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    };
+    if let Ok(channel) = channel.lock() {
+        let _ = channel.send(event);
+    }
+}
+
+fn dispatch_stdio_message(
+    value: Value,
+    writer: &SharedWriter,
+    roots: &SharedRoots,
+    server_requests: &SharedServerRequests,
+    event_channel: &SharedEventChannel,
+    response_waiters: &SharedResponseWaiters,
+    event_queue: &SharedEventQueue,
+) -> Result<(), String> {
+    let method = value.get("method").and_then(Value::as_str);
+    if method == Some("notifications/cancelled") {
+        if let Some(request_id) = value
+            .get("params")
+            .and_then(|params| params.get("requestId"))
+        {
+            if let Ok(key) = server_request_id_key(request_id) {
+                if let Ok(mut requests) = server_requests.lock() {
+                    requests.remove(&key);
+                }
+            }
+        }
+    }
+    if value.get("id").is_some() && method.is_some() {
+        let current_roots = roots
+            .lock()
+            .map_err(|_| "MCP STDIO roots lock poisoned.".to_string())?
+            .clone();
+        if let Some(response) = server_request_response(&value, &current_roots, true) {
+            record_stdio_event(event_queue, event_channel, value);
+            return send_shared(writer, &response);
+        }
+        let request_id = value
+            .get("id")
+            .ok_or_else(|| "The MCP server request has no identity.".to_string())?;
+        let key = server_request_id_key(request_id)?;
+        let mut requests = server_requests
+            .lock()
+            .map_err(|_| "MCP STDIO server-request lock poisoned.".to_string())?;
+        if requests.len() >= MAX_SERVER_REQUESTS && !requests.contains_key(&key) {
+            drop(requests);
+            return send_shared(
+                writer,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": { "code": -32000, "message": "Brunomnia has too many pending reviewed MCP server requests." }
+                }),
+            );
+        }
+        requests.insert(key, value.clone());
+        drop(requests);
+        record_stdio_event(event_queue, event_channel, value);
+        return Ok(());
+    }
+    if let Some(response_id) = value.get("id") {
+        let key = server_request_id_key(response_id)?;
+        let waiter = response_waiters
+            .lock()
+            .map_err(|_| "MCP STDIO response registry lock poisoned.".to_string())?
+            .remove(&key);
+        if let Some(waiter) = waiter {
+            let _ = waiter.send(Ok(value));
+            return Ok(());
+        }
+    }
+    record_stdio_event(event_queue, event_channel, value);
+    Ok(())
+}
+
+fn spawn_message_dispatcher(
+    receiver: Receiver<Result<Vec<u8>, String>>,
+    state: McpStdioDispatcherState,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || loop {
+        let bytes = match receiver.recv() {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(error)) => {
+                fail_response_waiters(
+                    &state.response_waiters,
+                    &state.transport_error,
+                    &state.event_channel,
+                    &state.closing,
+                    error,
+                );
+                return;
+            }
+            Err(_) => {
+                fail_response_waiters(
+                    &state.response_waiters,
+                    &state.transport_error,
+                    &state.event_channel,
+                    &state.closing,
+                    "The MCP STDIO server closed before returning a response.".into(),
+                );
+                return;
+            }
+        };
+        if bytes.len() > MAX_MESSAGE_BYTES {
+            fail_response_waiters(
+                &state.response_waiters,
+                &state.transport_error,
+                &state.event_channel,
+                &state.closing,
+                "An MCP STDIO message exceeded the 10 MB safety limit.".into(),
+            );
+            return;
+        }
+        let value = match serde_json::from_slice::<Value>(&bytes) {
+            Ok(value) => value,
+            Err(error) => {
+                fail_response_waiters(
+                    &state.response_waiters,
+                    &state.transport_error,
+                    &state.event_channel,
+                    &state.closing,
+                    format!("The MCP STDIO server returned invalid JSON: {error}"),
+                );
+                return;
+            }
+        };
+        if let Err(error) = dispatch_stdio_message(
+            value,
+            &state.writer,
+            &state.roots,
+            &state.server_requests,
+            &state.event_channel,
+            &state.response_waiters,
+            &state.event_queue,
+        ) {
+            fail_response_waiters(
+                &state.response_waiters,
+                &state.transport_error,
+                &state.event_channel,
+                &state.closing,
+                error,
+            );
+            return;
+        }
+    })
+}
+
+fn response_result(value: Value) -> Result<Value, String> {
+    if let Some(error) = value.get("error") {
+        return Err(format!("The MCP server returned an error: {error}"));
+    }
+    value
+        .get("result")
+        .cloned()
+        .ok_or_else(|| "The MCP response has no result.".to_string())
+}
+
+fn wait_for_client_response(
+    id: u64,
+    request: &Value,
+    writer: &SharedWriter,
+    response_waiters: &SharedResponseWaiters,
+    transport_error: &SharedTransportError,
+    deadline: Instant,
+    cancelled: &AtomicBool,
+) -> Result<Value, String> {
+    if let Some(error) = transport_error
+        .lock()
+        .map_err(|_| "MCP STDIO transport state lock poisoned.".to_string())?
+        .clone()
+    {
+        return Err(error);
+    }
+    let key = server_request_id_key(&json!(id))?;
+    let (sender, receiver) = mpsc::sync_channel(1);
+    response_waiters
+        .lock()
+        .map_err(|_| "MCP STDIO response registry lock poisoned.".to_string())?
+        .insert(key.clone(), sender);
+    if let Some(error) = transport_error
+        .lock()
+        .map_err(|_| "MCP STDIO transport state lock poisoned.".to_string())?
+        .clone()
+    {
+        if let Ok(mut waiters) = response_waiters.lock() {
+            waiters.remove(&key);
+        }
+        return Err(error);
+    }
+    if let Err(error) = send_shared(writer, request) {
+        if let Ok(mut waiters) = response_waiters.lock() {
+            waiters.remove(&key);
+        }
+        return Err(error);
+    }
+    loop {
+        if cancelled.load(Ordering::Acquire) {
+            if let Ok(mut waiters) = response_waiters.lock() {
+                waiters.remove(&key);
+            }
+            let _ = send_shared(
+                writer,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/cancelled",
+                    "params": { "requestId": id, "reason": "Canceled by user." }
+                }),
+            );
+            return Err("MCP STDIO request canceled.".into());
+        }
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            if let Ok(mut waiters) = response_waiters.lock() {
+                waiters.remove(&key);
+            }
+            return Err("The MCP STDIO request exceeded its time limit.".into());
+        };
+        match receiver.recv_timeout(remaining.min(CANCELLATION_POLL)) {
+            Ok(Ok(value)) => return response_result(value),
+            Ok(Err(error)) => return Err(error),
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err("The MCP STDIO response dispatcher stopped unexpectedly.".into())
+            }
+        }
+    }
+}
+
+fn drain_event_queue(event_queue: &SharedEventQueue) -> Result<Vec<Value>, String> {
+    Ok(event_queue
+        .lock()
+        .map_err(|_| "MCP STDIO event queue lock poisoned.".to_string())?
+        .drain(..)
+        .collect())
 }
 
 fn wait_for_response(id: u64, wait: &mut McpResponseWait<'_>) -> Result<Value, String> {
@@ -1304,7 +1641,7 @@ fn call_cancellable(
             .read_to_end(&mut bytes)
             .map(|_| bytes)
     });
-    let result: Result<(Value, Vec<Value>), String> = (|| {
+    let result: Result<(Value, Vec<Value>, Value), String> = (|| {
         let writer = Arc::new(Mutex::new(BufWriter::new(stdin)));
         let roots = Arc::new(Mutex::new(input.roots.clone()));
         let server_requests = Arc::new(Mutex::new(HashMap::new()));
@@ -1323,7 +1660,7 @@ fn call_cancellable(
                 }
             }),
         )?;
-        let _initialized = wait_for_response(
+        let initialized = wait_for_response(
             1,
             &mut McpResponseWait {
                 receiver: &receiver,
@@ -1360,7 +1697,14 @@ fn call_cancellable(
             },
         )?;
         drop(writer);
-        Ok((result, events))
+        Ok((
+            result,
+            events,
+            initialized
+                .get("capabilities")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
+        ))
     })();
     let _ = child.kill();
     let _ = child.wait();
@@ -1373,11 +1717,12 @@ fn call_cancellable(
     if stderr.len() > MAX_MESSAGE_BYTES {
         return Err("MCP STDERR exceeded the 10 MB safety limit.".into());
     }
-    let (result, events) = result?;
+    let (result, events, server_capabilities) = result?;
     Ok(McpStdioOutput {
         result,
         events,
         stderr: String::from_utf8_lossy(&stderr).trim().to_string(),
+        server_capabilities,
     })
 }
 
@@ -1743,12 +2088,13 @@ done
 
     #[cfg(unix)]
     #[test]
-    fn persistent_session_reviews_server_requests_and_updates_roots() {
+    fn persistent_session_dispatches_idle_messages_and_server_requests() {
         use std::{fs, os::unix::fs::PermissionsExt};
 
         let temporary = tempfile::tempdir().unwrap();
         let server = temporary.path().join("mcp-reviewed-server.sh");
         let transcript = temporary.path().join("transcript.log");
+        let idle_signal = temporary.path().join("emit-idle-notification");
         fs::write(
             &server,
             r#"#!/bin/sh
@@ -1766,7 +2112,7 @@ read_until() {
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$transcript"
   case "$line" in
-    *'"id":1'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{}}}' ;;
+    *'"id":1'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"resources":{"subscribe":true}}}}' ;;
     *'"method":"tools/list"'*)
       client_id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
       printf '%s\n' '{"jsonrpc":"2.0","id":"sample-1","method":"sampling/createMessage","params":{"messages":[]}}'
@@ -1778,6 +2124,12 @@ while IFS= read -r line; do
       printf '%s\n' '{"jsonrpc":"2.0","id":"cancel-1","method":"sampling/createMessage","params":{"messages":[]}}'
       printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"cancel-1","reason":"server canceled"}}'
       printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}\n' "$client_id"
+      while [ ! -f "$2" ]; do sleep 0.01; done
+      printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"file:///updated"}}'
+      ;;
+    *'"method":"resources/subscribe"'*|*'"method":"resources/unsubscribe"'*)
+      client_id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$client_id"
       ;;
   esac
 done
@@ -1789,7 +2141,10 @@ done
         let cancellations = McpStdioCancellationState::default();
         let input = McpStdioInput {
             command: server.to_string_lossy().into_owned(),
-            args: vec![transcript.to_string_lossy().into_owned()],
+            args: vec![
+                transcript.to_string_lossy().into_owned(),
+                idle_signal.to_string_lossy().into_owned(),
+            ],
             env: vec![],
             method: "tools/list".into(),
             params: json!({}),
@@ -1801,10 +2156,11 @@ done
         let (channel, events) = recording_event_channel();
         let worker_sessions = sessions.clone();
         let worker_cancellations = cancellations.clone();
+        let worker_input = input.clone();
         let (result_sender, result_receiver) = mpsc::sync_channel(1);
         thread::spawn(move || {
             let _ = result_sender.send(worker_sessions.call_with_events(
-                input,
+                worker_input,
                 &worker_cancellations,
                 channel,
             ));
@@ -1859,20 +2215,116 @@ done
             .unwrap_err()
             .contains("no longer pending"));
 
+        let output = result_receiver
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap()
+            .unwrap();
+        assert_eq!(output.result["tools"], json!([]));
+        assert_eq!(output.server_capabilities["resources"]["subscribe"], true);
+        fs::write(&idle_signal, b"ready").unwrap();
+        receive_method(&events, "notifications/resources/updated");
+        let mut subscription = input;
+        subscription.method = "resources/subscribe".into();
+        subscription.params = json!({ "uri": "file:///updated" });
         assert_eq!(
-            result_receiver
-                .recv_timeout(Duration::from_secs(3))
+            sessions
+                .call(subscription.clone(), &cancellations)
                 .unwrap()
-                .unwrap()
-                .result["tools"],
-            json!([])
+                .result,
+            json!({})
+        );
+        subscription.method = "resources/unsubscribe".into();
+        assert_eq!(
+            sessions.call(subscription, &cancellations).unwrap().result,
+            json!({})
         );
         let transcript = fs::read_to_string(transcript).unwrap();
         assert!(transcript.contains("notifications/roots/list_changed"));
         assert!(transcript.contains("file:///updated"));
         assert!(transcript.contains("approved"));
         assert!(transcript.contains("decline"));
+        assert!(transcript.contains("resources/subscribe"));
+        assert!(transcript.contains("resources/unsubscribe"));
         assert!(sessions.close("reviewed-session"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn idle_transport_failure_invalidates_and_replaces_the_session() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let temporary = tempfile::tempdir().unwrap();
+        let server = temporary.path().join("mcp-idle-failure-server.sh");
+        let starts = temporary.path().join("starts.log");
+        let fail_signal = temporary.path().join("fail-idle-session");
+        fs::write(
+            &server,
+            r#"#!/bin/sh
+printf '%s\n' start >> "$1"
+while IFS= read -r line; do
+  case "$line" in
+    *'"id":1'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"resources":{"subscribe":true}}}}' ;;
+    *'"method":"tools/list"'*)
+      client_id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}\n' "$client_id"
+      while [ ! -f "$2" ]; do sleep 0.01; done
+      printf '%s\n' 'not-json'
+      exit 0
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&server, fs::Permissions::from_mode(0o700)).unwrap();
+        let sessions = McpStdioSessionState::default();
+        let cancellations = McpStdioCancellationState::default();
+        let input = McpStdioInput {
+            command: server.to_string_lossy().into_owned(),
+            args: vec![
+                starts.to_string_lossy().into_owned(),
+                fail_signal.to_string_lossy().into_owned(),
+            ],
+            env: vec![],
+            method: "tools/list".into(),
+            params: json!({}),
+            roots: vec![],
+            timeout_ms: 5_000,
+            cancellation_id: String::new(),
+            session_key: "idle-failure-session".into(),
+        };
+        let (channel, events) = recording_event_channel();
+
+        assert_eq!(
+            sessions
+                .call_with_events(input.clone(), &cancellations, channel)
+                .unwrap()
+                .result["tools"],
+            json!([])
+        );
+        fs::write(&fail_signal, b"fail").unwrap();
+        let transport_error = receive_method(&events, "transport/error");
+        assert_eq!(transport_error["direction"], "stderr");
+        assert!(transport_error["detail"]
+            .as_str()
+            .unwrap()
+            .contains("invalid JSON"));
+        assert!(!sessions.contains("idle-failure-session"));
+
+        fs::remove_file(&fail_signal).unwrap();
+        let (replacement_channel, replacement_events) = recording_event_channel();
+        assert_eq!(
+            sessions
+                .call_with_events(input, &cancellations, replacement_channel)
+                .unwrap()
+                .result["tools"],
+            json!([])
+        );
+        assert_eq!(fs::read_to_string(&starts).unwrap().lines().count(), 2);
+        assert!(sessions.close("idle-failure-session"));
+        assert!(replacement_events
+            .recv_timeout(Duration::from_millis(100))
+            .is_err());
     }
 
     #[cfg(unix)]
