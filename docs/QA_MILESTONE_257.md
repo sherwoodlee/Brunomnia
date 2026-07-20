@@ -52,6 +52,16 @@ Scope: complete the pinned REST/HTTP execution capability row by preserving comp
 - New/missing preference defaults match pinned HTML authority; secure workspace import still removes inherited active-content authority.
 - Multipart regression coverage proves sections above 5 MiB and depths above five remain expandable while the response-wide safety ceiling remains enforced.
 
+## Remote gate
+
+Main implementation commit `a8d0be46e6e7e0cf9cdb6a107ae4b3cdbdcce93f` completed verify and publish in [Actions run 29758496066](https://github.com/sherwoodlee/Brunomnia/actions/runs/29758496066). Both jobs passed. The verify job reproduced the committed CLI, passed freshness, built the verification image, and passed ordinary plus extended non-root/no-network container smokes. The publish job emitted AMD64/ARM64 provenance and SBOM attestations and keylessly signed:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:e98d56d3306195a932ed69c4addb52e35fc77ee599c0bd021517dc4c953ff07e
+```
+
+Independent manifest inspection resolved AMD64 `sha256:b23b4d7b7cf6c56119367a59e819ab20351e75bcd266c7a7ea731e1051d3bc88`, ARM64 `sha256:d6de7370fb894a1f352355fa7064e68ef4501c7d2ae6a267162a39af8e6eab27`, and attached attestation manifests `sha256:8ff84c41159d4ebf816a96ac62b98643f9fc3182d221d054f6056b638673df16` plus `sha256:b757605212be597822b83cb83d02f321ce1abcaddbb764ca2e75f9107366cdd5`. Independent Cosign verification passed trusted certificate-chain validation, exact issuer `https://token.actions.githubusercontent.com`, exact subject `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, branch, repository, workflow, implementation SHA, digest claims, and offline transparency-log inclusion at Rekor index `2206889219`.
+
 ## Manual/rendered QA
 
 Rendered/manual QA remains omitted under the standing project direction. M257 therefore makes no screenshot, observed-click, DOM, focus, screen-reader, or visual-layout claim beyond source-backed behavior, strict compilation, focused regressions, full suites, live loopback evidence, and packaged-app verification.
