@@ -594,10 +594,12 @@ async fn secure_external_secret(
 #[tauri::command]
 async fn mcp_stdio_call(
     input: mcp_stdio::McpStdioInput,
-    state: State<'_, mcp_stdio::McpStdioCancellationState>,
+    cancellations: State<'_, mcp_stdio::McpStdioCancellationState>,
+    sessions: State<'_, mcp_stdio::McpStdioSessionState>,
 ) -> Result<mcp_stdio::McpStdioOutput, String> {
-    let state = state.inner().clone();
-    blocking(move || state.call(input)).await
+    let cancellations = cancellations.inner().clone();
+    let sessions = sessions.inner().clone();
+    blocking(move || sessions.call(input, &cancellations)).await
 }
 
 #[tauri::command]
@@ -606,6 +608,23 @@ fn cancel_mcp_stdio_call(
     state: State<'_, mcp_stdio::McpStdioCancellationState>,
 ) -> bool {
     state.cancel(&cancellation_id)
+}
+
+#[tauri::command]
+async fn close_mcp_stdio_session(
+    session_key: String,
+    state: State<'_, mcp_stdio::McpStdioSessionState>,
+) -> Result<bool, String> {
+    let state = state.inner().clone();
+    blocking(move || Ok(state.close(&session_key))).await
+}
+
+#[tauri::command]
+fn has_mcp_stdio_session(
+    session_key: String,
+    state: State<'_, mcp_stdio::McpStdioSessionState>,
+) -> bool {
+    state.contains(&session_key)
 }
 
 #[tauri::command]
@@ -782,6 +801,7 @@ pub fn run() {
         .manage(streaming::StreamingState::default())
         .manage(http_client::HttpCancellationState::default())
         .manage(mcp_stdio::McpStdioCancellationState::default())
+        .manage(mcp_stdio::McpStdioSessionState::default())
         .manage(grpc_client::GrpcSessionState::default())
         .manage(mock_server::MockServerState::default())
         .manage(oauth2_callback::OAuthCallbackState::default())
@@ -846,6 +866,8 @@ pub fn run() {
             secure_external_cache_clear,
             mcp_stdio_call,
             cancel_mcp_stdio_call,
+            close_mcp_stdio_session,
+            has_mcp_stdio_session,
             connect_websocket,
             send_websocket_message,
             disconnect_websocket,

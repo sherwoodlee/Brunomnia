@@ -6,7 +6,7 @@ use std::{
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, RecvTimeoutError},
+        mpsc::{self, Receiver, RecvTimeoutError, TryRecvError},
         Arc, Mutex,
     },
     thread,
@@ -19,6 +19,8 @@ const MAX_ARGUMENTS: usize = 100;
 const MAX_ARGUMENT_BYTES: usize = 8_192;
 const MAX_CANCELLATION_ID_BYTES: usize = 512;
 const MAX_CANCELLATION_IDS: usize = 1_024;
+const MAX_SESSION_KEY_BYTES: usize = 512;
+const MAX_SESSIONS: usize = 100;
 const CANCELLATION_POLL: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Default)]
@@ -30,6 +32,27 @@ pub struct McpStdioCancellationState {
 struct McpStdioCancellationRegistry {
     active: HashMap<String, Arc<AtomicBool>>,
     pending: HashSet<String>,
+}
+
+#[derive(Clone, Default)]
+pub struct McpStdioSessionState {
+    sessions: Arc<Mutex<HashMap<String, McpStdioSessionEntry>>>,
+}
+
+#[derive(Clone)]
+struct McpStdioSessionEntry {
+    fingerprint: String,
+    session: Arc<Mutex<McpStdioSession>>,
+}
+
+struct McpStdioSession {
+    child: std::process::Child,
+    writer: BufWriter<std::process::ChildStdin>,
+    stdout_receiver: Receiver<Result<Vec<u8>, String>>,
+    stderr_receiver: Receiver<Result<Vec<u8>, String>>,
+    stdout_reader: Option<thread::JoinHandle<()>>,
+    stderr_reader: Option<thread::JoinHandle<()>>,
+    next_id: u64,
 }
 
 impl McpStdioCancellationState {
@@ -111,6 +134,8 @@ pub struct McpStdioInput {
     pub timeout_ms: u64,
     #[serde(default)]
     pub cancellation_id: String,
+    #[serde(default)]
+    pub session_key: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -123,6 +148,393 @@ pub struct McpStdioOutput {
 
 fn default_timeout() -> u64 {
     30_000
+}
+
+fn session_fingerprint(input: &McpStdioInput) -> Result<String, String> {
+    serde_json::to_string(&(input.command.trim(), &input.args))
+        .map_err(|error| format!("Unable to encode MCP STDIO session configuration: {error}"))
+}
+
+fn persistent_result_is_reusable(result: &Result<McpStdioOutput, String>) -> bool {
+    match result {
+        Ok(_) => true,
+        Err(error) => {
+            error == "MCP STDIO request canceled."
+                || error.starts_with("The MCP server returned an error:")
+        }
+    }
+}
+
+fn spawn_line_reader(
+    stream: impl Read + Send + 'static,
+    limit: usize,
+    label: &'static str,
+) -> (Receiver<Result<Vec<u8>, String>>, thread::JoinHandle<()>) {
+    let (sender, receiver) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        let mut reader = BufReader::new(stream.take((limit + 1) as u64));
+        loop {
+            let mut line = Vec::new();
+            match reader.read_until(b'\n', &mut line) {
+                Ok(0) => {
+                    if reader.get_ref().limit() == 0 {
+                        let _ = sender.send(Err(format!(
+                            "MCP {label} exceeded its cumulative session safety limit."
+                        )));
+                    }
+                    break;
+                }
+                Ok(_) => {
+                    while line
+                        .last()
+                        .is_some_and(|byte| matches!(*byte, b'\n' | b'\r'))
+                    {
+                        line.pop();
+                    }
+                    if !line.is_empty() && sender.send(Ok(line)).is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    let _ = sender.send(Err(format!("Unable to read MCP {label}: {error}")));
+                    break;
+                }
+            }
+        }
+    });
+    (receiver, reader)
+}
+
+impl McpStdioSession {
+    fn open(input: &McpStdioInput, cancelled: &AtomicBool) -> Result<Self, String> {
+        if cancelled.load(Ordering::Acquire) {
+            return Err("MCP STDIO request canceled.".into());
+        }
+        let timeout = Duration::from_millis(input.timeout_ms.clamp(1_000, 120_000));
+        let deadline = Instant::now() + timeout;
+        let mut child = Command::new(input.command.trim())
+            .args(&input.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("Unable to start the MCP STDIO server: {error}"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Unable to open the MCP STDIO input stream.".to_string())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "Unable to open the MCP STDIO output stream.".to_string())?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "Unable to open the MCP STDERR stream.".to_string())?;
+        let (stdout_receiver, stdout_reader) =
+            spawn_line_reader(stdout, MAX_STREAM_BYTES, "STDIO output");
+        let (stderr_receiver, stderr_reader) =
+            spawn_line_reader(stderr, MAX_MESSAGE_BYTES, "STDERR output");
+        let mut session = Self {
+            child,
+            writer: BufWriter::new(stdin),
+            stdout_receiver,
+            stderr_receiver,
+            stdout_reader: Some(stdout_reader),
+            stderr_reader: Some(stderr_reader),
+            next_id: 2,
+        };
+        send(
+            &mut session.writer,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": { "roots": { "listChanged": false } },
+                    "clientInfo": { "name": "Brunomnia", "version": env!("CARGO_PKG_VERSION") }
+                }
+            }),
+        )?;
+        let mut events = Vec::new();
+        wait_for_response(
+            1,
+            &session.stdout_receiver,
+            &mut session.writer,
+            &input.roots,
+            deadline,
+            &mut events,
+            cancelled,
+        )?;
+        send(
+            &mut session.writer,
+            &json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+        )?;
+        Ok(session)
+    }
+
+    fn execute(
+        &mut self,
+        input: McpStdioInput,
+        cancelled: &AtomicBool,
+    ) -> Result<McpStdioOutput, String> {
+        if cancelled.load(Ordering::Acquire) {
+            return Err("MCP STDIO request canceled.".into());
+        }
+        let id = self.next_id;
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .ok_or_else(|| "The MCP STDIO request identity space is exhausted.".to_string())?;
+        let deadline =
+            Instant::now() + Duration::from_millis(input.timeout_ms.clamp(1_000, 120_000));
+        let mut events = Vec::new();
+        let mut stderr = self.drain_stderr()?;
+        send(
+            &mut self.writer,
+            &json!({ "jsonrpc": "2.0", "id": id, "method": input.method, "params": input.params }),
+        )?;
+        let result = wait_for_response(
+            id,
+            &self.stdout_receiver,
+            &mut self.writer,
+            &input.roots,
+            deadline,
+            &mut events,
+            cancelled,
+        )?;
+        let trailing_stderr = self.drain_stderr()?;
+        if !trailing_stderr.is_empty() {
+            if !stderr.is_empty() {
+                stderr.push('\n');
+            }
+            stderr.push_str(&trailing_stderr);
+        }
+        Ok(McpStdioOutput {
+            result,
+            events,
+            stderr,
+        })
+    }
+
+    fn drain_stderr(&self) -> Result<String, String> {
+        let mut bytes = Vec::new();
+        loop {
+            match self.stderr_receiver.try_recv() {
+                Ok(Ok(line)) => {
+                    if !bytes.is_empty() {
+                        bytes.push(b'\n');
+                    }
+                    bytes.extend(line);
+                    if bytes.len() > MAX_MESSAGE_BYTES {
+                        return Err("MCP STDERR exceeded the 10 MB safety limit.".into());
+                    }
+                }
+                Ok(Err(error)) => return Err(error),
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
+        Ok(String::from_utf8_lossy(&bytes).trim().to_string())
+    }
+
+    fn close(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(reader) = self.stdout_reader.take() {
+            let _ = reader.join();
+        }
+        if let Some(reader) = self.stderr_reader.take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+impl Drop for McpStdioSession {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+impl McpStdioSessionState {
+    pub fn call(
+        &self,
+        input: McpStdioInput,
+        cancellations: &McpStdioCancellationState,
+    ) -> Result<McpStdioOutput, String> {
+        validate(&input)?;
+        if input.session_key.is_empty() {
+            return cancellations.call(input);
+        }
+        let cancellation_id = input.cancellation_id.clone();
+        let cancelled = if cancellation_id.is_empty() {
+            Arc::new(AtomicBool::new(false))
+        } else {
+            let Some(cancelled) = cancellations.register(&cancellation_id) else {
+                return Err("MCP STDIO request canceled.".into());
+            };
+            cancelled
+        };
+        let result = self.call_registered(input, cancelled.as_ref());
+        if !cancellation_id.is_empty() {
+            cancellations.finish(&cancellation_id);
+        }
+        result
+    }
+
+    fn call_registered(
+        &self,
+        input: McpStdioInput,
+        cancelled: &AtomicBool,
+    ) -> Result<McpStdioOutput, String> {
+        let session = self.session_for(&input, cancelled)?;
+        let result;
+        let process_error;
+        let reusable;
+        {
+            let mut session_guard = session
+                .lock()
+                .map_err(|_| "MCP STDIO session lock poisoned.".to_string())?;
+            result = session_guard.execute(input.clone(), cancelled);
+            process_error = match session_guard.child.try_wait() {
+                Ok(status) => {
+                    reusable = status.is_none() && persistent_result_is_reusable(&result);
+                    None
+                }
+                Err(error) => {
+                    reusable = false;
+                    Some(format!("Unable to inspect the MCP STDIO process: {error}"))
+                }
+            };
+        }
+        if !reusable {
+            self.remove_if_same(&input.session_key, &session);
+        }
+        process_error.map_or(result, Err)
+    }
+
+    fn session_for(
+        &self,
+        input: &McpStdioInput,
+        cancelled: &AtomicBool,
+    ) -> Result<Arc<Mutex<McpStdioSession>>, String> {
+        let fingerprint = session_fingerprint(input)?;
+        let previous = {
+            let mut sessions = self
+                .sessions
+                .lock()
+                .map_err(|_| "MCP STDIO session registry lock poisoned.".to_string())?;
+            match sessions.get(&input.session_key) {
+                Some(entry) if entry.fingerprint == fingerprint => {
+                    return Ok(entry.session.clone())
+                }
+                Some(_) => sessions
+                    .remove(&input.session_key)
+                    .map(|entry| entry.session),
+                None if sessions.len() >= MAX_SESSIONS => {
+                    return Err(format!(
+                        "MCP STDIO has reached its {MAX_SESSIONS}-session safety limit. Disconnect an inactive client before connecting another."
+                    ))
+                }
+                None => None,
+            }
+        };
+        if let Some(previous) = previous {
+            previous
+                .lock()
+                .map_err(|_| "MCP STDIO session lock poisoned.".to_string())?
+                .close();
+        }
+        let session = Arc::new(Mutex::new(McpStdioSession::open(input, cancelled)?));
+        let (active, replaced) = {
+            let mut sessions = self
+                .sessions
+                .lock()
+                .map_err(|_| "MCP STDIO session registry lock poisoned.".to_string())?;
+            if let Some(existing) = sessions.get(&input.session_key) {
+                if existing.fingerprint == fingerprint {
+                    (existing.session.clone(), Some(session))
+                } else {
+                    let replaced = sessions
+                        .insert(
+                            input.session_key.clone(),
+                            McpStdioSessionEntry {
+                                fingerprint,
+                                session: session.clone(),
+                            },
+                        )
+                        .map(|entry| entry.session);
+                    (session, replaced)
+                }
+            } else {
+                if sessions.len() >= MAX_SESSIONS {
+                    return Err(format!(
+                        "MCP STDIO has reached its {MAX_SESSIONS}-session safety limit. Disconnect an inactive client before connecting another."
+                    ));
+                }
+                sessions.insert(
+                    input.session_key.clone(),
+                    McpStdioSessionEntry {
+                        fingerprint,
+                        session: session.clone(),
+                    },
+                );
+                (session, None)
+            }
+        };
+        if let Some(replaced) = replaced {
+            replaced
+                .lock()
+                .map_err(|_| "MCP STDIO session lock poisoned.".to_string())?
+                .close();
+        }
+        Ok(active)
+    }
+
+    fn remove_if_same(&self, session_key: &str, session: &Arc<Mutex<McpStdioSession>>) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            if sessions
+                .get(session_key)
+                .is_some_and(|candidate| Arc::ptr_eq(&candidate.session, session))
+            {
+                sessions.remove(session_key);
+            }
+        }
+    }
+
+    pub fn close(&self, session_key: &str) -> bool {
+        if session_key.is_empty()
+            || session_key.contains('\0')
+            || session_key.len() > MAX_SESSION_KEY_BYTES
+        {
+            return false;
+        }
+        let session = self
+            .sessions
+            .lock()
+            .ok()
+            .and_then(|mut sessions| sessions.remove(session_key))
+            .map(|entry| entry.session);
+        let Some(session) = session else {
+            return false;
+        };
+        if let Ok(mut session) = session.lock() {
+            session.close();
+        }
+        true
+    }
+
+    pub fn contains(&self, session_key: &str) -> bool {
+        if session_key.is_empty()
+            || session_key.contains('\0')
+            || session_key.len() > MAX_SESSION_KEY_BYTES
+        {
+            return false;
+        }
+        self.sessions
+            .lock()
+            .is_ok_and(|sessions| sessions.contains_key(session_key))
+    }
 }
 
 fn validate(input: &McpStdioInput) -> Result<(), String> {
@@ -164,6 +576,9 @@ fn validate(input: &McpStdioInput) -> Result<(), String> {
         || input.cancellation_id.len() > MAX_CANCELLATION_ID_BYTES
     {
         return Err("The MCP STDIO cancellation identity exceeds its safety limit.".into());
+    }
+    if input.session_key.contains('\0') || input.session_key.len() > MAX_SESSION_KEY_BYTES {
+        return Err("The MCP STDIO session identity exceeds its safety limit.".into());
     }
     Ok(())
 }
@@ -394,6 +809,7 @@ mod tests {
             roots: vec![],
             timeout_ms: 30_000,
             cancellation_id: String::new(),
+            session_key: String::new(),
         };
         assert!(validate(&input).unwrap_err().contains("not supported"));
         input.method = "tools/list".into();
@@ -489,6 +905,7 @@ done
             roots: vec![],
             timeout_ms: 30_000,
             cancellation_id: "live-cancel".into(),
+            session_key: String::new(),
         };
         let (sender, receiver) = mpsc::sync_channel(1);
         thread::spawn(move || {
@@ -512,5 +929,194 @@ done
             .unwrap()
             .unwrap_err()
             .contains("canceled"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persistent_session_reuses_and_restarts_one_process() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let temporary = tempfile::tempdir().unwrap();
+        let server = temporary.path().join("mcp-persistent-server.sh");
+        let starts = temporary.path().join("starts.log");
+        fs::write(
+            &server,
+            r#"#!/bin/sh
+printf '%s\n' start >> "$1"
+while IFS= read -r line; do
+  case "$line" in
+    *'"id":1'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{}}}' ;;
+    *'"method":"tools/list"'*)
+      id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}\n' "$id"
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&server, fs::Permissions::from_mode(0o700)).unwrap();
+        let sessions = McpStdioSessionState::default();
+        let cancellations = McpStdioCancellationState::default();
+        let input = McpStdioInput {
+            command: server.to_string_lossy().into_owned(),
+            args: vec![starts.to_string_lossy().into_owned()],
+            method: "tools/list".into(),
+            params: json!({}),
+            roots: vec![],
+            timeout_ms: 3_000,
+            cancellation_id: String::new(),
+            session_key: "persistent".into(),
+        };
+
+        assert_eq!(
+            sessions.call(input.clone(), &cancellations).unwrap().result["tools"],
+            json!([])
+        );
+        assert_eq!(
+            sessions.call(input.clone(), &cancellations).unwrap().result["tools"],
+            json!([])
+        );
+        assert_eq!(fs::read_to_string(&starts).unwrap().lines().count(), 1);
+        assert!(sessions.close("persistent"));
+        assert_eq!(
+            sessions.call(input, &cancellations).unwrap().result["tools"],
+            json!([])
+        );
+        assert_eq!(fs::read_to_string(&starts).unwrap().lines().count(), 2);
+        assert!(sessions.close("persistent"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persistent_cancellation_keeps_the_process_available() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let temporary = tempfile::tempdir().unwrap();
+        let server = temporary.path().join("mcp-persistent-cancel-server.sh");
+        let markers = temporary.path().join("markers.log");
+        fs::write(
+            &server,
+            r#"#!/bin/sh
+printf '%s\n' start >> "$1"
+while IFS= read -r line; do
+  case "$line" in
+    *'"id":1'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{}}}' ;;
+    *'"id":2'*) printf '%s\n' pending >> "$1" ;;
+    *'"method":"notifications/cancelled"'*) printf '%s\n' canceled >> "$1" ;;
+    *'"id":3'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"tools":[]}}' ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&server, fs::Permissions::from_mode(0o700)).unwrap();
+        let sessions = McpStdioSessionState::default();
+        let cancellations = McpStdioCancellationState::default();
+        let input = McpStdioInput {
+            command: server.to_string_lossy().into_owned(),
+            args: vec![markers.to_string_lossy().into_owned()],
+            method: "tools/list".into(),
+            params: json!({}),
+            roots: vec![],
+            timeout_ms: 5_000,
+            cancellation_id: "persistent-cancel".into(),
+            session_key: "persistent-cancel-session".into(),
+        };
+        let worker_sessions = sessions.clone();
+        let worker_cancellations = cancellations.clone();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            let _ = sender.send(worker_sessions.call(input, &worker_cancellations));
+        });
+        for _ in 0..200 {
+            if fs::read_to_string(&markers)
+                .unwrap_or_default()
+                .contains("pending")
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(cancellations.cancel("persistent-cancel"));
+        assert!(receiver
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap()
+            .unwrap_err()
+            .contains("canceled"));
+
+        let resumed = McpStdioInput {
+            command: server.to_string_lossy().into_owned(),
+            args: vec![markers.to_string_lossy().into_owned()],
+            method: "tools/list".into(),
+            params: json!({}),
+            roots: vec![],
+            timeout_ms: 3_000,
+            cancellation_id: String::new(),
+            session_key: "persistent-cancel-session".into(),
+        };
+        assert_eq!(
+            sessions.call(resumed, &cancellations).unwrap().result["tools"],
+            json!([])
+        );
+        let markers = fs::read_to_string(&markers).unwrap();
+        assert_eq!(markers.lines().filter(|line| *line == "start").count(), 1);
+        assert!(markers.contains("canceled"));
+        assert!(sessions.close("persistent-cancel-session"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persistent_session_restarts_after_a_fatal_protocol_error() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let temporary = tempfile::tempdir().unwrap();
+        let server = temporary.path().join("mcp-persistent-recovery-server.sh");
+        let starts = temporary.path().join("starts.log");
+        fs::write(
+            &server,
+            r#"#!/bin/sh
+printf '%s\n' start >> "$1"
+start_count=$(wc -l < "$1" | tr -d ' ')
+while IFS= read -r line; do
+  case "$line" in
+    *'"id":1'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{}}}' ;;
+    *'"method":"tools/list"'*)
+      if [ "$start_count" = "1" ]; then
+        printf '%s\n' 'not-json'
+      else
+        id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}\n' "$id"
+      fi
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&server, fs::Permissions::from_mode(0o700)).unwrap();
+        let sessions = McpStdioSessionState::default();
+        let cancellations = McpStdioCancellationState::default();
+        let input = McpStdioInput {
+            command: server.to_string_lossy().into_owned(),
+            args: vec![starts.to_string_lossy().into_owned()],
+            method: "tools/list".into(),
+            params: json!({}),
+            roots: vec![],
+            timeout_ms: 3_000,
+            cancellation_id: String::new(),
+            session_key: "persistent-recovery".into(),
+        };
+
+        assert!(sessions
+            .call(input.clone(), &cancellations)
+            .unwrap_err()
+            .contains("invalid JSON"));
+        assert_eq!(
+            sessions.call(input, &cancellations).unwrap().result["tools"],
+            json!([])
+        );
+        assert_eq!(fs::read_to_string(&starts).unwrap().lines().count(), 2);
+        assert!(sessions.close("persistent-recovery"));
     }
 }

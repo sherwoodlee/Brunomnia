@@ -22,6 +22,8 @@ const MCP_PROTOCOL_VERSION = '2025-06-18';
 const MAX_HTTP_SESSIONS = 100;
 const MAX_SESSION_ID_BYTES = 4_096;
 const httpSessions = new Map<string, McpHttpSession>();
+const stdioSessions = new Map<string, string>();
+const stdioSessionRevisions = new Map<string, number>();
 
 class McpHttpStatusError extends Error {
   constructor(readonly status: number, body: string) {
@@ -46,6 +48,16 @@ const sessionFingerprint = (client: McpClient) => JSON.stringify({
   oauthRegisteredClientSecret: client.authType === 'oauth2' ? client.oauthRegisteredClientSecret : '',
   oauthRegisteredTokenEndpointAuthMethod: client.authType === 'oauth2' ? client.oauthRegisteredTokenEndpointAuthMethod : 'none',
 });
+const stdioSessionFingerprint = (client: McpClient) => JSON.stringify([client.command.trim(), client.args]);
+const stdioSessionRevision = (key: string) => stdioSessionRevisions.get(key) ?? 0;
+const rememberStdioSession = (key: string, fingerprint: string, revision: number) => {
+  if (stdioSessionRevision(key) === revision) stdioSessions.set(key, fingerprint);
+};
+const invalidateStdioSession = (key: string) => {
+  const active = stdioSessions.delete(key);
+  stdioSessionRevisions.set(key, stdioSessionRevision(key) + 1);
+  return active;
+};
 const normalizeSessionId = (value: string) => {
   if (!value) return '';
   if (value.length > MAX_SESSION_ID_BYTES || /[\0\r\n]/.test(value)) throw new Error('The MCP server returned an invalid or oversized session identity.');
@@ -70,8 +82,16 @@ const rememberHttpSession = (client: McpClient, context: Pick<McpRequestContext,
   httpSessions.set(key, { client, fingerprint: sessionFingerprint(client), sessionId: normalized });
   while (httpSessions.size > MAX_HTTP_SESSIONS) httpSessions.delete(httpSessions.keys().next().value!);
 };
-export const forgetMcpClientSession = (clientId: string, sessionScope = '') => httpSessions.delete(sessionKey(clientId, sessionScope));
-export const hasMcpClientSession = (client: McpClient, sessionScope = '') => httpSessions.get(sessionKey(client.id, sessionScope))?.fingerprint === sessionFingerprint(client);
+export const forgetMcpClientSession = (clientId: string, sessionScope = '') => {
+  const key = sessionKey(clientId, sessionScope);
+  const http = httpSessions.delete(key);
+  const stdio = invalidateStdioSession(key);
+  return http || stdio;
+};
+export const hasMcpClientSession = (client: McpClient, sessionScope = '') => {
+  const key = sessionKey(client.id, sessionScope);
+  return client.transport === 'stdio' ? stdioSessions.get(key) === stdioSessionFingerprint(client) : httpSessions.get(key)?.fingerprint === sessionFingerprint(client);
+};
 
 const validateHttpEndpoint = (value: string) => {
   const url = new URL(value);
@@ -326,6 +346,18 @@ const httpSession = async (client: McpClient, environment: Environment | undefin
 
 export const disconnectMcpClient = async (client: McpClient, environment: Environment | undefined, context: McpRequestContext): Promise<{ events: McpEvent[]; terminated: boolean }> => {
   const key = sessionKey(client.id, context.sessionScope);
+  if (client.transport === 'stdio') {
+    const active = invalidateStdioSession(key);
+    const events: McpEvent[] = [{ direction: 'client', method: 'MCP session', detail: 'Cleared the local STDIO connection and requested process termination.', timestamp: now() }];
+    try {
+      const terminated = isTauri() && await invoke<boolean>('close_mcp_stdio_session', { sessionKey: key });
+      if (!active && !terminated) return { events: [], terminated: false };
+      return { events, terminated };
+    } catch (error) {
+      if (!active) return { events: [], terminated: false };
+      return { events: [...events, { direction: 'server', method: 'MCP session', detail: `Native MCP STDIO termination failed after local disconnect: ${error instanceof Error ? error.message : String(error)}`, timestamp: now() }], terminated: false };
+    }
+  }
   const session = httpSessions.get(key);
   httpSessions.delete(key);
   if (!session) return { events: [] as McpEvent[], terminated: false };
@@ -362,12 +394,27 @@ const stdioRequest = async (client: McpClient, method: string, params: unknown, 
   throwIfMcpAborted(context.signal);
   if (!isTauri()) throw new Error('MCP STDIO servers require the Tauri desktop app.');
   if (!client.command.trim()) throw new Error('Enter the MCP STDIO executable and arguments. Brunomnia never invokes a shell.');
+  const sessionKeyValue = sessionKey(client.id, context.sessionScope);
+  const sessionRevision = stdioSessionRevision(sessionKeyValue);
+  const fingerprint = stdioSessionFingerprint(client);
   const cancellationId = context.signal ? context.cancellationId ?? `mcp-stdio-${crypto.randomUUID()}` : '';
   const cancel = () => { if (cancellationId) void invoke('cancel_mcp_stdio_call', { cancellationId }).catch(() => undefined); };
   context.signal?.addEventListener('abort', cancel, { once: true });
   let output: StdioOutput;
   try {
-    output = await invoke<StdioOutput>('mcp_stdio_call', { input: { command: client.command, args: client.args, method, params, roots: client.roots, timeoutMs: 30_000, cancellationId } });
+    output = await invoke<StdioOutput>('mcp_stdio_call', { input: { command: client.command, args: client.args, method, params, roots: client.roots, timeoutMs: 30_000, cancellationId, sessionKey: sessionKeyValue } });
+    rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (detail.startsWith('The MCP server returned an error:')) rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision);
+    else if (context.signal?.aborted) {
+      try {
+        const active = await invoke<boolean>('has_mcp_stdio_session', { sessionKey: sessionKeyValue });
+        if (active) rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision);
+        else if (stdioSessionRevision(sessionKeyValue) === sessionRevision) stdioSessions.delete(sessionKeyValue);
+      } catch {}
+    } else if (stdioSessionRevision(sessionKeyValue) === sessionRevision) stdioSessions.delete(sessionKeyValue);
+    throw error;
   } finally {
     context.signal?.removeEventListener('abort', cancel);
   }
