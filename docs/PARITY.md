@@ -1349,6 +1349,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Pinned RJSF 6/AJV 8 tool-schema form, default-state synchronization, advisory validation, and JSON-overview audit: [`docs/QA_MILESTONE_234.md`](QA_MILESTONE_234.md)
 - Bounded local-reference/composition/conditional schema model, recursive object/array/additional-property controls, typed variants/defaults, immutable path edits, and nonblocking issues: [`src/lib/mcpParameterSchema.ts`](../src/lib/mcpParameterSchema.ts), [`src/components/McpParameterField.tsx`](../src/components/McpParameterField.tsx), and [`src/components/IntegrationWorkbench.tsx`](../src/components/IntegrationWorkbench.tsx)
 - Recursive/default/reference/union/dependency/path regression fixtures, full frontend/native/build/CLI gates, and exact verification record: [`src/lib/mcpParameterSchema.test.ts`](../src/lib/mcpParameterSchema.test.ts) and [`docs/QA_MILESTONE_234.md`](QA_MILESTONE_234.md)
+- Successful remote Node 22 rebuild/no-network smoke, signed AMD64/ARM64 publication, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_234.md`](QA_MILESTONE_234.md)
 
 ## Parity declaration rule
 

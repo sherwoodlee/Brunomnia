@@ -40,7 +40,13 @@ Rendered interaction QA remains omitted by standing direction. Deterministic sch
 
 ## Remote gate
 
-Pending the first push of the M234 implementation commit to `main`.
+Main commit `56c2e6e5a452b5f64607d715f3e402acbddb0037` completed verify and publish in [Actions run 29711978759](https://github.com/sherwoodlee/Brunomnia/actions/runs/29711978759). Node 22 rebuilt the generated CLI, passed the freshness and non-root no-network trust smoke, and published AMD64/ARM64 provenance/SBOM manifests at:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:309f4f8d8f5c994d40296b1b689e28b237fd88a240f09033a9987cfeaf2dffb9
+```
+
+Independent `cosign verify` passed issuer `https://token.actions.githubusercontent.com` and the exact `cli-container.yml@refs/heads/main` identity, validated the M234 commit and digest claims plus the trusted certificate chain, and found transparency-log entry `2204688885`.
 
 ## Acceptance boundary
 
