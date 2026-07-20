@@ -18,10 +18,10 @@ describe('workspace certificates', () => {
     const request = cloneSeedWorkspace().collections[0].requests[0];
     const certificates = normalizeWorkspaceCertificates({
       ca: { enabled: true, pem: 'ca-pem' },
-      clients: [{ id: 'client', host: 'api.example.test', certificatePem: 'workspace-cert', keyPem: 'workspace-key' }],
+      clients: [{ id: 'client', host: 'api.example.test', certificatePem: 'workspace-cert', keyPem: 'workspace-key', passphrase: 'pem-secret' }],
     });
     expect(applyWorkspaceCertificates(request.transport, 'https://api.example.test', certificates)).toMatchObject({
-      caCertificatePem: 'ca-pem', clientCertificatePem: 'workspace-cert', clientKeyPem: 'workspace-key',
+      caCertificatePem: 'ca-pem', clientCertificatePem: 'workspace-cert', clientKeyPem: 'workspace-key', clientCertificatePassphrase: 'pem-secret',
     });
     request.transport.clientCertificatePem = 'request-cert';
     request.transport.clientKeyPem = 'request-key';

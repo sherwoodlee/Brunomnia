@@ -223,10 +223,10 @@ describe('script sandbox source validation', () => {
         { key: 'label', type: 'text', value: 'ready' },
         { key: 'upload', type: 'file', value: '{{ folder }}/payload.csv', fileName: 'renamed.csv', contentType: 'text/csv' },
       ] });
-      insomnia.request.certificate.update({ cert: { src: '/tmp/client.crt' }, key: { src: '/tmp/client.key' }, domains: ['api.example.com'] });
+      insomnia.request.certificate.update({ cert: { src: '/tmp/client.crt' }, key: { src: '/tmp/client.key' }, passphrase: 'pem-secret', domains: ['api.example.com'] });
     `, { permissions: { network: false, files: true, vault: false, maxSubrequests: 5 }, folders: [{ id: 'root', name: 'Root', environment: { folder: '/tmp' } }] });
     expect(output.ok).toBe(true);
-    expect(output.request).toMatchObject({ bodyMode: 'multipart', multipartBody: [{ kind: 'text', value: 'ready' }, { kind: 'file', fileName: 'renamed.csv', contentType: 'text/csv' }], transport: { clientCertificateDomains: 'api.example.com' } });
+    expect(output.request).toMatchObject({ bodyMode: 'multipart', multipartBody: [{ kind: 'text', value: 'ready' }, { kind: 'file', fileName: 'renamed.csv', contentType: 'text/csv' }], transport: { clientCertificateDomains: 'api.example.com', clientCertificatePassphrase: 'pem-secret' } });
     expect(output.fileReferences).toEqual([
       { kind: 'multipart', path: '/tmp/payload.csv', partId: 'script-part-1', fileName: 'renamed.csv', contentType: 'text/csv' },
       { kind: 'certificate-cert', path: '/tmp/client.crt' },

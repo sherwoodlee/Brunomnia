@@ -675,7 +675,15 @@ self.onmessage = async ({ data }) => {
     send,
     sendRequest,
     replaceIn,
-    vault: { get: (name) => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); return state.vault[String(name)]; } },
+    vault: {
+      get: (name) => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); return state.vault[String(name)]; },
+      has: (name) => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); return Object.hasOwn(state.vault, String(name)); },
+      replaceIn: (value) => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); return String(value).replace(/{{\\s*([^{}]+?)\\s*}}/g, (match, name) => state.vault[name] ?? match); },
+      toObject: () => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); return { ...state.vault }; },
+      set: () => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); throw new Error('Vault can not be set in script'); },
+      unset: () => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); throw new Error('Vault can not be unset in script'); },
+      clear: () => { if (!state.permissions.vault) throw new Error('Script vault access is disabled. Enable it in Preferences.'); throw new Error('Vault can not be cleared in script'); },
+    },
     expect,
     test,
   };

@@ -4,7 +4,7 @@ Milestones 12–19 expand Brunomnia's clean-room compatibility with the current 
 
 ## Runtime model
 
-Desktop pre-request and after-response JavaScript runs in a disposable browser Worker with a configurable 1–60 second deadline. The default is 10 seconds. Direct `fetch`, XHR, WebSocket, EventSource, DOM access, IndexedDB, Cache Storage, dynamic `import()`, `eval`, nested workers, and ambient host objects are unavailable. Function-constructor paths are hardened, and only typed results or mediated secondary-request messages cross back to the app.
+Desktop pre-request and after-response JavaScript runs in a disposable browser Worker with a configurable 1–60 second deadline. Trusted CLI scripts run in a disposable `worker_threads` Worker whose restricted `vm` context has string/Wasm code generation disabled and no `process`, host `Buffer`, parent port, filesystem, or ambient network authority. The Node Worker has explicit heap/stack limits and is terminated at the same script deadline. Direct `fetch`, XHR, WebSocket, EventSource, DOM access, IndexedDB, Cache Storage, dynamic `import()`, `eval`, nested workers, and ambient host objects are unavailable. Function-constructor paths are hardened, and only typed results or mediated secondary-request/file messages cross either Worker boundary.
 
 The runtime exposes:
 
@@ -44,14 +44,14 @@ These adapters do not load Chai plugins, expose `should`, support assertion over
 
 Desktop file reads require two device-local choices under **Preferences → General → Request scripts**: add one absolute root per line to **Allowed data folders**, then enable **Allow scripts to attach local body and certificate files**. Together they grant the documented `insomnia.request.body.update()` and `insomnia.sendRequest()` file modes plus PEM certificate source paths. Both controls are off/empty by default, available only in the Tauri desktop app, omitted from folder/Git projects and encrypted revisions, and reset on workspace import.
 
-Before reading bytes, the Rust host canonicalizes the requested file and every existing directory root. The file must remain under at least one canonical root, so `..` traversal and symlinks resolving outside the root are rejected. Empty, missing, or non-directory roots do not grant access. Brunomnia does not automatically allow the OS temporary or application-data directories, and this grant is read-only; unlike current Insomnia's broader data-folder description, script file writes are not implemented.
+Before reading bytes, the Rust host canonicalizes the requested file and every existing directory root. The file must remain under at least one canonical root, so `..` traversal and symlinks resolving outside the root are rejected. Empty, missing, or non-directory roots do not grant access. Brunomnia does not automatically allow the OS temporary or application-data directories, and this grant is read-only. Pinned Insomnia's scripting SDK likewise exposes attachment paths rather than a script file-write API.
 
 Supported body inputs are:
 
 - `{ mode: 'file', file: '/path/to/payload.bin' }` for a binary primary-request body; and
 - `{ mode: 'formdata', formdata: [{ key: 'upload', type: 'file', value: '/path/to/payload.csv' }] }` for multipart file parts, including optional `fileName` and `contentType` overrides.
 
-`insomnia.request.certificate.update()` accepts `cert: { src: '/path/to/client.crt' }` plus `key: { src: '/path/to/client.key' }`, the `certPath`/`keyPath` aliases, or `pfx: { src: '/path/to/client.p12' }` plus an optional `passphrase`. PEM certificate/key files must be UTF-8 text; PFX/PKCS#12 files remain binary and are transferred as bounded base64 only after the Worker returns a path reference. Primary requests hydrate after the disposable Worker finishes, while secondary requests hydrate only for that mediated request. The Worker receives no filesystem function or file bytes. Paths can use ordinary `{{ variable }}` substitution. Reads are limited to 5 MB per regular file, 20 files, and 20 MB across all primary and secondary attachments in one script execution. A mutation must choose PFX or a PEM pair, never both.
+`insomnia.request.certificate.update()` accepts `cert: { src: '/path/to/client.crt' }` plus `key: { src: '/path/to/client.key' }`, the `certPath`/`keyPath` aliases, or `pfx: { src: '/path/to/client.p12' }` plus an optional `passphrase`. The passphrase applies to modern PBES2/AES encrypted PKCS#8, legacy OpenSSL AES/DES PEM keys, and PFX/PKCS#12 identities through the shared native transport path. PEM certificate/key files must be UTF-8 text; PFX/PKCS#12 files remain binary and are transferred as bounded base64 only after the Worker returns a path reference. Primary requests hydrate after the disposable Worker finishes, while secondary requests hydrate only for that mediated request. The Worker receives no filesystem function or file bytes. Paths can use ordinary `{{ variable }}` substitution. Reads are limited to 5 MB per regular file, 20 files, and 20 MB across all primary and secondary attachments in one script execution. A mutation must choose PFX or a PEM pair, never both.
 
 ## Secondary requests
 
@@ -63,13 +63,13 @@ Secondary requests do not run nested request scripts or plugin hooks. They can u
 
 ## Vault access
 
-**Expose the unlocked local vault through `insomnia.vault`** grants `insomnia.vault.get(name)` on this device. It is off by default. Only the current in-memory unlocked entries are copied into the disposable Worker, and they are excluded from script results, workspaces, logs, project files, and synchronization payloads. Locking the vault removes the values available to later runs.
+**Expose the unlocked local vault through `insomnia.vault`** grants the pinned read-only `get`, `has`, `replaceIn`, and `toObject` helpers on this device. Pinned `set`, `unset`, and `clear` calls remain explicit errors. The grant is off by default. Only the current in-memory unlocked entries are copied into the disposable Worker, and they are excluded from script results, workspaces, logs, project files, and synchronization payloads. Locking the vault removes the values available to later runs.
 
-The grant does not expose external-vault provider adapters. Scripts cannot enumerate local vault names through this API; a script must already know the requested key.
+Pinned Insomnia constructs this object from the reserved private global-environment vault; it does not expose AWS, GCP, Azure, or HashiCorp provider adapters through the scripting SDK. Brunomnia's separate external-secret template support therefore remains outside `insomnia.vault`.
 
 ## CLI trust boundary
 
-The bundled CLI uses Node's `vm` compatibility runtime, which is not a security boundary for hostile JavaScript. For that reason, workspace scripts are disabled by default. Run scripts only for a workspace you trust:
+The bundled CLI isolates compatibility execution in a fresh resource-limited Node Worker and a restricted `vm` context. Workspace scripts still remain disabled by default because an explicit trust decision is preferable before spending CPU, memory, transport, or approved file authority on imported JavaScript:
 
 ```sh
 brunomnia run test workspace.json "Suite or API spec" --allow-scripts
@@ -77,6 +77,6 @@ brunomnia run test workspace.json "Suite or API spec" --allow-scripts
 
 Local attachments additionally require `--allow-script-files` and at least one `-f`/`--dataFolders` root; arbitrary `insomnia.sendRequest()` calls require `--allow-script-requests`. Standalone-suite `insomnia.send()` may execute only a saved HTTP/GraphQL request in that suite's owning collection and still requires `--allow-scripts`. A file-backed arbitrary secondary request therefore requires all three authority flags plus a canonical allowed root. The trusted CLI does not consume the desktop allowed-folder list or expose the desktop local vault. These invocation flags and roots are intentionally not read from workspace preference data, preventing an imported workspace from granting itself script authority.
 
-## Remaining compatibility limits
+## Compatibility boundary
 
-Every module name currently documented by Insomnia is available, but full npm-package behavioral equivalence remains open. In particular, exact Chai internals, complete Lodash behavior, arbitrary/local-reference JSON Schema behavior, the full Cheerio/XML parsers, additional CryptoJS algorithms, Moment locales/time zones, complete Node built-in semantics, and the complete Postman Collection SDK are not claimed. Encrypted PEM-key passphrases, external-vault scripts, portable CLI client identities, and stronger portable CLI isolation remain in the [parity ledger](PARITY.md). The official scripts reference says deprecated Postman interfaces are not supported by Insomnia, so they are not treated as an upstream parity requirement.
+Every module name currently documented by Insomnia is available through bounded clean-room adapters. Pinned source supplies the global Lodash-compatible `_` through `es-toolkit/compat`; a particular dependency's undocumented internals, locales, prototype identity, extension hooks, and error metadata are implementation details rather than separate workbench capabilities. The documented scripting operations, assertion names, module names, variable scopes, request/response mutation, vault access, certificate passphrases, mediated requests/files, desktop execution, and portable CLI execution are covered. The official scripts reference says deprecated Postman interfaces are not supported by Insomnia, so they are not treated as an upstream parity requirement.

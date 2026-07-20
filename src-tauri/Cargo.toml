@@ -16,10 +16,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+aes = "0.8"
 axum = "0.8"
 base64 = "0.22"
 brotli = "8"
+cbc = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
+der = { version = "0.7", features = ["derive"] }
+des = "0.8"
 digest_auth = "0.3.1"
 encoding_rs = "0.8"
 flate2 = "1"
@@ -27,12 +31,15 @@ futures-util = "0.3"
 http = "1"
 hyper-util = { version = "0.1", features = ["tokio"] }
 libc = "0.2"
+md-5 = "0.10"
 prost = "0.14"
 prost-reflect = { version = "0.16", features = ["serde", "text-format"] }
 prost-types = "0.14"
 protox = "0.9"
 ntlmclient = "0.2.0"
 p12-keystore = { version = "=0.1.5", default-features = true }
+pem-rfc7468 = { version = "0.7", features = ["alloc"] }
+pkcs5 = { version = "0.7", features = ["3des", "alloc", "pbes2", "sha1-insecure"] }
 reqwest = { version = "0.12", default-features = false, features = ["brotli", "deflate", "gzip", "http2", "json", "multipart", "rustls-tls", "stream", "zstd"] }
 ring = "0.17"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

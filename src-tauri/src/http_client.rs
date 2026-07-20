@@ -1145,7 +1145,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn sends_modern_pkcs12_identity_for_https_requests() {
+    async fn sends_password_protected_client_identities_for_https_requests() {
         use rustls::{RootCertStore, ServerConfig};
         use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
         use std::sync::Arc;
@@ -1176,25 +1176,58 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let mut stream = acceptor.accept(stream).await.unwrap();
-            let request = read_loopback_request(&mut stream).await;
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
-                .await
-                .unwrap();
-            request
+            let mut requests = Vec::new();
+            for _ in 0..3 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut stream = acceptor.accept(stream).await.unwrap();
+                requests.push(read_loopback_request(&mut stream).await);
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    )
+                    .await
+                    .unwrap();
+            }
+            requests
         });
 
-        let mut input = body_test_input("text");
-        input.url = format!("https://127.0.0.1:{}/pfx", address.port());
-        input.transport.validate_certificates = false;
-        input.transport.client_certificate_pfx_base64 =
-            crate::client_identity::test_pfx_base64("pfx-secret", false);
-        input.transport.client_certificate_passphrase = "pfx-secret".into();
-        let response = send(input).await.unwrap();
-        assert_eq!(response.status, 200);
-        assert!(server.await.unwrap().0.starts_with("POST /pfx HTTP/1.1"));
+        let identities = [
+            (
+                "pfx",
+                "",
+                "",
+                crate::client_identity::test_pfx_base64("pfx-secret", false),
+                "pfx-secret",
+            ),
+            (
+                "pkcs8",
+                include_str!("../tests/fixtures/tls/client.cert.pem"),
+                include_str!("../tests/fixtures/tls/client.key.encrypted.pkcs8.pem"),
+                String::new(),
+                "pem-modern-secret",
+            ),
+            (
+                "legacy",
+                include_str!("../tests/fixtures/tls/client.cert.pem"),
+                include_str!("../tests/fixtures/tls/client.key.encrypted-legacy.pem"),
+                String::new(),
+                "pem-legacy-secret",
+            ),
+        ];
+        for (path, certificate, key, pfx, passphrase) in identities {
+            let mut input = body_test_input("text");
+            input.url = format!("https://127.0.0.1:{}/{path}", address.port());
+            input.transport.validate_certificates = false;
+            input.transport.client_certificate_pem = certificate.into();
+            input.transport.client_key_pem = key.into();
+            input.transport.client_certificate_pfx_base64 = pfx;
+            input.transport.client_certificate_passphrase = passphrase.into();
+            assert_eq!(send(input).await.unwrap().status, 200);
+        }
+        let requests = server.await.unwrap();
+        assert!(requests[0].0.starts_with("POST /pfx HTTP/1.1"));
+        assert!(requests[1].0.starts_with("POST /pkcs8 HTTP/1.1"));
+        assert!(requests[2].0.starts_with("POST /legacy HTTP/1.1"));
     }
 
     #[test]

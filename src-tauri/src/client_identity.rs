@@ -1,6 +1,12 @@
 use crate::models::TransportConfig;
+use aes::{Aes128, Aes192, Aes256};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use cbc::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
+use der::{asn1::OctetStringRef, Decode, Sequence};
+use des::{Des, TdesEde3};
+use md5::{Digest, Md5};
 use p12_keystore::KeyStore;
+use pkcs5::EncryptionScheme;
 
 const MAX_CERTIFICATE_TEXT_BYTES: usize = 1_048_576;
 const MAX_CA_CERTIFICATE_TEXT_BYTES: usize = 5_242_880;
@@ -13,6 +19,12 @@ pub(crate) struct ClientIdentityPem {
     pub private_key_pem: String,
 }
 
+#[derive(Sequence)]
+struct EncryptedPrivateKeyInfo<'a> {
+    encryption_algorithm: EncryptionScheme<'a>,
+    encrypted_data: OctetStringRef<'a>,
+}
+
 fn pem_block(label: &str, der: &[u8]) -> String {
     let encoded = STANDARD.encode(der);
     let mut pem = format!("-----BEGIN {label}-----\n");
@@ -22,6 +34,160 @@ fn pem_block(label: &str, der: &[u8]) -> String {
     }
     pem.push_str(&format!("-----END {label}-----\n"));
     pem
+}
+
+fn openssl_legacy_key(password: &[u8], salt: &[u8], length: usize) -> Vec<u8> {
+    let mut output = Vec::with_capacity(length);
+    let mut previous = Vec::new();
+    while output.len() < length {
+        let mut digest = Md5::new();
+        digest.update(&previous);
+        digest.update(password);
+        digest.update(salt);
+        previous = digest.finalize().to_vec();
+        output.extend_from_slice(&previous);
+    }
+    output.truncate(length);
+    output
+}
+
+fn hex_bytes(value: &str) -> Result<Vec<u8>, String> {
+    if value.len() % 2 != 0 {
+        return Err("The encrypted PEM private-key IV is malformed.".into());
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&value[index..index + 2], 16)
+                .map_err(|_| "The encrypted PEM private-key IV is malformed.".to_string())
+        })
+        .collect()
+}
+
+fn decrypt_legacy_private_key(
+    private_key_pem: &str,
+    passphrase: &str,
+) -> Result<Option<String>, String> {
+    let source = private_key_pem.trim();
+    let mut lines = source.lines();
+    let begin = lines.next().unwrap_or_default().trim();
+    let Some(label) = begin
+        .strip_prefix("-----BEGIN ")
+        .and_then(|value| value.strip_suffix("-----"))
+    else {
+        return Ok(None);
+    };
+    if label == "ENCRYPTED PRIVATE KEY" {
+        return Ok(None);
+    }
+    let mut encrypted = false;
+    let mut algorithm = String::new();
+    let mut iv = Vec::new();
+    let mut body = String::new();
+    let mut reading_body = false;
+    for line in lines {
+        let line = line.trim();
+        if line == format!("-----END {label}-----") {
+            break;
+        }
+        if reading_body {
+            body.push_str(line);
+        } else if line.is_empty() {
+            reading_body = true;
+        } else if let Some(value) = line.strip_prefix("Proc-Type:") {
+            encrypted = value.trim().eq_ignore_ascii_case("4,ENCRYPTED");
+        } else if let Some(value) = line.strip_prefix("DEK-Info:") {
+            let Some((cipher, iv_hex)) = value.trim().split_once(',') else {
+                return Err("The encrypted PEM private-key metadata is malformed.".into());
+            };
+            algorithm = cipher.trim().to_ascii_uppercase();
+            iv = hex_bytes(iv_hex.trim())?;
+        }
+    }
+    if !encrypted {
+        return Ok(None);
+    }
+    if passphrase.is_empty() {
+        return Err("The encrypted PEM private key requires a passphrase.".into());
+    }
+    if algorithm.is_empty() || iv.len() < 8 || body.is_empty() {
+        return Err("The encrypted PEM private-key metadata is incomplete.".into());
+    }
+    let mut encrypted_der = STANDARD
+        .decode(body)
+        .map_err(|_| "The encrypted PEM private-key body is not valid base64.".to_string())?;
+    let key_length = match algorithm.as_str() {
+        "AES-128-CBC" => 16,
+        "AES-192-CBC" => 24,
+        "AES-256-CBC" => 32,
+        "DES-CBC" => 8,
+        "DES-EDE3-CBC" => 24,
+        _ => {
+            return Err(format!(
+                "The encrypted PEM private-key cipher '{algorithm}' is unsupported."
+            ))
+        }
+    };
+    let key = openssl_legacy_key(passphrase.as_bytes(), &iv[..8], key_length);
+    macro_rules! decrypt {
+        ($cipher:ty) => {{
+            cbc::Decryptor::<$cipher>::new_from_slices(&key, &iv)
+                .map_err(|_| {
+                    "The encrypted PEM private-key cipher parameters are invalid.".to_string()
+                })?
+                .decrypt_padded_mut::<Pkcs7>(&mut encrypted_der)
+                .map(|value| value.to_vec())
+                .map_err(|_| {
+                    "The encrypted PEM private-key passphrase is incorrect or the key is malformed."
+                        .to_string()
+                })?
+        }};
+    }
+    let decrypted = match algorithm.as_str() {
+        "AES-128-CBC" => decrypt!(Aes128),
+        "AES-192-CBC" => decrypt!(Aes192),
+        "AES-256-CBC" => decrypt!(Aes256),
+        "DES-CBC" => decrypt!(Des),
+        "DES-EDE3-CBC" => decrypt!(TdesEde3),
+        _ => unreachable!(),
+    };
+    if decrypted.first() != Some(&0x30) {
+        return Err(
+            "The encrypted PEM private-key passphrase is incorrect or the key is malformed.".into(),
+        );
+    }
+    Ok(Some(pem_block(label, &decrypted)))
+}
+
+fn decrypt_private_key(private_key_pem: &str, passphrase: &str) -> Result<String, String> {
+    let source = private_key_pem.trim();
+    if source.starts_with("-----BEGIN ENCRYPTED PRIVATE KEY-----") {
+        if passphrase.is_empty() {
+            return Err("The encrypted PEM private key requires a passphrase.".into());
+        }
+        let (label, encrypted_der) = pem_rfc7468::decode_vec(source.as_bytes())
+            .map_err(|_| "The encrypted PKCS#8 private-key PEM is malformed.".to_string())?;
+        if label != "ENCRYPTED PRIVATE KEY" {
+            return Err("The encrypted PKCS#8 private-key PEM has an invalid label.".into());
+        }
+        let encrypted = EncryptedPrivateKeyInfo::from_der(&encrypted_der)
+            .map_err(|_| "The encrypted PKCS#8 private-key data is malformed.".to_string())?;
+        let decrypted = encrypted
+            .encryption_algorithm
+            .decrypt(passphrase.as_bytes(), encrypted.encrypted_data.as_bytes())
+            .map_err(|_| {
+                "The encrypted PKCS#8 private-key passphrase is incorrect or its cipher is unsupported."
+                    .to_string()
+            })?;
+        if decrypted.first() != Some(&0x30) {
+            return Err(
+                "The encrypted PKCS#8 private-key passphrase is incorrect or the key is malformed."
+                    .into(),
+            );
+        }
+        return Ok(pem_block("PRIVATE KEY", &decrypted));
+    }
+    Ok(decrypt_legacy_private_key(source, passphrase)?.unwrap_or_else(|| source.to_string()))
 }
 
 pub(crate) fn domain_matches(pattern: &str, hostname: &str) -> bool {
@@ -94,7 +260,10 @@ pub(crate) fn effective_client_identity_pem(
     if has_pem {
         return Ok(Some(ClientIdentityPem {
             certificate_pem: transport.client_certificate_pem.trim().to_string(),
-            private_key_pem: transport.client_key_pem.trim().to_string(),
+            private_key_pem: decrypt_private_key(
+                &transport.client_key_pem,
+                &transport.client_certificate_passphrase,
+            )?,
         }));
     }
     let pfx_der = STANDARD
@@ -249,5 +418,45 @@ mod tests {
             2
         );
         assert!(identity.private_key_pem.contains("BEGIN PRIVATE KEY"));
+    }
+
+    #[test]
+    fn decrypts_modern_and_legacy_encrypted_pem_private_keys() {
+        use rustls_pki_types::{pem::PemObject, PrivateKeyDer};
+
+        for (certificate_pem, private_key_pem, passphrase) in [
+            (
+                include_str!("../tests/fixtures/tls/client.cert.pem"),
+                include_str!("../tests/fixtures/tls/client.key.encrypted.pkcs8.pem"),
+                "pem-modern-secret",
+            ),
+            (
+                include_str!("../tests/fixtures/tls/client-rsa.cert.pem"),
+                include_str!("../tests/fixtures/tls/client-rsa.key.encrypted-legacy.pem"),
+                "pem-legacy-secret",
+            ),
+        ] {
+            let transport = TransportConfig {
+                client_certificate_pem: certificate_pem.into(),
+                client_key_pem: private_key_pem.into(),
+                client_certificate_passphrase: passphrase.into(),
+                ..TransportConfig::default()
+            };
+            let identity = effective_client_identity_pem(&transport, Some("https://api.test"))
+                .unwrap()
+                .unwrap();
+            assert!(!identity.private_key_pem.contains("ENCRYPTED"));
+            PrivateKeyDer::from_pem_slice(identity.private_key_pem.as_bytes()).unwrap();
+
+            let invalid = TransportConfig {
+                client_certificate_passphrase: "wrong".into(),
+                ..transport
+            };
+            let error = match effective_client_identity_pem(&invalid, Some("https://api.test")) {
+                Err(error) => error,
+                Ok(_) => panic!("wrong encrypted PEM passphrase must fail"),
+            };
+            assert!(error.contains("passphrase"));
+        }
     }
 }
