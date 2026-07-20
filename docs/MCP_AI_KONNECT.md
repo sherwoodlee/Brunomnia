@@ -36,6 +36,7 @@ The HTTP client:
 - retains one project/client-scoped logical connection in device memory, carrying `Mcp-Session-Id` and `Mcp-Protocol-Version` across discovery and invocation;
 - discovers paginated tools, prompts, resources, and resource templates;
 - invokes tools, prompts, and resource reads;
+- advertises roots/list-change, elicitation, and sampling support and emits their server requests live from POST or GET SSE;
 - cancels active discovery or invocation requests and sends session-aware `notifications/cancelled` messages;
 - accepts Basic, bearer/PAT, manually configured OAuth 2, and custom headers;
 - disables redirects and cookies;
@@ -60,7 +61,7 @@ OAuth uses the authorization-code grant, mandatory PKCE S256, an RFC 8707 resour
 
 For automatic setup, Brunomnia parses a Bearer `WWW-Authenticate` challenge, tries the advertised `resource_metadata` URL, then path-aware and root RFC 9728 fallbacks. It validates that protected-resource metadata covers the MCP URL, selects its first authorization server, tries path-aware RFC 8414 and OIDC metadata locations, requires authorization-code and PKCE S256 compatibility when advertised, and chooses explicit scope before challenge, protected-resource, or authorization-server scope. If no client ID exists, it registers a loopback authorization-code/refresh client at the advertised endpoint or legacy `/register` fallback. Metadata GETs follow up to twenty explicit relative or absolute redirects, matching the pinned Fetch ceiling; every hop is revalidated as credential-free, fragment-free HTTPS or loopback HTTP, recorded in the event console, and rejected on a missing `Location`, loop, or overflow. Native automatic redirects remain off, and dynamic-registration POSTs never follow redirects. All discovery/registration requests contain no stored MCP credentials or cookies, have 30-second deadlines, and reject post-buffer JSON over 1 MiB.
 
-MCP OAuth tokens and dynamically registered client ID/secret/expiry/auth-method metadata are retained in the local catalog project but stripped from folder/Git and encrypted-sync payloads. Incoming shared runtime fields are discarded before matching local client state is restored by MCP client ID. Registration state is persisted immediately, even when later browser authorization is canceled. Configured endpoints, manual client ID, scope/state, and protected manual client-secret reference remain project data. The exact SDK supports optional URL-based client IDs, but pinned Insomnia's provider never supplies `clientMetadataUrl`, so client-ID metadata documents are not an observable Insomnia capability or parity requirement. Server-request response UI, multiple authorization-server failover, DPoP, and reviewed sampling/elicitation remain open.
+MCP OAuth tokens and dynamically registered client ID/secret/expiry/auth-method metadata are retained in the local catalog project but stripped from folder/Git and encrypted-sync payloads. Incoming shared runtime fields are discarded before matching local client state is restored by MCP client ID. Registration state is persisted immediately, even when later browser authorization is canceled. Configured endpoints, manual client ID, scope/state, and protected manual client-secret reference remain project data. The exact SDK supports optional URL-based client IDs, but pinned Insomnia's provider never supplies `clientMetadataUrl`, so client-ID metadata documents are not an observable Insomnia capability or parity requirement. Multiple authorization-server failover, DPoP, and OS-keychain wrapping remain open.
 
 ### STDIO
 
@@ -79,11 +80,14 @@ The native boundary limits:
 - operation parameters to 1 MB;
 - individual protocol messages and stderr to 10 MB;
 - cumulative session stdout to 20 MB and stderr to 10 MB;
-- pre-response events to 1,000; and
+- pre-response events to 1,000;
+- roots and pending reviewed server requests to 100 each, roots and response payloads to 1 MB, and individual root URIs to 8,192 bytes;
 - cancellation and session identities to 512 bytes, with at most 1,024 pending cancellations and 100 active sessions; and
 - the operation deadline to 1–120 seconds (the UI uses 30 seconds).
 
-Servers may call `roots/list`; Brunomnia returns the reviewed project roots. Other server requests, including sampling and elicitation, receive an explicit JSON-RPC “method not found” response explaining that interactive approval UI is required. Sampling review, elicitation forms, and user-reviewed responses to other server requests remain parity work.
+HTTP and persistent STDIO clients advertise `roots` with `listChanged`, `elicitation`, and `sampling`. `roots/list` is answered automatically from the current reviewed URI list; editing roots on a connected client sends `notifications/roots/list_changed`. STDIO uses a concurrency-safe writer so a review response can unblock the serialized operation that caused the request. Server cancellation removes the matching pending review. Unknown STDIO server-request methods receive a JSON-RPC method-not-found response rather than hanging the child.
+
+`elicitation/create` opens the same bounded recursive JSON-Schema form used by MCP tools. The user can submit an accepting structured result only when the form satisfies the requested schema, or explicitly decline/cancel. `sampling/createMessage` shows the bounded request context and editable text content, role, model, and stop reason; **Approve** returns that reviewed result, while **Reject** returns a JSON-RPC error. If the optional AI provider is enabled, **Generate AI draft** sends only the displayed bounded sampling request to that configured provider and fills the form. Generated output is never returned automatically and still requires a separate explicit approval. HTTP replies use the existing authenticated/session-bound rendered POST path; STDIO replies require the original pending request identity. The renderer keeps at most 100 deduplicated reviews and caps every response at 1 MB.
 
 ## AI providers and workflows
 
@@ -112,7 +116,7 @@ Output remains capped at 10 MB after transport buffering, routes at 500, headers
 
 The project workbench can send a bounded staged/working diff plus the exact changed-path allowlist to the selected provider. The model returns up to eight proposed groups with conventional-style messages and short comments. Brunomnia drops unknown paths. Applying a suggestion only selects files and fills the commit message; the user still reviews, stages, and commits through the ordinary Git workflow.
 
-Diff input is capped at 200 KB, messages at 200 characters, comments at 1,000 characters, and output at 10 MB after transport buffering. MCP sampling is not automatically forwarded to the AI provider.
+Diff input is capped at 200 KB, messages at 200 characters, comments at 1,000 characters, and output at 10 MB after transport buffering. MCP sampling reaches the AI provider only when the user presses **Generate AI draft**; the request parameters are capped at 200,000 characters, generated text at 1 MB, and explicit approval remains mandatory.
 
 Brunomnia does not bundle a model or load `.gguf` files directly. A local model is currently used through a user-run OpenAI-compatible loopback server.
 
@@ -137,4 +141,4 @@ The integration is intentionally pull-only, matching pinned Insomnia: Brunomnia 
 - Local response/history/cookie data remains device-local as in earlier milestones.
 - All integration actions respect the current local viewer/editor governance check.
 
-Reference behavior was reconciled against Kong's current [MCP client documentation](https://developer.konghq.com/insomnia/mcp-clients-in-insomnia/), [AI documentation](https://developer.konghq.com/insomnia/ai-in-insomnia/), [Konnect integration guide](https://developer.konghq.com/insomnia/konnect-integration/), and [Konnect API overview](https://developer.konghq.com/konnect-api/) on 2026-07-16.
+Reference behavior was reconciled against Kong's current [MCP client documentation](https://developer.konghq.com/insomnia/mcp-clients-in-insomnia/), [AI documentation](https://developer.konghq.com/insomnia/ai-in-insomnia/), [Konnect integration guide](https://developer.konghq.com/insomnia/konnect-integration/), and [Konnect API overview](https://developer.konghq.com/konnect-api/) on 2026-07-19.

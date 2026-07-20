@@ -1703,6 +1703,18 @@ kbd {
 .mcp-template-preview small { color: var(--faint); font-size: 8px; text-transform: uppercase; }
 .mcp-template-preview code { color: var(--text-soft); font: 8px/1.5 var(--font-mono); overflow-wrap: anywhere; }
 .mcp-operation-run pre { background: #0a0f12; border: 1px solid var(--border-soft); color: var(--text-soft); flex: 1; font: 8px/1.5 var(--font-mono); margin: 0; max-height: 320px; min-height: 120px; overflow: auto; padding: 9px; white-space: pre-wrap; }
+.mcp-server-requests { display: grid; gap: 10px; }
+.mcp-server-request { background: #0d1418; border: 1px solid var(--border-soft); display: grid; gap: 9px; padding: 10px; }
+.mcp-server-request > header { align-items: center; display: flex; justify-content: space-between; }
+.mcp-server-request > header h3 { font-size: 10px; margin: 2px 0 0; }
+.mcp-server-request > header code, .mcp-server-request > small, .mcp-server-request > p { color: var(--faint); font: 8px/1.4 var(--font-mono); margin: 0; }
+.mcp-server-request > label { color: var(--muted); display: grid; font-size: 8px; gap: 6px; }
+.mcp-server-request > label textarea { min-height: 120px; }
+.mcp-server-request details { border: 1px solid var(--border-soft); padding: 7px; }
+.mcp-server-request details summary { color: var(--muted); cursor: pointer; font-size: 8px; }
+.mcp-server-request details pre { margin-top: 7px; max-height: 180px; min-height: 0; }
+.mcp-server-request-fields { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+.mcp-server-request-fields label { color: var(--muted); display: grid; font-size: 8px; gap: 5px; }
 .mcp-console > div { display: flex; flex-direction: column; max-height: 280px; overflow: auto; }
 .mcp-console article { border-top: 1px solid var(--border-soft); display: grid; gap: 4px 8px; grid-template-columns: 90px minmax(140px, .25fr) minmax(240px, 1fr); padding: 8px 0; }
 .mcp-console time { color: var(--faint); font: 7px var(--font-mono); }
@@ -2061,6 +2073,7 @@ kbd {
   .integration-list { border-bottom: 1px solid var(--border); border-right: 0; max-height: 240px; overflow: auto; }
   .integration-mcp-main { padding: 10px 12px 52px; }
   .integration-fields, .mcp-operation-grid { grid-template-columns: minmax(0, 1fr); }
+  .mcp-server-request-fields { grid-template-columns: minmax(0, 1fr); }
   .mcp-console article { grid-template-columns: 80px minmax(120px, 1fr); }
   .mcp-console pre { grid-column: 1 / -1; }
   .conflict-workbench > header { grid-template-columns: minmax(0, 1fr); }

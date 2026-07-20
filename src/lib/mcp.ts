@@ -9,7 +9,15 @@ import { isProtectedSecretReference, isSensitiveSecretName } from './security';
 
 type McpEvent = { direction: 'client' | 'server' | 'stderr'; method: string; detail: string; timestamp: string };
 type McpOperationResult = { result: unknown; events: McpEvent[]; client: McpClient; sessionId?: string };
-export type McpRequestContext = SendRequestContext & { onMcpClient?: (client: McpClient) => void; onMcpEvent?: (event: McpEvent) => void; sessionScope?: string };
+export type McpServerRequest = { clientId: string; id: string | number; method: 'elicitation/create' | 'sampling/createMessage' | 'roots/list'; params: Record<string, unknown>; receivedAt: string };
+export type McpReviewedServerRequest = Omit<McpServerRequest, 'method'> & { method: 'elicitation/create' | 'sampling/createMessage' };
+export type McpRequestContext = SendRequestContext & {
+  onMcpClient?: (client: McpClient) => void;
+  onMcpEvent?: (event: McpEvent) => void;
+  onMcpServerRequest?: (request: McpServerRequest) => void;
+  onMcpServerRequestCancelled?: (clientId: string, requestId: string | number) => void;
+  sessionScope?: string;
+};
 type StdioOutput = { result: unknown; events: unknown[]; stderr: string };
 type McpHttpSession = { client: McpClient; fingerprint: string; sessionId: string };
 
@@ -25,6 +33,28 @@ const MAX_SESSION_ID_BYTES = 4_096;
 const httpSessions = new Map<string, McpHttpSession>();
 const stdioSessions = new Map<string, string>();
 const stdioSessionRevisions = new Map<string, number>();
+const reviewedServerRequestMethods = new Set<McpServerRequest['method']>(['elicitation/create', 'sampling/createMessage']);
+
+const publishMcpEvent = (client: McpClient, context: McpRequestContext, event: McpEvent) => {
+  context.onMcpEvent?.(event);
+  let message: Record<string, unknown> | undefined;
+  try { message = asRecord(JSON.parse(event.detail)); } catch { return; }
+  if (event.method === 'notifications/cancelled') {
+    const requestId = asRecord(message?.params)?.requestId;
+    if (typeof requestId === 'string' || typeof requestId === 'number') context.onMcpServerRequestCancelled?.(client.id, requestId);
+    return;
+  }
+  if (!reviewedServerRequestMethods.has(event.method as McpServerRequest['method'])) return;
+  const id = message?.id;
+  if (typeof id !== 'string' && typeof id !== 'number') return;
+  context.onMcpServerRequest?.({
+    clientId: client.id,
+    id,
+    method: event.method as McpServerRequest['method'],
+    params: asRecord(message?.params) ?? {},
+    receivedAt: event.timestamp,
+  });
+};
 
 class McpHttpStatusError extends Error {
   constructor(readonly status: number, body: string) {
@@ -314,7 +344,18 @@ const httpRequest = async (
         nativeHttpTransport: {
           send: async (input: unknown, cancellationId?: string) => {
             const channel = new Channel<McpEvent>();
-            channel.onmessage = (event) => context.onMcpEvent?.(event);
+            channel.onmessage = (event) => {
+              publishMcpEvent(updatedClient, context, event);
+              if (event.method !== 'roots/list') return;
+              let message: Record<string, unknown> | undefined;
+              try { message = asRecord(JSON.parse(event.detail)); } catch { return; }
+              const serverRequestId = message?.id;
+              if (typeof serverRequestId !== 'string' && typeof serverRequestId !== 'number') return;
+              const rootsRequest: McpServerRequest = { clientId: updatedClient.id, id: serverRequestId, method: 'roots/list', params: asRecord(message?.params) ?? {}, receivedAt: event.timestamp };
+              void respondMcpServerRequest(updatedClient, rootsRequest, {
+                result: { roots: updatedClient.roots.map((uri) => ({ uri, name: uri })) },
+              }, environment, context).then(({ event: responseEvent }) => publishMcpEvent(updatedClient, context, responseEvent)).catch((caught) => publishMcpEvent(updatedClient, context, { direction: 'server', method: 'roots/list error', detail: caught instanceof Error ? caught.message : String(caught), timestamp: now() }));
+            };
             return invoke<NativeHttpResponse>('send_mcp_http_request', {
               input: {
                 request: input,
@@ -380,7 +421,7 @@ const httpSession = async (client: McpClient, environment: Environment | undefin
   }
   const initialized = await httpRequest(client, 'initialize', {
     protocolVersion: MCP_PROTOCOL_VERSION,
-    capabilities: { roots: { listChanged: false } },
+    capabilities: { roots: { listChanged: true }, elicitation: {}, sampling: {} },
     clientInfo: { name: 'Brunomnia', version: '0.1.0' },
   }, environment, context);
   const notification = await httpRequest(initialized.client, 'notifications/initialized', {}, environment, context, initialized.sessionId, true);
@@ -436,6 +477,93 @@ export const disconnectMcpClient = async (client: McpClient, environment: Enviro
   }
 };
 
+export type McpServerRequestResponse =
+  | { result: unknown; error?: never }
+  | { error: { code: number; message: string; data?: unknown }; result?: never };
+
+export const respondMcpServerRequest = async (
+  client: McpClient,
+  serverRequest: McpServerRequest,
+  response: McpServerRequestResponse,
+  environment: Environment | undefined,
+  context: McpRequestContext,
+): Promise<{ client: McpClient; event: McpEvent }> => {
+  if (serverRequest.clientId !== client.id) throw new Error('The MCP server request belongs to another client.');
+  const payload = {
+    jsonrpc: '2.0',
+    id: serverRequest.id,
+    ...('error' in response ? { error: response.error } : { result: response.result }),
+  };
+  const detail = JSON.stringify(payload);
+  if (detail.length > 1_000_000) throw new Error('The MCP server response exceeds its 1 MB safety limit.');
+  if (client.transport === 'stdio') {
+    if (!isTauri()) throw new Error('MCP STDIO servers require the Tauri desktop app.');
+    await invoke('respond_mcp_stdio_server_request', {
+      input: {
+        sessionKey: sessionKey(client.id, context.sessionScope),
+        serverRequestId: serverRequest.id,
+        ...('error' in response ? { error: response.error } : { result: response.result }),
+      },
+    });
+    return { client, event: { direction: 'client', method: `${serverRequest.method} response`, detail, timestamp: now() } };
+  }
+
+  const session = matchingHttpSession(client, context);
+  if (!session) throw new Error('The MCP HTTP session is no longer connected.');
+  const request = createBlankRequest(requestId());
+  request.name = `${client.name} · ${serverRequest.method} response`;
+  request.method = 'POST';
+  request.url = validateHttpEndpoint(client.url);
+  request.bodyMode = 'json';
+  request.body = detail;
+  request.headers = [
+    { id: `${request.id}-content-type`, name: 'Content-Type', value: 'application/json', enabled: true },
+    { id: `${request.id}-accept`, name: 'Accept', value: 'application/json, text/event-stream', enabled: true },
+    { id: `${request.id}-protocol`, name: 'Mcp-Protocol-Version', value: MCP_PROTOCOL_VERSION, enabled: true },
+    ...(session.sessionId ? [{ id: `${request.id}-session`, name: 'Mcp-Session-Id', value: session.sessionId, enabled: true }] : []),
+    ...client.headers,
+  ];
+  request.auth = mcpAuthentication(client, request.auth);
+  request.transport = { ...request.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMode: 'custom', timeoutMs: 30_000, sendCookies: false, storeCookies: false };
+  let updatedClient = client;
+  const result = await sendRequest(request, environment, {
+    ...context,
+    signal: undefined,
+    cancellationId: undefined,
+    nativeHttpTransport: undefined,
+    pluginRuntime: undefined,
+    onOAuth2Token: (updatedRequest) => {
+      updatedClient = mcpClientWithOAuth2Auth(updatedClient, updatedRequest.auth);
+      context.onMcpClient?.(updatedClient);
+    },
+  });
+  if (result.status < 200 || result.status >= 300) throw new McpHttpStatusError(result.status, result.body);
+  const nextSession = normalizeSessionId(Object.entries(result.headers).find(([name]) => name.toLowerCase() === 'mcp-session-id')?.[1] ?? session.sessionId);
+  rememberHttpSession(updatedClient, context, nextSession);
+  return { client: updatedClient, event: { direction: 'client', method: `${serverRequest.method} response`, detail, timestamp: now() } };
+};
+
+export const notifyMcpRootsChanged = async (
+  client: McpClient,
+  environment: Environment | undefined,
+  context: McpRequestContext,
+): Promise<boolean> => {
+  if (!hasMcpClientSession(client, context.sessionScope)) return false;
+  if (client.transport === 'stdio') {
+    if (!isTauri()) return false;
+    return invoke<boolean>('update_mcp_stdio_roots', {
+      sessionKey: sessionKey(client.id, context.sessionScope),
+      roots: client.roots,
+      notify: true,
+    });
+  }
+  const session = matchingHttpSession(client, context);
+  if (!session) return false;
+  const output = await httpRequest(client, 'notifications/roots/list_changed', {}, environment, context, session.sessionId, true);
+  rememberHttpSession(output.client, context, output.sessionId ?? session.sessionId);
+  return true;
+};
+
 const stdioRequest = async (client: McpClient, method: string, params: unknown, environment: Environment | undefined, context: McpRequestContext): Promise<McpOperationResult> => {
   throwIfMcpAborted(context.signal);
   if (!isTauri()) throw new Error('MCP STDIO servers require the Tauri desktop app.');
@@ -450,8 +578,14 @@ const stdioRequest = async (client: McpClient, method: string, params: unknown, 
   const cancel = () => { if (cancellationId) void invoke('cancel_mcp_stdio_call', { cancellationId }).catch(() => undefined); };
   context.signal?.addEventListener('abort', cancel, { once: true });
   let output: StdioOutput;
+  const delivered = new Set<string>();
+  const channel = new Channel<McpEvent>();
+  channel.onmessage = (event) => {
+    delivered.add(`${event.method}\n${event.detail}`);
+    publishMcpEvent(client, context, event);
+  };
   try {
-    output = await invoke<StdioOutput>('mcp_stdio_call', { input: { command: client.command, args: client.args, env: processEnvironment, method, params, roots: client.roots, timeoutMs: 30_000, cancellationId, sessionKey: sessionKeyValue } });
+    output = await invoke<StdioOutput>('mcp_stdio_call', { input: { command: client.command, args: client.args, env: processEnvironment, method, params, roots: client.roots, timeoutMs: 30_000, cancellationId, sessionKey: sessionKeyValue }, onEvent: channel });
     rememberStdioSession(sessionKeyValue, fingerprint, sessionRevision);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -467,7 +601,7 @@ const stdioRequest = async (client: McpClient, method: string, params: unknown, 
   } finally {
     context.signal?.removeEventListener('abort', cancel);
   }
-  const events: McpEvent[] = output.events.map((event) => ({ direction: 'server', method: asString(asRecord(event)?.method) || 'message', detail: JSON.stringify(event), timestamp: now() }));
+  const events = output.events.map((event): McpEvent => ({ direction: 'server', method: asString(asRecord(event)?.method) || 'message', detail: JSON.stringify(event), timestamp: now() })).filter((event) => !delivered.has(`${event.method}\n${event.detail}`));
   if (output.stderr) events.push({ direction: 'stderr', method: 'stderr', detail: output.stderr, timestamp: now() });
   return { result: output.result, events, client };
 };

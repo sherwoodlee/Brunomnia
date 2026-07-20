@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { integrationSecretInputType, mcpOperationDraftKey, withMcpParameterDraft } from './IntegrationWorkbench';
+import type { McpReviewedServerRequest } from '../lib/mcp';
+import { integrationSecretInputType, mcpOperationDraftKey, withMcpParameterDraft, withMcpServerRequest, withoutMcpServerRequest } from './IntegrationWorkbench';
 
 describe('integration credential visibility', () => {
   it('masks credentials by default', () => {
@@ -22,5 +23,22 @@ describe('integration credential visibility', () => {
     expect(Object.keys(drafts)).toHaveLength(1000);
     expect(drafts['draft-0']).toBeUndefined();
     expect(drafts['draft-1001']).toBe('1001');
+  });
+
+  it('deduplicates, bounds, and cancels reviewed MCP server requests', () => {
+    let requests: McpReviewedServerRequest[] = Array.from({ length: 100 }, (_, index) => ({
+      clientId: 'client-a',
+      id: index,
+      method: 'sampling/createMessage' as const,
+      params: {},
+      receivedAt: `2026-01-01T00:00:${String(index).padStart(2, '0')}Z`,
+    }));
+    requests = withMcpServerRequest(requests, { ...requests[50], params: { replacement: true } });
+    expect(requests).toHaveLength(100);
+    expect(requests.at(-1)).toEqual(expect.objectContaining({ id: 50, params: { replacement: true } }));
+    requests = withMcpServerRequest(requests, { clientId: 'client-a', id: 100, method: 'elicitation/create', params: {}, receivedAt: '2026-01-01T00:02:00Z' });
+    expect(requests).toHaveLength(100);
+    expect(requests.some((request) => request.id === 0)).toBe(false);
+    expect(withoutMcpServerRequest(requests, 'client-a', 50).some((request) => request.id === 50)).toBe(false);
   });
 });

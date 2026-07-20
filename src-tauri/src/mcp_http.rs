@@ -438,7 +438,12 @@ impl Default for PostProgress {
 }
 
 impl PostProgress {
-    fn apply(&mut self, event: ParsedSseEvent, request_id: &str) -> Result<bool, String> {
+    fn apply(
+        &mut self,
+        event: ParsedSseEvent,
+        request_id: &str,
+        channel: &SharedEventChannel,
+    ) -> Result<bool, String> {
         if let Some(id) = event.id {
             self.last_event_id = id;
         }
@@ -456,6 +461,9 @@ impl PostProgress {
         }
         let message: Value = serde_json::from_str(&event.data)
             .map_err(|error| format!("The MCP SSE event contained invalid JSON: {error}"))?;
+        if message.get("id").is_some() && message.get("method").and_then(Value::as_str).is_some() {
+            emit_message(channel, &message);
+        }
         let matched = message
             .as_object()
             .and_then(|object| object.get("id"))
@@ -470,13 +478,14 @@ async fn consume_post_stream(
     response: Response,
     request_id: &str,
     progress: &mut PostProgress,
+    channel: &SharedEventChannel,
 ) -> Result<bool, String> {
     let mut parser = BoundedSseParser::default();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|error| format!("The MCP POST stream failed: {error}"))?;
         for event in parser.push(&chunk)? {
-            if progress.apply(event, request_id)? {
+            if progress.apply(event, request_id, channel)? {
                 return Ok(true);
             }
         }
@@ -566,6 +575,7 @@ async fn execute(
     sessions
         .update_channel(&input.session_key, on_event.clone())
         .await;
+    let post_channel = Arc::new(StdMutex::new(on_event.clone()));
     let started = Instant::now();
     let response = open_response(&input.request).await?;
     let metadata = ResponseMetadata::from_response(&response);
@@ -599,7 +609,8 @@ async fn execute(
     }
 
     let mut progress = PostProgress::default();
-    let mut matched = consume_post_stream(response, &input.request_id, &mut progress).await?;
+    let mut matched =
+        consume_post_stream(response, &input.request_id, &mut progress, &post_channel).await?;
     let mut reconnects = 0;
     let mut last_reconnect_error = String::new();
     while !matched {
@@ -642,7 +653,8 @@ async fn execute(
         if !is_event_stream(&resumed) {
             return Err("The MCP POST resume response was not an SSE stream.".into());
         }
-        matched = consume_post_stream(resumed, &input.request_id, &mut progress).await?;
+        matched =
+            consume_post_stream(resumed, &input.request_id, &mut progress, &post_channel).await?;
         last_reconnect_error.clear();
         progress.reconnect_delay_ms = next_reconnect_delay(progress.reconnect_delay_ms);
     }
@@ -974,6 +986,60 @@ mod tests {
             server.await.unwrap(),
             "POST stream reconnected after its result"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn emits_server_requests_before_the_matching_post_result() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (release_sender, release_receiver) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            assert_eq!(read_request(&mut stream).await.method, "POST");
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: keep-alive\r\n\r\n")
+                .await
+                .unwrap();
+            stream
+                .write_all(b"data: {\"jsonrpc\":\"2.0\",\"id\":\"sample-1\",\"method\":\"sampling/createMessage\",\"params\":{\"messages\":[]}}\n\n")
+                .await
+                .unwrap();
+            stream.flush().await.unwrap();
+            release_receiver.await.unwrap();
+            stream
+                .write_all(b"data: {\"jsonrpc\":\"2.0\",\"id\":\"request-live\",\"result\":{\"tools\":[]}}\n\n")
+                .await
+                .unwrap();
+            stream.flush().await.unwrap();
+        });
+
+        let (channel, events) = recording_channel();
+        let pending = tokio::spawn(async move {
+            send_cancellable(
+                McpHttpRequestInput {
+                    request: request(format!("http://{address}/mcp"), "request-live"),
+                    request_id: "request-live".into(),
+                    session_key: "project/live-request".into(),
+                    start_get_stream: false,
+                },
+                None,
+                channel,
+                &HttpCancellationState::default(),
+                McpHttpSessionState::default(),
+            )
+            .await
+        });
+        let event = events
+            .recv_timeout(Duration::from_secs(2))
+            .expect("live MCP server request");
+        assert_eq!(event["method"], "sampling/createMessage");
+        assert!(event["detail"].as_str().unwrap().contains("sample-1"));
+        release_sender.send(()).unwrap();
+        let output = pending.await.unwrap().unwrap();
+        let messages: Vec<Value> = serde_json::from_str(&output.body).unwrap();
+        assert_eq!(messages[0]["id"], "sample-1");
+        assert_eq!(messages[1]["id"], "request-live");
+        server.await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

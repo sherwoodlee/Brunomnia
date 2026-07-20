@@ -622,12 +622,33 @@ async fn secure_external_secret(
 #[tauri::command]
 async fn mcp_stdio_call(
     input: mcp_stdio::McpStdioInput,
+    on_event: Channel<mcp_stdio::McpStdioEvent>,
     cancellations: State<'_, mcp_stdio::McpStdioCancellationState>,
     sessions: State<'_, mcp_stdio::McpStdioSessionState>,
 ) -> Result<mcp_stdio::McpStdioOutput, String> {
     let cancellations = cancellations.inner().clone();
     let sessions = sessions.inner().clone();
-    blocking(move || sessions.call(input, &cancellations)).await
+    blocking(move || sessions.call_with_events(input, &cancellations, on_event)).await
+}
+
+#[tauri::command]
+async fn respond_mcp_stdio_server_request(
+    input: mcp_stdio::McpStdioServerResponseInput,
+    state: State<'_, mcp_stdio::McpStdioSessionState>,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    blocking(move || state.respond_server_request(input)).await
+}
+
+#[tauri::command]
+async fn update_mcp_stdio_roots(
+    session_key: String,
+    roots: Vec<String>,
+    notify: bool,
+    state: State<'_, mcp_stdio::McpStdioSessionState>,
+) -> Result<bool, String> {
+    let state = state.inner().clone();
+    blocking(move || state.update_roots(&session_key, roots, notify)).await
 }
 
 #[tauri::command]
@@ -896,6 +917,8 @@ pub fn run() {
             secure_external_secret,
             secure_external_cache_clear,
             mcp_stdio_call,
+            respond_mcp_stdio_server_request,
+            update_mcp_stdio_roots,
             cancel_mcp_stdio_call,
             close_mcp_stdio_session,
             has_mcp_stdio_session,

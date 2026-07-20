@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { McpClient } from '../types';
-import { disconnectMcpClient, discoverMcpClient, forgetMcpClientSession, hasMcpClientSession, invokeMcpOperation, parseMcpJsonRpcResponse } from './mcp';
+import { disconnectMcpClient, discoverMcpClient, forgetMcpClientSession, hasMcpClientSession, invokeMcpOperation, notifyMcpRootsChanged, parseMcpJsonRpcResponse, respondMcpServerRequest, type McpServerRequest } from './mcp';
 
 const tauri = vi.hoisted(() => {
   class Channel<T> {
@@ -12,8 +12,10 @@ vi.mock('@tauri-apps/api/core', () => tauri);
 
 beforeEach(() => {
   tauri.invoke.mockReset();
+  tauri.invoke.mockResolvedValue(undefined);
   tauri.isTauri.mockReturnValue(true);
   ['', 'project-a', 'project-failure'].forEach((scope) => forgetMcpClientSession('stdio', scope));
+  ['native-project', 'http-response'].forEach((scope) => forgetMcpClientSession('http-stream', scope));
 });
 
 const stdioClient = (): McpClient => ({
@@ -77,8 +79,9 @@ describe('MCP JSON-RPC transport parsing', () => {
     const liveEvents: Array<{ method: string }> = [];
     tauri.invoke.mockImplementation((command: string, args?: Record<string, any>) => {
       if (command === 'send_mcp_http_request') {
-        const message = JSON.parse(args?.input.request.body) as { id?: string; method: string };
+        const message = JSON.parse(args?.input.request.body) as { id?: string; method: string; params?: Record<string, unknown> };
         expect(args?.onEvent).toBeInstanceOf(tauri.Channel);
+        if (message.method === 'initialize') expect(message.params?.capabilities).toEqual({ roots: { listChanged: true }, elicitation: {}, sampling: {} });
         if (message.method === 'notifications/initialized') {
           args?.onEvent.onmessage({ direction: 'server', method: 'notifications/tools/list_changed', detail: '{}', timestamp: new Date().toISOString() });
           return Promise.resolve(nativeResponse(202));
@@ -126,6 +129,71 @@ describe('MCP JSON-RPC transport parsing', () => {
 
     await expect(pending).rejects.toThrow('MCP STDIO request canceled');
     expect(tauri.invoke).toHaveBeenCalledWith('cancel_mcp_stdio_call', { cancellationId: 'mcp-stdio-cancel' });
+  });
+
+  it('routes live STDIO server requests, cancellation, roots changes, and responses', async () => {
+    const client = stdioClient();
+    const requests: McpServerRequest[] = [];
+    const canceled: Array<string | number> = [];
+    let channel: { onmessage: (message: { direction: 'server'; method: string; detail: string; timestamp: string }) => void } | undefined;
+    let resolveCall: ((value: { result: object; events: never[]; stderr: string }) => void) | undefined;
+    let stdioCalls = 0;
+    tauri.invoke.mockImplementation((command: string, args?: Record<string, any>) => {
+      if (command === 'mcp_stdio_call') {
+        stdioCalls += 1;
+        if (stdioCalls === 1) return Promise.resolve({ result: { content: [] }, events: [], stderr: '' });
+        channel = args?.onEvent;
+        return new Promise((resolve) => { resolveCall = resolve; });
+      }
+      if (command === 'respond_mcp_stdio_server_request') return Promise.resolve();
+      if (command === 'update_mcp_stdio_roots') return Promise.resolve(true);
+      return Promise.reject(new Error(`Unexpected command ${command}`));
+    });
+    const context = {
+      sessionScope: 'project-a',
+      onMcpServerRequest: (request: McpServerRequest) => requests.push(request),
+      onMcpServerRequestCancelled: (_clientId: string, requestId: string | number) => canceled.push(requestId),
+    };
+    await invokeMcpOperation(client, 'tool', 'search', {}, undefined, context);
+    const pending = invokeMcpOperation(client, 'tool', 'search', {}, undefined, context);
+    await vi.waitFor(() => expect(channel).toBeDefined());
+    const timestamp = new Date().toISOString();
+    channel?.onmessage({ direction: 'server', method: 'sampling/createMessage', detail: JSON.stringify({ jsonrpc: '2.0', id: 'sample-1', method: 'sampling/createMessage', params: { messages: [] } }), timestamp });
+    expect(requests).toEqual([expect.objectContaining({ id: 'sample-1', method: 'sampling/createMessage' })]);
+    await respondMcpServerRequest(client, requests[0], { result: { content: { type: 'text', text: 'approved' }, role: 'assistant', model: 'local', stopReason: 'endTurn' } }, undefined, context);
+    expect(tauri.invoke).toHaveBeenCalledWith('respond_mcp_stdio_server_request', { input: expect.objectContaining({ sessionKey: '["project-a","stdio"]', serverRequestId: 'sample-1', result: expect.any(Object) }) });
+    expect(await notifyMcpRootsChanged(client, undefined, context)).toBe(true);
+    expect(tauri.invoke).toHaveBeenCalledWith('update_mcp_stdio_roots', { sessionKey: '["project-a","stdio"]', roots: ['file:///project'], notify: true });
+    channel?.onmessage({ direction: 'server', method: 'notifications/cancelled', detail: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 'sample-1' } }), timestamp });
+    expect(canceled).toEqual(['sample-1']);
+    resolveCall?.({ result: { content: [] }, events: [], stderr: '' });
+    await expect(pending).resolves.toEqual(expect.objectContaining({ result: { content: [] } }));
+  });
+
+  it('routes an HTTP server-request response through the authenticated session', async () => {
+    const client = httpClient();
+    let serverRequest: McpServerRequest | undefined;
+    let resolveOperation: ((value: ReturnType<typeof nativeResponse>) => void) | undefined;
+    tauri.invoke.mockImplementation((command: string, args?: Record<string, any>) => {
+      if (command === 'send_mcp_http_request') {
+        const message = JSON.parse(args?.input.request.body) as { id?: string; method: string };
+        if (message.method === 'initialize') return Promise.resolve(nativeResponse(200, JSON.stringify([{ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2025-06-18', capabilities: {} } }]), { 'mcp-session-id': 'response-session' }));
+        if (message.method === 'notifications/initialized') return Promise.resolve(nativeResponse(202));
+        args?.onEvent.onmessage({ direction: 'server', method: 'elicitation/create', detail: JSON.stringify({ jsonrpc: '2.0', id: 'elicit-1', method: 'elicitation/create', params: { message: 'Continue?', requestedSchema: { type: 'object' } } }), timestamp: new Date().toISOString() });
+        return new Promise((resolve) => { resolveOperation = resolve; });
+      }
+      if (command === 'send_http_request') return Promise.resolve(nativeResponse(202));
+      return Promise.reject(new Error(`Unexpected command ${command}`));
+    });
+    const context = { sessionScope: 'http-response', onMcpServerRequest: (request: McpServerRequest) => { serverRequest = request; } };
+    const pending = invokeMcpOperation(client, 'tool', 'search', {}, undefined, context);
+    await vi.waitFor(() => expect(serverRequest).toBeDefined());
+    await respondMcpServerRequest(client, serverRequest!, { result: { action: 'decline' } }, undefined, context);
+    expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ method: 'POST', body: expect.stringContaining('"id":"elicit-1"'), headers: expect.arrayContaining([expect.objectContaining({ name: 'Mcp-Session-Id', value: 'response-session' })]) }) }));
+    const operationCall = tauri.invoke.mock.calls.filter(([command]) => command === 'send_mcp_http_request').at(-1)?.[1] as Record<string, any>;
+    const operationId = JSON.parse(operationCall.input.request.body).id;
+    resolveOperation?.(nativeResponse(200, JSON.stringify([{ jsonrpc: '2.0', id: operationId, result: { content: [] } }])));
+    await expect(pending).resolves.toEqual(expect.objectContaining({ result: { content: [] } }));
   });
 
   it('reuses one project-scoped STDIO identity through cancellation and explicit disconnect', async () => {
