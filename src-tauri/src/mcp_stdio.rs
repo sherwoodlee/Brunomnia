@@ -12,6 +12,13 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+#[cfg(unix)]
+use std::{
+    ffi::{CStr, OsStr, OsString},
+    io::{Seek, SeekFrom},
+    mem::MaybeUninit,
+    os::unix::ffi::OsStringExt,
+};
 
 const MAX_MESSAGE_BYTES: usize = 10_000_000;
 const MAX_STREAM_BYTES: usize = 20_000_000;
@@ -21,11 +28,19 @@ const MAX_ENVIRONMENT_VARIABLES: usize = 100;
 const MAX_ENVIRONMENT_NAME_BYTES: usize = 512;
 const MAX_ENVIRONMENT_VALUE_BYTES: usize = 32_768;
 const MAX_ENVIRONMENT_BYTES: usize = 1_000_000;
+#[cfg(unix)]
+const MAX_PASSWD_BUFFER_BYTES: usize = 1_000_000;
+#[cfg(unix)]
+const MAX_SHELL_PATH_OUTPUT_BYTES: usize = 1_000_000;
 const MAX_CANCELLATION_ID_BYTES: usize = 512;
 const MAX_CANCELLATION_IDS: usize = 1_024;
 const MAX_SESSION_KEY_BYTES: usize = 512;
 const MAX_SESSIONS: usize = 100;
 const CANCELLATION_POLL: Duration = Duration::from_millis(50);
+#[cfg(unix)]
+const SHELL_PATH_POLL: Duration = Duration::from_millis(10);
+#[cfg(unix)]
+const SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Default)]
 pub struct McpStdioCancellationState {
@@ -168,7 +183,226 @@ fn session_fingerprint(input: &McpStdioInput) -> Result<String, String> {
         .map_err(|error| format!("Unable to encode MCP STDIO session configuration: {error}"))
 }
 
-fn spawn_child(input: &McpStdioInput) -> Result<std::process::Child, String> {
+fn application_path() -> std::ffi::OsString {
+    std::env::var_os("PATH").unwrap_or_default()
+}
+
+#[cfg(unix)]
+fn strip_ansi(input: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(input.len());
+    let mut index = 0;
+    while index < input.len() {
+        if input[index] == 0x1b && input.get(index + 1) == Some(&b'[') {
+            index += 2;
+            while index < input.len() {
+                let byte = input[index];
+                index += 1;
+                if (0x40..=0x7e).contains(&byte) {
+                    break;
+                }
+            }
+        } else if input[index] == 0x1b && input.get(index + 1) == Some(&b']') {
+            index += 2;
+            while index < input.len() {
+                if input[index] == 0x07 {
+                    index += 1;
+                    break;
+                }
+                if input[index] == 0x1b && input.get(index + 1) == Some(&b'\\') {
+                    index += 2;
+                    break;
+                }
+                index += 1;
+            }
+        } else if input[index] == 0x1b {
+            index = (index + 2).min(input.len());
+        } else if input[index] == 0x9b {
+            index += 1;
+            while index < input.len() {
+                let byte = input[index];
+                index += 1;
+                if (0x40..=0x7e).contains(&byte) {
+                    break;
+                }
+            }
+        } else {
+            output.push(input[index]);
+            index += 1;
+        }
+    }
+    output
+}
+
+#[cfg(unix)]
+fn parse_shell_path(output: &[u8], marker: &[u8]) -> Option<OsString> {
+    let start = output
+        .windows(marker.len())
+        .position(|window| window == marker)?
+        + marker.len();
+    let end = output[start..]
+        .windows(marker.len())
+        .position(|window| window == marker)?
+        + start;
+    strip_ansi(&output[start..end])
+        .split(|byte| *byte == b'\n')
+        .find_map(|line| line.strip_prefix(b"PATH="))
+        .filter(|path| !path.is_empty() && path.len() <= MAX_ENVIRONMENT_VALUE_BYTES)
+        .map(|path| OsString::from_vec(path.to_vec()))
+}
+
+#[cfg(unix)]
+fn discover_shell_path_from(shell: &OsStr, timeout: Duration) -> Option<OsString> {
+    if shell.is_empty() {
+        return None;
+    }
+    let marker = format!("_BRUNOMNIA_SHELL_PATH_{}_", uuid::Uuid::new_v4().simple());
+    let script = format!("printf '%s' '{marker}'; command env; printf '%s' '{marker}'; exit");
+    let mut output_file = tempfile::tempfile().ok()?;
+    let child_output = output_file.try_clone().ok()?;
+    let mut child = Command::new(shell)
+        .arg("-ilc")
+        .arg(script)
+        .env("DISABLE_AUTO_UPDATE", "true")
+        .env("ZSH_TMUX_AUTOSTARTED", "true")
+        .env("ZSH_TMUX_AUTOSTART", "false")
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(child_output))
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) => return None,
+            Ok(None) => {}
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+        if output_file
+            .metadata()
+            .map(|metadata| metadata.len() > MAX_SHELL_PATH_OUTPUT_BYTES as u64)
+            .unwrap_or(true)
+            || Instant::now() >= deadline
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        thread::sleep(SHELL_PATH_POLL);
+    }
+    output_file.seek(SeekFrom::Start(0)).ok()?;
+    let mut output = Vec::new();
+    Read::take(&mut output_file, (MAX_SHELL_PATH_OUTPUT_BYTES + 1) as u64)
+        .read_to_end(&mut output)
+        .ok()?;
+    if output.len() > MAX_SHELL_PATH_OUTPUT_BYTES {
+        return None;
+    }
+    parse_shell_path(&output, marker.as_bytes())
+}
+
+#[cfg(unix)]
+fn current_user_shell() -> Option<OsString> {
+    let suggested = unsafe { libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) };
+    let mut buffer_size = usize::try_from(suggested)
+        .ok()
+        .filter(|size| *size > 0 && *size <= MAX_PASSWD_BUFFER_BYTES)
+        .unwrap_or(16_384);
+    let user_id = unsafe { libc::geteuid() };
+    loop {
+        let mut passwd = MaybeUninit::<libc::passwd>::uninit();
+        let mut result = std::ptr::null_mut();
+        let mut buffer = vec![0_u8; buffer_size];
+        let status = unsafe {
+            libc::getpwuid_r(
+                user_id,
+                passwd.as_mut_ptr(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                &mut result,
+            )
+        };
+        if status == 0 {
+            if result.is_null() {
+                return None;
+            }
+            let passwd = unsafe { passwd.assume_init() };
+            if passwd.pw_shell.is_null() {
+                return None;
+            }
+            let shell = unsafe { CStr::from_ptr(passwd.pw_shell) }.to_bytes();
+            return (!shell.is_empty() && shell.len() <= MAX_ENVIRONMENT_VALUE_BYTES)
+                .then(|| OsString::from_vec(shell.to_vec()));
+        }
+        if status != libc::ERANGE || buffer_size >= MAX_PASSWD_BUFFER_BYTES {
+            return None;
+        }
+        buffer_size = (buffer_size * 2).min(MAX_PASSWD_BUFFER_BYTES);
+    }
+}
+
+#[cfg(unix)]
+fn default_login_shell_from(
+    account_shell: Option<OsString>,
+    environment_shell: Option<OsString>,
+) -> OsString {
+    account_shell
+        .filter(|shell| !shell.is_empty())
+        .or_else(|| environment_shell.filter(|shell| !shell.is_empty()))
+        .unwrap_or_else(|| {
+            OsString::from(if cfg!(target_os = "macos") {
+                "/bin/zsh"
+            } else {
+                "/bin/sh"
+            })
+        })
+}
+
+#[cfg(unix)]
+fn resolve_process_path_from(shells: &[&OsStr], fallback: OsString, timeout: Duration) -> OsString {
+    let deadline = Instant::now() + timeout;
+    for (index, shell) in shells.iter().enumerate() {
+        if shells[..index].contains(shell) {
+            continue;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        if let Some(path) = discover_shell_path_from(shell, remaining) {
+            return path;
+        }
+    }
+    fallback
+}
+
+#[cfg(all(unix, not(test)))]
+fn resolved_process_path() -> std::ffi::OsString {
+    let shell = default_login_shell_from(current_user_shell(), std::env::var_os("SHELL"));
+    resolve_process_path_from(
+        &[
+            shell.as_os_str(),
+            OsStr::new("/bin/zsh"),
+            OsStr::new("/bin/bash"),
+        ],
+        application_path(),
+        SHELL_PATH_TIMEOUT,
+    )
+}
+
+#[cfg(any(not(unix), test))]
+fn resolved_process_path() -> std::ffi::OsString {
+    application_path()
+}
+
+fn spawn_child_with_path(
+    input: &McpStdioInput,
+    path: &std::ffi::OsStr,
+) -> Result<std::process::Child, String> {
     let mut command = Command::new(input.command.trim());
     command
         .args(&input.args)
@@ -176,9 +410,7 @@ fn spawn_child(input: &McpStdioInput) -> Result<std::process::Child, String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(path) = std::env::var_os("PATH") {
-        command.env("PATH", path);
-    }
+    command.env("PATH", path);
     command.envs(
         input
             .env
@@ -188,6 +420,11 @@ fn spawn_child(input: &McpStdioInput) -> Result<std::process::Child, String> {
     command
         .spawn()
         .map_err(|error| format!("Unable to start the MCP STDIO server: {error}"))
+}
+
+fn spawn_child(input: &McpStdioInput) -> Result<std::process::Child, String> {
+    let path = resolved_process_path();
+    spawn_child_with_path(input, &path)
 }
 
 fn persistent_result_is_reusable(result: &Result<McpStdioOutput, String>) -> bool {
@@ -867,6 +1104,137 @@ mod tests {
         assert!(validate(&input)
             .unwrap_err()
             .contains("cancellation identity"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovers_login_shell_path_and_falls_back_cleanly() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let temporary = tempfile::tempdir().unwrap();
+        let shell = temporary.path().join("login-shell.sh");
+        fs::write(
+            &shell,
+            r#"#!/bin/sh
+printf '%s\n' 'profile startup noise'
+PATH='/fixture/bin:/usr/bin'
+export PATH
+exec /bin/sh -c "$2"
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&shell, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            parse_shell_path(b"markerPATH=\x1b[31m/fixture/bin\x1b[0m\nmarker", b"marker").unwrap(),
+            OsString::from("/fixture/bin")
+        );
+        assert_eq!(
+            default_login_shell_from(
+                Some(OsString::from("/account/shell")),
+                Some(OsString::from("/environment/shell")),
+            ),
+            OsString::from("/account/shell")
+        );
+        assert_eq!(
+            default_login_shell_from(None, Some(OsString::from("/environment/shell"))),
+            OsString::from("/environment/shell")
+        );
+        let _ = current_user_shell();
+        assert_eq!(
+            resolve_process_path_from(
+                &[shell.as_os_str()],
+                OsString::from("/fallback/bin"),
+                SHELL_PATH_TIMEOUT,
+            ),
+            OsString::from("/fixture/bin:/usr/bin")
+        );
+
+        let failed_shell = temporary.path().join("failed-shell.sh");
+        fs::write(&failed_shell, "#!/bin/sh\nexit 7\n").unwrap();
+        fs::set_permissions(&failed_shell, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            resolve_process_path_from(
+                &[failed_shell.as_os_str(), shell.as_os_str()],
+                OsString::from("/fallback/bin"),
+                Duration::from_secs(1),
+            ),
+            OsString::from("/fixture/bin:/usr/bin")
+        );
+        assert_eq!(
+            resolve_process_path_from(
+                &[failed_shell.as_os_str()],
+                OsString::from("/fallback/bin"),
+                Duration::from_millis(100),
+            ),
+            OsString::from("/fallback/bin")
+        );
+
+        let hanging_shell = temporary.path().join("hanging-shell.sh");
+        fs::write(&hanging_shell, "#!/bin/sh\nwhile :; do :; done\n").unwrap();
+        fs::set_permissions(&hanging_shell, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            resolve_process_path_from(
+                &[hanging_shell.as_os_str(), shell.as_os_str()],
+                OsString::from("/fallback/bin"),
+                Duration::from_millis(50),
+            ),
+            OsString::from("/fallback/bin")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_uses_resolved_path_then_reviewed_override() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        let temporary = tempfile::tempdir().unwrap();
+        let executable = temporary.path().join("resolved-mcp-server");
+        fs::write(
+            &executable,
+            r#"#!/bin/sh
+printf '%s' "$PATH" > "$1"
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let default_output = temporary.path().join("default-path.txt");
+        let mut input = McpStdioInput {
+            command: "resolved-mcp-server".into(),
+            args: vec![default_output.to_string_lossy().into_owned()],
+            env: vec![],
+            method: "tools/list".into(),
+            params: json!({}),
+            roots: vec![],
+            timeout_ms: 3_000,
+            cancellation_id: String::new(),
+            session_key: String::new(),
+        };
+        assert!(spawn_child_with_path(&input, temporary.path().as_os_str())
+            .unwrap()
+            .wait()
+            .unwrap()
+            .success());
+        assert_eq!(
+            fs::read_to_string(&default_output).unwrap(),
+            temporary.path().to_string_lossy()
+        );
+
+        let reviewed_output = temporary.path().join("reviewed-path.txt");
+        input.command = executable.to_string_lossy().into_owned();
+        input.args = vec![reviewed_output.to_string_lossy().into_owned()];
+        input.env = vec![McpStdioEnvironmentVariable {
+            name: "PATH".into(),
+            value: "/reviewed/bin".into(),
+        }];
+        assert!(spawn_child_with_path(&input, temporary.path().as_os_str())
+            .unwrap()
+            .wait()
+            .unwrap()
+            .success());
+        assert_eq!(
+            fs::read_to_string(&reviewed_output).unwrap(),
+            "/reviewed/bin"
+        );
     }
 
     #[test]
