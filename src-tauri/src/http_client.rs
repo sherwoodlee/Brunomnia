@@ -167,7 +167,7 @@ impl HttpCancellationState {
         false
     }
 
-    fn register(&self, cancellation_id: String) -> Option<oneshot::Receiver<()>> {
+    pub(crate) fn register(&self, cancellation_id: String) -> Option<oneshot::Receiver<()>> {
         let mut registry = self
             .registry
             .lock()
@@ -180,7 +180,7 @@ impl HttpCancellationState {
         Some(receiver)
     }
 
-    fn finish(&self, cancellation_id: &str) {
+    pub(crate) fn finish(&self, cancellation_id: &str) {
         let mut registry = self
             .registry
             .lock()
@@ -628,6 +628,14 @@ async fn send_with_auth(
             .await
             .map_err(HttpRequestError::from_reqwest),
     }
+}
+
+pub(crate) async fn send_streaming(input: &HttpRequestInput) -> Result<Response, HttpRequestError> {
+    let url = url::Url::parse(&input.url)
+        .map_err(|error| HttpRequestError::request(format!("Invalid URL: {error}")))?;
+    let client = build_streaming_client(&input.transport, Some(&input.url))
+        .map_err(HttpRequestError::request)?;
+    send_with_auth(&client, input, url).await
 }
 
 async fn read_response(

@@ -170,11 +170,23 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
     setMessage('Cleared this MCP client’s local OAuth tokens.');
   };
   const persistMcpClient = (updated: McpClient) => onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === updated.id ? updated : client) }));
+  const liveMcpEventCollector = () => {
+    const collected: McpEvent[] = [];
+    return {
+      collected,
+      onMcpEvent: (event: McpEvent) => {
+        collected.push(event);
+        if (collected.length > 1000) collected.splice(0, collected.length - 1000);
+        setEvents((current) => [...current, event].slice(-1000));
+      },
+    };
+  };
 
   const discover = () => active && canEdit && run('Discovering MCP capabilities', async (signal) => {
-    const discovered = await discoverMcpClient(active, environment, { ...requestContext, signal, cancellationId: `mcp-discover-${active.id}-${crypto.randomUUID()}`, onMcpClient: persistMcpClient });
+    const live = liveMcpEventCollector();
+    const discovered = await discoverMcpClient(active, environment, { ...requestContext, signal, cancellationId: `mcp-discover-${active.id}-${crypto.randomUUID()}`, onMcpClient: persistMcpClient, onMcpEvent: live.onMcpEvent });
     onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === active.id ? discovered.client : client) }));
-    setEvents(discovered.events);
+    setEvents([...discovered.events, ...live.collected].slice(-1000));
     refreshSessionState();
     setMessage(`Discovered ${discovered.client.tools.length} tools, ${discovered.client.prompts.length} prompts, ${discovered.client.resources.length} resources, and ${discovered.client.resourceTemplates.length} templates${discovered.warnings.length ? ` · ${discovered.warnings.length} optional list calls unavailable` : ''}.`);
   }, true);
@@ -278,9 +290,10 @@ export function IntegrationWorkbench({ workspace, workspaceId, environment, requ
       parsed = value as Record<string, unknown>;
     }
     catch { throw new Error('MCP parameters must be a JSON object.'); }
-    const output = await invokeMcpOperation(active, operationKind, operationName, parsed, environment, { ...requestContext, signal, cancellationId: `mcp-invoke-${active.id}-${crypto.randomUUID()}`, onMcpClient: persistMcpClient });
+    const live = liveMcpEventCollector();
+    const output = await invokeMcpOperation(active, operationKind, operationName, parsed, environment, { ...requestContext, signal, cancellationId: `mcp-invoke-${active.id}-${crypto.randomUUID()}`, onMcpClient: persistMcpClient, onMcpEvent: live.onMcpEvent });
     onChangeWorkspace((current) => ({ ...current, mcpClients: current.mcpClients.map((client) => client.id === active.id ? output.client : client) }));
-    setEvents(output.events);
+    setEvents([...output.events, ...live.collected].slice(-1000));
     refreshSessionState();
     setResult(JSON.stringify(output.result, null, 2));
     setMessage(`${operationKind} operation completed.`);

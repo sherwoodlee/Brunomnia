@@ -12,7 +12,7 @@ import { applyDefaultAcceptHeader } from './calculatedHeaders';
 import { renderApiRequest, type RequestRenderContext } from './requestRender';
 import { clearTemplatePromptValuesForRequest } from './templates';
 
-type NativeHttpResponse = HttpResponse & {
+export type NativeHttpResponse = HttpResponse & {
   headerLines?: Array<{ name: string; value: string }>;
   redirects?: Array<{ status: number; fromUrl: string; toUrl: string; elapsedMs: number }>;
   redirectsTruncated?: boolean;
@@ -85,6 +85,9 @@ export type SendRequestContext = {
   authorizeOAuth2?: (request: ApiRequest, environment: Environment | undefined) => Promise<ApiRequest['auth']>;
   signal?: AbortSignal;
   cancellationId?: string;
+  nativeHttpTransport?: {
+    send: (input: unknown, cancellationId?: string) => Promise<NativeHttpResponse>;
+  };
   pluginRuntime?: {
     beforeRequest: (request: ApiRequest) => Promise<ApiRequest>;
     afterResponse: (request: ApiRequest, response: HttpResponse) => Promise<HttpResponse>;
@@ -155,7 +158,8 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
   let hooked = context.pluginRuntime ? await context.pluginRuntime.beforeRequest(request) : request;
   if (!context.skipOAuth2Acquisition && hooked.auth.type === 'oauth2' && !hooked.auth.disabled) {
     const { acquireOAuth2TokenWithoutBrowser } = await import('./oauth2');
-    const auth = await acquireOAuth2TokenWithoutBrowser(hooked, environment, { ...context, skipOAuth2Acquisition: true })
+    const oauthContext = { ...context, nativeHttpTransport: undefined };
+    const auth = await acquireOAuth2TokenWithoutBrowser(hooked, environment, { ...oauthContext, skipOAuth2Acquisition: true })
       ?? await context.authorizeOAuth2?.(hooked, environment);
     if (!auth) throw new Error('OAuth 2 browser authorization is required before this request can be sent.');
     if (auth !== hooked.auth) {
@@ -236,37 +240,37 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
     const cancel = () => { if (cancellationId) void invoke('cancel_http_request', { cancellationId }).catch(() => undefined); };
     context.signal?.addEventListener('abort', cancel, { once: true });
     try {
-      const output = await invoke<NativeHttpResponse>('send_http_request', {
-        cancellationId,
-        input: {
-          method: prepared.method,
-          url,
-          headers,
-          bodyMode: prepared.protocol === 'graphql' ? 'json' : prepared.bodyMode,
-          body,
-          formBody: prepared.formBody,
-          multipartBody: prepared.multipartBody,
-          binaryBody: prepared.binaryBody,
-          transport: applyWorkspaceCertificates({
-            ...prepared.transport,
-            followRedirects,
-            timeoutMs,
-            validateCertificates,
-            ...proxy,
-            preferredHttpVersion: context.preferredHttpVersion ?? 'default',
-            maxRedirects: context.maxRedirects ?? 10,
-          }, url, context.certificates),
-          auth: {
-            authType: prepared.auth.type,
-            disabled: prepared.auth.disabled,
-            username: prepared.auth.username,
-            password: prepared.auth.password,
-            ntlmDomain: prepared.auth.ntlmDomain,
-            ntlmWorkstation: prepared.auth.ntlmWorkstation,
-            netrc: prepared.auth.netrc,
-          },
+      const input = {
+        method: prepared.method,
+        url,
+        headers,
+        bodyMode: prepared.protocol === 'graphql' ? 'json' : prepared.bodyMode,
+        body,
+        formBody: prepared.formBody,
+        multipartBody: prepared.multipartBody,
+        binaryBody: prepared.binaryBody,
+        transport: applyWorkspaceCertificates({
+          ...prepared.transport,
+          followRedirects,
+          timeoutMs,
+          validateCertificates,
+          ...proxy,
+          preferredHttpVersion: context.preferredHttpVersion ?? 'default',
+          maxRedirects: context.maxRedirects ?? 10,
+        }, url, context.certificates),
+        auth: {
+          authType: prepared.auth.type,
+          disabled: prepared.auth.disabled,
+          username: prepared.auth.username,
+          password: prepared.auth.password,
+          ntlmDomain: prepared.auth.ntlmDomain,
+          ntlmWorkstation: prepared.auth.ntlmWorkstation,
+          netrc: prepared.auth.netrc,
         },
-      });
+      };
+      const output = context.nativeHttpTransport
+        ? await context.nativeHttpTransport.send(input, cancellationId)
+        : await invoke<NativeHttpResponse>('send_http_request', { cancellationId, input });
       const decoded = decodeHttpResponseBody(output);
       const { headerLines, redirects, redirectsTruncated, effectiveUrl, ...response } = decoded;
       return finish(withTimeline(response, {

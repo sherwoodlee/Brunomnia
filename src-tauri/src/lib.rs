@@ -3,6 +3,7 @@ mod external_url;
 mod external_vault;
 mod grpc_client;
 mod http_client;
+mod mcp_http;
 mod mcp_stdio;
 mod mock_faker;
 mod mock_server;
@@ -188,6 +189,33 @@ fn cancel_http_request(
     state: State<'_, http_client::HttpCancellationState>,
 ) -> bool {
     state.cancel(&cancellation_id)
+}
+
+#[tauri::command]
+async fn send_mcp_http_request(
+    input: mcp_http::McpHttpRequestInput,
+    cancellation_id: Option<String>,
+    on_event: Channel<mcp_http::McpHttpEvent>,
+    cancellations: State<'_, http_client::HttpCancellationState>,
+    sessions: State<'_, mcp_http::McpHttpSessionState>,
+) -> Result<HttpResponseOutput, String> {
+    mcp_http::send_cancellable(
+        input,
+        cancellation_id,
+        on_event,
+        cancellations.inner(),
+        sessions.inner().clone(),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn close_mcp_http_session(
+    session_key: String,
+    state: State<'_, mcp_http::McpHttpSessionState>,
+) -> Result<bool, String> {
+    let state = state.inner().clone();
+    Ok(state.close(&session_key).await)
 }
 
 #[tauri::command]
@@ -800,6 +828,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(streaming::StreamingState::default())
         .manage(http_client::HttpCancellationState::default())
+        .manage(mcp_http::McpHttpSessionState::default())
         .manage(mcp_stdio::McpStdioCancellationState::default())
         .manage(mcp_stdio::McpStdioSessionState::default())
         .manage(grpc_client::GrpcSessionState::default())
@@ -824,6 +853,8 @@ pub fn run() {
             template_os_info,
             send_http_request,
             cancel_http_request,
+            send_mcp_http_request,
+            close_mcp_http_session,
             oauth2_authorize,
             oauth2_cancel,
             open_external_url,

@@ -1,7 +1,7 @@
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import type { ApiRequest, AuthConfig, Environment, HttpResponse, JsonValue, McpClient, McpPrompt, McpResource, McpTool } from '../types';
 import { createBlankRequest } from '../data/seed';
-import { sendRequest, type SendRequestContext } from './http';
+import { sendRequest, type NativeHttpResponse, type SendRequestContext } from './http';
 import { discoverMcpOAuthConfiguration, mcpOAuthClientCredentials, mcpOAuthConfigurationReady, mcpOAuthResource, parseMcpOAuthChallenge } from './mcpOAuthDiscovery';
 import { expandMcpUriTemplate, mcpUriTemplateVariables } from './mcpUriTemplate';
 import { renderRequestValue } from './requestRender';
@@ -9,7 +9,7 @@ import { isProtectedSecretReference, isSensitiveSecretName } from './security';
 
 type McpEvent = { direction: 'client' | 'server' | 'stderr'; method: string; detail: string; timestamp: string };
 type McpOperationResult = { result: unknown; events: McpEvent[]; client: McpClient; sessionId?: string };
-export type McpRequestContext = SendRequestContext & { onMcpClient?: (client: McpClient) => void; sessionScope?: string };
+export type McpRequestContext = SendRequestContext & { onMcpClient?: (client: McpClient) => void; onMcpEvent?: (event: McpEvent) => void; sessionScope?: string };
 type StdioOutput = { result: unknown; events: unknown[]; stderr: string };
 type McpHttpSession = { client: McpClient; fingerprint: string; sessionId: string };
 
@@ -70,6 +70,7 @@ const matchingHttpSession = (client: McpClient, context: Pick<McpRequestContext,
   if (!session) return undefined;
   if (session.fingerprint !== sessionFingerprint(client)) {
     httpSessions.delete(key);
+    if (isTauri()) void invoke('close_mcp_http_session', { sessionKey: key }).catch(() => undefined);
     return undefined;
   }
   httpSessions.delete(key);
@@ -81,11 +82,16 @@ const rememberHttpSession = (client: McpClient, context: Pick<McpRequestContext,
   const key = sessionKey(client.id, context.sessionScope);
   httpSessions.delete(key);
   httpSessions.set(key, { client, fingerprint: sessionFingerprint(client), sessionId: normalized });
-  while (httpSessions.size > MAX_HTTP_SESSIONS) httpSessions.delete(httpSessions.keys().next().value!);
+  while (httpSessions.size > MAX_HTTP_SESSIONS) {
+    const evicted = httpSessions.keys().next().value!;
+    httpSessions.delete(evicted);
+    if (isTauri()) void invoke('close_mcp_http_session', { sessionKey: evicted }).catch(() => undefined);
+  }
 };
 export const forgetMcpClientSession = (clientId: string, sessionScope = '') => {
   const key = sessionKey(clientId, sessionScope);
   const http = httpSessions.delete(key);
+  if (http && isTauri()) void invoke('close_mcp_http_session', { sessionKey: key }).catch(() => undefined);
   const stdio = invalidateStdioSession(key);
   return http || stdio;
 };
@@ -250,6 +256,7 @@ const sendHttpCancellation = async (
     ...context,
     signal: undefined,
     cancellationId: undefined,
+    nativeHttpTransport: undefined,
     pluginRuntime: undefined,
     skipOAuth2Acquisition: true,
     onOAuth2Token: undefined,
@@ -303,6 +310,24 @@ const httpRequest = async (
   try {
     response = await sendRequest(request, environment, {
       ...context,
+      ...(isTauri() ? {
+        nativeHttpTransport: {
+          send: async (input: unknown, cancellationId?: string) => {
+            const channel = new Channel<McpEvent>();
+            channel.onmessage = (event) => context.onMcpEvent?.(event);
+            return invoke<NativeHttpResponse>('send_mcp_http_request', {
+              input: {
+                request: input,
+                requestId: notification ? '' : id,
+                sessionKey: sessionKey(client.id, context.sessionScope),
+                startGetStream: method === 'notifications/initialized',
+              },
+              cancellationId,
+              onEvent: channel,
+            });
+          },
+        },
+      } : {}),
       onOAuth2Token: (updatedRequest: ApiRequest) => {
         updatedClient = mcpClientWithOAuth2Auth(updatedClient, updatedRequest.auth);
         context.onMcpClient?.(updatedClient);
@@ -380,6 +405,7 @@ export const disconnectMcpClient = async (client: McpClient, environment: Enviro
   }
   const session = httpSessions.get(key);
   httpSessions.delete(key);
+  if (isTauri()) await invoke<boolean>('close_mcp_http_session', { sessionKey: key }).catch(() => false);
   if (!session) return { events: [] as McpEvent[], terminated: false };
   if (!session.sessionId) return { events: [{ direction: 'client', method: 'MCP session', detail: 'Cleared the local stateless HTTP connection.', timestamp: now() }], terminated: false };
   const request = createBlankRequest(requestId());
@@ -394,7 +420,7 @@ export const disconnectMcpClient = async (client: McpClient, environment: Enviro
   ];
   request.auth = mcpAuthentication(session.client, request.auth);
   request.transport = { ...request.transport, followRedirects: false, followRedirectsMode: 'off', timeoutMode: 'custom', timeoutMs: 5_000, sendCookies: false, storeCookies: false };
-  const detachedContext: SendRequestContext = { ...context, signal: undefined, cancellationId: undefined, pluginRuntime: undefined, skipOAuth2Acquisition: true, onOAuth2Token: undefined, authorizeOAuth2: undefined };
+  const detachedContext: SendRequestContext = { ...context, signal: undefined, cancellationId: undefined, nativeHttpTransport: undefined, pluginRuntime: undefined, skipOAuth2Acquisition: true, onOAuth2Token: undefined, authorizeOAuth2: undefined };
   const events: McpEvent[] = [{ direction: 'client', method: 'MCP session', detail: 'Cleared the local HTTP session and requested remote termination.', timestamp: now() }];
   try {
     const response = await sendRequest(request, environment, detachedContext);

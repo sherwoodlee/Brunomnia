@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { McpClient } from '../types';
 import { disconnectMcpClient, discoverMcpClient, forgetMcpClientSession, hasMcpClientSession, invokeMcpOperation, parseMcpJsonRpcResponse } from './mcp';
 
-const tauri = vi.hoisted(() => ({ invoke: vi.fn(), isTauri: vi.fn(() => true) }));
+const tauri = vi.hoisted(() => {
+  class Channel<T> {
+    onmessage: (message: T) => void = () => undefined;
+  }
+  return { Channel, invoke: vi.fn(), isTauri: vi.fn(() => true) };
+});
 vi.mock('@tauri-apps/api/core', () => tauri);
 
 beforeEach(() => {
@@ -13,6 +18,32 @@ beforeEach(() => {
 
 const stdioClient = (): McpClient => ({
   id: 'stdio', name: 'STDIO tools', enabled: true, transport: 'stdio', url: '', command: '/usr/bin/server', args: ['--stdio'], env: [], headers: [], authType: 'none', token: '', username: '', password: '', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none', roots: ['file:///project'], tools: [], prompts: [], resources: [], resourceTemplates: [],
+});
+
+const httpClient = (): McpClient => ({
+  ...stdioClient(),
+  id: 'http-stream',
+  name: 'HTTP tools',
+  transport: 'http',
+  url: 'https://mcp.example.test/rpc',
+  command: '',
+  args: [],
+  roots: [],
+});
+
+const nativeResponse = (status: number, body = '', headers: Record<string, string> = {}) => ({
+  status,
+  statusText: status === 200 ? 'OK' : status === 202 ? 'Accepted' : 'No Content',
+  headers,
+  headerLines: Object.entries(headers).map(([name, value]) => ({ name, value })),
+  body,
+  durationMs: 1,
+  sizeBytes: body.length,
+  setCookies: [],
+  httpVersion: 'HTTP/1.1',
+  effectiveUrl: 'https://mcp.example.test/rpc',
+  redirects: [],
+  redirectsTruncated: false,
 });
 
 describe('MCP JSON-RPC transport parsing', () => {
@@ -39,6 +70,41 @@ describe('MCP JSON-RPC transport parsing', () => {
 
   it('rejects plaintext bearer tokens before connecting', async () => {
     await expect(discoverMcpClient({ id: 'one', name: 'Tools', enabled: true, transport: 'http', url: 'https://mcp.example', command: '', args: [], env: [], headers: [], authType: 'bearer', token: 'plaintext', username: '', password: '', oauthAuthorizationUrl: '', oauthAccessTokenUrl: '', oauthClientId: '', oauthClientSecret: '', oauthScope: '', oauthState: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [] }, undefined, {})).rejects.toThrow('complete local-vault');
+  });
+
+  it('routes HTTP MCP calls through the native streaming bridge and closes its GET session', async () => {
+    const client = httpClient();
+    const liveEvents: Array<{ method: string }> = [];
+    tauri.invoke.mockImplementation((command: string, args?: Record<string, any>) => {
+      if (command === 'send_mcp_http_request') {
+        const message = JSON.parse(args?.input.request.body) as { id?: string; method: string };
+        expect(args?.onEvent).toBeInstanceOf(tauri.Channel);
+        if (message.method === 'notifications/initialized') {
+          args?.onEvent.onmessage({ direction: 'server', method: 'notifications/tools/list_changed', detail: '{}', timestamp: new Date().toISOString() });
+          return Promise.resolve(nativeResponse(202));
+        }
+        const result = message.method === 'initialize'
+          ? { protocolVersion: '2025-06-18', capabilities: {} }
+          : { content: [{ type: 'text', text: 'done' }] };
+        return Promise.resolve(nativeResponse(200, JSON.stringify([{ jsonrpc: '2.0', id: message.id, result }]), message.method === 'initialize' ? { 'mcp-session-id': 'native-session' } : {}));
+      }
+      if (command === 'close_mcp_http_session') return Promise.resolve(true);
+      if (command === 'send_http_request') return Promise.resolve(nativeResponse(204));
+      return Promise.reject(new Error(`Unexpected command ${command}`));
+    });
+
+    const output = await invokeMcpOperation(client, 'tool', 'search', {}, undefined, { sessionScope: 'native-project', onMcpEvent: (event) => liveEvents.push(event) });
+    expect(output.result).toEqual({ content: [{ type: 'text', text: 'done' }] });
+    expect(liveEvents).toEqual([expect.objectContaining({ method: 'notifications/tools/list_changed' })]);
+    const calls = tauri.invoke.mock.calls.filter(([command]) => command === 'send_mcp_http_request');
+    expect(calls).toHaveLength(3);
+    expect(calls[0][1]).toMatchObject({ input: { sessionKey: '["native-project","http-stream"]', startGetStream: false } });
+    expect(calls[1][1]).toMatchObject({ input: { requestId: '', startGetStream: true } });
+    expect(calls[2][1]).toMatchObject({ input: { startGetStream: false } });
+
+    await disconnectMcpClient(output.client, undefined, { sessionScope: 'native-project' });
+    expect(tauri.invoke).toHaveBeenCalledWith('close_mcp_http_session', { sessionKey: '["native-project","http-stream"]' });
+    expect(tauri.invoke).toHaveBeenCalledWith('send_http_request', expect.objectContaining({ input: expect.objectContaining({ method: 'DELETE' }) }));
   });
 
   it('cancels an in-flight native STDIO operation with the same identity', async () => {
