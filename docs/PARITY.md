@@ -1328,6 +1328,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Workspace v38 ordered/disabled row model, normalization, security publication diagnostics, and scoped persistence: [`src/types.ts`](../src/types.ts), [`src/lib/storage.ts`](../src/lib/storage.ts), [`src/lib/security.ts`](../src/lib/security.ts), and [`src-tauri/src/project.rs`](../src-tauri/src/project.rs)
 - Selected-environment/template/vault rendering, sensitive-value refusal, duplicate handling, fingerprinted renderer state, and locked connected editor: [`src/lib/mcp.ts`](../src/lib/mcp.ts) and [`src/components/IntegrationWorkbench.tsx`](../src/components/IntegrationWorkbench.tsx)
 - Ambient-cleared `PATH`-plus-overrides spawning, bounded validation, resolved-environment process replacement, real-child evidence, full regressions/builds, packaged CLI smokes, and exact verification record: [`src-tauri/src/mcp_stdio.rs`](../src-tauri/src/mcp_stdio.rs), [`src/lib/mcp.test.ts`](../src/lib/mcp.test.ts), and [`docs/QA_MILESTONE_231.md`](QA_MILESTONE_231.md)
+- Successful remote Node 22 rebuild/no-network smoke, signed AMD64/ARM64 publication, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_231.md`](QA_MILESTONE_231.md)
 
 ## Parity declaration rule
 

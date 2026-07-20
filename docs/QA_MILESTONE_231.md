@@ -44,7 +44,13 @@ The local browser restriction prevents a rendered interaction claim. Determinist
 
 ## Remote gate
 
-Pending the first push of the M231 implementation commit to `main`.
+Main commit `0908382a16a7a38091c21b7bae7fc740bd3c9252` completed verify and publish in [Actions run 29710330797](https://github.com/sherwoodlee/Brunomnia/actions/runs/29710330797). Node 22 rebuilt the generated CLI, passed the freshness and non-root no-network trust smoke, and published AMD64/ARM64 provenance/SBOM manifests at:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:ed0dc55dff5f3729ec461cb510bcc8fd8f59f17ebb783efe548a61d1ec185bab
+```
+
+Independent `cosign verify` passed issuer `https://token.actions.githubusercontent.com` and the exact `cli-container.yml@refs/heads/main` identity, validated the M231 commit and digest claims plus the trusted certificate chain, and found transparency-log entry `2204608149`.
 
 ## Acceptance boundary
 
