@@ -37,6 +37,16 @@ No Rust/native or generated CLI behavior changed. Milestone 228 remains the late
 
 The local browser restriction prevents a rendered interaction claim. Deterministic fixtures plus a disposable real loopback server cover the complete state machine without external MCP credentials or providers.
 
+## Remote gate
+
+Main commit `08e143ed64fc8dfe97596ccd6a6222e8d939853f` completed verify and publish in [Actions run 29709192682](https://github.com/sherwoodlee/Brunomnia/actions/runs/29709192682). Node 22 rebuilt the generated CLI, passed the freshness and non-root no-network trust smoke, and published AMD64/ARM64 provenance/SBOM manifests at:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:a9fab0de523d3efc080ce0107e855754a54a91b654a45f662b011ef27f06ee75
+```
+
+Independent `cosign verify` passed issuer `https://token.actions.githubusercontent.com` and the exact `cli-container.yml@refs/heads/main` identity, validated the M229 commit and digest claims plus the trusted certificate chain, and found transparency-log entry `2204537846`.
+
 ## Acceptance boundary
 
 M229 closes reusable HTTP initialization, project-scoped session/protocol headers, explicit termination, and bounded server-rejected session replacement. Recursive/conditional schema forms, long-lived GET/POST SSE resumption/reconnect, elicitation and reviewed sampling UI, notification response UI, persistent STDIO sessions, multiple authorization-server failover, DPoP, live third-party fixtures, and OS-keychain-wrapped runtime credentials remain. MCP clients stay `Baseline`; exactly 19 parity rows remain incomplete, so Brunomnia is not feature-complete.

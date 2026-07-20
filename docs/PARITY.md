@@ -1312,6 +1312,7 @@ This is the authoritative claim ledger for Brunomnia. A roadmap item being imple
 - Bounded project/client-scoped device-memory session registry, stateless reuse, validated identities, protocol headers, one-shot 404 replacement, and best-effort termination: [`src/lib/mcp.ts`](../src/lib/mcp.ts)
 - Explicit connected/disconnect state plus automatic termination on disable, delete, or connection-setting changes: [`src/components/IntegrationWorkbench.tsx`](../src/components/IntegrationWorkbench.tsx) and [`src/App.tsx`](../src/App.tsx)
 - Project isolation, reuse, stateless behavior, DELETE/header, 404 recovery, identity-bound, real loopback, full regression/build, and exact verification evidence: [`src/lib/mcpOAuth.test.ts`](../src/lib/mcpOAuth.test.ts), [`src/lib/mcpSession.integration.test.ts`](../src/lib/mcpSession.integration.test.ts), and [`docs/QA_MILESTONE_229.md`](QA_MILESTONE_229.md)
+- Successful remote Node 22 rebuild/no-network smoke, signed AMD64/ARM64 publication, and independent exact-identity Cosign verification: [`docs/QA_MILESTONE_229.md`](QA_MILESTONE_229.md)
 
 ## Parity declaration rule
 
