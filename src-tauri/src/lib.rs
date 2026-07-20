@@ -2,6 +2,8 @@ mod client_identity;
 mod external_url;
 mod external_vault;
 mod gguf;
+mod git_credential_store;
+mod git_provider;
 mod grpc_client;
 mod http_client;
 mod mcp_http;
@@ -41,6 +43,10 @@ pub fn run_gguf_worker() -> i32 {
 
 fn workspace_store_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(workspace_path(app)?.with_file_name("workspaces"))
+}
+
+fn git_credential_store_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(workspace_path(app)?.with_file_name("git-credentials.json"))
 }
 
 fn legacy_vault_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -499,8 +505,50 @@ async fn project_git_init(
 async fn project_git_clone(
     remote: String,
     path: String,
+    branch: Option<String>,
+    credential: Option<project::GitCredentialInput>,
 ) -> Result<project::GitStatusOutput, String> {
-    blocking(move || project::git_clone(remote, path)).await
+    blocking(move || project::git_clone_authenticated(remote, path, branch, credential)).await
+}
+
+#[tauri::command]
+async fn project_git_repository_probe(
+    remote: String,
+    branch: Option<String>,
+    credential: Option<project::GitCredentialInput>,
+) -> Result<project::GitRepositoryProbeOutput, String> {
+    blocking(move || project::git_repository_probe(remote, branch, credential)).await
+}
+
+#[tauri::command]
+async fn project_git_provider_validate(
+    credential: project::GitCredentialInput,
+) -> Result<git_provider::GitProviderValidationOutput, String> {
+    git_provider::validate(credential).await
+}
+
+#[tauri::command]
+async fn project_git_provider_repositories(
+    credential: project::GitCredentialInput,
+) -> Result<Vec<git_provider::GitProviderRepository>, String> {
+    git_provider::repositories(credential).await
+}
+
+#[tauri::command]
+async fn project_git_credentials_load(
+    app: AppHandle,
+) -> Result<Vec<git_credential_store::GitCredentialRecord>, String> {
+    let path = git_credential_store_path(&app)?;
+    blocking(move || git_credential_store::load(&path)).await
+}
+
+#[tauri::command]
+async fn project_git_credentials_save(
+    app: AppHandle,
+    credentials: Vec<git_credential_store::GitCredentialRecord>,
+) -> Result<Vec<git_credential_store::GitCredentialRecord>, String> {
+    let path = git_credential_store_path(&app)?;
+    blocking(move || git_credential_store::save(&path, credentials)).await
 }
 
 #[tauri::command]
@@ -586,8 +634,9 @@ async fn project_git_delete_branch(
 async fn project_git_fetch(
     path: String,
     remote: String,
+    credential: Option<project::GitCredentialInput>,
 ) -> Result<project::GitOperationOutput, String> {
-    blocking(move || project::git_fetch(path, remote)).await
+    blocking(move || project::git_fetch_authenticated(path, remote, credential)).await
 }
 
 #[tauri::command]
@@ -595,8 +644,10 @@ async fn project_git_checkout_remote(
     path: String,
     remote: String,
     branch: String,
+    credential: Option<project::GitCredentialInput>,
 ) -> Result<project::GitOperationOutput, String> {
-    blocking(move || project::git_checkout_remote(path, remote, branch)).await
+    blocking(move || project::git_checkout_remote_authenticated(path, remote, branch, credential))
+        .await
 }
 
 #[tauri::command]
@@ -611,20 +662,27 @@ async fn project_git_set_remote(
 #[tauri::command]
 async fn project_git_pull(
     input: project::GitPushPullInput,
+    credential: Option<project::GitCredentialInput>,
 ) -> Result<project::GitOperationOutput, String> {
-    blocking(move || project::git_pull(input)).await
+    blocking(move || project::git_pull_authenticated(input, credential)).await
 }
 
 #[tauri::command]
 async fn project_git_push(
     input: project::GitPushPullInput,
+    credential: Option<project::GitCredentialInput>,
 ) -> Result<project::GitOperationOutput, String> {
-    blocking(move || project::git_push(input)).await
+    blocking(move || project::git_push_authenticated(input, credential)).await
 }
 
 #[tauri::command]
-async fn project_git_validate_remote_access(path: String, remote: String) -> Result<(), String> {
-    blocking(move || project::git_validate_remote_access(path, remote)).await
+async fn project_git_validate_remote_access(
+    path: String,
+    remote: String,
+    credential: Option<project::GitCredentialInput>,
+) -> Result<(), String> {
+    blocking(move || project::git_validate_remote_access_authenticated(path, remote, credential))
+        .await
 }
 
 #[tauri::command]
@@ -1009,6 +1067,11 @@ pub fn run() {
             project_read,
             project_git_init,
             project_git_clone,
+            project_git_repository_probe,
+            project_git_provider_validate,
+            project_git_provider_repositories,
+            project_git_credentials_load,
+            project_git_credentials_save,
             project_git_status,
             project_git_stage,
             project_git_unstage,

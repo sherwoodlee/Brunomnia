@@ -70,10 +70,25 @@ struct McpOAuthRuntime {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GitRuntime {
+    credential_id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    provider: String,
+    #[serde(default)]
+    username: String,
+    token: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RuntimeCredentialPayload {
     version: u8,
     oauth: Vec<OAuthRuntime>,
     mcp_oauth: Vec<McpOAuthRuntime>,
+    #[serde(default)]
+    git: Vec<GitRuntime>,
 }
 
 fn string_field(value: &Map<String, Value>, key: &str) -> String {
@@ -268,6 +283,32 @@ fn extract_runtime_credentials(workspace: &mut Value) -> RuntimeCredentialPayloa
             }
         }
     }
+    if let Some(credentials) = workspace
+        .get_mut("project")
+        .and_then(Value::as_object_mut)
+        .and_then(|project| project.get_mut("gitCredentials"))
+        .and_then(Value::as_array_mut)
+    {
+        for credential in credentials {
+            let Some(credential) = credential.as_object_mut() else {
+                continue;
+            };
+            let runtime = GitRuntime {
+                credential_id: string_field(credential, "id"),
+                name: string_field(credential, "name"),
+                provider: string_field(credential, "provider"),
+                username: string_field(credential, "username"),
+                token: string_field(credential, "token"),
+            };
+            if !runtime.credential_id.is_empty() && !runtime.token.is_empty() {
+                set_string(credential, "name", String::new());
+                set_string(credential, "provider", String::new());
+                set_string(credential, "username", String::new());
+                set_string(credential, "token", String::new());
+                payload.git.push(runtime);
+            }
+        }
+    }
     payload
 }
 
@@ -381,6 +422,29 @@ fn hydrate_runtime_credentials(workspace: &mut Value, payload: RuntimeCredential
             };
             if let Some(runtime) = mcp.remove(&string_field(client, "id")) {
                 hydrate_mcp_runtime(client, runtime);
+            }
+        }
+    }
+    let mut git = payload
+        .git
+        .into_iter()
+        .map(|runtime| (runtime.credential_id.clone(), runtime))
+        .collect::<HashMap<_, _>>();
+    if let Some(credentials) = workspace
+        .get_mut("project")
+        .and_then(Value::as_object_mut)
+        .and_then(|project| project.get_mut("gitCredentials"))
+        .and_then(Value::as_array_mut)
+    {
+        for credential in credentials {
+            let Some(credential) = credential.as_object_mut() else {
+                continue;
+            };
+            if let Some(runtime) = git.remove(&string_field(credential, "id")) {
+                set_string(credential, "name", runtime.name);
+                set_string(credential, "provider", runtime.provider);
+                set_string(credential, "username", runtime.username);
+                set_string(credential, "token", runtime.token);
             }
         }
     }
@@ -539,7 +603,7 @@ pub fn is_protected(workspace: &Value) -> bool {
 pub fn needs_protection(workspace: &Value) -> bool {
     let mut workspace = workspace.clone();
     let payload = extract_runtime_credentials(&mut workspace);
-    !payload.oauth.is_empty() || !payload.mcp_oauth.is_empty()
+    !payload.oauth.is_empty() || !payload.mcp_oauth.is_empty() || !payload.git.is_empty()
 }
 
 #[cfg(test)]
@@ -550,7 +614,7 @@ fn protect_with_key(
 ) -> Result<Value, String> {
     let mut protected = workspace.clone();
     let payload = extract_runtime_credentials(&mut protected);
-    if payload.oauth.is_empty() && payload.mcp_oauth.is_empty() {
+    if payload.oauth.is_empty() && payload.mcp_oauth.is_empty() && payload.git.is_empty() {
         return Ok(protected);
     }
     let envelope = encrypt_payload(workspace_id, &payload, key)?;
@@ -586,7 +650,7 @@ fn unprotect_with_key(
 pub fn protect(workspace_id: &str, workspace: &Value) -> Result<Value, String> {
     let mut protected = workspace.clone();
     let payload = extract_runtime_credentials(&mut protected);
-    if payload.oauth.is_empty() && payload.mcp_oauth.is_empty() {
+    if payload.oauth.is_empty() && payload.mcp_oauth.is_empty() && payload.git.is_empty() {
         return Ok(protected);
     }
     let envelope = encrypt_payload(workspace_id, &payload, &master_key()?)?;
@@ -657,7 +721,16 @@ mod tests {
                 "oauthRegisteredClientIdIssuedAt": 111,
                 "oauthRegisteredClientSecretExpiresAt": 222,
                 "oauthRegisteredTokenEndpointAuthMethod": "client_secret_post"
-            }]
+            }],
+            "project": {
+                "gitCredentials": [{
+                    "id": "github-one",
+                    "name": "Work GitHub",
+                    "provider": "github",
+                    "username": "",
+                    "token": "github-access"
+                }]
+            }
         })
     }
 
@@ -676,6 +749,8 @@ mod tests {
             ""
         );
         assert_eq!(protected["mcpClients"][0]["token"], "");
+        assert_eq!(protected["project"]["gitCredentials"][0]["token"], "");
+        assert_eq!(protected["project"]["gitCredentials"][0]["provider"], "");
         assert_eq!(
             protected["mcpClients"][0]["oauthRegisteredClientSecret"],
             ""
@@ -688,6 +763,8 @@ mod tests {
             "folder-access",
             "mcp-access",
             "registered-secret",
+            "github-access",
+            "Work GitHub",
         ] {
             assert!(!stored.contains(plaintext));
         }
@@ -750,6 +827,7 @@ mod tests {
         value["mcpClients"][0]["oauthRegisteredClientIdIssuedAt"] = 0.into();
         value["mcpClients"][0]["oauthRegisteredClientSecretExpiresAt"] = 0.into();
         value["mcpClients"][0]["oauthRegisteredTokenEndpointAuthMethod"] = "none".into();
+        value["project"]["gitCredentials"][0]["token"] = "".into();
 
         let protected = protect_with_key("workspace-one", &value, &[4; MASTER_KEY_BYTES]).unwrap();
         assert_eq!(protected, value);

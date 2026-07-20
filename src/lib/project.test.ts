@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cloneSeedWorkspace } from '../data/seed';
-import { readProject, writeProject } from './project';
+import { cloneGitProject, discoverGitProviderRepositories, fetchGitRemote, gitCredentialInput, loadGitCredentials, probeGitRepository, readProject, saveGitCredentials, validateGitProviderCredential, writeProject } from './project';
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
 
@@ -54,5 +54,32 @@ describe('filesystem project OAuth boundaries', () => {
     expect(loaded.streamSessions.map((session) => session.id)).toEqual(['stream']);
     expect(loaded.certificates).toEqual({ ca: { enabled: false, pem: '' }, clients: [] });
     expect(loaded.fileState[current.collections[0].id]).toEqual(current.fileState[current.collections[0].id]);
+  });
+});
+
+describe('Git provider command boundaries', () => {
+  it('passes only transient provider fields to native Git and discovery commands', async () => {
+    const credential = gitCredentialInput({ id: 'github-one', name: 'Work GitHub', provider: 'github', username: '', token: 'secret' })!;
+    tauri.invoke.mockResolvedValue({});
+
+    await validateGitProviderCredential(credential);
+    await discoverGitProviderRepositories(credential);
+    await probeGitRepository('https://github.com/acme/orders.git', 'main', credential);
+    await cloneGitProject('https://github.com/acme/orders.git', '/tmp/orders', 'main', credential);
+    await fetchGitRemote('/tmp/orders', 'origin', credential);
+    await loadGitCredentials();
+    await saveGitCredentials([{ id: 'github-one', name: 'Work GitHub', provider: 'github', username: '', token: 'secret' }]);
+
+    expect(tauri.invoke.mock.calls).toEqual([
+      ['project_git_provider_validate', { credential }],
+      ['project_git_provider_repositories', { credential }],
+      ['project_git_repository_probe', { remote: 'https://github.com/acme/orders.git', branch: 'main', credential }],
+      ['project_git_clone', { remote: 'https://github.com/acme/orders.git', path: '/tmp/orders', branch: 'main', credential }],
+      ['project_git_fetch', { path: '/tmp/orders', remote: 'origin', credential }],
+      ['project_git_credentials_load'],
+      ['project_git_credentials_save', { credentials: [{ id: 'github-one', name: 'Work GitHub', provider: 'github', username: '', token: 'secret' }] }],
+    ]);
+    expect(JSON.stringify(tauri.invoke.mock.calls.slice(0, 5))).not.toContain('github-one');
+    expect(JSON.stringify(tauri.invoke.mock.calls.slice(0, 5))).not.toContain('Work GitHub');
   });
 });

@@ -98,7 +98,7 @@ export const createBlankWorkspace = (name: string, preferences: AppPreferences):
     streamSessions: [],
     mcpSessions: [],
     responseFilters: {},
-    project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
+    project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' },
     plugins: [],
     pluginData: {},
     activePluginTheme: '',
@@ -118,7 +118,7 @@ export const createWorkspaceDuplicate = (source: Workspace, name: string, prefer
   copy.responses = [];
   copy.streamSessions = [];
   copy.runnerReports = [];
-  copy.project = { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true };
+  copy.project = { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' };
   copy.collaboration = { mode: 'off', path: '', actor: copy.collaboration.actor || 'Local owner', revision: 0 };
   if (copy.konnect.managedControlPlaneId) copy.konnect = {
     ...copy.konnect,

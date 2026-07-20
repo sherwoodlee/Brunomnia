@@ -127,6 +127,21 @@ const normalizeCollaboration = (value: unknown, defaults: CollaborationConfig): 
   };
 };
 
+const normalizeProject = (value: unknown, defaults: Workspace['project']): Workspace['project'] => {
+  const source = record(value);
+  return {
+    mode: source?.mode === 'folder' || source?.mode === 'git' ? source.mode : 'local',
+    path: stringValue(source?.path, defaults.path),
+    remoteUrl: stringValue(source?.remoteUrl, defaults.remoteUrl),
+    remoteName: stringValue(source?.remoteName, defaults.remoteName).slice(0, 200),
+    authorName: stringValue(source?.authorName, defaults.authorName).replace(/[\r\n\0]/g, ' ').slice(0, 500),
+    authorEmail: stringValue(source?.authorEmail, defaults.authorEmail).replace(/[\r\n\0]/g, '').slice(0, 500),
+    autoSave: source?.autoSave !== false,
+    gitCredentialId: stringValue(source?.gitCredentialId).replace(/[\r\n\0]/g, '').slice(0, 200),
+    ...(typeof source?.lastSavedAt === 'string' ? { lastSavedAt: source.lastSavedAt.slice(0, 128) } : {}),
+  };
+};
+
 const normalizeMcpResources = (value: unknown): McpResource[] => !Array.isArray(value) ? [] : value.flatMap((item): McpResource[] => {
   const resource = record(item);
   const uriTemplate = stringValue(resource?.uriTemplate);
@@ -871,7 +886,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   }));
   return {
     ...workspace,
-    version: 44,
+    version: 45,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',
@@ -894,7 +909,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     mcpSessions: normalizeMcpHistorySessions(workspace.mcpSessions, new Set(mcpClients.map((client) => client.id)), environmentIds),
     responseFilters: normalizeResponseFilters(workspace.responseFilters, requestIds),
     certificates: emptyWorkspaceCertificates(),
-    project: { ...seed.project, ...workspace.project },
+    project: normalizeProject(workspace.project, seed.project),
     plugins: normalizePlugins(workspace.plugins),
     pluginData: workspace.pluginData ?? {},
     activePluginTheme: workspace.activePluginTheme ?? '',
@@ -915,6 +930,7 @@ export const secureImportedWorkspace = (value: unknown): Workspace => {
     plugins: workspace.plugins.map((plugin) => ({ ...plugin, enabled: false, grantedPermissions: [] })),
     pluginData: {},
     activePluginTheme: '',
+    project: structuredClone(cloneSeedWorkspace().project),
     mcpSessions: [],
     mcpClients: workspace.mcpClients.map((client) => ({ ...client, enabled: false, token: '', password: '', oauthClientSecret: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none' })),
     ai: { ...workspace.ai, enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false },

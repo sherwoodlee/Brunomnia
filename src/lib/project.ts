@@ -1,5 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import type { Workspace } from '../types';
+import type { GitCredential, GitProvider, Workspace } from '../types';
 import { migrateWorkspace } from './storage';
 import { publicEnvironments } from './resources';
 import { mergeLocalOAuth2RuntimeCredentials, withoutOAuth2RuntimeCredentials } from './oauth2Tokens';
@@ -26,6 +26,10 @@ export type GitOperation = { summary: string; stdout: string; stderr: string; st
 export type GitConflict = { path: string; base: string; ours: string; theirs: string; working: string; binary: boolean };
 export type GitCommitSummary = { oid: string; shortOid: string; message: string; authorName: string; authorEmail: string; authoredAt: string; parents: string[]; refs: string[] };
 export type GitCommitPatch = { oid: string; patch: string };
+export type GitCredentialInput = { provider: GitProvider; username: string; token: string };
+export type GitProviderValidation = { provider: GitProvider; accountLogin: string; accountName: string; emails: string[]; canDiscoverRepositories: boolean };
+export type GitProviderRepository = { id: string; name: string; fullName: string; cloneUrl: string; webUrl: string; defaultBranch: string; private: boolean; canPush: boolean };
+export type GitRepositoryProbe = { defaultBranch: string; branches: string[]; totalFiles: number; brunomniaFiles: number; insomniaFiles: number; specificationFiles: number; truncated: boolean };
 export type LocalPluginSource = { source: string; name: string; version: string; description: string; path: string };
 
 const nativeOnly = () => {
@@ -50,7 +54,7 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     ...current,
     ...project,
     format: 'brunomnia',
-    version: 44,
+    version: 45,
     history: current.history,
     runnerReports: current.runnerReports,
     unitTestResults: current.unitTestResults,
@@ -75,9 +79,30 @@ export const initGitProject = async (path: string, defaultBranch = 'main') => {
   nativeOnly();
   return invoke<GitStatus>('project_git_init', { path, defaultBranch });
 };
-export const cloneGitProject = async (remote: string, path: string) => {
+export const gitCredentialInput = (credential: GitCredential | undefined): GitCredentialInput | undefined => credential ? { provider: credential.provider, username: credential.username, token: credential.token } : undefined;
+export const cloneGitProject = async (remote: string, path: string, branch = '', credential?: GitCredentialInput) => {
   nativeOnly();
-  return invoke<GitStatus>('project_git_clone', { remote, path });
+  return invoke<GitStatus>('project_git_clone', { remote, path, branch: branch || null, credential });
+};
+export const probeGitRepository = async (remote: string, branch = '', credential?: GitCredentialInput) => {
+  nativeOnly();
+  return invoke<GitRepositoryProbe>('project_git_repository_probe', { remote, branch: branch || null, credential });
+};
+export const validateGitProviderCredential = async (credential: GitCredentialInput) => {
+  nativeOnly();
+  return invoke<GitProviderValidation>('project_git_provider_validate', { credential });
+};
+export const discoverGitProviderRepositories = async (credential: GitCredentialInput) => {
+  nativeOnly();
+  return invoke<GitProviderRepository[]>('project_git_provider_repositories', { credential });
+};
+export const loadGitCredentials = async () => {
+  nativeOnly();
+  return invoke<GitCredential[]>('project_git_credentials_load');
+};
+export const saveGitCredentials = async (credentials: GitCredential[]) => {
+  nativeOnly();
+  return invoke<GitCredential[]>('project_git_credentials_save', { credentials });
 };
 export const getGitStatus = async (path: string) => {
   nativeOnly();
@@ -93,12 +118,12 @@ export const getGitCommitPatch = async (path: string, oid: string) => invoke<Git
 export const commitGitChanges = async (path: string, message: string, authorName: string, authorEmail: string) => invoke<GitOperation>('project_git_commit', { input: { path, message, authorName, authorEmail } });
 export const checkoutGitBranch = async (path: string, branch: string, create = false) => invoke<GitOperation>('project_git_checkout', { path, branch, create });
 export const deleteGitBranch = async (path: string, branch: string) => invoke<GitOperation>('project_git_delete_branch', { path, branch });
-export const fetchGitRemote = async (path: string, remote: string) => invoke<GitOperation>('project_git_fetch', { path, remote });
-export const checkoutGitRemoteBranch = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_checkout_remote', { path, remote, branch });
+export const fetchGitRemote = async (path: string, remote: string, credential?: GitCredentialInput) => invoke<GitOperation>('project_git_fetch', { path, remote, credential });
+export const checkoutGitRemoteBranch = async (path: string, remote: string, branch: string, credential?: GitCredentialInput) => invoke<GitOperation>('project_git_checkout_remote', { path, remote, branch, credential });
 export const setGitRemote = async (path: string, name: string, url: string) => invoke<GitStatus>('project_git_set_remote', { path, name, url });
-export const pullGitProject = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_pull', { input: { path, remote, branch } });
-export const validateGitRemoteAccess = async (path: string, remote: string) => invoke<void>('project_git_validate_remote_access', { path, remote });
-export const pushGitProject = async (path: string, remote: string, branch: string) => invoke<GitOperation>('project_git_push', { input: { path, remote, branch } });
+export const pullGitProject = async (path: string, remote: string, branch: string, credential?: GitCredentialInput) => invoke<GitOperation>('project_git_pull', { input: { path, remote, branch }, credential });
+export const validateGitRemoteAccess = async (path: string, remote: string, credential?: GitCredentialInput) => invoke<void>('project_git_validate_remote_access', { path, remote, credential });
+export const pushGitProject = async (path: string, remote: string, branch: string, credential?: GitCredentialInput) => invoke<GitOperation>('project_git_push', { input: { path, remote, branch }, credential });
 export const mergeGitBranch = async (path: string, branch: string) => invoke<GitOperation>('project_git_merge', { path, branch });
 export const abortGitMerge = async (path: string) => invoke<GitStatus>('project_git_abort_merge', { path });
 export const getGitConflicts = async (path: string) => invoke<GitConflict[]>('project_git_conflicts', { path });

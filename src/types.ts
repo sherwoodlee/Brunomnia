@@ -438,7 +438,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 44;
+  version: 45;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -659,6 +659,16 @@ export type GovernanceConfig = {
   audit: AuditEvent[];
 };
 
+export type GitProvider = 'github' | 'gitlab' | 'custom';
+
+export type GitCredential = {
+  id: string;
+  name: string;
+  provider: GitProvider;
+  username: string;
+  token: string;
+};
+
 export type ProjectConfig = {
   mode: 'local' | 'folder' | 'git';
   path: string;
@@ -667,6 +677,7 @@ export type ProjectConfig = {
   authorName: string;
   authorEmail: string;
   autoSave: boolean;
+  gitCredentialId: string;
   lastSavedAt?: string;
 };
 

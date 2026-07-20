@@ -7,6 +7,7 @@ use std::{
     path::{Component, Path, PathBuf},
     process::{Command, Output},
 };
+use url::Url;
 use uuid::Uuid;
 
 const PROJECT_FILE: &str = ".brunomnia/project.yaml";
@@ -139,6 +140,27 @@ pub struct GitPushPullInput {
     pub remote: String,
     #[serde(default)]
     pub branch: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GitCredentialInput {
+    pub provider: String,
+    #[serde(default)]
+    pub username: String,
+    pub token: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRepositoryProbeOutput {
+    pub default_branch: String,
+    pub branches: Vec<String>,
+    pub total_files: usize,
+    pub brunomnia_files: usize,
+    pub insomnia_files: usize,
+    pub specification_files: usize,
+    pub truncated: bool,
 }
 
 fn default_remote() -> String {
@@ -502,6 +524,97 @@ fn git_output(path: &Path, args: &[&str]) -> Result<Output, String> {
         .map_err(|error| format!("Unable to run Git: {error}"))
 }
 
+const GIT_CREDENTIAL_HELPER: &str = "!f() { if test \"$1\" = get; then printf '%s\\n' \"username=$BRUNOMNIA_GIT_USERNAME\" \"password=$BRUNOMNIA_GIT_PASSWORD\"; fi; }; f";
+
+fn validate_credential_field(value: &str, label: &str, limit: usize) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(format!("Enter the Git {label}."));
+    }
+    if value.len() > limit || value.chars().any(char::is_control) {
+        return Err(format!("The Git {label} is invalid."));
+    }
+    Ok(value.to_string())
+}
+
+fn git_auth(
+    remote: &str,
+    credential: &GitCredentialInput,
+) -> Result<(String, String, String), String> {
+    let url = Url::parse(remote)
+        .map_err(|_| "Token credentials require an HTTP(S) Git remote URL.".to_string())?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("Token credentials require an HTTP(S) Git remote URL.".into());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("Git remote URLs cannot contain embedded credentials.".into());
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "The Git remote URL has no host.".to_string())?;
+    let token = validate_credential_field(&credential.token, "token", 65_536)?;
+    let (username, password) = match credential.provider.as_str() {
+        "github" => {
+            if url.scheme() != "https" || !host.eq_ignore_ascii_case("github.com") {
+                return Err("GitHub credentials can only be sent to https://github.com repositories. Use a custom credential for another host.".into());
+            }
+            (token, "x-oauth-basic".into())
+        }
+        "gitlab" => {
+            if url.scheme() != "https" || !host.eq_ignore_ascii_case("gitlab.com") {
+                return Err("GitLab credentials can only be sent to https://gitlab.com repositories. Use a custom credential for another host.".into());
+            }
+            ("oauth2".into(), token)
+        }
+        "custom" => (
+            validate_credential_field(&credential.username, "username", 500)?,
+            token,
+        ),
+        _ => return Err("Choose GitHub, GitLab, or custom Git credentials.".into()),
+    };
+    let origin = url.origin().ascii_serialization();
+    Ok((origin, username, password))
+}
+
+fn authenticated_git_command(
+    path: Option<&Path>,
+    remote: &str,
+    credential: Option<&GitCredentialInput>,
+) -> Result<Command, String> {
+    let mut command = Command::new("git");
+    if let Some(path) = path {
+        command.arg("-C").arg(path);
+    }
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    if let Some(credential) = credential {
+        let (origin, username, password) = git_auth(remote, credential)?;
+        command
+            .arg("-c")
+            .arg("credential.helper=")
+            .arg("-c")
+            .arg("credential.useHttpPath=false")
+            .arg("-c")
+            .arg(format!(
+                "credential.{origin}.helper={GIT_CREDENTIAL_HELPER}"
+            ))
+            .env("BRUNOMNIA_GIT_USERNAME", username)
+            .env("BRUNOMNIA_GIT_PASSWORD", password);
+    }
+    Ok(command)
+}
+
+fn authenticated_git_output(
+    path: Option<&Path>,
+    remote: &str,
+    credential: Option<&GitCredentialInput>,
+    args: &[&str],
+) -> Result<Output, String> {
+    authenticated_git_command(path, remote, credential)?
+        .args(args)
+        .output()
+        .map_err(|error| format!("Unable to run Git: {error}"))
+}
+
 fn output_text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_TEXT_OUTPUT)])
         .trim()
@@ -548,9 +661,22 @@ pub fn git_init(path: String, default_branch: String) -> Result<GitStatusOutput,
     git_status(root.to_string_lossy().into_owned())
 }
 
+#[cfg(test)]
 pub fn git_clone(remote: String, path: String) -> Result<GitStatusOutput, String> {
+    git_clone_authenticated(remote, path, None, None)
+}
+
+pub fn git_clone_authenticated(
+    remote: String,
+    path: String,
+    branch: Option<String>,
+    credential: Option<GitCredentialInput>,
+) -> Result<GitStatusOutput, String> {
     if remote.trim().is_empty() {
         return Err("Enter a Git remote URL.".into());
+    }
+    if remote.trim().starts_with('-') {
+        return Err("The Git remote URL cannot begin with a hyphen.".into());
     }
     let target = PathBuf::from(path.trim());
     if target.as_os_str().is_empty() {
@@ -568,8 +694,22 @@ pub fn git_clone(remote: String, path: String) -> Result<GitStatusOutput, String
         fs::create_dir_all(parent)
             .map_err(|error| format!("Unable to create clone parent: {error}"))?;
     }
-    let output = Command::new("git")
-        .arg("clone")
+    let branch = branch.unwrap_or_default();
+    if !branch.trim().is_empty() {
+        require_success(
+            Command::new("git")
+                .args(["check-ref-format", "--branch", branch.trim()])
+                .output()
+                .map_err(|error| format!("Unable to validate clone branch: {error}"))?,
+            "Validate clone branch",
+        )?;
+    }
+    let mut command = authenticated_git_command(None, remote.trim(), credential.as_ref())?;
+    command.arg("clone");
+    if !branch.trim().is_empty() {
+        command.args(["--branch", branch.trim(), "--single-branch"]);
+    }
+    let output = command
         .arg("--")
         .arg(remote.trim())
         .arg(&target)
@@ -578,6 +718,167 @@ pub fn git_clone(remote: String, path: String) -> Result<GitStatusOutput, String
     require_success(output, "Git clone")?;
     let root = target.canonicalize().map_err(|error| error.to_string())?;
     git_status(root.to_string_lossy().into_owned())
+}
+
+fn parse_remote_refs(source: &str) -> (String, Vec<String>) {
+    let mut default_branch = String::new();
+    let mut branches = BTreeSet::new();
+    for line in source.lines() {
+        if let Some(reference) = line
+            .strip_prefix("ref: ")
+            .and_then(|value| value.split_once('\t'))
+            .filter(|(_, destination)| *destination == "HEAD")
+            .and_then(|(reference, _)| reference.strip_prefix("refs/heads/"))
+        {
+            default_branch = reference.to_string();
+            continue;
+        }
+        if let Some(branch) = line
+            .split_once('\t')
+            .and_then(|(_, reference)| reference.strip_prefix("refs/heads/"))
+        {
+            branches.insert(branch.to_string());
+        }
+    }
+    if default_branch.is_empty() && branches.contains("main") {
+        default_branch = "main".into();
+    } else if default_branch.is_empty() && branches.contains("master") {
+        default_branch = "master".into();
+    } else if default_branch.is_empty() {
+        default_branch = branches.iter().next().cloned().unwrap_or_default();
+    }
+    (default_branch, branches.into_iter().collect())
+}
+
+fn scan_repository_paths(source: &str, truncated: bool) -> GitRepositoryProbeOutput {
+    let mut total_files = 0;
+    let mut brunomnia_files = 0;
+    let mut insomnia_files = 0;
+    let mut specification_files = 0;
+    for path in source.lines().filter(|path| !path.is_empty()).take(50_000) {
+        total_files += 1;
+        let lower = path.to_ascii_lowercase();
+        if lower == ".brunomnia/project.yaml"
+            || MANAGED_ROOTS
+                .iter()
+                .any(|root| lower.starts_with(&format!("{root}/")))
+        {
+            brunomnia_files += 1;
+        }
+        if lower.starts_with(".insomnia/")
+            || matches!(
+                lower.rsplit('/').next().unwrap_or_default(),
+                "insomnia.json" | "insomnia.yaml" | "insomnia.yml"
+            )
+        {
+            insomnia_files += 1;
+        }
+        let file_name = lower.rsplit('/').next().unwrap_or_default();
+        if file_name.starts_with("openapi.")
+            || file_name.starts_with("swagger.")
+            || matches!(
+                file_name,
+                "asyncapi.yaml" | "asyncapi.yml" | "asyncapi.json"
+            )
+        {
+            specification_files += 1;
+        }
+    }
+    GitRepositoryProbeOutput {
+        default_branch: String::new(),
+        branches: vec![],
+        total_files,
+        brunomnia_files,
+        insomnia_files,
+        specification_files,
+        truncated: truncated || source.lines().count() > 50_000,
+    }
+}
+
+pub fn git_repository_probe(
+    remote: String,
+    branch: Option<String>,
+    credential: Option<GitCredentialInput>,
+) -> Result<GitRepositoryProbeOutput, String> {
+    let remote = remote.trim();
+    if remote.is_empty() {
+        return Err("Enter a Git remote URL.".into());
+    }
+    if remote.starts_with('-') {
+        return Err("The Git remote URL cannot begin with a hyphen.".into());
+    }
+    let refs = require_success(
+        authenticated_git_output(
+            None,
+            remote,
+            credential.as_ref(),
+            &[
+                "ls-remote",
+                "--symref",
+                "--",
+                remote,
+                "HEAD",
+                "refs/heads/*",
+            ],
+        )?,
+        "Inspect Git repository",
+    )?;
+    let (default_branch, branches) = parse_remote_refs(&output_text(&refs.stdout));
+    if branches.is_empty() {
+        return Err("The Git repository has no discoverable branches.".into());
+    }
+    let requested_branch = branch.unwrap_or_default();
+    let requested_branch = requested_branch.trim();
+    if requested_branch.is_empty() {
+        return Ok(GitRepositoryProbeOutput {
+            default_branch,
+            branches,
+            total_files: 0,
+            brunomnia_files: 0,
+            insomnia_files: 0,
+            specification_files: 0,
+            truncated: false,
+        });
+    }
+    if !branches.iter().any(|branch| branch == requested_branch) {
+        return Err(format!(
+            "Git branch '{requested_branch}' does not exist in the remote repository."
+        ));
+    }
+    let temporary = tempfile::tempdir()
+        .map_err(|error| format!("Unable to prepare repository scan: {error}"))?;
+    let checkout = temporary.path().join("repository");
+    let checkout_text = checkout.to_string_lossy().into_owned();
+    require_success(
+        authenticated_git_output(
+            None,
+            remote,
+            credential.as_ref(),
+            &[
+                "clone",
+                "--depth",
+                "1",
+                "--filter=blob:none",
+                "--no-checkout",
+                "--single-branch",
+                "--branch",
+                requested_branch,
+                "--",
+                remote,
+                &checkout_text,
+            ],
+        )?,
+        "Scan Git repository",
+    )?;
+    let tree = require_success(
+        git_output(&checkout, &["ls-tree", "-r", "--name-only", "HEAD"])?,
+        "Read Git repository tree",
+    )?;
+    let tree_truncated = tree.stdout.len() > MAX_TEXT_OUTPUT;
+    let mut output = scan_repository_paths(&output_text(&tree.stdout), tree_truncated);
+    output.default_branch = default_branch;
+    output.branches = branches;
+    Ok(output)
 }
 
 fn parse_branch_header(header: &str) -> (String, String, usize, usize) {
@@ -1180,23 +1481,65 @@ fn require_remote(root: &Path, name: &str) -> Result<String, String> {
     Ok(name.to_string())
 }
 
+fn remote_url(root: &Path, name: &str, push: bool) -> Result<String, String> {
+    let remote = list_remotes(root)
+        .into_iter()
+        .find(|remote| remote.name == name)
+        .ok_or_else(|| format!("Git remote '{name}' does not exist."))?;
+    let url = if push && !remote.push_url.is_empty() {
+        remote.push_url
+    } else {
+        remote.fetch_url
+    };
+    if url.is_empty() {
+        return Err(format!("Git remote '{name}' has no usable URL."));
+    }
+    Ok(url)
+}
+
+#[cfg(test)]
 pub fn git_fetch(path: String, remote: String) -> Result<GitOperationOutput, String> {
+    git_fetch_authenticated(path, remote, None)
+}
+
+pub fn git_fetch_authenticated(
+    path: String,
+    remote: String,
+    credential: Option<GitCredentialInput>,
+) -> Result<GitOperationOutput, String> {
     let root = project_root(&path, false)?;
     let remote = require_remote(&root, &remote)?;
-    let output = git_output(&root, &["fetch", "--prune", "--no-tags", "--", &remote])?;
+    let url = remote_url(&root, &remote, false)?;
+    let output = authenticated_git_output(
+        Some(&root),
+        &url,
+        credential.as_ref(),
+        &["fetch", "--prune", "--no-tags", "--", &remote],
+    )?;
     operation(&root, output, "Fetch", false)
 }
 
+#[cfg(test)]
 pub fn git_checkout_remote(
     path: String,
     remote: String,
     branch: String,
+) -> Result<GitOperationOutput, String> {
+    git_checkout_remote_authenticated(path, remote, branch, None)
+}
+
+pub fn git_checkout_remote_authenticated(
+    path: String,
+    remote: String,
+    branch: String,
+    credential: Option<GitCredentialInput>,
 ) -> Result<GitOperationOutput, String> {
     if branch.trim().is_empty() {
         return Err("Choose a remote branch to check out.".into());
     }
     let root = project_root(&path, false)?;
     let remote = require_remote(&root, &remote)?;
+    let url = remote_url(&root, &remote, false)?;
     let branch = branch.trim();
     require_success(
         git_output(&root, &["check-ref-format", "--branch", branch])?,
@@ -1211,7 +1554,12 @@ pub fn git_checkout_remote(
         ));
     }
     require_success(
-        git_output(&root, &["fetch", "--no-tags", "--", &remote, branch])?,
+        authenticated_git_output(
+            Some(&root),
+            &url,
+            credential.as_ref(),
+            &["fetch", "--no-tags", "--", &remote, branch],
+        )?,
         "Fetch remote branch",
     )?;
     let tracking_ref = format!("{remote}/{branch}");
@@ -1257,7 +1605,10 @@ pub fn git_set_remote(path: String, name: String, url: String) -> Result<GitStat
     git_status(root.to_string_lossy().into_owned())
 }
 
-pub fn git_pull(input: GitPushPullInput) -> Result<GitOperationOutput, String> {
+pub fn git_pull_authenticated(
+    input: GitPushPullInput,
+    credential: Option<GitCredentialInput>,
+) -> Result<GitOperationOutput, String> {
     let root = project_root(&input.path, false)?;
     let remote = if input.remote.trim().is_empty() {
         "origin"
@@ -1270,6 +1621,7 @@ pub fn git_pull(input: GitPushPullInput) -> Result<GitOperationOutput, String> {
     {
         return Err(format!("Git remote '{remote}' does not exist."));
     }
+    let url = remote_url(&root, remote, false)?;
     let mut args = vec!["pull", "--no-rebase", "--no-edit", remote];
     if !input.branch.trim().is_empty() {
         require_success(
@@ -1281,11 +1633,19 @@ pub fn git_pull(input: GitPushPullInput) -> Result<GitOperationOutput, String> {
         )?;
         args.push(input.branch.trim());
     }
-    let output = git_output(&root, &args)?;
+    let output = authenticated_git_output(Some(&root), &url, credential.as_ref(), &args)?;
     operation(&root, output, "Pull", true)
 }
 
+#[cfg(test)]
 pub fn git_push(input: GitPushPullInput) -> Result<GitOperationOutput, String> {
+    git_push_authenticated(input, None)
+}
+
+pub fn git_push_authenticated(
+    input: GitPushPullInput,
+    credential: Option<GitCredentialInput>,
+) -> Result<GitOperationOutput, String> {
     let root = project_root(&input.path, false)?;
     let remote = if input.remote.trim().is_empty() {
         "origin"
@@ -1298,6 +1658,7 @@ pub fn git_push(input: GitPushPullInput) -> Result<GitOperationOutput, String> {
     {
         return Err(format!("Git remote '{remote}' does not exist."));
     }
+    let url = remote_url(&root, remote, true)?;
     let branch = if input.branch.trim().is_empty() {
         git_status(input.path.clone())?.branch
     } else {
@@ -1316,14 +1677,28 @@ pub fn git_push(input: GitPushPullInput) -> Result<GitOperationOutput, String> {
     {
         return Err("Nothing to push from the current branch.".into());
     }
-    let output = git_output(&root, &["push", "-u", remote, &branch])?;
+    let output = authenticated_git_output(
+        Some(&root),
+        &url,
+        credential.as_ref(),
+        &["push", "-u", remote, &branch],
+    )?;
     if !output.status.success() {
         return Err(push_error(&output));
     }
     operation(&root, output, "Push", false)
 }
 
+#[cfg(test)]
 pub fn git_validate_remote_access(path: String, remote: String) -> Result<(), String> {
+    git_validate_remote_access_authenticated(path, remote, None)
+}
+
+pub fn git_validate_remote_access_authenticated(
+    path: String,
+    remote: String,
+    credential: Option<GitCredentialInput>,
+) -> Result<(), String> {
     let root = project_root(&path, false)?;
     let remote = if remote.trim().is_empty() {
         "origin"
@@ -1336,8 +1711,14 @@ pub fn git_validate_remote_access(path: String, remote: String) -> Result<(), St
     {
         return Err(format!("Git remote '{remote}' does not exist."));
     }
+    let url = remote_url(&root, remote, false)?;
     require_success(
-        git_output(&root, &["ls-remote", "--heads", "--", remote])?,
+        authenticated_git_output(
+            Some(&root),
+            &url,
+            credential.as_ref(),
+            &["ls-remote", "--heads", "--", remote],
+        )?,
         "Validate Git remote access",
     )?;
     Ok(())
@@ -1501,6 +1882,97 @@ mod tests {
             "release.1"
         );
         assert_eq!(parse_branch_header("## No commits yet on main").0, "main");
+    }
+
+    #[test]
+    fn scopes_provider_credentials_to_the_expected_remote_host() {
+        let github = GitCredentialInput {
+            provider: "github".into(),
+            username: String::new(),
+            token: "github-secret".into(),
+        };
+        assert_eq!(
+            git_auth("https://github.com/acme/orders.git", &github).unwrap(),
+            (
+                "https://github.com".into(),
+                "github-secret".into(),
+                "x-oauth-basic".into()
+            )
+        );
+        assert!(git_auth("https://git.example.com/acme/orders.git", &github)
+            .unwrap_err()
+            .contains("only be sent"));
+        let custom = GitCredentialInput {
+            provider: "custom".into(),
+            username: "developer".into(),
+            token: "custom-secret".into(),
+        };
+        let command = authenticated_git_command(
+            None,
+            "https://git.example.com/acme/orders.git",
+            Some(&custom),
+        )
+        .unwrap();
+        let arguments = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(!arguments.contains("developer"));
+        assert!(!arguments.contains("custom-secret"));
+        assert!(arguments.contains("credential.https://git.example.com.helper"));
+    }
+
+    #[test]
+    fn parses_remote_head_and_sorted_branches() {
+        let (default_branch, branches) = parse_remote_refs(
+            "ref: refs/heads/release\tHEAD\nabc\trefs/heads/release\ndef\trefs/heads/feature/api\n",
+        );
+        assert_eq!(default_branch, "release");
+        assert_eq!(branches, vec!["feature/api", "release"]);
+    }
+
+    #[test]
+    fn probes_a_selected_remote_branch_without_a_worktree_checkout() {
+        let remote = tempfile::tempdir().unwrap();
+        git(remote.path(), &["init", "--bare", "-b", "main"]);
+        let source = tempfile::tempdir().unwrap();
+        git(source.path(), &["init", "-b", "main"]);
+        git(source.path(), &["config", "user.name", "Probe Test"]);
+        git(
+            source.path(),
+            &["config", "user.email", "probe@example.com"],
+        );
+        fs::create_dir_all(source.path().join(".brunomnia")).unwrap();
+        fs::create_dir_all(source.path().join(".insomnia/Request")).unwrap();
+        fs::write(
+            source.path().join(".brunomnia/project.yaml"),
+            "name: Probe\n",
+        )
+        .unwrap();
+        fs::write(
+            source.path().join(".insomnia/Request/request.yml"),
+            "name: Request\n",
+        )
+        .unwrap();
+        fs::write(source.path().join("openapi.yaml"), "openapi: 3.0.0\n").unwrap();
+        git(source.path(), &["add", "."]);
+        git(source.path(), &["commit", "-m", "probe files"]);
+        let remote_path = remote.path().to_string_lossy().into_owned();
+        git(source.path(), &["remote", "add", "origin", &remote_path]);
+        git(source.path(), &["push", "-u", "origin", "main"]);
+
+        let branches = git_repository_probe(remote_path.clone(), None, None).unwrap();
+        assert_eq!(branches.default_branch, "main");
+        assert_eq!(branches.branches, vec!["main"]);
+        assert_eq!(branches.total_files, 0);
+
+        let scan = git_repository_probe(remote_path, Some("main".into()), None).unwrap();
+        assert_eq!(scan.total_files, 3);
+        assert_eq!(scan.brunomnia_files, 1);
+        assert_eq!(scan.insomnia_files, 1);
+        assert_eq!(scan.specification_files, 1);
+        assert!(!scan.truncated);
     }
 
     #[test]

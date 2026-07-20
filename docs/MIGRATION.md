@@ -2524,6 +2524,20 @@ Compatibility bounds remain explicit: immutable project snapshots remain self-co
 
 Compatibility bounds remain explicit: managed project ownership is scoped to the local coordinator rather than a Brunomnia account or hosted organization, preserving the account-free architecture. Credentialed live execution remains opt-in and is skipped without environment-provided tenant authority. Service integrations is now `Complete`; exactly 13 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 254 — provider-guided Git onboarding (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned provider audit | Complete | Pinned Insomnia exposes reusable GitHub, GitLab, custom, and native credentials; provider validation; GitHub/GitLab repository APIs; author-email selection; manual URL fallback; branch selection; repository scans; and clone-location onboarding |
+| Reusable credential store | Complete | Up to 100 GitHub, GitLab, or custom HTTP(S) records are device-global and reusable across projects; credential names, providers, usernames, and tokens are authenticated inside one bounded AES-256-GCM payload whose random master key remains in macOS Keychain, while projects persist only a selected credential ID |
+| Provider validation and discovery | Complete | GitHub validates `/user`, optionally discovers `/user/emails`, and paginates pullable `/user/repos`; GitLab validates `/user` and paginates membership `/projects`, with bounded 30-second/no-redirect/2 MB page and 20-page/2,000-repository limits |
+| Transient Git authentication | Complete | GitHub, GitLab, and custom credentials are validated against the exact HTTP(S) remote host and passed to Git through host-scoped environment-backed credential helpers; tokens never enter command arguments, repository configuration, project YAML, exports, collaboration payloads, or duplicated workspaces. Installed Git helpers and SSH agents remain the native fallback |
+| Guided repository workflow | Complete baseline | One four-step flow selects/adds/edits/removes credentials, shows validation identity, automatically lists provider repositories, permits manual URLs, discovers remote branches, offers provider author emails, requires a selected-branch scan, and clones the exact branch into the chosen destination |
+| Bounded remote scan | Complete | A temporary depth-one filtered no-checkout clone reads only the selected branch tree, reports up to 50,000 repository files plus Brunomnia, Insomnia, and common API-spec counts, and is removed automatically; branch/ref parsing and local-bare-remote fixtures cover the behavior without external authority |
+| Existing-project continuity | Complete | Fetch, remote-branch checkout, pull, push, remote-access preflight, direct commit-and-push, and grouped commit-and-push all reuse the selected global credential; changing the remote to an incompatible host refuses before exposing provider credentials |
+
+Compatibility bounds remain explicit: built-in GitHub/GitLab authentication uses user-created provider tokens rather than a Brunomnia-hosted OAuth client or account broker; custom credentials deliberately support user-selected HTTP as well as HTTPS to match the pinned generic provider. System Git helpers and SSH remain available for enterprise hosts and native authentication. Git Sync and version control is now `Complete`; exactly 12 parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

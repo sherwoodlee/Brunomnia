@@ -148,7 +148,7 @@ export const shareableWorkspace = (workspace: Workspace): Workspace => {
     streamSessions: [],
     mcpSessions: [],
     certificates: emptyWorkspaceCertificates(),
-    project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true },
+    project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' },
     plugins: [],
     pluginData: {},
     activePluginTheme: '',
