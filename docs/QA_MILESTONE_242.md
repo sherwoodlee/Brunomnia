@@ -43,7 +43,13 @@ Rendered interaction QA remains omitted by standing direction. M242 changes the 
 
 ## Remote gate
 
-Pending implementation workflow and signed publication evidence.
+Main commit `05d22dccd7cde3ab75ccad8f9babb1acd6dec2ed` completed verify and publish in [Actions run 29730376384](https://github.com/sherwoodlee/Brunomnia/actions/runs/29730376384). Node 22 reproduced the committed 23,388,403-byte CLI, passed freshness plus the strengthened non-root/no-network Spectral trust smoke, and published AMD64/ARM64 provenance/SBOM manifests at:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:e402d68a8feb309b108a8cbde0b51a4e029bd26cb2992e8e1a7672dc8777b76d
+```
+
+Independent manifest inspection resolved AMD64 `sha256:d2020dc69ed8501fe59e7d54b8fc5b0d661dbfe469fabb890400f4f58b6fbdbc`, ARM64 `sha256:b22c545ca1e6d5d8b2e2125cfeb34ffbd5f17b7618b67337a9ec6c7f01dd045a`, and attached attestation manifests `sha256:466633f648ee0e8ff719c9520bef456fb576da8cd15439f0b8d5f848f7c7e3b3` plus `sha256:dec434ba4d8e8deb51b3bf09469add544ece2af898d959b3991253316ee00c1f`. Independent `cosign verify` passed issuer `https://token.actions.githubusercontent.com` and exact identity `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, validated the M242 commit and published digest claims plus the trusted certificate chain, and found transparency-log entry `2205332067`.
 
 ## Acceptance boundary
 
