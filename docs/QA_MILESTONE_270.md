@@ -55,7 +55,17 @@ No real AWS, GCP, Azure, Vault Dedicated, or HCP account was used. M270 proves v
 
 ## Remote gate
 
-Pending the implementation commit's remote `main` verification and signed multi-architecture publication. This section will be amended with the exact workflow, image digest, attestations, Cosign identity, and transparency evidence after that gate completes.
+Implementation commit `3c8bcc156eb705e7c69306fb117c6d409ae15ff0` first ran [CLI container workflow 29813417417](https://github.com/sherwoodlee/Brunomnia/actions/runs/29813417417). Its verify job correctly rejected the stale committed generated CLI bundle and skipped publication. Bundle-only commit `aebd2e7abe4b32a375891a5f5508e2779089f510` then matched the locally rebuilt 23,680,816-byte artifact byte-for-byte and completed both verify and publish jobs in [CLI container workflow 29813571865](https://github.com/sherwoodlee/Brunomnia/actions/runs/29813571865). The successful verify job rebuilt under Node 22 without a diff, built the verification image, matched package version, and passed the pinned-image, non-root, no-network, read-only, local-reference lint, standalone-suite, config, and plugin-tag smoke.
+
+The publish job emitted AMD64/ARM64 SBOM and provenance attestations and keylessly signed:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:dafcb767ce9c5d952d267b0c42c99bab057ea559210a8df0f2e2d9275c5c78c9
+```
+
+Independent manifest inspection resolved AMD64 `sha256:61264fc5b288e2c4f699d4d3fd3818f5538e3df04fd0fe6ecf1197913d8ff54a`, ARM64 `sha256:0d2d9bcdc386866f7884b860bc65244597c973b9b86cb5147e2a9cdebea233dc`, and attached attestation manifests `sha256:027acfbd99cf075ea7012a2b2b9fc29f6ccac1d5f9312a1e8096f9b136f6f30d` plus `sha256:8ba5672506d855573bcaeda41eeb4227d83a7321fbb52567f33c2fc990cb71ea`. Both platform attestations expose SPDX and SLSA provenance predicates.
+
+Independent Cosign verification passed digest claims, trusted certificate-chain validation, exact issuer `https://token.actions.githubusercontent.com`, exact subject `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, `push` trigger, `refs/heads/main`, repository `sherwoodlee/Brunomnia`, workflow `CLI container`, exact bundle commit SHA, and offline transparency-log inclusion at Rekor index `2211247854`.
 
 ## Acceptance boundary
 
