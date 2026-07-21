@@ -788,11 +788,15 @@ describe('workspace migrations', () => {
     exported.plugins = [{
       id: 'plugin-package', name: 'Package', version: '1.0.0', description: '', source: `module.exports = require('./lib/value');`, sourcePath: '/plugins/package', registryPackageName: 'insomnia-plugin-package',
       moduleFiles: { 'index.js': `module.exports = require('./lib/value');`, 'lib/value.js': 'module.exports = {};', '../escape.js': 'unsafe' }, entryModuleKey: 'index.js',
+      dependencyModuleFiles: { 'node_modules/left-pad/package.json': '{"name":"left-pad"}', 'node_modules/left-pad/index.js': 'module.exports = true;', '../dependency-escape.js': 'unsafe' },
+      dependencyPackages: { 'left-pad': { version: '1.3.0', entryModuleKey: 'node_modules/left-pad/index.js' }, '../unsafe': { version: '1.0.0', entryModuleKey: '../dependency-escape.js' } },
       sourceFormat: 'insomnia-commonjs', enabled: false, requestedPermissions: [], grantedPermissions: [], installedAt: '2026-07-20T00:00:00.000Z',
     }];
     const imported = migrateWorkspace(exported);
-    expect(imported.plugins[0]).toMatchObject({ registryPackageName: 'insomnia-plugin-package', entryModuleKey: 'index.js', moduleFiles: { 'index.js': expect.any(String), 'lib/value.js': 'module.exports = {};' } });
+    expect(imported.plugins[0]).toMatchObject({ registryPackageName: 'insomnia-plugin-package', entryModuleKey: 'index.js', moduleFiles: { 'index.js': expect.any(String), 'lib/value.js': 'module.exports = {};' }, dependencyPackages: { 'left-pad': { version: '1.3.0', entryModuleKey: 'node_modules/left-pad/index.js' } }, dependencyModuleFiles: { 'node_modules/left-pad/index.js': 'module.exports = true;' } });
     expect(imported.plugins[0].moduleFiles).not.toHaveProperty('../escape.js');
+    expect(imported.plugins[0].dependencyPackages).not.toHaveProperty('../unsafe');
+    expect(imported.plugins[0].dependencyModuleFiles).not.toHaveProperty('../dependency-escape.js');
     exported.plugins[0].registryPackageName = '../unsafe';
     expect(migrateWorkspace(exported).plugins[0].registryPackageName).toBeUndefined();
   });

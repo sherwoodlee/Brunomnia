@@ -6,6 +6,7 @@ import {
   buildPluginModuleRegistrySource,
   inferPluginModules,
   installReviewedPlugin,
+  pluginDependencyPackageName,
   pluginModuleVersions,
   pluginPackageChanged,
   requestedPluginModules,
@@ -40,6 +41,10 @@ describe('curated plugin modules', () => {
     `;
     expect(inferPluginModules(source)).toEqual(['events', 'uuid']);
     expect(requestedPluginModules(source, ['node:crypto', 'ajv', 'node:events'])).toEqual(['ajv', 'events', 'uuid']);
+    expect(pluginDependencyPackageName('left-pad/lib/pad')).toBe('left-pad');
+    expect(pluginDependencyPackageName('@scope/value/subpath')).toBe('@scope/value');
+    expect(pluginDependencyPackageName('../escape')).toBeUndefined();
+    expect(pluginDependencyPackageName('left-pad/../escape')).toBeUndefined();
   });
 
   it('treats source, package maps, entries, and manifest requests as authority-changing identity', () => {
@@ -47,6 +52,7 @@ describe('curated plugin modules', () => {
     expect(pluginPackageChanged(previous, { ...previous })).toBe(false);
     expect(pluginPackageChanged(previous, { ...previous, requestedModules: ['events', 'uuid'] })).toBe(true);
     expect(pluginPackageChanged(previous, { ...previous, moduleFiles: { 'index.js': 'module.exports = { changed: true };' } })).toBe(true);
+    expect(pluginPackageChanged(previous, { ...previous, dependencyModuleFiles: { 'node_modules/left-pad/index.js': 'module.exports = true;' }, dependencyPackages: { 'left-pad': { version: '1.3.0', entryModuleKey: 'node_modules/left-pad/index.js' } } })).toBe(true);
     expect(retainedPluginModuleGrants(['node:events', 'uuid'], ['events'])).toEqual(['events']);
   });
 

@@ -53,11 +53,11 @@ globalThis.postMessage = value => parentPort.postMessage(value);
 Object.defineProperty(globalThis, 'process', { value: undefined, writable: false, configurable: false });
 Object.defineProperty(globalThis, 'global', { value: undefined, writable: false, configurable: false });
 parentPort.on('message', data => globalThis.onmessage?.({ data }));
-${buildPluginWorkerSource(plugin.source, undefined, plugin.moduleFiles, plugin.entryModuleKey, plugin.grantedModules ?? [])}
+${buildPluginWorkerSource(plugin.source, undefined, plugin.moduleFiles, plugin.entryModuleKey, plugin.grantedModules ?? [], plugin.dependencyModuleFiles, plugin.dependencyPackages)}
 `;
   const workerUrl = new URL(`data:text/javascript;base64,${Buffer.from(bootstrap).toString('base64')}`);
   const worker = new Worker(workerUrl, {
-    resourceLimits: { maxOldGenerationSizeMb: 16, maxYoungGenerationSizeMb: 4, stackSizeMb: 2 },
+    resourceLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 8, stackSizeMb: 2 },
   });
   try {
     const result = await new Promise<CliPluginWorkerResult>((resolveWorker, rejectWorker) => {

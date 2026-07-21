@@ -7,7 +7,7 @@ import { emptyWorkspaceCertificates, normalizeCertificatePassphrase, normalizeCe
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 import { normalizeHttpMethod } from './request';
 import { normalizeMcpHistorySessions } from './mcpHistory';
-import { isRegistryPluginName, normalizePluginModules, requestedPluginModules } from './pluginModules';
+import { isRegistryPluginName, normalizePluginModules, pluginDependencyPackageName, requestedPluginModules } from './pluginModules';
 
 const storageKey = 'brunomnia.workspace.v1';
 
@@ -60,10 +60,10 @@ const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(valu
     ? knownPluginPermissions.filter((permission) => candidate.includes(permission))
     : [];
   const modules = (candidate: unknown) => !Array.isArray(candidate) ? [] : normalizePluginModules(candidate.flatMap((entry) => typeof entry === 'string' ? [entry] : []));
-  const safeModuleKey = (key: string) => !key.startsWith('/') && !key.includes('\\') && !key.includes('\0') && /\.(?:js|json)$/.test(key) && key.split('/').every((part) => Boolean(part) && part !== '.' && part !== '..');
+  const safeModuleKey = (key: string) => !key.startsWith('/') && !key.includes('\\') && !key.includes('\0') && /\.(?:c?js|json)$/.test(key) && key.split('/').every((part) => Boolean(part) && part !== '.' && part !== '..');
   const rawModuleFiles = plugin.moduleFiles && typeof plugin.moduleFiles === 'object' && !Array.isArray(plugin.moduleFiles)
     ? Object.entries(plugin.moduleFiles as Record<string, unknown>)
-      .filter(([key, source]) => typeof source === 'string' && safeModuleKey(key))
+      .filter(([key, source]) => typeof source === 'string' && safeModuleKey(key) && !key.split('/').includes('node_modules'))
       .slice(0, 500)
     : [];
   let moduleBytes = 0;
@@ -73,8 +73,31 @@ const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(valu
     return bytes <= 1_000_000 && moduleBytes <= 5_000_000;
   })) as Record<string, string>;
   const entryModuleKey = typeof plugin.entryModuleKey === 'string' && plugin.entryModuleKey in moduleFiles ? plugin.entryModuleKey : undefined;
+  const rawDependencyModuleFiles = plugin.dependencyModuleFiles && typeof plugin.dependencyModuleFiles === 'object' && !Array.isArray(plugin.dependencyModuleFiles)
+    ? Object.entries(plugin.dependencyModuleFiles as Record<string, unknown>)
+      .filter(([key, source]) => typeof source === 'string' && safeModuleKey(key) && key.startsWith('node_modules/'))
+      .slice(0, 2_000)
+    : [];
+  let dependencyBytes = 0;
+  const candidateDependencyModuleFiles = Object.fromEntries(rawDependencyModuleFiles.filter(([, source]) => {
+    const bytes = new TextEncoder().encode(source as string).byteLength;
+    dependencyBytes += bytes;
+    return bytes <= 1_000_000 && dependencyBytes <= 20_000_000;
+  })) as Record<string, string>;
+  const rawDependencyPackages = plugin.dependencyPackages && typeof plugin.dependencyPackages === 'object' && !Array.isArray(plugin.dependencyPackages)
+    ? Object.entries(plugin.dependencyPackages as Record<string, unknown>).slice(0, 50)
+    : [];
+  const dependencyPackages = Object.fromEntries(rawDependencyPackages.flatMap(([name, value]) => {
+    if (pluginDependencyPackageName(name) !== name || !value || typeof value !== 'object') return [];
+    const metadata = value as Record<string, unknown>;
+    const version = typeof metadata.version === 'string' ? metadata.version.slice(0, 200) : '';
+    const dependencyEntry = typeof metadata.entryModuleKey === 'string' ? metadata.entryModuleKey : '';
+    if (!version || !dependencyEntry.startsWith(`node_modules/${name}/`) || !(dependencyEntry in candidateDependencyModuleFiles)) return [];
+    return [[name, { version, entryModuleKey: dependencyEntry }]];
+  }));
+  const dependencyModuleFiles = Object.fromEntries(Object.entries(candidateDependencyModuleFiles).filter(([key]) => Object.keys(dependencyPackages).some((name) => key.startsWith(`node_modules/${name}/`))));
   const registryPackageName = stringValue(plugin.registryPackageName).trim();
-  const moduleSource = Object.values({ ...(entryModuleKey ? moduleFiles : {}), [entryModuleKey ?? 'index.js']: plugin.source }).join('\n');
+  const moduleSource = [...Object.values({ ...(entryModuleKey ? moduleFiles : {}), [entryModuleKey ?? 'index.js']: plugin.source }), ...Object.values(dependencyModuleFiles)].join('\n');
   const requestedModules = requestedPluginModules(moduleSource, modules(plugin.requestedModules));
   return [{
     id: typeof plugin.id === 'string' && plugin.id ? plugin.id : `migrated-plugin-${index}`,
@@ -86,6 +109,8 @@ const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(valu
     registryPackageName: isRegistryPluginName(registryPackageName) ? registryPackageName : undefined,
     moduleFiles: entryModuleKey ? moduleFiles : undefined,
     entryModuleKey,
+    dependencyModuleFiles: Object.keys(dependencyModuleFiles).length ? dependencyModuleFiles : undefined,
+    dependencyPackages: Object.keys(dependencyPackages).length ? dependencyPackages : undefined,
     requestedModules,
     grantedModules: modules(plugin.grantedModules).filter((module) => requestedModules.includes(module)),
     moduleWarnings: Array.isArray(plugin.moduleWarnings) ? plugin.moduleWarnings.flatMap((warning) => typeof warning === 'string' && warning.trim() ? [warning.slice(0, 1_000)] : []).slice(0, 100) : [],

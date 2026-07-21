@@ -2683,6 +2683,18 @@ Compatibility bounds remain explicit: production dependencies are not downloaded
 
 Compatibility bounds remain explicit: production dependencies are not downloaded, native dependency behavior for host-loaded hooks/actions is absent, and registry authentication, exact context-menu placement, broader ecosystem compatibility, plus CLI host RPC/user-invoked actions remain. `Plugins and extension API` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 267 — bounded reviewed plugin dependencies (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned dependency audit | Complete | Pinned installation runs Yarn's production graph, copies hoisted dependencies into the plugin's `node_modules`, and native-requires hooks/actions; its separate template sandbox intentionally excludes `node_modules` |
+| Local dependency capture | Complete baseline | Declared dependencies and optionals resolve from canonical in-root `node_modules`; UTF-8 CommonJS source, package identity/version/entry, nested requirements, graph limits, missing optionals, escapes, and version conflicts are explicit |
+| Registry graph acquisition | Complete baseline | Exact/tag/semver ranges select the highest compatible metadata version; every same-policy metadata/tarball request is bounded, every tarball SHA-1 and identity is verified, transitive dependencies recurse without scripts, and optional failures warn |
+| Runtime and authority | Complete baseline | At most 50 packages/2,000 files/20 MB remain reviewable workspace data. Each package is separately requested/granted, relative loads stay inside package roots, dependency changes reset authority, and desktop plus CLI use the same disposable Worker loader |
+| Verification | Complete | Local/registry graph, semver, checksum, traversal, grant denial/success, migration, TypeScript, full frontend, production/CLI build, native regression, formatting, and strict Clippy evidence is recorded in [Milestone 267 verification](QA_MILESTONE_267.md) |
+
+Compatibility bounds remain explicit: lifecycle/install scripts, native addons, ESM/export maps, conflicting multi-version graphs, peer/alias/Git/HTTP/file/workspace specifications, ambient Node/process compatibility, registry authentication, exact context-menu placement, broader ecosystem compatibility, and CLI host RPC/user-invoked actions remain. `Plugins and extension API` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

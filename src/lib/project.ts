@@ -1,5 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import type { GitCredential, GitProvider, Workspace } from '../types';
+import type { GitCredential, GitProvider, PluginDependencyPackage, Workspace } from '../types';
 import { migrateWorkspace } from './storage';
 import { publicEnvironments } from './resources';
 import { mergeLocalOAuth2RuntimeCredentials, withoutOAuth2RuntimeCredentials } from './oauth2Tokens';
@@ -30,7 +30,7 @@ export type GitCredentialInput = { provider: GitProvider; username: string; toke
 export type GitProviderValidation = { provider: GitProvider; accountLogin: string; accountName: string; emails: string[]; canDiscoverRepositories: boolean };
 export type GitProviderRepository = { id: string; name: string; fullName: string; cloneUrl: string; webUrl: string; defaultBranch: string; private: boolean; canPush: boolean };
 export type GitRepositoryProbe = { defaultBranch: string; branches: string[]; totalFiles: number; brunomniaFiles: number; insomniaFiles: number; specificationFiles: number; truncated: boolean };
-export type LocalPluginSource = { source: string; name: string; version: string; description: string; path: string; moduleFiles: Record<string, string>; entryModuleKey: string; requestedModules: string[]; moduleWarnings: string[] };
+export type LocalPluginSource = { source: string; name: string; version: string; description: string; path: string; moduleFiles: Record<string, string>; entryModuleKey: string; dependencyModuleFiles: Record<string, string>; dependencyPackages: Record<string, PluginDependencyPackage>; requestedModules: string[]; moduleWarnings: string[] };
 export type LocalPluginDiscovery = { plugins: LocalPluginSource[]; warnings: string[] };
 export type PluginRegistryInstallInput = { packageName: string; registryUrl: string; validateCertificates: boolean; caCertificatePem: string; proxyEnabled: boolean; httpProxy: string; httpsProxy: string; noProxy: string };
 

@@ -1,8 +1,8 @@
-import type { ApiRequest, HttpResponse, PluginPermission, PluginRecord, Workspace } from '../types';
+import type { ApiRequest, HttpResponse, PluginDependencyPackage, PluginPermission, PluginRecord, Workspace } from '../types';
 import { createBlankRequest } from '../data/seed';
-import { buildPluginModuleRegistrySource, inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginModuleVersions, validateRegistryPluginName } from './pluginModules';
+import { buildPluginModuleRegistrySource, canonicalPluginModule, inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginDependencyPackageName, pluginModuleVersions, validateRegistryPluginName } from './pluginModules';
 
-export { inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginModuleVersions, validateRegistryPluginName };
+export { inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginDependencyPackageName, pluginModuleVersions, validateRegistryPluginName };
 
 export type PluginTemplateDescriptor = { name: string; displayName: string; description: string };
 export type PluginActionDescriptor = { id: string; label: string; kind: 'request' | 'request-group' | 'workspace' | 'document' };
@@ -106,6 +106,22 @@ const normalizePluginNetworkRequest = (value: unknown): ApiRequest => {
 
 const safeIdentifier = () => `__br_${crypto.randomUUID().replace(/-/g, '')}`;
 
+const safePluginModuleKey = (key: string) => {
+  const parts = key.split('/');
+  return Boolean(key) && key.length <= 1_000 && !key.startsWith('/') && !key.includes('\\') && !key.includes('\0') && /\.(?:c?js|json)$/.test(key) && parts.every((part) => Boolean(part) && part !== '.' && part !== '..');
+};
+
+const validateModuleSource = (key: string, value: string, label: string) => {
+  if (typeof value !== 'string') throw new Error(`${label} module '${key}' must contain text.`);
+  const bytes = new TextEncoder().encode(value).byteLength;
+  if (bytes > 1_000_000) throw new Error(`${label} module '${key}' exceeds the 1 MB limit.`);
+  if (/\.(?:c?js)$/.test(key) && value.trim()) {
+    if (/\bimport\s*(?:\/\*[\s\S]*?\*\/\s*)?\(/.test(value) || /(^|[;\n])\s*import\s/m.test(value)) throw new Error(`${label} module '${key}' uses unavailable ES module imports.`);
+    if (/(^|[;\n])\s*export\s/m.test(value)) throw new Error(`${label} module '${key}' uses unavailable ES module exports.`);
+  }
+  return bytes;
+};
+
 const normalizedPluginModules = (source: string, moduleFiles?: Record<string, string>, entryModuleKey?: string) => {
   validatePluginSource(source);
   const files: Record<string, string> = moduleFiles && Object.keys(moduleFiles).length ? { ...moduleFiles } : { 'index.js': source };
@@ -115,29 +131,42 @@ const normalizedPluginModules = (source: string, moduleFiles?: Record<string, st
   if (entries.length > 500) throw new Error('Plugin package exceeds the 500-module limit.');
   let totalBytes = 0;
   for (const [key, value] of entries) {
-    const parts = key.split('/');
-    if (!key || key.length > 1_000 || key.startsWith('/') || key.includes('\\') || key.includes('\0') || !/\.(?:js|json)$/.test(key) || parts.some((part) => !part || part === '.' || part === '..')) throw new Error(`Plugin module path '${key}' is not safe.`);
-    if (typeof value !== 'string') throw new Error(`Plugin module '${key}' must contain text.`);
-    const bytes = new TextEncoder().encode(value).byteLength;
-    if (bytes > 1_000_000) throw new Error(`Plugin module '${key}' exceeds the 1 MB limit.`);
-    totalBytes += bytes;
+    if (!safePluginModuleKey(key) || key.split('/').includes('node_modules')) throw new Error(`Plugin module path '${key}' is not safe.`);
+    totalBytes += validateModuleSource(key, value, 'Plugin');
     if (totalBytes > 5_000_000) throw new Error('Plugin package exceeds the 5 MB aggregate module limit.');
-    if (key.endsWith('.js') && value.trim()) {
-      if (/\bimport\s*(?:\/\*[\s\S]*?\*\/\s*)?\(/.test(value) || /(^|[;\n])\s*import\s/m.test(value)) throw new Error(`Plugin module '${key}' uses unavailable ES module imports.`);
-      if (/(^|[;\n])\s*export\s/m.test(value)) throw new Error(`Plugin module '${key}' uses unavailable ES module exports.`);
-    }
   }
   return { files, entry };
 };
 
-export const pluginSourceText = (plugin: Pick<PluginRecord, 'source' | 'moduleFiles' | 'entryModuleKey'>) => {
-  const files: Record<string, string> = plugin.moduleFiles ? { ...plugin.moduleFiles } : { 'index.js': plugin.source };
-  files[plugin.entryModuleKey && plugin.entryModuleKey in files ? plugin.entryModuleKey : 'index.js'] = plugin.source;
-  return Object.values(files).join('\n');
+const normalizedDependencyModules = (moduleFiles: Record<string, string> = {}, packages: Record<string, PluginDependencyPackage> = {}) => {
+  const packageEntries = Object.entries(packages);
+  const fileEntries = Object.entries(moduleFiles);
+  if (packageEntries.length > 50) throw new Error('Plugin dependencies exceed the 50-package limit.');
+  if (fileEntries.length > 2_000) throw new Error('Plugin dependencies exceed the 2,000-module limit.');
+  let totalBytes = 0;
+  for (const [key, value] of fileEntries) {
+    if (!safePluginModuleKey(key) || !key.startsWith('node_modules/')) throw new Error(`Plugin dependency module path '${key}' is not safe.`);
+    totalBytes += validateModuleSource(key, value, 'Plugin dependency');
+    if (totalBytes > 20_000_000) throw new Error('Plugin dependencies exceed the 20 MB aggregate module limit.');
+  }
+  for (const [name, dependency] of packageEntries) {
+    if (pluginDependencyPackageName(name) !== name) throw new Error(`Plugin dependency package '${name}' is not safe.`);
+    if (!dependency || typeof dependency.version !== 'string' || dependency.version.length > 200) throw new Error(`Plugin dependency package '${name}' has invalid metadata.`);
+    if (!dependency.entryModuleKey.startsWith(`node_modules/${name}/`) || !(dependency.entryModuleKey in moduleFiles)) throw new Error(`Plugin dependency package '${name}' has an invalid entry module.`);
+  }
+  return { files: { ...moduleFiles }, packages: structuredClone(packages) };
 };
 
-export const buildPluginWorkerSource = (source: string, nonce = safeIdentifier(), moduleFiles?: Record<string, string>, entryModuleKey?: string, grantedModules: string[] = []) => {
+export const pluginSourceText = (plugin: Pick<PluginRecord, 'source' | 'moduleFiles' | 'entryModuleKey' | 'dependencyModuleFiles'>) => {
+  const files: Record<string, string> = plugin.moduleFiles ? { ...plugin.moduleFiles } : { 'index.js': plugin.source };
+  files[plugin.entryModuleKey && plugin.entryModuleKey in files ? plugin.entryModuleKey : 'index.js'] = plugin.source;
+  return [...Object.values(files), ...Object.values(plugin.dependencyModuleFiles ?? {})].join('\n');
+};
+
+export const buildPluginWorkerSource = (source: string, nonce = safeIdentifier(), moduleFiles?: Record<string, string>, entryModuleKey?: string, grantedModules: string[] = [], dependencyModuleFiles?: Record<string, string>, dependencyPackages?: Record<string, PluginDependencyPackage>) => {
   const packageModules = normalizedPluginModules(source, moduleFiles, entryModuleKey);
+  const dependencyModules = normalizedDependencyModules(dependencyModuleFiles, dependencyPackages);
+  const moduleGrants = [...new Set(grantedModules.map(canonicalPluginModule))];
   const moduleRegistry = buildPluginModuleRegistrySource(grantedModules, nonce);
   const host = `${nonce}_host`;
   const pending = `${nonce}_pending`;
@@ -153,6 +182,10 @@ export const buildPluginWorkerSource = (source: string, nonce = safeIdentifier()
   const input = `${nonce}_input`;
   const nativeFunction = `${nonce}_nativeFunction`;
   const packageFiles = `${nonce}_packageFiles`;
+  const dependencyFiles = `${nonce}_dependencyFiles`;
+  const dependencyMetadata = `${nonce}_dependencyMetadata`;
+  const grantedModuleSet = `${nonce}_grantedModuleSet`;
+  const reservedModuleSet = `${nonce}_reservedModuleSet`;
   const packageCache = `${nonce}_packageCache`;
   return `
 const ${host} = self;
@@ -199,6 +232,10 @@ ${moduleRegistry.source}
     error: (...values) => ${notifications}.push({ type: 'log', title: 'Plugin error', message: values.map(String).join(' ') }),
   };
   const ${packageFiles} = JSON.parse(${JSON.stringify(JSON.stringify(packageModules.files))});
+  const ${dependencyFiles} = JSON.parse(${JSON.stringify(JSON.stringify(dependencyModules.files))});
+  const ${dependencyMetadata} = JSON.parse(${JSON.stringify(JSON.stringify(dependencyModules.packages))});
+  const ${grantedModuleSet} = new Set(${JSON.stringify(moduleGrants)});
+  const ${reservedModuleSet} = new Set(${JSON.stringify([...pluginBaselineModules, ...pluginCuratedModules])});
   const ${packageCache} = Object.create(null);
   const normalizeModuleKey = value => {
     const output = [];
@@ -209,29 +246,65 @@ ${moduleRegistry.source}
     }
     return output.join('/');
   };
-  const resolveModuleKey = (fromKey, specifier) => {
+  const resolveModuleKey = (files, fromKey, specifier, seen = new Set()) => {
     const fromParts = String(fromKey).split('/'); fromParts.pop();
     const normalized = normalizeModuleKey(fromParts.concat(String(specifier).split('/')).join('/'));
-    if (!normalized) return null;
-    const candidates = [normalized, normalized + '.js', normalized + '.json', normalized + '/index.js', normalized + '/index.json'];
-    return candidates.find(candidate => Object.prototype.hasOwnProperty.call(${packageFiles}, candidate)) || null;
+    if (!normalized || seen.has(normalized)) return null;
+    seen.add(normalized);
+    const direct = [normalized, normalized + '.js', normalized + '.cjs', normalized + '.json'].find(candidate => Object.prototype.hasOwnProperty.call(files, candidate));
+    if (direct) return direct;
+    const manifestKey = normalized + '/package.json';
+    if (Object.prototype.hasOwnProperty.call(files, manifestKey)) {
+      try {
+        const manifest = JSON.parse(files[manifestKey]);
+        const main = typeof manifest.main === 'string' && manifest.main ? manifest.main : 'index.js';
+        const fromManifest = resolveModuleKey(files, manifestKey, './' + main, seen);
+        if (fromManifest) return fromManifest;
+      } catch {}
+    }
+    return [normalized + '/index.js', normalized + '/index.cjs', normalized + '/index.json'].find(candidate => Object.prototype.hasOwnProperty.call(files, candidate)) || null;
+  };
+  const dependencyPackageName = specifier => {
+    const parts = String(specifier).split('/');
+    if (parts.some(part => !part || part === '.' || part === '..')) return '';
+    return String(specifier).startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+  };
+  const dependencyPackageForKey = key => dependencyPackageName(String(key).slice('node_modules/'.length));
+  const resolveDependencyKey = specifier => {
+    const packageName = dependencyPackageName(specifier);
+    const dependency = ${dependencyMetadata}[packageName];
+    if (!dependency) return null;
+    if (specifier === packageName) return dependency.entryModuleKey;
+    return resolveModuleKey(${dependencyFiles}, 'node_modules/' + packageName + '/index.js', './' + specifier.slice(packageName.length + 1));
   };
   const loadPluginModule = key => {
     if (Object.prototype.hasOwnProperty.call(${packageCache}, key)) return ${packageCache}[key].exports;
-    if (!Object.prototype.hasOwnProperty.call(${packageFiles}, key)) throw new Error("Cannot find plugin module '" + key + "'.");
+    const files = key.startsWith('node_modules/') ? ${dependencyFiles} : ${packageFiles};
+    if (!Object.prototype.hasOwnProperty.call(files, key)) throw new Error("Cannot find plugin module '" + key + "'.");
     const module = { exports: {}, filename: key }; ${packageCache}[key] = module;
-    if (key.endsWith('.json')) { module.exports = JSON.parse(${packageFiles}[key]); return module.exports; }
+    if (key.endsWith('.json')) { module.exports = JSON.parse(files[key]); return module.exports; }
     const localRequire = name => {
       const specifier = String(name);
       if (specifier.startsWith('./') || specifier.startsWith('../')) {
-        const resolved = resolveModuleKey(key, specifier);
+        const resolved = resolveModuleKey(files, key, specifier);
         if (!resolved) throw new Error("Cannot find module '" + specifier + "' from '" + key + "'.");
+        if (key.startsWith('node_modules/')) {
+          const packagePrefix = 'node_modules/' + dependencyPackageForKey(key) + '/';
+          if (!resolved.startsWith(packagePrefix)) throw new Error("Dependency-relative module '" + specifier + "' escaped package '" + dependencyPackageForKey(key) + "'.");
+        }
         return loadPluginModule(resolved);
+      }
+      if (${reservedModuleSet}.has(specifier)) return ${moduleRegistry.safeRequire}(specifier);
+      const dependencyKey = resolveDependencyKey(specifier);
+      if (dependencyKey) {
+        const packageName = dependencyPackageName(specifier);
+        if (!${grantedModuleSet}.has(specifier) && !${grantedModuleSet}.has(packageName)) throw new Error("Module '" + specifier + "' not permitted by manifest");
+        return loadPluginModule(dependencyKey);
       }
       return ${moduleRegistry.safeRequire}(specifier);
     };
     const directory = key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : '.';
-    const compiled = ${nativeFunction}('module', 'exports', 'require', '__dirname', '__filename', 'Buffer', 'console', 'TextEncoder', 'TextDecoder', 'URL', 'setTimeout', 'clearTimeout', 'globalThis', 'self', 'window', 'document', 'navigator', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'importScripts', 'indexedDB', 'caches', 'postMessage', 'Function', 'WebAssembly', "'use strict';\\n" + ${packageFiles}[key]);
+    const compiled = ${nativeFunction}('module', 'exports', 'require', '__dirname', '__filename', 'Buffer', 'console', 'TextEncoder', 'TextDecoder', 'URL', 'setTimeout', 'clearTimeout', 'globalThis', 'self', 'window', 'document', 'navigator', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'importScripts', 'indexedDB', 'caches', 'postMessage', 'Function', 'WebAssembly', "'use strict';\\n" + files[key]);
     compiled(module, module.exports, localRequire, directory, key, SafeBuffer, safeConsole, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined);
     return module.exports;
   };
@@ -400,7 +473,7 @@ const executePlugin = async (
   callbacks: PluginHostCallbacks = {},
   timeoutMs = 2000,
 ): Promise<PluginWorkerResult> => {
-  const source = buildPluginWorkerSource(plugin.source, safeIdentifier(), plugin.moduleFiles, plugin.entryModuleKey, plugin.grantedModules ?? []);
+  const source = buildPluginWorkerSource(plugin.source, safeIdentifier(), plugin.moduleFiles, plugin.entryModuleKey, plugin.grantedModules ?? [], plugin.dependencyModuleFiles, plugin.dependencyPackages);
   const blob = new Blob([source], { type: 'text/javascript' });
   const workerUrl = URL.createObjectURL(blob);
   const worker = new Worker(workerUrl);

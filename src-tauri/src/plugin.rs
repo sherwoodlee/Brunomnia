@@ -2,10 +2,11 @@ use flate2::read::GzDecoder;
 use futures_util::StreamExt;
 use reqwest::{redirect::Policy, Certificate, Client, Proxy, Url};
 use ring::digest::{digest, SHA1_FOR_LEGACY_USE_ONLY};
+use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -25,6 +26,12 @@ const MAX_REGISTRY_TARBALL_BYTES: usize = 10_000_000;
 const MAX_REGISTRY_ARCHIVE_BYTES: u64 = 20_000_000;
 const MAX_REGISTRY_ARCHIVE_ENTRIES: usize = 2_000;
 const MAX_REGISTRY_REDIRECTS: usize = 5;
+const MAX_DEPENDENCY_PACKAGES: usize = 50;
+const MAX_DEPENDENCY_FILES: usize = 2_000;
+const MAX_DEPENDENCY_BYTES: u64 = 20_000_000;
+const MAX_DEPENDENCY_DOWNLOAD_BYTES: usize = 30_000_000;
+const MAX_DEPENDENCY_METADATA_BYTES: usize = 2_000_000;
+const MAX_DEPENDENCY_METADATA_TOTAL_BYTES: usize = 10_000_000;
 const DEFAULT_PLUGIN_REGISTRY: &str = "https://registry.npmjs.org/";
 const DEFAULT_TARBALL_HOSTS: [&str; 2] = ["registry.npmjs.org", "npm.pkg.github.com"];
 
@@ -51,8 +58,17 @@ pub struct PluginSourceOutput {
     pub path: String,
     pub module_files: BTreeMap<String, String>,
     pub entry_module_key: String,
+    pub dependency_module_files: BTreeMap<String, String>,
+    pub dependency_packages: BTreeMap<String, PluginDependencyPackage>,
     pub requested_modules: Vec<String>,
     pub module_warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDependencyPackage {
+    pub version: String,
+    pub entry_module_key: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -154,7 +170,7 @@ fn collect_module_files(
             continue;
         }
         let extension = path.extension().and_then(|value| value.to_str());
-        if !matches!(extension, Some("js" | "json")) {
+        if !matches!(extension, Some("js" | "cjs" | "json")) {
             continue;
         }
         if metadata.len() > MAX_PLUGIN_BYTES {
@@ -200,7 +216,7 @@ fn package_modules(
     let entry_module_key = module_key(root, entry)?;
     if !matches!(
         entry.extension().and_then(|value| value.to_str()),
-        Some("js")
+        Some("js" | "cjs")
     ) {
         return Err("Plugin package entries must be JavaScript files.".into());
     }
@@ -295,9 +311,451 @@ fn plugin_source_output(
         path,
         module_files,
         entry_module_key,
+        dependency_module_files: BTreeMap::new(),
+        dependency_packages: BTreeMap::new(),
         requested_modules,
         module_warnings,
     }
+}
+
+#[derive(Debug, Clone)]
+struct DependencyRequirement {
+    name: String,
+    requirement: String,
+    optional: bool,
+}
+
+#[derive(Debug, Default)]
+struct DependencyBundle {
+    module_files: BTreeMap<String, String>,
+    packages: BTreeMap<String, PluginDependencyPackage>,
+    requested_packages: BTreeSet<String>,
+    warnings: Vec<String>,
+}
+
+fn validate_dependency_package_name(package_name: &str) -> Result<(), String> {
+    if package_name.is_empty()
+        || package_name.len() > 214
+        || package_name.contains('\0')
+        || package_name.contains('\\')
+        || package_name.contains("..")
+        || package_name.starts_with('/')
+    {
+        return Err(format!(
+            "Dependency package name '{package_name}' is unsafe."
+        ));
+    }
+    let segments = package_name.split('/').collect::<Vec<_>>();
+    if (package_name.starts_with('@') && segments.len() != 2)
+        || (!package_name.starts_with('@') && segments.len() != 1)
+        || segments.iter().any(|segment| {
+            segment.is_empty()
+                || *segment == "."
+                || *segment == ".."
+                || !segment.chars().enumerate().all(|(index, character)| {
+                    character.is_ascii_alphanumeric()
+                        || matches!(character, '_' | '-' | '.' | '~')
+                        || (index == 0 && character == '@')
+                })
+        })
+    {
+        return Err(format!(
+            "Dependency package name '{package_name}' is unsafe."
+        ));
+    }
+    Ok(())
+}
+
+fn package_dependency_requirements(
+    package: &Value,
+    warnings: &mut Vec<String>,
+) -> Vec<DependencyRequirement> {
+    let mut requirements = BTreeMap::<String, DependencyRequirement>::new();
+    for (field, optional) in [("dependencies", false), ("optionalDependencies", true)] {
+        let Some(entries) = package.get(field).and_then(Value::as_object) else {
+            continue;
+        };
+        for (name, value) in entries {
+            if validate_dependency_package_name(name).is_err() {
+                warnings.push(format!("Ignoring unsafe {field} package name '{name}'."));
+                continue;
+            }
+            let Some(requirement) = value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                warnings.push(format!("Ignoring non-string {field} range for '{name}'."));
+                continue;
+            };
+            requirements.insert(
+                name.clone(),
+                DependencyRequirement {
+                    name: name.clone(),
+                    requirement: requirement.to_string(),
+                    optional,
+                },
+            );
+        }
+    }
+    if package
+        .get("peerDependencies")
+        .and_then(Value::as_object)
+        .is_some_and(|dependencies| !dependencies.is_empty())
+    {
+        warnings.push(
+            "Peer dependencies are not injected from Brunomnia's ambient runtime; package them as production dependencies."
+                .into(),
+        );
+    }
+    if ["bundledDependencies", "bundleDependencies"]
+        .iter()
+        .any(|field| {
+            package
+                .get(field)
+                .and_then(Value::as_array)
+                .is_some_and(|dependencies| !dependencies.is_empty())
+        })
+    {
+        warnings.push(
+            "Bundled node_modules are ignored; declared production dependencies are resolved independently."
+                .into(),
+        );
+    }
+    requirements.into_values().collect()
+}
+
+fn dependency_entry(
+    package_name: &str,
+    package: &Value,
+    module_files: &BTreeMap<String, String>,
+) -> Result<String, String> {
+    if package.get("type").and_then(Value::as_str) == Some("module") {
+        return Err(format!(
+            "Dependency '{package_name}' is ESM-only; the plugin runtime accepts reviewed CommonJS packages."
+        ));
+    }
+    let requested = package
+        .get("main")
+        .and_then(Value::as_str)
+        .unwrap_or("index.js")
+        .trim_start_matches("./");
+    if requested.is_empty()
+        || requested.starts_with('/')
+        || requested.contains('\\')
+        || requested.contains('\0')
+        || requested
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(format!(
+            "Dependency '{package_name}' has an unsafe main entry."
+        ));
+    }
+    if Path::new(requested)
+        .extension()
+        .and_then(|value| value.to_str())
+        == Some("node")
+    {
+        return Err(format!(
+            "Dependency '{package_name}' requires a native addon, which cannot run in the isolated plugin Worker."
+        ));
+    }
+    let candidates = [
+        requested.to_string(),
+        format!("{requested}.js"),
+        format!("{requested}.cjs"),
+        format!("{requested}.json"),
+        format!("{requested}/index.js"),
+        format!("{requested}/index.cjs"),
+        format!("{requested}/index.json"),
+    ];
+    candidates
+        .into_iter()
+        .find(|candidate| module_files.contains_key(candidate))
+        .ok_or_else(|| {
+            format!(
+                "Dependency '{package_name}' entry '{requested}' was not found in its bounded CommonJS module map."
+            )
+        })
+}
+
+fn dependency_module_prefix(package_name: &str) -> String {
+    format!("node_modules/{package_name}/")
+}
+
+fn merge_dependency_package(
+    bundle: &mut DependencyBundle,
+    package_name: &str,
+    version: &str,
+    entry: &str,
+    module_files: BTreeMap<String, String>,
+) -> Result<(), String> {
+    if bundle.packages.len() >= MAX_DEPENDENCY_PACKAGES {
+        return Err(format!(
+            "Plugin dependency graph exceeds {MAX_DEPENDENCY_PACKAGES} packages."
+        ));
+    }
+    let prefix = dependency_module_prefix(package_name);
+    let mut bytes = bundle
+        .module_files
+        .values()
+        .map(|source| source.len() as u64)
+        .sum::<u64>();
+    for (key, source) in module_files {
+        if bundle.module_files.len() >= MAX_DEPENDENCY_FILES {
+            return Err(format!(
+                "Plugin dependency graph exceeds {MAX_DEPENDENCY_FILES} JavaScript/JSON files."
+            ));
+        }
+        bytes = bytes.saturating_add(source.len() as u64);
+        if bytes > MAX_DEPENDENCY_BYTES {
+            return Err(format!(
+                "Plugin dependency graph exceeds the {MAX_DEPENDENCY_BYTES} byte source limit."
+            ));
+        }
+        let full_key = format!("{prefix}{key}");
+        if bundle
+            .module_files
+            .insert(full_key.clone(), source)
+            .is_some()
+        {
+            return Err(format!("Duplicate plugin dependency module '{full_key}'."));
+        }
+    }
+    bundle.packages.insert(
+        package_name.to_string(),
+        PluginDependencyPackage {
+            version: version.to_string(),
+            entry_module_key: format!("{prefix}{entry}"),
+        },
+    );
+    Ok(())
+}
+
+fn local_dependency_path(
+    plugin_root: &Path,
+    requester_root: &Path,
+    package_name: &str,
+) -> Result<Option<PathBuf>, String> {
+    let relative = package_name
+        .split('/')
+        .fold(PathBuf::new(), |mut path, segment| {
+            path.push(segment);
+            path
+        });
+    let mut search_root = Some(requester_root);
+    while let Some(root) = search_root {
+        if !root.starts_with(plugin_root) {
+            break;
+        }
+        let candidate = root.join("node_modules").join(&relative);
+        if !candidate.is_dir() {
+            if root == plugin_root {
+                break;
+            }
+            search_root = root.parent();
+            continue;
+        }
+        let canonical = candidate
+            .canonicalize()
+            .map_err(|error| format!("Unable to open dependency '{package_name}': {error}"))?;
+        if !canonical.starts_with(plugin_root) {
+            return Err(format!(
+                "Dependency '{package_name}' escapes the selected plugin package root."
+            ));
+        }
+        return Ok(Some(canonical));
+    }
+    Ok(None)
+}
+
+fn read_package_json(path: &Path, label: &str) -> Result<Value, String> {
+    let package_path = path.join("package.json");
+    let metadata = fs::metadata(&package_path)
+        .map_err(|error| format!("Unable to inspect {label} package.json: {error}"))?;
+    if !metadata.is_file() || metadata.len() > MAX_PLUGIN_BYTES {
+        return Err(format!(
+            "{label} package.json must be a regular file no larger than 1 MB."
+        ));
+    }
+    serde_json::from_str(
+        &fs::read_to_string(&package_path)
+            .map_err(|error| format!("Unable to read {label} package.json: {error}"))?,
+    )
+    .map_err(|error| format!("Invalid {label} package.json: {error}"))
+}
+
+fn local_dependency_bundle(
+    plugin_root: &Path,
+    package: &Value,
+) -> Result<DependencyBundle, String> {
+    let mut bundle = DependencyBundle::default();
+    let mut root_warnings = Vec::new();
+    let mut queue = VecDeque::from(
+        package_dependency_requirements(package, &mut root_warnings)
+            .into_iter()
+            .map(|requirement| (requirement, plugin_root.to_path_buf()))
+            .collect::<Vec<_>>(),
+    );
+    bundle.warnings.extend(root_warnings);
+    while let Some((requirement, requester_root)) = queue.pop_front() {
+        bundle.requested_packages.insert(requirement.name.clone());
+        if let Some(selected) = bundle.packages.get(&requirement.name) {
+            if !npm_requirement_matches(&requirement.requirement, &selected.version) {
+                return Err(format!(
+                    "Dependency '{}' requires incompatible versions '{}' and '{}'.",
+                    requirement.name, requirement.requirement, selected.version
+                ));
+            }
+            continue;
+        }
+        let Some(package_root) =
+            local_dependency_path(plugin_root, &requester_root, &requirement.name)?
+        else {
+            bundle.warnings.push(format!(
+                "{} dependency '{}' ({}) is not installed under this plugin's node_modules.",
+                if requirement.optional {
+                    "Optional"
+                } else {
+                    "Required"
+                },
+                requirement.name,
+                requirement.requirement
+            ));
+            continue;
+        };
+        let dependency_package =
+            match read_package_json(&package_root, &format!("dependency '{}'", requirement.name)) {
+                Ok(package) => package,
+                Err(error) if requirement.optional => {
+                    bundle.warnings.push(error);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+        let actual_name = dependency_package
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(&requirement.name);
+        if actual_name != requirement.name {
+            return Err(format!(
+                "Dependency folder '{}' contains package '{}'.",
+                requirement.name, actual_name
+            ));
+        }
+        let version = dependency_package
+            .get("version")
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("Dependency '{}' has no version.", requirement.name))?;
+        if !npm_requirement_matches(&requirement.requirement, version) {
+            return Err(format!(
+                "Dependency '{}' version '{}' does not satisfy '{}'.",
+                requirement.name, version, requirement.requirement
+            ));
+        }
+        let mut files = BTreeMap::new();
+        let mut bytes = 0;
+        collect_module_files(&package_root, &package_root, 0, &mut bytes, &mut files)?;
+        let entry = match dependency_entry(&requirement.name, &dependency_package, &files) {
+            Ok(entry) => entry,
+            Err(error) if requirement.optional => {
+                bundle.warnings.push(error);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        let mut dependency_warnings = Vec::new();
+        let nested = package_dependency_requirements(&dependency_package, &mut dependency_warnings);
+        bundle.warnings.extend(dependency_warnings);
+        merge_dependency_package(&mut bundle, &requirement.name, version, &entry, files)?;
+        queue.extend(
+            nested
+                .into_iter()
+                .map(|nested_requirement| (nested_requirement, package_root.clone())),
+        );
+    }
+    Ok(bundle)
+}
+
+fn attach_dependency_bundle(output: &mut PluginSourceOutput, bundle: DependencyBundle) {
+    for package_name in &bundle.requested_packages {
+        if !output
+            .requested_modules
+            .iter()
+            .any(|requested| requested == package_name)
+        {
+            output.requested_modules.push(package_name.clone());
+        }
+    }
+    output.dependency_module_files = bundle.module_files;
+    output.dependency_packages = bundle.packages;
+    output.module_warnings.extend(bundle.warnings);
+}
+
+fn normalized_version_requirement(value: &str) -> String {
+    let mut output = Vec::new();
+    let mut pending_operator = "";
+    for part in value.split_whitespace() {
+        if matches!(part, ">" | ">=" | "<" | "<=" | "=" | "~" | "^") {
+            pending_operator = part;
+            continue;
+        }
+        let normalized = if part.eq_ignore_ascii_case("x") {
+            "*".to_string()
+        } else {
+            part.replace(['X', 'x'], "*")
+        };
+        output.push(format!("{pending_operator}{normalized}"));
+        pending_operator = "";
+    }
+    output.join(",")
+}
+
+fn npm_requirement_matches(requirement: &str, version: &str) -> bool {
+    let Ok(version) = Version::parse(version.trim_start_matches('v')) else {
+        return false;
+    };
+    requirement.split("||").any(|branch| {
+        let branch = branch.trim();
+        if branch.is_empty() || branch == "*" || branch.eq_ignore_ascii_case("latest") {
+            return true;
+        }
+        if let Some((minimum, maximum)) = branch.split_once(" - ") {
+            let Ok(minimum) = Version::parse(minimum.trim().trim_start_matches('v')) else {
+                return false;
+            };
+            let Ok(maximum) = Version::parse(maximum.trim().trim_start_matches('v')) else {
+                return false;
+            };
+            return version >= minimum && version <= maximum;
+        }
+        let numeric = branch.trim_start_matches('v');
+        if numeric
+            .chars()
+            .all(|character| character.is_ascii_digit() || character == '.')
+        {
+            let parts = numeric
+                .split('.')
+                .map(str::parse::<u64>)
+                .collect::<Result<Vec<_>, _>>();
+            if let Ok(parts) = parts {
+                return match parts.as_slice() {
+                    [major] => version.major == *major,
+                    [major, minor] => version.major == *major && version.minor == *minor,
+                    [major, minor, patch] => {
+                        version.major == *major
+                            && version.minor == *minor
+                            && version.patch == *patch
+                            && version.pre.is_empty()
+                    }
+                    _ => false,
+                };
+            }
+        }
+        VersionReq::parse(&normalized_version_requirement(branch))
+            .is_ok_and(|parsed| parsed.matches(&version))
+    })
 }
 
 fn validate_registry_plugin_name(plugin_name: &str) -> Result<(), String> {
@@ -468,7 +926,14 @@ where
         validate(&current)?;
         let response = client
             .get(current.clone())
-            .header("accept", "application/json, application/octet-stream;q=0.9")
+            .header(
+                "accept",
+                if label.contains("metadata") {
+                    "application/vnd.npm.install-v1+json, application/json;q=0.9"
+                } else {
+                    "application/octet-stream, application/json;q=0.5"
+                },
+            )
             .header(reqwest::header::ACCEPT_ENCODING, "identity")
             .send()
             .await
@@ -629,7 +1094,7 @@ fn registry_module_key(path: &str) -> Result<Option<String>, String> {
     }
     if !matches!(
         Path::new(key).extension().and_then(|value| value.to_str()),
-        Some("js" | "json")
+        Some("js" | "cjs" | "json")
     ) {
         return Ok(None);
     }
@@ -658,27 +1123,33 @@ fn resolve_registry_entry(
     let candidates = [
         requested.to_string(),
         format!("{requested}.js"),
+        format!("{requested}.cjs"),
         format!("{requested}/index.js"),
+        format!("{requested}/index.cjs"),
     ];
     candidates
         .into_iter()
-        .find(|candidate| candidate.ends_with(".js") && module_files.contains_key(candidate))
+        .find(|candidate| {
+            (candidate.ends_with(".js") || candidate.ends_with(".cjs"))
+                && module_files.contains_key(candidate)
+        })
         .ok_or_else(|| {
             format!("Plugin package entry '{requested}' was not found in the bounded module map.")
         })
 }
 
 #[derive(Debug)]
-struct RegistryPackageContents {
-    output: PluginSourceOutput,
-    package_name: String,
-    package_version: String,
+struct RegistryArchivePackage {
+    package: Value,
+    module_files: BTreeMap<String, String>,
+    contains_native_addon: bool,
 }
 
-fn package_from_registry_tarball(
+fn registry_archive_package(
     bytes: &[u8],
-    path: String,
-) -> Result<RegistryPackageContents, String> {
+    max_files: usize,
+    max_module_bytes: u64,
+) -> Result<RegistryArchivePackage, String> {
     let mut decoder = GzDecoder::new(bytes).take(MAX_REGISTRY_ARCHIVE_BYTES + 1);
     let mut archive = Vec::new();
     decoder
@@ -691,9 +1162,10 @@ fn package_from_registry_tarball(
     }
     let mut offset = 0usize;
     let mut entries = 0usize;
-    let mut module_bytes = 0usize;
+    let mut module_bytes = 0u64;
     let mut module_files = BTreeMap::new();
     let mut pending_path: Option<String> = None;
+    let mut contains_native_addon = false;
     while offset + 512 <= archive.len() {
         let header = &archive[offset..offset + 512];
         offset += 512;
@@ -753,19 +1225,26 @@ fn package_from_registry_tarball(
         if !matches!(entry_type, 0 | b'0') {
             continue;
         }
+        if entry_path.strip_prefix("package/").is_some_and(|path| {
+            Path::new(path).extension().and_then(|value| value.to_str()) == Some("node")
+        }) {
+            contains_native_addon = true;
+        }
         let Some(key) = registry_module_key(&entry_path)? else {
             continue;
         };
         if data.len() > MAX_PLUGIN_BYTES as usize {
             return Err(format!("Plugin module '{key}' exceeds the 1 MB limit."));
         }
-        module_bytes = module_bytes.saturating_add(data.len());
-        if module_bytes > MAX_PACKAGE_BYTES as usize {
-            return Err("Plugin package modules exceed the 5 MB aggregate limit.".into());
-        }
-        if module_files.len() >= MAX_PACKAGE_FILES {
+        module_bytes = module_bytes.saturating_add(data.len() as u64);
+        if module_bytes > max_module_bytes {
             return Err(format!(
-                "Plugin package contains more than {MAX_PACKAGE_FILES} JavaScript/JSON files."
+                "Plugin package modules exceed the {max_module_bytes} byte aggregate limit."
+            ));
+        }
+        if module_files.len() >= max_files {
+            return Err(format!(
+                "Plugin package contains more than {max_files} JavaScript/JSON files."
             ));
         }
         let source = String::from_utf8(data.to_vec())
@@ -779,8 +1258,31 @@ fn package_from_registry_tarball(
     let package_source = module_files
         .get("package.json")
         .ok_or_else(|| "Plugin tarball does not contain package/package.json.".to_string())?;
-    let package: Value = serde_json::from_str(package_source)
+    let package = serde_json::from_str(package_source)
         .map_err(|error| format!("Invalid plugin package.json: {error}"))?;
+    Ok(RegistryArchivePackage {
+        package,
+        module_files,
+        contains_native_addon,
+    })
+}
+
+#[derive(Debug)]
+struct RegistryPackageContents {
+    output: PluginSourceOutput,
+    package_name: String,
+    package_version: String,
+    package: Value,
+}
+
+fn package_from_registry_tarball(
+    bytes: &[u8],
+    path: String,
+) -> Result<RegistryPackageContents, String> {
+    let archive = registry_archive_package(bytes, MAX_PACKAGE_FILES, MAX_PACKAGE_BYTES)?;
+    let contains_native_addon = archive.contains_native_addon;
+    let package = archive.package;
+    let module_files = archive.module_files;
     if !package.get("insomnia").is_some_and(Value::is_object) {
         return Err("Package is not an Insomnia plugin (missing \"insomnia\" attribute)".into());
     }
@@ -800,7 +1302,7 @@ fn package_from_registry_tarball(
         .get(&entry_module_key)
         .cloned()
         .ok_or_else(|| "Plugin package entry is missing.".to_string())?;
-    let output = plugin_source_output(
+    let mut output = plugin_source_output(
         source,
         path,
         module_files,
@@ -808,26 +1310,9 @@ fn package_from_registry_tarball(
         Some(&package),
         &package_name,
     );
-    let mut output = output;
-    let has_dependencies = ["dependencies", "optionalDependencies", "peerDependencies"]
-        .iter()
-        .any(|name| {
-            package
-                .get(name)
-                .and_then(Value::as_object)
-                .is_some_and(|dependencies| !dependencies.is_empty())
-        })
-        || ["bundledDependencies", "bundleDependencies"]
-            .iter()
-            .any(|name| {
-                package
-                    .get(name)
-                    .and_then(Value::as_array)
-                    .is_some_and(|dependencies| !dependencies.is_empty())
-            });
-    if has_dependencies {
+    if contains_native_addon {
         output.module_warnings.push(
-            "Production dependencies are not downloaded; only modules bundled in this package can load."
+            "Native addon files in the plugin tarball were excluded from the isolated Worker."
                 .into(),
         );
     }
@@ -835,6 +1320,7 @@ fn package_from_registry_tarball(
         output,
         package_name,
         package_version,
+        package,
     })
 }
 
@@ -844,6 +1330,304 @@ fn sha1_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn registry_metadata_url(registry: &Url, package_name: &str) -> Result<Url, String> {
+    let mut url = registry.clone();
+    url.path_segments_mut()
+        .map_err(|_| "Unable to build the dependency metadata URL.".to_string())?
+        .push(package_name);
+    Ok(url)
+}
+
+fn selected_registry_version(
+    package_name: &str,
+    requirement: &str,
+    metadata: &Value,
+) -> Result<(String, Value), String> {
+    let versions = metadata
+        .get("versions")
+        .and_then(Value::as_object)
+        .ok_or_else(|| format!("Registry metadata for '{package_name}' has no versions."))?;
+    if let Some(tagged) = metadata
+        .get("dist-tags")
+        .and_then(|tags| tags.get(requirement))
+        .and_then(Value::as_str)
+    {
+        let record = versions.get(tagged).ok_or_else(|| {
+            format!(
+                "Registry tag '{requirement}' for '{package_name}' points to a missing version."
+            )
+        })?;
+        return Ok((tagged.to_string(), record.clone()));
+    }
+    if let Some(record) = versions.get(requirement) {
+        return Ok((requirement.to_string(), record.clone()));
+    }
+    if requirement.starts_with("git+")
+        || requirement.starts_with("http:")
+        || requirement.starts_with("https:")
+        || requirement.starts_with("file:")
+        || requirement.starts_with("workspace:")
+        || requirement.starts_with("npm:")
+    {
+        return Err(format!(
+            "Dependency '{package_name}' uses unsupported non-registry specification '{requirement}'."
+        ));
+    }
+    let selected = versions
+        .iter()
+        .filter_map(|(version, record)| {
+            let parsed = Version::parse(version.trim_start_matches('v')).ok()?;
+            npm_requirement_matches(requirement, version).then_some((parsed, version, record))
+        })
+        .max_by(|left, right| left.0.cmp(&right.0));
+    let Some((_, version, record)) = selected else {
+        return Err(format!(
+            "No registry version of '{package_name}' satisfies '{requirement}'."
+        ));
+    };
+    Ok((version.clone(), record.clone()))
+}
+
+async fn fetch_verified_registry_tarball(
+    client: &Client,
+    registry: &Url,
+    package_name: &str,
+    version: &Value,
+) -> Result<(Vec<u8>, Url, String), String> {
+    let distribution = version
+        .get("dist")
+        .ok_or_else(|| format!("Dependency '{package_name}' omitted distribution information."))?;
+    let tarball_url = distribution
+        .get("tarball")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("Dependency '{package_name}' omitted its tarball URL."))?;
+    let expected_sha1 = distribution
+        .get("shasum")
+        .and_then(Value::as_str)
+        .filter(|value| {
+            value.len() == 40 && value.chars().all(|character| character.is_ascii_hexdigit())
+        })
+        .ok_or_else(|| {
+            format!("Dependency '{package_name}' omitted a valid SHA-1 tarball checksum.")
+        })?
+        .to_ascii_lowercase();
+    let tarball = Url::parse(tarball_url)
+        .map_err(|_| format!("Dependency '{package_name}' returned an invalid tarball URL."))?;
+    let (bytes, final_url) = fetch_registry_bytes(
+        client,
+        tarball,
+        MAX_REGISTRY_TARBALL_BYTES,
+        "dependency tarball",
+        |url| validate_tarball_url(url, registry),
+    )
+    .await?;
+    let actual_sha1 = sha1_hex(&bytes);
+    if actual_sha1 != expected_sha1 {
+        return Err(format!(
+            "Dependency '{package_name}' tarball checksum mismatch: expected {expected_sha1}, received {actual_sha1}."
+        ));
+    }
+    Ok((bytes, final_url, actual_sha1))
+}
+
+#[derive(Debug)]
+struct ResolvedRegistryDependency {
+    name: String,
+    version: String,
+    entry: String,
+    module_files: BTreeMap<String, String>,
+    requirements: Vec<DependencyRequirement>,
+    warnings: Vec<String>,
+    metadata_bytes: usize,
+    download_bytes: usize,
+    final_url: Url,
+    sha1: String,
+}
+
+async fn resolve_registry_dependency(
+    client: &Client,
+    registry: &Url,
+    requirement: &DependencyRequirement,
+) -> Result<ResolvedRegistryDependency, String> {
+    let metadata_url = registry_metadata_url(registry, &requirement.name)?;
+    let (metadata_bytes, _) = fetch_registry_bytes(
+        client,
+        metadata_url,
+        MAX_DEPENDENCY_METADATA_BYTES,
+        "dependency metadata",
+        |url| {
+            if same_origin(url, registry) {
+                Ok(())
+            } else {
+                Err(
+                    "Dependency metadata redirects must stay on the configured registry origin."
+                        .into(),
+                )
+            }
+        },
+    )
+    .await?;
+    let metadata: Value = serde_json::from_slice(&metadata_bytes)
+        .map_err(|error| format!("Invalid dependency registry metadata: {error}"))?;
+    let (selected_version, version_record) =
+        selected_registry_version(&requirement.name, &requirement.requirement, &metadata)?;
+    let metadata_name = version_record
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "Dependency '{}' metadata omitted its name.",
+                requirement.name
+            )
+        })?;
+    let metadata_version = version_record
+        .get("version")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "Dependency '{}' metadata omitted its version.",
+                requirement.name
+            )
+        })?;
+    if metadata_name != requirement.name || metadata_version != selected_version {
+        return Err(format!(
+            "Dependency '{}' registry identity does not match its selected version.",
+            requirement.name
+        ));
+    }
+    let (tarball, final_url, sha1) =
+        fetch_verified_registry_tarball(client, registry, &requirement.name, &version_record)
+            .await?;
+    let archive = registry_archive_package(&tarball, MAX_PACKAGE_FILES, MAX_PACKAGE_BYTES)?;
+    if archive.contains_native_addon {
+        return Err(format!(
+            "Dependency '{}' contains a native addon, which cannot run in the isolated plugin Worker.",
+            requirement.name
+        ));
+    }
+    let package_name = archive
+        .package
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "Dependency '{}' package.json omitted its name.",
+                requirement.name
+            )
+        })?;
+    let package_version = archive
+        .package
+        .get("version")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "Dependency '{}' package.json omitted its version.",
+                requirement.name
+            )
+        })?;
+    if package_name != requirement.name || package_version != selected_version {
+        return Err(format!(
+            "Dependency '{}' tarball identity does not match its registry metadata.",
+            requirement.name
+        ));
+    }
+    let entry = dependency_entry(&requirement.name, &archive.package, &archive.module_files)?;
+    let mut warnings = Vec::new();
+    let requirements = package_dependency_requirements(&archive.package, &mut warnings);
+    Ok(ResolvedRegistryDependency {
+        name: requirement.name.clone(),
+        version: selected_version,
+        entry,
+        module_files: archive.module_files,
+        requirements,
+        warnings,
+        metadata_bytes: metadata_bytes.len(),
+        download_bytes: tarball.len(),
+        final_url,
+        sha1,
+    })
+}
+
+async fn registry_dependency_bundle(
+    client: &Client,
+    registry: &Url,
+    package: &Value,
+) -> Result<DependencyBundle, String> {
+    let mut bundle = DependencyBundle::default();
+    let mut warnings = Vec::new();
+    let mut queue = VecDeque::from(package_dependency_requirements(package, &mut warnings));
+    bundle.warnings.extend(warnings);
+    let mut metadata_bytes = 0usize;
+    let mut download_bytes = 0usize;
+    while let Some(requirement) = queue.pop_front() {
+        bundle.requested_packages.insert(requirement.name.clone());
+        if let Some(selected) = bundle.packages.get(&requirement.name) {
+            if npm_requirement_matches(&requirement.requirement, &selected.version) {
+                continue;
+            }
+            let error = format!(
+                "Dependency '{}' requires incompatible versions '{}' and '{}'.",
+                requirement.name, requirement.requirement, selected.version
+            );
+            if requirement.optional {
+                bundle.warnings.push(error);
+                continue;
+            }
+            return Err(error);
+        }
+        if bundle.packages.len() >= MAX_DEPENDENCY_PACKAGES {
+            return Err(format!(
+                "Plugin dependency graph exceeds {MAX_DEPENDENCY_PACKAGES} packages."
+            ));
+        }
+        let resolved = match resolve_registry_dependency(client, registry, &requirement).await {
+            Ok(resolved) => resolved,
+            Err(error) if requirement.optional => {
+                bundle.warnings.push(format!(
+                    "Optional dependency '{}' was skipped: {error}",
+                    requirement.name
+                ));
+                continue;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Unable to resolve required dependency '{}': {error}",
+                    requirement.name
+                ))
+            }
+        };
+        metadata_bytes = metadata_bytes.saturating_add(resolved.metadata_bytes);
+        if metadata_bytes > MAX_DEPENDENCY_METADATA_TOTAL_BYTES {
+            return Err(format!(
+                "Plugin dependency metadata exceeds the {MAX_DEPENDENCY_METADATA_TOTAL_BYTES} byte aggregate limit."
+            ));
+        }
+        download_bytes = download_bytes.saturating_add(resolved.download_bytes);
+        if download_bytes > MAX_DEPENDENCY_DOWNLOAD_BYTES {
+            return Err(format!(
+                "Plugin dependency downloads exceed the {MAX_DEPENDENCY_DOWNLOAD_BYTES} byte aggregate limit."
+            ));
+        }
+        bundle.warnings.extend(resolved.warnings);
+        bundle.warnings.push(format!(
+            "Fetched dependency {}@{} from {} and verified SHA-1 {}.",
+            resolved.name,
+            resolved.version,
+            redacted_url(&resolved.final_url),
+            resolved.sha1
+        ));
+        queue.extend(resolved.requirements.clone());
+        merge_dependency_package(
+            &mut bundle,
+            &resolved.name,
+            &resolved.version,
+            &resolved.entry,
+            resolved.module_files,
+        )?;
+    }
+    Ok(bundle)
 }
 
 pub async fn install_registry_plugin(
@@ -939,6 +1723,8 @@ pub async fn install_registry_plugin(
     if package.package_name != package_name || package.package_version != metadata_version {
         return Err("Plugin tarball identity does not match its registry metadata.".into());
     }
+    let dependencies = registry_dependency_bundle(&client, &registry, &package.package).await?;
+    attach_dependency_bundle(&mut package.output, dependencies);
     package.output.module_warnings.push(format!(
         "Fetched {} from {} and verified SHA-1 {}.",
         metadata_version,
@@ -972,14 +1758,18 @@ pub fn read_plugin_source(path: String) -> Result<PluginSourceOutput, String> {
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("Local plugin");
-    Ok(plugin_source_output(
+    let mut output = plugin_source_output(
         source,
         source_path.to_string_lossy().into_owned(),
         module_files,
         entry_module_key,
         package.as_ref(),
         fallback,
-    ))
+    );
+    if let Some(package) = package.as_ref() {
+        attach_dependency_bundle(&mut output, local_dependency_bundle(&source_path, package)?);
+    }
+    Ok(output)
 }
 
 fn has_insomnia_manifest(path: &Path) -> bool {
@@ -1163,6 +1953,20 @@ mod tests {
         ])
     }
 
+    fn dependency_tarball() -> Vec<u8> {
+        gzip_archive(&[
+            (
+                "package/package.json",
+                br#"{"name":"left-pad","version":"1.3.0","main":"index.js"}"#.to_vec(),
+            ),
+            (
+                "package/index.js",
+                b"module.exports = (value, length, fill = ' ') => String(value).padStart(length, fill);"
+                    .to_vec(),
+            ),
+        ])
+    }
+
     #[test]
     fn loads_a_commonjs_package_entry() {
         let temporary = tempfile::tempdir().unwrap();
@@ -1242,6 +2046,35 @@ mod tests {
     }
 
     #[test]
+    fn selects_highest_matching_registry_dependency_version() {
+        let metadata = serde_json::json!({
+            "dist-tags": { "latest": "2.0.0", "legacy": "1.2.0" },
+            "versions": {
+                "1.2.0": { "name": "example", "version": "1.2.0" },
+                "1.9.0": { "name": "example", "version": "1.9.0" },
+                "2.0.0": { "name": "example", "version": "2.0.0" }
+            }
+        });
+        assert_eq!(
+            selected_registry_version("example", "^1.2.0", &metadata)
+                .unwrap()
+                .0,
+            "1.9.0"
+        );
+        assert_eq!(
+            selected_registry_version("example", "legacy", &metadata)
+                .unwrap()
+                .0,
+            "1.2.0"
+        );
+        assert!(
+            selected_registry_version("example", "git+https://example.test/value", &metadata)
+                .unwrap_err()
+                .contains("unsupported")
+        );
+    }
+
+    #[test]
     fn parses_a_bounded_registry_package() {
         let output = package_from_registry_tarball(
             &registry_package_tarball(),
@@ -1254,11 +2087,86 @@ mod tests {
         assert_eq!(output.output.entry_module_key, "index.js");
         assert!(output.output.module_files.contains_key("lib/value.js"));
         assert_eq!(output.output.requested_modules, vec!["events"]);
+        assert_eq!(
+            output
+                .package
+                .get("dependencies")
+                .and_then(|value| value.get("left-pad"))
+                .and_then(Value::as_str),
+            Some("1.3.0")
+        );
+        assert!(output.output.dependency_packages.is_empty());
+    }
+
+    #[test]
+    fn captures_bounded_local_commonjs_dependencies() {
+        let temporary = tempfile::tempdir().unwrap();
+        fs::write(
+            temporary.path().join("package.json"),
+            r#"{"name":"insomnia-plugin-local-dependency","version":"1.0.0","main":"index.js","dependencies":{"left-pad":"^1.2.0"},"optionalDependencies":{"missing-optional":"1.0.0"},"insomnia":{}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temporary.path().join("index.js"),
+            "module.exports = require('left-pad');",
+        )
+        .unwrap();
+        let dependency = temporary.path().join("node_modules/left-pad");
+        fs::create_dir_all(&dependency).unwrap();
+        fs::write(
+            dependency.join("package.json"),
+            r#"{"name":"left-pad","version":"1.3.0","main":"index.js","dependencies":{"nested-child":"1.0.0"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            dependency.join("index.js"),
+            "module.exports = value => value;",
+        )
+        .unwrap();
+        let nested_child = dependency.join("node_modules/nested-child");
+        let nested_sibling = dependency.join("node_modules/nested-sibling");
+        fs::create_dir_all(&nested_child).unwrap();
+        fs::create_dir_all(&nested_sibling).unwrap();
+        fs::write(
+            nested_child.join("package.json"),
+            r#"{"name":"nested-child","version":"1.0.0","main":"index.js","dependencies":{"nested-sibling":"1.0.0"}}"#,
+        )
+        .unwrap();
+        fs::write(nested_child.join("index.js"), "module.exports = true;").unwrap();
+        fs::write(
+            nested_sibling.join("package.json"),
+            r#"{"name":"nested-sibling","version":"1.0.0","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(nested_sibling.join("index.js"), "module.exports = true;").unwrap();
+
+        let output = read_plugin_source(temporary.path().to_string_lossy().into_owned()).unwrap();
+        assert_eq!(
+            output
+                .dependency_packages
+                .get("left-pad")
+                .map(|dependency| dependency.version.as_str()),
+            Some("1.3.0")
+        );
         assert!(output
-            .output
+            .dependency_module_files
+            .contains_key("node_modules/left-pad/index.js"));
+        assert!(output.dependency_packages.contains_key("nested-child"));
+        assert!(output.dependency_packages.contains_key("nested-sibling"));
+        assert!(output.requested_modules.contains(&"left-pad".to_string()));
+        assert!(output
+            .requested_modules
+            .contains(&"missing-optional".to_string()));
+        assert!(output
             .module_warnings
             .iter()
-            .any(|warning| warning.contains("not downloaded")));
+            .any(|warning| warning.contains("missing-optional")));
+        assert!(npm_requirement_matches("^1.2.0", "1.3.0"));
+        assert!(!npm_requirement_matches("^1.2.0", "2.0.0"));
+        assert!(!npm_requirement_matches("1.2.0", "1.3.0"));
+        assert!(npm_requirement_matches("1.2", "1.2.9"));
+        assert!(!npm_requirement_matches("1.2", "1.3.0"));
+        assert!(npm_requirement_matches(">= 1.2.0 < 2.0.0", "1.9.0"));
     }
 
     #[test]
@@ -1292,6 +2200,8 @@ mod tests {
     async fn installs_from_a_custom_loopback_registry() {
         let tarball = registry_package_tarball();
         let checksum = sha1_hex(&tarball);
+        let dependency = dependency_tarball();
+        let dependency_checksum = sha1_hex(&dependency);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let metadata = serde_json::json!({
@@ -1310,8 +2220,23 @@ mod tests {
         })
         .to_string()
         .into_bytes();
+        let dependency_metadata = serde_json::json!({
+            "dist-tags": { "latest": "1.3.0" },
+            "versions": {
+                "1.3.0": {
+                    "name": "left-pad",
+                    "version": "1.3.0",
+                    "dist": {
+                        "shasum": dependency_checksum,
+                        "tarball": format!("http://{address}/left-pad.tgz?token=dependency-secret")
+                    }
+                }
+            }
+        })
+        .to_string()
+        .into_bytes();
         let server = tokio::spawn(async move {
-            for _ in 0..2 {
+            for _ in 0..4 {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let mut request = [0_u8; 2_048];
                 let size = stream.read(&mut request).await.unwrap();
@@ -1320,6 +2245,10 @@ mod tests {
                     &metadata
                 } else if request.starts_with("GET /example.tgz?token=secret ") {
                     &tarball
+                } else if request.starts_with("GET /left-pad ") {
+                    &dependency_metadata
+                } else if request.starts_with("GET /left-pad.tgz?token=dependency-secret ") {
+                    &dependency
                 } else {
                     panic!("unexpected request: {request}");
                 };
@@ -1346,6 +2275,17 @@ mod tests {
         server.await.unwrap();
         assert_eq!(output.name, "Registry example");
         assert_eq!(output.path, "npm:insomnia-plugin-example@1.2.3");
+        assert_eq!(
+            output
+                .dependency_packages
+                .get("left-pad")
+                .map(|dependency| dependency.version.as_str()),
+            Some("1.3.0")
+        );
+        assert!(output
+            .dependency_module_files
+            .contains_key("node_modules/left-pad/index.js"));
+        assert!(output.requested_modules.contains(&"left-pad".to_string()));
         assert!(output
             .module_warnings
             .iter()

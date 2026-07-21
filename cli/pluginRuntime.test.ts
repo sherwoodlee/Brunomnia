@@ -156,6 +156,48 @@ describe('CLI plugin template runtime', () => {
     await expect(runtime.render('package_value', [], createBlankRequest('plugin-request'))).resolves.toBe('lib:lib/index.js:loaded-json');
   });
 
+  it('loads only explicitly granted reviewed CommonJS dependencies', async () => {
+    const entry = `
+      const leftPad = require('left-pad');
+      module.exports.templateTags = [{ name: 'dependency_value', run() { return leftPad('7', 3, '0'); } }];
+    `;
+    const dependencyFields = {
+      dependencyModuleFiles: {
+        'node_modules/left-pad/package.json': '{"name":"left-pad","version":"1.3.0","main":"index.js"}',
+        'node_modules/left-pad/index.js': `module.exports = require('./lib/pad');`,
+        'node_modules/left-pad/lib/pad.js': `module.exports = (value, length, fill) => String(value).padStart(length, fill);`,
+      },
+      dependencyPackages: {
+        'left-pad': { version: '1.3.0', entryModuleKey: 'node_modules/left-pad/index.js' },
+      },
+    };
+    const denied = createCliPluginRuntime([{
+      ...plugin(entry),
+      ...dependencyFields,
+      requestedModules: ['left-pad'],
+    }], {});
+    await expect(denied.render('dependency_value', [], createBlankRequest('plugin-request'))).rejects.toThrow("Module 'left-pad' not permitted by manifest");
+
+    const granted = createCliPluginRuntime([{
+      ...plugin(entry, ['template'], ['left-pad']),
+      ...dependencyFields,
+    }], {});
+    await expect(granted.render('dependency_value', [], createBlankRequest('plugin-request'))).resolves.toBe('007');
+
+    const escaping = createCliPluginRuntime([{
+      ...plugin(entry, ['template'], ['left-pad']),
+      dependencyModuleFiles: {
+        'node_modules/left-pad/index.js': `module.exports = require('../other');`,
+        'node_modules/other/index.js': `module.exports = () => 'unsafe';`,
+      },
+      dependencyPackages: {
+        'left-pad': { version: '1.3.0', entryModuleKey: 'node_modules/left-pad/index.js' },
+        other: { version: '1.0.0', entryModuleKey: 'node_modules/other/index.js' },
+      },
+    }], {});
+    await expect(escaping.render('dependency_value', [], createBlankRequest('plugin-request'))).rejects.toThrow("escaped package 'left-pad'");
+  });
+
   it('refuses missing, traversing, and bare package dependencies', async () => {
     const request = createBlankRequest('plugin-request');
     for (const dependency of ['./missing', '../outside', 'uuid']) {

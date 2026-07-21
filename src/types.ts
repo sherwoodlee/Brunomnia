@@ -700,6 +700,11 @@ export type PluginPermission =
   | 'action'
   | 'theme';
 
+export type PluginDependencyPackage = {
+  version: string;
+  entryModuleKey: string;
+};
+
 export type PluginRecord = {
   id: string;
   name: string;
@@ -710,6 +715,8 @@ export type PluginRecord = {
   registryPackageName?: string;
   moduleFiles?: Record<string, string>;
   entryModuleKey?: string;
+  dependencyModuleFiles?: Record<string, string>;
+  dependencyPackages?: Record<string, PluginDependencyPackage>;
   requestedModules?: string[];
   grantedModules?: string[];
   moduleWarnings?: string[];

@@ -19,6 +19,18 @@ const aliases: Record<string, string> = {
 
 export const canonicalPluginModule = (name: string) => aliases[name] ?? name;
 
+export const pluginDependencyPackageName = (specifier: string) => {
+  const value = canonicalPluginModule(String(specifier).trim());
+  if (!value || value.length > 214 || value.startsWith('.') || value.startsWith('/') || value.includes('\\') || value.includes('\0')) return undefined;
+  const parts = value.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..')) return undefined;
+  const packageName = value.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+  if (!packageName || (value.startsWith('@') && parts.length < 2)) return undefined;
+  const segments = packageName.split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..' || !/^@?[a-zA-Z0-9_.~-]+$/.test(segment))) return undefined;
+  return packageName;
+};
+
 export const validateRegistryPluginName = (pluginName: string) => {
   const suffix = pluginName.replace(/^insomnia-plugin-/, '');
   if (!suffix.trim() || suffix.length > 214) throw new Error('Plugin name must not be empty or too long.');
@@ -69,12 +81,16 @@ type PluginPackageIdentity = {
   source: string;
   moduleFiles?: Record<string, string>;
   entryModuleKey?: string;
+  dependencyModuleFiles?: Record<string, string>;
+  dependencyPackages?: PluginRecord['dependencyPackages'];
   requestedModules?: string[];
 };
 
 export const pluginPackageChanged = (previous: PluginPackageIdentity, next: PluginPackageIdentity) => previous.source !== next.source
   || previous.entryModuleKey !== next.entryModuleKey
   || JSON.stringify(previous.moduleFiles ?? {}) !== JSON.stringify(next.moduleFiles ?? {})
+  || JSON.stringify(previous.dependencyModuleFiles ?? {}) !== JSON.stringify(next.dependencyModuleFiles ?? {})
+  || JSON.stringify(previous.dependencyPackages ?? {}) !== JSON.stringify(next.dependencyPackages ?? {})
   || JSON.stringify(previous.requestedModules ?? []) !== JSON.stringify(next.requestedModules ?? []);
 
 export const retainedPluginModuleGrants = (grantedModules: Iterable<string> = [], requestedModules: Iterable<string> = []) => {
