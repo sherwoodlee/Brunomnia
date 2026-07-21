@@ -1,4 +1,5 @@
-import { lazy, Suspense, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import type {
   ApiRequest,
   BodyMode,
@@ -43,6 +44,15 @@ export function CodeEditor({ ariaLabel, value, onChange, completions, onCursorCh
     setActiveSuggestion(0);
   };
   const closeSuggestions = () => setSuggestions([]);
+  useEffect(() => {
+    const showAutocomplete = () => {
+      const target = textarea.current;
+      if (!target || document.activeElement !== target) return;
+      updateSuggestions(target.value, target.selectionStart);
+    };
+    window.addEventListener('brunomnia-show-autocomplete', showAutocomplete);
+    return () => window.removeEventListener('brunomnia-show-autocomplete', showAutocomplete);
+  });
   const applySuggestion = (target: HTMLTextAreaElement, suggestion: GraphqlCompletion) => {
     const result = applyEditorCompletion(target.value, target.selectionStart, target.selectionEnd, suggestion.insertText);
     onChange(result.value);
@@ -73,11 +83,6 @@ export function CodeEditor({ ariaLabel, value, onChange, completions, onCursorCh
         }}
         onClick={(event) => { onCursorChange?.(event.currentTarget.selectionStart); closeSuggestions(); }}
         onKeyDown={(event) => {
-          if (completions && event.key === ' ' && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault();
-            updateSuggestions(event.currentTarget.value, event.currentTarget.selectionStart);
-            return;
-          }
           if (suggestions.length && event.key === 'ArrowDown') {
             event.preventDefault();
             setActiveSuggestion((current) => (current + 1) % suggestions.length);
@@ -206,7 +211,7 @@ export function HttpBodyEditor({ request, onChange }: { request: ApiRequest; onC
   );
 }
 
-export function GraphqlEditor({ request, onChange, schemaLoading, schemaError, onLoadSchema }: { request: ApiRequest; onChange: ChangeRequest; schemaLoading: boolean; schemaError: string; onLoadSchema: (includeInputValueDeprecation: boolean) => void }) {
+export function GraphqlEditor({ request, onChange, schemaLoading, schemaError, onLoadSchema, filterInputRef }: { request: ApiRequest; onChange: ChangeRequest; schemaLoading: boolean; schemaError: string; onLoadSchema: (includeInputValueDeprecation: boolean) => void; filterInputRef?: RefObject<HTMLInputElement | null> }) {
   const graphql = request.graphql;
   const [showSchema, setShowSchema] = useState(true);
   const [filter, setFilter] = useState('');
@@ -303,7 +308,7 @@ export function GraphqlEditor({ request, onChange, schemaLoading, schemaError, o
           <aside className="graphql-explorer">
             <header>
               <div><small>{operation} root</small><strong>{rootName || 'Unavailable'}</strong></div>
-              <input aria-label="Search GraphQL schema" placeholder="Search schema…" value={filter} onChange={(event) => setFilter(event.target.value)} />
+              <input aria-label="Search GraphQL schema" placeholder="Search schema…" ref={filterInputRef} value={filter} onChange={(event) => setFilter(event.target.value)} />
             </header>
             {filter ? (
               <div className="graphql-schema-search">

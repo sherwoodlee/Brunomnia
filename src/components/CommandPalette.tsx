@@ -36,3 +36,12 @@ export function CommandPalette({ onClose, onAddRequest, onAddCollection, onEnvir
     </div>
   );
 }
+
+export function CreateMenu({ onClose, onAddRequest, onAddCollection, onAddFolder }: { onClose: () => void; onAddRequest: () => void; onAddCollection: () => void; onAddFolder?: () => void }) {
+  const actions = [
+    { icon: 'plus' as const, label: 'HTTP request', action: onAddRequest },
+    { icon: 'folder' as const, label: 'Folder', action: onAddFolder },
+    { icon: 'archive' as const, label: 'Collection', action: onAddCollection },
+  ];
+  return <div className="modal-backdrop palette-backdrop" role="presentation" onMouseDown={onClose}><section aria-label="Create menu" aria-modal="true" className="command-palette create-menu" onMouseDown={(event) => event.stopPropagation()} role="dialog"><label><Icon name="plus" /><strong>Create resource</strong></label><div>{actions.map((item) => <button disabled={!item.action} key={item.label} onClick={() => { item.action?.(); onClose(); }} type="button"><Icon name={item.icon} /><span>{item.label}</span></button>)}</div></section></div>;
+}

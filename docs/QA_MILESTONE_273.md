@@ -2,7 +2,7 @@
 
 Date: 2026-07-21 (America/Los_Angeles)
 
-Scope: replace the single-string/hardcoded-tab shortcut split with a bounded account-free multi-binding registry for Brunomnia's current sixteen actions while preserving honest limits against the pinned 34-action inventory.
+Scope: replace the single-string/hardcoded-tab shortcut split with a bounded account-free multi-binding registry for Brunomnia's current sixteen actions while preserving honest limits against the pinned 33-action inventory. Milestone 274 corrected the original off-by-one prose count after an exact union-member recount.
 
 ## Source audit
 
@@ -60,4 +60,4 @@ Independent Cosign verification passed digest claims, trusted certificate-chain 
 
 ## Acceptance boundary
 
-M273 closes multiple binding management and editable tab-lifecycle dispatch for the sixteen actions Brunomnia currently exposes. Eighteen pinned shortcut actions remain to be adapted or source-audited, alongside the wider accessibility and desktop distribution gaps. Exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete.
+M273 closes multiple binding management and editable tab-lifecycle dispatch for the sixteen actions Brunomnia currently exposes. Seventeen pinned shortcut actions remain to be adapted or source-audited, alongside the wider accessibility and desktop distribution gaps. Exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete.

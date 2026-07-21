@@ -40,6 +40,7 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - system, dark, or light appearance;
 - comfortable or compact density;
 - an off-by-default device-wide reveal choice for saved request/folder authentication and integration credentials;
+- an off-by-default resolved environment-variable source/value display in the template-tag picker;
 - separate 8–24 px interface and editor sizes plus optional interface/monospace font-family lists;
 - responsive or forced-vertical request/response layout;
 - text wrapping, tab/space indentation, a 1–16 indent width, and font ligatures;
@@ -59,9 +60,9 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - a 1–60 second script deadline plus separate off-by-default secondary-request, local-file, and local-vault script authorities, with an explicit desktop data-folder allowlist for script attachments;
 - automatic GraphQL introspection;
 - request-deletion confirmation; and
-- sixteen editable keyboard actions with up to eight bindings each, including close/next/previous/reopen and keep-request-tab lifecycle actions.
+- all 33 pinned keyboard actions with up to eight bindings each, including request/sidebar/response focus, create-menu, send-options, environment switching, plugin reload, autocomplete, body beautification, GraphQL filtering, variable disclosure, and tab lifecycle actions.
 
-Focus **Press shortcut** and press a combination to add it. `Mod` maps to Command on macOS and Control elsewhere. Remove combinations individually, reset one action, or use **Reset all**. New duplicates are refused; legacy collisions remain visible and only the first registry owner runs across the request workbench and Runner. Removing every combination leaves that action explicitly unassigned after reload.
+Focus **Press shortcut** and press a combination to add it. `Mod` maps to Command on macOS and Control elsewhere. Remove combinations individually, reset one action, or use **Reset all**. New duplicates are refused; legacy collisions remain visible and only the first registry owner runs across the request workbench and Runner. The pinned defaults assign `Mod+Shift+F` to both sidebar filtering and body beautification; Brunomnia gives the body editor contextual precedence while it is active and otherwise focuses the sidebar filter. Removing every combination leaves that action explicitly unassigned after reload.
 
 Preferences stay on this device. Split-YAML folder/Git projects omit them, encrypted-sync pulls preserve the current device's values, and imported workspace files start with safe defaults. Plugin themes take precedence while active.
 

@@ -352,12 +352,16 @@ const normalizeKonnect = (value: unknown, defaults: KonnectConfig): KonnectConfi
   };
 };
 
-const normalizePreferences = (value: unknown): AppPreferences => {
+const normalizePreferences = (value: unknown, workspaceVersion: number): AppPreferences => {
   const source = record(value);
   const rawShortcuts = record(source?.shortcuts);
   const shortcuts = Object.fromEntries((Object.keys(defaultShortcuts) as ShortcutAction[]).map((action) => {
     return [action, normalizeShortcutBindings(rawShortcuts?.[action], defaultShortcuts[action])];
   })) as AppPreferences['shortcuts'];
+  if (workspaceVersion < 48 && rawShortcuts?.['create-menu'] === undefined && rawShortcuts?.['new-request'] !== undefined) {
+    const migrated = shortcuts['new-request'].filter((binding) => binding !== 'Mod+N');
+    if (migrated.length !== shortcuts['new-request'].length) shortcuts['new-request'] = migrated.length ? migrated : [...defaultShortcuts['new-request']];
+  }
   return {
     theme: source?.theme === 'dark' || source?.theme === 'light' ? source.theme : 'system',
     density: source?.density === 'compact' ? 'compact' : 'comfortable',
@@ -408,6 +412,7 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     editorIndentSize: Math.min(16, Math.max(1, Math.trunc(Number(source?.editorIndentSize) || defaultPreferences.editorIndentSize))),
     editorLineWrapping: source?.editorLineWrapping !== false,
     fontVariantLigatures: source?.fontVariantLigatures === true,
+    showVariableSourceAndValue: source?.showVariableSourceAndValue === true,
     scriptTimeoutMs: Math.min(60_000, Math.max(1_000, Number(source?.scriptTimeoutMs) || defaultPreferences.scriptTimeoutMs)),
     allowScriptRequests: source?.allowScriptRequests === true,
     allowScriptFileAccess: source?.allowScriptFileAccess === true,
@@ -948,7 +953,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   }));
   return {
     ...workspace,
-    version: 47,
+    version: 48,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',
@@ -980,7 +985,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
     mcpClients,
     ai: normalizeAi(workspace.ai, seed.ai),
     konnect: normalizeKonnect(workspace.konnect, seed.konnect),
-    preferences: normalizePreferences(workspace.preferences),
+    preferences: normalizePreferences(workspace.preferences, workspace.version ?? 0),
     collections,
   } as Workspace;
 };

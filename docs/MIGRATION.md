@@ -2759,13 +2759,25 @@ Compatibility bounds remain explicit: local Secret rows require the encrypted lo
 
 | Capability | Status | Notes |
 | --- | --- | --- |
-| Pinned registry audit | Complete | Pinned source exposes 34 named actions, platform binding lists, duplicate prevention, add/remove, per-action reset, and reset-all rather than one mutable string per action |
+| Pinned registry audit | Complete | Pinned source exposes 33 named actions, platform binding lists, duplicate prevention, add/remove, per-action reset, and reset-all rather than one mutable string per action |
 | Bounded binding model | Complete baseline | Workspace v47 migrates legacy strings into deduplicated lists, preserves explicit empty assignments, limits each action to eight normalized combinations, and deep-clones defaults |
 | Editor lifecycle | Complete baseline | Sixteen current actions expose every binding with capture-to-add, independent removal, per-action reset, reset-all, limit feedback, and visible legacy-collision evidence; new duplicates are refused |
 | Tab and Runner dispatch | Complete | Close, next, previous, reopen, and keep-request-tab now use editable bindings instead of hidden listeners; first-owner collision semantics apply consistently to the request workbench and Runner capture path |
 | Verification | Complete | Normalization/migration/matching/ownership/Runner/static-editor regressions, TypeScript, full frontend, production/CLI build, native regression, formatting, and strict Clippy evidence is recorded in [Milestone 273 verification](QA_MILESTONE_273.md) |
 
-Compatibility bounds remain explicit: M273 establishes the pinned multi-binding behavior for sixteen actions but does not claim the remaining eighteen pinned actions. A complete accessibility audit, updater, desktop signing/notarization, and Windows/Linux desktop release artifacts also remain. `Preferences, shortcuts, themes, accessibility, and packaging` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+Compatibility bounds remain explicit: M273 establishes the pinned multi-binding behavior for sixteen actions but does not claim the remaining seventeen pinned actions. A complete accessibility audit, updater, desktop signing/notarization, and Windows/Linux desktop release artifacts also remain. `Preferences, shortcuts, themes, accessibility, and packaging` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 274 — complete keyboard action registry (complete baseline increment)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned recount | Complete | The exact `KeyboardShortcut` union contains 33 actions, correcting the prior 34-action prose count; all seventeen actions omitted by M273 are now represented |
+| Contextual command targets | Complete | Collection/request settings, keyboard preferences, plugin descriptor reload, autocomplete, send options, environment/method/sidebar/response/GraphQL focus, cookies, create menu, contextual folder/request creation, pinning, variable disclosure, and body beautification reach live local surfaces |
+| Create-binding migration | Complete | Workspace v48 adds `Mod+N` create-menu and moves an unchanged legacy create-request conflict to pinned `Mod+Alt+N` while preserving custom and explicitly cleared bindings |
+| Capture and collisions | Complete | The request workbench dispatches one registry owner from the window capture phase; the pinned `Mod+Shift+F` duplicate is context-resolved to body beautification inside an active body editor and sidebar focus elsewhere |
+| Verification | Complete | Registry/migration/static-surface regressions, TypeScript, complete frontend partitions, production/CLI build, packaged CLI matrices, native regression, formatting, and strict Clippy evidence is recorded in [Milestone 274 verification](QA_MILESTONE_274.md) |
+
+Compatibility bounds remain explicit: all pinned keyboard actions now have editable bindings and local command targets, but rendered interaction and assistive-technology QA remain omitted by standing direction. A complete accessibility audit, updater, desktop signing/notarization, and Windows/Linux desktop release artifacts remain, so `Preferences, shortcuts, themes, accessibility, and packaging` stays `Baseline`. Exactly five parity rows remain incomplete, and Brunomnia is not declared feature-complete.
 
 ## Architectural boundaries
 

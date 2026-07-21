@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cloneShortcuts, defaultShortcuts, duplicateShortcuts, normalizeShortcut, normalizeShortcutBindings, shortcutBindingOwner, shortcutEventOwner, shortcutMatches } from './preferences';
+import { cloneShortcuts, defaultShortcuts, duplicateShortcuts, normalizeShortcut, normalizeShortcutBindings, shortcutBindingOwner, shortcutEventOwner, shortcutLabels, shortcutMatches } from './preferences';
 
 describe('desktop preferences', () => {
   const keyEvent = (key: string, modifiers: Partial<KeyboardEvent> = {}) => ({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...modifiers }) as KeyboardEvent;
@@ -8,7 +8,8 @@ describe('desktop preferences', () => {
     expect(normalizeShortcut(' Mod + shift + h ')).toBe('Mod+Shift+H');
     expect(normalizeShortcut(' shift + mod + h ')).toBe('Mod+Shift+H');
     expect(normalizeShortcut('Mod+H+J')).toBe('');
-    expect(duplicateShortcuts({ ...cloneShortcuts(defaultShortcuts), send: [...defaultShortcuts.palette] })).toEqual(['Mod+K']);
+    expect(duplicateShortcuts(defaultShortcuts)).toEqual(['Mod+Shift+F']);
+    expect(duplicateShortcuts({ ...cloneShortcuts(defaultShortcuts), send: [...defaultShortcuts.palette] })).toEqual(['Mod+P', 'Mod+Shift+F']);
   });
 
   it('matches any binding while preserving exact secondary modifiers', () => {
@@ -26,13 +27,20 @@ describe('desktop preferences', () => {
     expect(shortcutBindingOwner(defaultShortcuts, 'mod + shift + t')).toBe('reopen-closed-tab');
     const duplicates = cloneShortcuts(defaultShortcuts);
     duplicates.send = [...duplicates.palette];
-    expect(shortcutEventOwner(duplicates, keyEvent('k', { metaKey: true }))).toBe('palette');
+    expect(shortcutEventOwner(duplicates, keyEvent('p', { metaKey: true }))).toBe('palette');
   });
 
   it('clones binding lists without sharing mutable action arrays', () => {
     const cloned = cloneShortcuts(defaultShortcuts);
-    cloned.send.push('F5');
-    expect(defaultShortcuts.send).toEqual(['Mod+Enter']);
-    expect(cloned.send).toEqual(['Mod+Enter', 'F5']);
+    cloned.send.push('Alt+F5');
+    expect(defaultShortcuts.send).toEqual(['Mod+Enter', 'Mod+R', 'F5']);
+    expect(cloned.send).toEqual(['Mod+Enter', 'Mod+R', 'F5', 'Alt+F5']);
+  });
+
+  it('exposes the complete pinned action inventory and create split', () => {
+    expect(Object.keys(shortcutLabels)).toHaveLength(33);
+    expect(Object.keys(defaultShortcuts)).toEqual(Object.keys(shortcutLabels));
+    expect(defaultShortcuts['create-menu']).toEqual(['Mod+N']);
+    expect(defaultShortcuts['new-request']).toEqual(['Mod+Alt+N']);
   });
 });

@@ -10,6 +10,8 @@ type TemplateTagDialogProps = {
   request: ApiRequest;
   responses: StoredResponse[];
   variableNames: string[];
+  variableValues: Record<string, string>;
+  showVariableSourceAndValue: boolean;
   onApply: (request: ApiRequest) => void;
   onClose: () => void;
 };
@@ -48,7 +50,7 @@ const defaultsForKind = (kind: TemplateTagKind): Record<string, string> => {
   return { field: '', provider: 'aws', reference: '', scope: '', version: '' };
 };
 
-export function TemplateTagDialog({ cookies, request, responses, variableNames, onApply, onClose }: TemplateTagDialogProps) {
+export function TemplateTagDialog({ cookies, request, responses, variableNames, variableValues, showVariableSourceAndValue, onApply, onClose }: TemplateTagDialogProps) {
   const destinations = useMemo(() => templateTagDestinations(request), [request]);
   const [destination, setDestination] = useState(destinations[0]?.id ?? 'url');
   const [kind, setKind] = useState<TemplateTagKind>('environment');
@@ -74,7 +76,7 @@ export function TemplateTagDialog({ cookies, request, responses, variableNames, 
       <div className="template-tag-grid">
         <label>Destination<select onChange={(event) => setDestination(event.target.value)} value={destination}>{destinations.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
         <label>Tag<select onChange={(event) => { const next = event.target.value as TemplateTagKind; setKind(next); setValues(defaultsForKind(next)); }} value={kind}>{kinds.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
-        {kind === 'environment' ? <label>Variable<select onChange={(event) => update('name', event.target.value)} value={values.name}>{<option value="">Choose variable</option>}{variableNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label> : null}
+        {kind === 'environment' ? <label>Variable<select onChange={(event) => update('name', event.target.value)} value={values.name}>{<option value="">Choose variable</option>}{variableNames.map((name) => <option key={name} value={name}>{showVariableSourceAndValue ? `${name} · ${variableValues[name]?.slice(0, 80) || '(empty)'} · effective request scope` : name}</option>)}</select></label> : null}
         {kind === 'faker' ? <label>Function<select onChange={(event) => update('name', event.target.value)} value={values.name || 'randomUUID'}>{fakerFunctionNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label> : null}
         {kind === 'uuid' ? select('Version', 'version', [['v4', 'Version 4'], ['v1', 'Version 1']]) : null}
         {kind === 'now' ? <>{select('Format', 'format', [['iso-8601', 'ISO-8601'], ['millis', 'Milliseconds'], ['unix', 'Unix seconds'], ['custom', 'Custom format']])}{values.format === 'custom' ? text('date-fns format', 'formatTemplate', 'yyyy-MM-dd HH:mm:ss') : null}</> : null}

@@ -439,7 +439,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 47;
+  version: 48;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -471,7 +471,40 @@ export type Workspace = {
   preferences: AppPreferences;
 };
 
-export type ShortcutAction = 'palette' | 'preferences' | 'send' | 'environment' | 'history' | 'toggle-sidebar' | 'new-request' | 'duplicate-request' | 'delete-request' | 'focus-url' | 'generate-code' | 'close-tab' | 'next-tab' | 'previous-tab' | 'reopen-closed-tab' | 'open-request-new-tab';
+export type ShortcutAction =
+  | 'workspace-settings'
+  | 'request-settings'
+  | 'keyboard-shortcuts'
+  | 'preferences'
+  | 'palette'
+  | 'reload-plugins'
+  | 'autocomplete'
+  | 'send'
+  | 'send-options'
+  | 'environment'
+  | 'switch-environment'
+  | 'focus-method'
+  | 'history'
+  | 'focus-url'
+  | 'generate-code'
+  | 'focus-sidebar-filter'
+  | 'create-menu'
+  | 'toggle-sidebar'
+  | 'focus-response'
+  | 'cookies'
+  | 'new-request'
+  | 'delete-request'
+  | 'create-folder'
+  | 'duplicate-request'
+  | 'toggle-pin'
+  | 'variable-source'
+  | 'beautify-body'
+  | 'focus-graphql-filter'
+  | 'close-tab'
+  | 'next-tab'
+  | 'previous-tab'
+  | 'reopen-closed-tab'
+  | 'open-request-new-tab';
 
 export type PreferredHttpVersion = 'default' | 'http1.0' | 'http1.1' | 'http2' | 'http2-prior-knowledge';
 
@@ -508,6 +541,7 @@ export type AppPreferences = {
   editorIndentSize: number;
   editorLineWrapping: boolean;
   fontVariantLigatures: boolean;
+  showVariableSourceAndValue: boolean;
   scriptTimeoutMs: number;
   allowScriptRequests: boolean;
   allowScriptFileAccess: boolean;

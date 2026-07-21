@@ -19,6 +19,6 @@ describe('keyboard shortcut multi-binding editor', () => {
     shortcuts.send = [...shortcuts.palette];
     const html = renderToStaticMarkup(<ShortcutBindingsEditor onChange={vi.fn()} onMessage={vi.fn()} shortcuts={shortcuts} />);
     expect(html).toContain('Duplicate migrated bindings');
-    expect(html).toContain('Mod+K');
+    expect(html).toContain('Mod+P');
   });
 });
