@@ -1964,7 +1964,18 @@ kbd {
 .modal-cancel { background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text-soft); font-size: 11px; padding: 8px 16px; }
 .dialog-loading { background: var(--panel); border: 1px solid var(--border); color: var(--muted); font-size: 11px; padding: 18px 22px; }
 .export-options { display: grid; grid-template-columns: 1fr 1fr; }
-.export-options > .interchange-error, .export-options > .export-preview, .export-options > .conversion-warnings { grid-column: 1 / -1; }
+.export-options > .interchange-error, .export-options > .export-preview, .export-options > .conversion-warnings, .export-options > .export-request-selection, .export-options > .export-private-consent { grid-column: 1 / -1; }
+.export-request-selection { border: 1px solid var(--border); margin: 0; min-width: 0; padding: 0; }
+.export-request-selection legend { align-items: center; color: var(--muted); display: flex; font-size: 9px; justify-content: space-between; letter-spacing: .06em; padding: 0 10px; text-transform: uppercase; width: calc(100% - 20px); }
+.export-request-selection legend button { background: transparent; border: 0; color: var(--accent); font-size: 9px; padding: 5px; }
+.export-request-selection > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 210px; overflow: auto; padding: 8px; }
+.export-request-selection label, .export-private-consent { align-items: flex-start; color: var(--text-soft); display: flex !important; flex-direction: row !important; gap: 9px !important; letter-spacing: 0 !important; padding: 8px; text-transform: none !important; }
+.export-request-selection label:hover { background: var(--panel-raised); }
+.export-request-selection input, .export-private-consent input { accent-color: var(--accent); flex: 0 0 auto; margin: 2px 0 0; }
+.export-request-selection label span, .export-private-consent span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.export-request-selection label strong, .export-private-consent strong { font-size: 10px; font-weight: 600; }
+.export-request-selection label small, .export-private-consent small { color: var(--faint); font: 8px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-private-consent { background: #251d0c; border: 1px solid #665120; padding: 11px 12px !important; }
 .export-preview { align-items: center; background: var(--panel-soft); border: 1px solid var(--border); display: flex; gap: 12px; padding: 13px; }
 .export-preview > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .export-preview strong { font: 10px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

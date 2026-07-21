@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the two-hundred-fifty-fifth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the two-hundred-sixty-first runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -32,9 +32,9 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - OpenAPI 3.x YAML/JSON editing, formatting, resolved operation preview/request generation, the pinned Spectral 1.22 OAS runtime, all runtime-exported safe built-in custom functions, nested local/public-HTTPS ruleset extension, selected multi-file/public-HTTPS references, and source/range-aware diagnostics
 - Native loopback mock servers with live route editing, response-pane server/route create-or-overwrite selection, route parameters, delays, headers, CORS, request-aware header/query/decoded-path/JSON/form/multipart output templates, ordered repeated query/form/multipart arrays, computed bracket properties, LiquidJS-compatible quoted strings/escapes/comparisons/logic/`elsif` inside bounded `assign`/`if`/`unless`/`raw` controls, structured template-error responses, all 118 currently documented Faker outputs, dynamic response tokens, and account-free deployment export for the shared headless Tauri/standalone/container runtime with live file reload
 - A headless CLI for OpenAPI lint/generation/export, JSON or split-YAML project collection execution with repeated selected-request, regex request-name, and request-delay controls, and standalone test-suite execution by suite or linked API-spec identity with regex test-name filtering, the documented Inso reporter names, and JSON/JUnit artifacts
-- File, pasted-text, and HTTP(S) URL imports with format detection and a warning preview
-- Insomnia JSON v4/v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports, including nested mixed request/folder sibling order
-- Scoped Brunomnia JSON, Insomnia v4/v5, HAR, and raw OpenAPI exports, with v4/v5 mixed request/folder order round trips
+- Bounded file, recursive-folder, pasted-text, and HTTP(S) URL imports with per-artifact warning previews, partial batch failures, Postman data-dump ZIP extraction, and direct disabled MCP-client URL creation
+- Insomnia JSON v1–v5, Postman Collection 2.0/2.1 and environments, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL imports, including nested mixed request/folder sibling order
+- Scoped Brunomnia JSON, Insomnia v4/v5, HAR, and raw OpenAPI exports with selected-request/ancestor-folder preservation, matching test references, and explicit consent before private environments are included; see the [import/export guide](docs/IMPORT_EXPORT.md)
 - Versioned workspace migrations with collision-safe import history, distinct environment-store interoperability, advanced-auth/cookie-jar mapping, and preserved source metadata
 - Reviewable split-YAML filesystem projects with ordinary Git init/clone/status/push-readiness/actionable-push-errors/aggregate-and-per-file-diff/selected-or-bulk-stage/unstaged-discard/credential-preflighted-commit-and-push/history/local-and-remote-branch/create/delete/fetch/pull/push/clean-tree-merge workflows; reusable OS-protected GitHub, GitLab, and custom HTTP(S) credentials; system Git-helper/SSH fallback; provider account/email validation; automatic pullable-repository discovery; guided remote-branch selection; and bounded no-checkout Brunomnia/Insomnia/API-spec tree scans
 - Three-way text conflict editing, binary ours/theirs resolution, and explicit merge abort without silently discarding local changes

@@ -1,5 +1,5 @@
 import { stringify } from 'yaml';
-import type { ApiRequest, Environment, ImportWarning, McpClient, Workspace } from '../../types';
+import type { ApiRequest, Collection, Environment, ImportWarning, McpClient, Workspace } from '../../types';
 import type { ArtifactExport, ExportFormat, ExportScope } from './types';
 import { normalizeGrpcProtoTree } from '../grpcProto';
 import { orderedCollectionChildren, publicEnvironments } from '../resources';
@@ -11,6 +11,8 @@ export type ExportOptions = {
   scope: ExportScope;
   collectionId?: string;
   designId?: string;
+  requestIds?: string[];
+  includePrivateEnvironments?: boolean;
 };
 
 const safeName = (value: string) => value.trim().replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'brunomnia-export';
@@ -24,18 +26,46 @@ const insomniaV4EnvironmentFields = (rows: Workspace['environments'][number]['va
   kvPairData: mode === 'raw' ? [] : rows.map((row) => ({ id: row.id, name: row.name, value: row.value, type: row.valueType === 'json' ? 'json' : 'str', enabled: row.enabled })),
 });
 
+const selectCollectionRequests = (collection: Collection, requestIds: string[] | undefined): Collection => {
+  if (!requestIds) return collection;
+  const selectedIds = new Set(requestIds);
+  const requests = collection.requests.filter((request) => selectedIds.has(request.id));
+  const foldersById = new Map((collection.folders ?? []).map((folder) => [folder.id, folder]));
+  const folderIds = new Set<string>();
+  requests.forEach((request) => {
+    let folderId = request.folderId;
+    const visited = new Set<string>();
+    while (folderId && !visited.has(folderId)) {
+      visited.add(folderId);
+      folderIds.add(folderId);
+      folderId = foldersById.get(folderId)?.parentId ?? '';
+    }
+  });
+  const retainedIds = new Set([...selectedIds, ...folderIds]);
+  return {
+    ...collection,
+    requests,
+    folders: (collection.folders ?? []).filter((folder) => folderIds.has(folder.id)),
+    resourceOrder: (collection.resourceOrder ?? []).filter((id) => retainedIds.has(id)),
+  };
+};
+
 const selectedCollections = (workspace: Workspace, options: ExportOptions) => options.scope === 'collection'
-  ? workspace.collections.filter((collection) => collection.id === options.collectionId)
+  ? workspace.collections.filter((collection) => collection.id === options.collectionId).map((collection) => selectCollectionRequests(collection, options.requestIds))
   : options.scope === 'design'
     ? workspace.collections.filter((collection) => collection.id === workspace.apiDesigns.find((design) => design.id === options.designId)?.generatedCollectionId)
     : workspace.collections;
+
+const exportEnvironments = (workspace: Workspace, options: ExportOptions) => options.includePrivateEnvironments
+  ? workspace.environments
+  : publicEnvironments(workspace.environments);
 
 const selectedDesigns = (workspace: Workspace, options: ExportOptions) => options.scope === 'design'
   ? workspace.apiDesigns.filter((design) => design.id === options.designId)
   : options.scope === 'all' ? workspace.apiDesigns : [];
 
 const scopedWorkspace = (workspace: Workspace, options: ExportOptions): Workspace => {
-  const environments = publicEnvironments(workspace.environments);
+  const environments = exportEnvironments(workspace, options);
   const activeEnvironmentId = environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '';
   if (options.scope === 'all') return { ...workspace, environments, activeEnvironmentId };
   const collections = selectedCollections(workspace, options);
@@ -205,11 +235,11 @@ const pushV4ProtoResources = (resources: unknown[], request: ApiRequest, workspa
   return entryId || `${prefix}_FILE_1__`;
 };
 
-const pushV4McpWorkspace = (resources: unknown[], workspace: Workspace, client: McpClient, index: number) => {
+const pushV4McpWorkspace = (resources: unknown[], workspace: Workspace, options: ExportOptions, client: McpClient, index: number) => {
   const workspaceId = `__MCP_WORKSPACE_${index + 1}__`;
   const now = Date.now();
   resources.push({ _id: workspaceId, parentId: null, modified: now, created: now, name: client.name, scope: 'mcp', _type: 'workspace' });
-  const publicEnvironment = publicEnvironments(workspace.environments);
+  const publicEnvironment = exportEnvironments(workspace, options);
   const environmentIds = new Map(publicEnvironment.map((environment, environmentIndex) => [environment.id, `__MCP_ENVIRONMENT_${index + 1}_${environmentIndex + 1}__`]));
   publicEnvironment.forEach((environment) => resources.push({
     _id: environmentIds.get(environment.id),
@@ -241,7 +271,7 @@ const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): Artifac
   const warnings: ImportWarning[] = [];
   const collections = selectedCollections(workspace, options);
   const resources: unknown[] = [];
-  if (publicEnvironments(workspace.environments).some((environment) => environment.variables.length) && !(options.scope === 'all' && workspace.mcpClients.length)) warnings.push({ code: 'global-environment-export', message: 'Insomnia v4 workspace exports have no separate global-environment resource; collection environments are preserved and Brunomnia global environments are omitted.' });
+  if (exportEnvironments(workspace, options).some((environment) => environment.variables.length) && !(options.scope === 'all' && workspace.mcpClients.length)) warnings.push({ code: 'global-environment-export', message: 'Insomnia v4 workspace exports have no separate global-environment resource; collection environments are preserved and Brunomnia global environments are omitted.' });
   collections.forEach((collection, collectionIndex) => {
     const workspaceId = `__WORKSPACE_${collectionIndex + 1}__`;
     const fileState = getWorkspaceFileState(workspace, workspaceFileIdForCollection(workspace, collection.id));
@@ -286,13 +316,13 @@ const exportInsomniaV4 = (workspace: Workspace, options: ExportOptions): Artifac
     workspace.testSuites.filter((suite) => suite.collectionId === collection.id).sort((left, right) => left.sortKey - right.sortKey).forEach((suite, suiteIndex) => {
       const suiteId = `__UNIT_TEST_SUITE_${collectionIndex + 1}_${suiteIndex + 1}__`;
       resources.push({ _id: suiteId, parentId: workspaceId, modified: Date.now(), created: Date.now(), name: suite.name, metaSortKey: suite.sortKey, _type: 'unit_test_suite' });
-      [...suite.tests].sort((left, right) => left.sortKey - right.sortKey).forEach((test, testIndex) => resources.push({
+      [...suite.tests].filter((test) => test.requestId === null || exportedRequestIds.has(test.requestId)).sort((left, right) => left.sortKey - right.sortKey).forEach((test, testIndex) => resources.push({
         _id: `__UNIT_TEST_${collectionIndex + 1}_${suiteIndex + 1}_${testIndex + 1}__`, parentId: suiteId, modified: Date.now(), created: Date.now(), name: test.name,
         requestId: test.requestId ? exportedRequestIds.get(test.requestId) ?? null : null, code: test.code, metaSortKey: test.sortKey, _type: 'unit_test',
       }));
     });
   });
-  if (options.scope === 'all') workspace.mcpClients.forEach((client, index) => pushV4McpWorkspace(resources, workspace, client, index));
+  if (options.scope === 'all') workspace.mcpClients.forEach((client, index) => pushV4McpWorkspace(resources, workspace, options, client, index));
   else if (workspace.mcpClients.length) warnings.push({ code: 'mcp-scope-export', message: 'Project-scoped MCP clients are omitted from collection/design-only Insomnia exports. Export the full project to include them.' });
   selectedDesigns(workspace, options).forEach((design, index) => resources.push({ _id: `__API_SPEC_${index + 1}__`, parentId: resources.length ? '__WORKSPACE_1__' : null, name: design.name, contents: design.contents, _type: 'api_spec' }));
   if (options.scope === 'all') workspace.mockServers.forEach((server, index) => resources.push({ _id: `__MOCK_${index + 1}__`, parentId: resources.length ? '__WORKSPACE_1__' : null, name: server.name, url: `http://${server.host}:${server.port}`, routes: server.routes.map((route) => ({ name: route.name, method: route.method, path: route.path, statusCode: route.status, headers: route.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled })), body: route.body, delayMs: route.delayMs })), _type: 'mock_server' }));
@@ -390,7 +420,7 @@ const v5TestSuites = (workspace: Workspace, collectionId: string, requestIds: Ma
   .map((suite, suiteIndex) => ({
     name: suite.name,
     meta: { id: `${prefix}-suite-${suiteIndex + 1}`, sortKey: suite.sortKey },
-    tests: [...suite.tests].sort((left, right) => left.sortKey - right.sortKey).map((test, testIndex) => ({
+    tests: [...suite.tests].filter((test) => test.requestId === null || requestIds.has(test.requestId)).sort((left, right) => left.sortKey - right.sortKey).map((test, testIndex) => ({
       name: test.name,
       meta: { id: `${prefix}-test-${suiteIndex + 1}-${testIndex + 1}`, sortKey: test.sortKey },
       requestId: test.requestId ? requestIds.get(test.requestId) ?? null : null,
@@ -418,7 +448,7 @@ const exportInsomniaV5 = (workspace: Workspace, options: ExportOptions): Artifac
   const representableCollectionIds = new Set(designs.flatMap((design) => design.generatedCollectionId ? [design.generatedCollectionId] : []));
   const selectedCollectionIds = new Set(selectedCollections(workspace, options).map((collection) => collection.id));
   workspace.testSuites.filter((suite) => selectedCollectionIds.has(suite.collectionId) && !representableCollectionIds.has(suite.collectionId)).forEach((suite) => warnings.push({ code: 'unsupported-v5-test-suite', message: 'Insomnia v5 can store standalone test suites only on API specification documents, so this collection-owned suite was omitted.', resource: suite.name }));
-  const globalEnvironments = publicEnvironments(workspace.environments);
+  const globalEnvironments = exportEnvironments(workspace, options);
   const byId = new Map(globalEnvironments.map((environment) => [environment.id, environment]));
   globalEnvironments.filter((environment) => !environment.parentId || !byId.has(environment.parentId)).forEach((base, index) => {
     const belongsToBase = (environment: Environment) => {
@@ -492,14 +522,21 @@ const exportHar = (workspace: Workspace, options: ExportOptions): ArtifactExport
 };
 
 export const exportArtifact = (workspace: Workspace, options: ExportOptions): ArtifactExport => {
+  if (options.scope === 'collection' && options.requestIds?.length === 0) throw new Error('Select at least one request to export.');
+  let artifact: ArtifactExport;
   if (options.format === 'brunomnia') {
     const scoped = scopedWorkspace(workspace, options);
-    return { contents: `${JSON.stringify(scoped, null, 2)}\n`, fileName: `${safeName(scoped.name)}.brunomnia.json`, mimeType: 'application/json', warnings: [] };
+    artifact = { contents: `${JSON.stringify(scoped, null, 2)}\n`, fileName: `${safeName(scoped.name)}.brunomnia.json`, mimeType: 'application/json', warnings: [] };
+  } else if (options.format === 'insomnia-v4') artifact = exportInsomniaV4(workspace, options);
+  else if (options.format === 'insomnia-v5') artifact = exportInsomniaV5(workspace, options);
+  else if (options.format === 'har') artifact = exportHar(workspace, options);
+  else {
+    const design = workspace.apiDesigns.find((candidate) => candidate.id === options.designId) ?? workspace.apiDesigns[0];
+    if (!design) throw new Error('There is no OpenAPI design to export.');
+    artifact = { contents: design.contents, fileName: `${safeName(design.name)}.yaml`, mimeType: 'application/yaml', warnings: [] };
   }
-  if (options.format === 'insomnia-v4') return exportInsomniaV4(workspace, options);
-  if (options.format === 'insomnia-v5') return exportInsomniaV5(workspace, options);
-  if (options.format === 'har') return exportHar(workspace, options);
-  const design = workspace.apiDesigns.find((candidate) => candidate.id === options.designId) ?? workspace.apiDesigns[0];
-  if (!design) throw new Error('There is no OpenAPI design to export.');
-  return { contents: design.contents, fileName: `${safeName(design.name)}.yaml`, mimeType: 'application/yaml', warnings: [] };
+  if (options.format !== 'openapi' && options.includePrivateEnvironments && publicEnvironments(workspace.environments).length < workspace.environments.length) {
+    artifact.warnings.unshift({ code: 'private-environment-export', message: 'This export intentionally includes device-private environment values. Review and protect the downloaded file.' });
+  }
+  return artifact;
 };

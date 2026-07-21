@@ -3039,9 +3039,9 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [active, activeRequestDocumentState, activeWorkspaceId, isRequestDocument, isSending, scheduledSendLabel, workspace]);
 
-  const applyImport = async (result: ArtifactImport) => {
+  const applyImport = async (results: ArtifactImport[]) => {
     const { applyArtifactImport } = await import('./lib/interchange/apply');
-    setWorkspace((current) => applyArtifactImport(current, result));
+    setWorkspace((current) => results.reduce((next, result) => applyArtifactImport(next, result), current));
     setWorkbenchSection('requests');
     setSidebarMode('collections');
   };

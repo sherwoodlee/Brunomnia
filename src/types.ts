@@ -810,7 +810,7 @@ export type UnitTestRunResult = {
   tests: UnitTestCaseResult[];
 };
 
-export type ImportFormat = 'brunomnia' | 'insomnia-v4' | 'insomnia-v5' | 'postman-2' | 'postman-environment' | 'har' | 'openapi-3' | 'swagger-2' | 'wsdl' | 'curl';
+export type ImportFormat = 'brunomnia' | 'insomnia-v1' | 'insomnia-v2' | 'insomnia-v3' | 'insomnia-v4' | 'insomnia-v5' | 'postman-2' | 'postman-environment' | 'har' | 'openapi-3' | 'swagger-2' | 'wsdl' | 'curl';
 
 export type ImportWarning = {
   code: string;

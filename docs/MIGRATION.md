@@ -2563,6 +2563,63 @@ Compatibility bounds remain explicit: Brunomnia's richer local snapshots, physic
 
 Compatibility bounds remain explicit: macOS is Brunomnia's packaged desktop target for this WebKit implementation. Provider-specific hosted credentials are not required to reproduce a protocol and TLS challenge contract that the pinned project itself tests with a local OIDC provider. Rendered interaction QA remains omitted by standing direction. Request authentication is now `Complete`; exactly 10 parity rows remain incomplete, so Brunomnia is not declared feature-complete.
 
+## Milestone 257 — complete REST/HTTP execution (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Wire/content accounting | Complete | Native compressed transfer bytes and decoded entity bytes remain distinct through response badges, history, timeline, plugins, Runner, and HAR |
+| Response compatibility | Complete | Pinned JSON/doctype sniffing, default HTML authority, response-URL-relative resources, and bounded nested multipart viewing match the exposed workbench operations |
+| Transport evidence | Complete | Negotiated encoding/protocol, redirects, duplicate final headers, effective URL, connection/TLS/proxy summaries, and classified failures remain visible without fabricating libcurl callback internals |
+| Verification | Complete | Focused/full frontend and native regressions, strict builds, CLI smokes, app packaging, and signed-container evidence are recorded in [Milestone 257 verification](QA_MILESTONE_257.md) |
+
+Compatibility bounds distinguish user-visible HTTP operations from Electron/libcurl implementation identity. `REST/HTTP execution` is `Complete`; nine parity rows remained incomplete after this milestone.
+
+## Milestone 258 — complete permission-bounded scripting (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Portable isolation | Complete | Trusted CLI scripts execute in disposable resource-limited Workers around a restricted VM with mediated file/network/vault authority |
+| Vault contract | Complete | The pinned read-only `get`, `has`, `replaceIn`, and `toObject` surface works while mutations remain denied |
+| Encrypted identities | Complete | Modern and legacy password-protected PEM keys join existing PEM/PFX transport selection without persisting decrypted key material |
+| Verification | Complete | Worker/sandbox, identity, full frontend/native, CLI smoke, build, package, and signed-container evidence are recorded in [Milestone 258 verification](QA_MILESTONE_258.md) |
+
+Compatibility bounds do not claim npm-package implementation identity or filesystem-write/external-provider script APIs that pinned Insomnia does not expose. `Pre-request and after-response scripts` is `Complete`; eight parity rows remained incomplete after this milestone.
+
+## Milestone 259 — complete Runner and automated tests (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Data files | Complete | Runner upload uses pinned `chardet` 2.1.1 detection with the existing 41-label picker and portable decoders |
+| Result statistics | Complete | Saved/live request cards use compressed wire bytes when native transport supplies them and decoded fallback otherwise |
+| Pinned operation audit | Complete | Planning, execution, live feedback, flow control, filtering, history, cancellation, result cards, tabs, CLI commands, and report operations have executable coverage |
+| Verification | Complete | Focused/full frontend, native, build, CLI smoke, package, and signed-container evidence are recorded in [Milestone 259 verification](QA_MILESTONE_259.md) |
+
+Compatibility bounds omit shared transport internals and package-maintainer commands that are not distinct Runner operations. `Collection runner and automated tests` is `Complete`; seven parity rows remained incomplete after this milestone.
+
+## Milestone 260 — deployable account-free mock servers (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Deployment artifact | Complete | The mock workbench exports a bounded versioned route file with no account, organization, credential, or entitlement state |
+| Shared headless runtime | Complete | Tauri and standalone executables reuse the same renderer, support graceful stop and safe live reload, and preserve the last valid routes during partial writes |
+| Portable hosting | Complete | A pinned non-root multi-architecture OCI workflow supports Docker, Kubernetes, reverse proxies, and user-selected public infrastructure |
+| Verification | Complete | Frontend/native/standalone suites, strict checks, live-reload smokes, constrained container execution, signing, attestations, and transparency evidence are recorded in [Milestone 260 verification](QA_MILESTONE_260.md) |
+
+Compatibility bounds do not claim a Brunomnia-operated hosting service; public DNS, TLS, reachability, and infrastructure belong to the user's host. `Mock servers` is `Complete`; six parity rows remained incomplete after this milestone.
+
+## Milestone 261 — complete import and export operations (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Legacy and batch import | Complete | Insomnia v1–v3 migrate through the pinned v4 model; files/folders apply multiple artifacts with per-file failures and replacement isolation |
+| Postman data dumps | Complete | Stored/deflate ZIPs receive manifest classification, CRC/size checks, bounded streaming expansion, and strict encryption/ZIP64/multidisk refusal |
+| MCP URL import | Complete | Bounded credential-free HTTP(S) URLs create first-class disabled clients whose credential/runtime fields remain cleared |
+| Selective export | Complete | Request subsets retain ancestor folders/order and matching or unbound standalone tests across compatible collection formats |
+| Private-value consent | Complete | Effectively private environment trees are omitted by default and included only through an explicit warning-bearing control |
+| Verification | Complete | Legacy, batch/ZIP, MCP, selection, and consent regressions plus TypeScript, full frontend, and production-build gates are recorded in [Milestone 261 verification](QA_MILESTONE_261.md) |
+
+Compatibility bounds remain explicit for database-only v5 proto references, partially translatable deprecated scripts, external local-file paths, WSDL sample placeholders, and formats without binary embedding. `Import and export formats` is now `Complete`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

@@ -4,7 +4,7 @@ import { secureImportedWorkspace } from '../storage';
 import { asRecord, asString, type UnknownRecord } from './common';
 import { importCurl, isCurl } from './curl';
 import { importHar, isHar } from './har';
-import { importInsomniaV4, importInsomniaV5, isInsomniaV4, isInsomniaV5 } from './insomnia';
+import { importInsomniaLegacy, importInsomniaV4, importInsomniaV5, insomniaLegacyVersion, isInsomniaV4, isInsomniaV5 } from './insomnia';
 import { importPostman, importPostmanEnvironment, isPostmanCollection, isPostmanEnvironment } from './postman';
 import { importOpenApi, importSwagger, parseSpecDocument } from './spec';
 import { importWsdl, isWsdl } from './wsdl';
@@ -43,13 +43,14 @@ export const importArtifact = (contents: string, sourceName = 'Imported artifact
     };
   }
   if (documents.some(isInsomniaV5)) return importInsomniaV5(sourceName, documents.filter(isInsomniaV5));
+  if (insomniaLegacyVersion(first)) return importInsomniaLegacy(sourceName, first);
   if (isInsomniaV4(first)) return importInsomniaV4(sourceName, first);
   if (isPostmanCollection(first)) return importPostman(sourceName, first);
   if (isPostmanEnvironment(first)) return importPostmanEnvironment(sourceName, first);
   if (isHar(first)) return importHar(sourceName, first);
   if (asString(first.openapi).startsWith('3.')) return importOpenApi(contents, sourceName, first);
   if (asString(first.swagger) === '2.0') return importSwagger(contents, sourceName, first);
-  throw new Error('Unsupported import. Brunomnia accepts Brunomnia JSON, Insomnia v4/v5, Postman 2.0/2.1, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL.');
+  throw new Error('Unsupported import. Brunomnia accepts Brunomnia JSON, Insomnia v1–v5, Postman 2.0/2.1, HAR, OpenAPI 3.x, Swagger 2, WSDL, and cURL.');
 };
 
 export const importSummary = (result: ArtifactImport) => {

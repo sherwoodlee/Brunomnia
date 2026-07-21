@@ -281,4 +281,49 @@ describe('artifact export adapters', () => {
     const collectionV5 = exportArtifact(workspace, { format: 'insomnia-v5', scope: 'collection', collectionId: collection.id });
     expect(collectionV5.warnings).toContainEqual(expect.objectContaining({ code: 'unsupported-v5-test-suite', resource: 'Scoped suite' }));
   });
+
+  it('exports selected requests with ancestor folders, stable order, and matching tests only', () => {
+    const workspace = cloneSeedWorkspace();
+    const collection = workspace.collections[0];
+    collection.requests = collection.requests.slice(0, 3);
+    collection.folders = [
+      { id: 'parent-folder', name: 'Parent', parentId: '', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+      { id: 'child-folder', name: 'Child', parentId: 'parent-folder', expanded: true, headers: [], environment: [], preRequestScript: '', tests: '', documentation: '' },
+    ];
+    collection.requests[0].folderId = 'child-folder';
+    collection.requests[1].folderId = 'parent-folder';
+    collection.requests[2].folderId = '';
+    collection.resourceOrder = ['parent-folder', collection.requests[1].id, 'child-folder', collection.requests[0].id, collection.requests[2].id];
+    workspace.testSuites = [{ id: 'suite', name: 'Suite', collectionId: collection.id, sortKey: 0, tests: [
+      { id: 'selected-test', name: 'Selected', code: '', requestId: collection.requests[0].id, sortKey: 0 },
+      { id: 'excluded-test', name: 'Excluded', code: '', requestId: collection.requests[1].id, sortKey: 1 },
+      { id: 'unbound-test', name: 'Unbound', code: '', requestId: null, sortKey: 2 },
+    ] }];
+
+    const exported = exportArtifact(workspace, { format: 'brunomnia', scope: 'collection', collectionId: collection.id, requestIds: [collection.requests[0].id] });
+    const parsed = JSON.parse(exported.contents);
+    expect(parsed.collections[0].requests).toEqual([expect.objectContaining({ id: collection.requests[0].id })]);
+    expect(parsed.collections[0].folders.map((folder: { id: string }) => folder.id)).toEqual(['parent-folder', 'child-folder']);
+    expect(parsed.collections[0].resourceOrder).toEqual(['parent-folder', 'child-folder', collection.requests[0].id]);
+    expect(parsed.testSuites[0].tests.map((test: { id: string }) => test.id)).toEqual(['selected-test', 'unbound-test']);
+    expect(() => exportArtifact(workspace, { format: 'brunomnia', scope: 'collection', collectionId: collection.id, requestIds: [] })).toThrow('Select at least one request');
+  });
+
+  it('omits private environments by default and includes them only with explicit consent', () => {
+    const workspace = cloneSeedWorkspace();
+    workspace.environments.push(
+      { id: 'private-root', name: 'Private', private: true, variables: [{ id: 'private-token', name: 'token', value: 'device-secret', enabled: true }] },
+      { id: 'private-child', parentId: 'private-root', name: 'Private child', variables: [{ id: 'private-child-token', name: 'childToken', value: 'child-secret', enabled: true }] },
+    );
+
+    const safe = exportArtifact(workspace, { format: 'brunomnia', scope: 'all' });
+    expect(safe.contents).not.toContain('device-secret');
+    expect(safe.contents).not.toContain('child-secret');
+    expect(JSON.parse(safe.contents).environments.some((environment: { id: string }) => environment.id === 'private-root')).toBe(false);
+
+    const consented = exportArtifact(workspace, { format: 'brunomnia', scope: 'all', includePrivateEnvironments: true });
+    expect(consented.contents).toContain('device-secret');
+    expect(consented.contents).toContain('child-secret');
+    expect(consented.warnings[0]).toMatchObject({ code: 'private-environment-export' });
+  });
 });

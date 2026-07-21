@@ -522,6 +522,106 @@ const v4ProtoTree = (
 
 export const isInsomniaV4 = (document: UnknownRecord) => document.__export_format === 4 && Array.isArray(document.resources);
 
+type LegacyInsomniaVersion = 1 | 2 | 3;
+
+export const insomniaLegacyVersion = (document: UnknownRecord): LegacyInsomniaVersion | undefined => {
+  const version = asNumber(document.__export_format);
+  return (version === 1 && Array.isArray(document.items)) || ((version === 2 || version === 3) && Array.isArray(document.resources))
+    ? version as LegacyInsomniaVersion
+    : undefined;
+};
+
+const legacyContentType = (headers: unknown) => asArray(headers).map(asRecord)
+  .find((header) => asString(header?.name).toLowerCase() === 'content-type');
+
+const legacyV1Resources = (document: UnknownRecord): UnknownRecord[] => asArray(document.items).flatMap((value, groupIndex) => {
+  const item = asRecord(value);
+  if (!item) return [];
+  const groupId = `__LEGACY_GROUP_${groupIndex + 1}__`;
+  const group: UnknownRecord = {
+    _type: 'request_group',
+    _id: groupId,
+    parentId: '__WORKSPACE_ID__',
+    name: asString(item.name, `Imported Folder ${groupIndex + 1}`),
+    environment: asRecord(asRecord(item.environments)?.base) ?? {},
+  };
+  const requests = asArray(item.requests).flatMap((requestValue, requestIndex): UnknownRecord[] => {
+    const raw = asRecord(requestValue);
+    if (!raw) return [];
+    const headers = asArray(raw.headers).map(asRecord).filter((header): header is UnknownRecord => Boolean(header));
+    const format = asString(asRecord(raw.__insomnia)?.format);
+    const formatMime: Record<string, string> = { form: 'application/x-www-form-urlencoded', json: 'application/json', text: 'text/plain', xml: 'application/xml' };
+    let contentType = legacyContentType(headers);
+    if (!contentType && formatMime[format]) {
+      contentType = { name: 'Content-Type', value: formatMime[format] };
+      headers.push(contentType);
+    }
+    const mimeType = asString(contentType?.value).split(';')[0];
+    const bodyText = asString(raw.body);
+    const formBody = /^application\/(?:x-www-form-urlencoded|multipart\/form-encoded)/i.test(asString(contentType?.value));
+    const body = formBody
+      ? {
+          mimeType,
+          params: bodyText.split('&').filter(Boolean).map((pair) => {
+            const separator = pair.indexOf('=');
+            const decode = (part: string) => {
+              try { return decodeURIComponent(part.replace(/\+/g, ' ')); } catch { return part; }
+            };
+            return { name: decode(separator < 0 ? pair : pair.slice(0, separator)), value: decode(separator < 0 ? '' : pair.slice(separator + 1)) };
+          }),
+        }
+      : bodyText ? { mimeType: mimeType || formatMime[format] || '', text: bodyText } : {};
+    const authentication = asRecord(raw.authentication);
+    return [{
+      _type: 'request',
+      _id: `__LEGACY_REQUEST_${groupIndex + 1}_${requestIndex + 1}__`,
+      parentId: groupId,
+      name: asString(raw.name, `Imported Request ${requestIndex + 1}`),
+      url: asString(raw.url),
+      method: asString(raw.method, 'GET'),
+      body,
+      parameters: asArray(raw.params),
+      headers,
+      authentication: authentication && (asString(authentication.username) || asString(authentication.password))
+        ? { ...authentication, type: asString(authentication._type, 'basic') }
+        : authentication ?? {},
+    }];
+  });
+  return [group, ...requests];
+});
+
+const legacyResources = (document: UnknownRecord, version: LegacyInsomniaVersion): UnknownRecord[] => {
+  if (version === 1) return legacyV1Resources(document);
+  return asArray(document.resources).flatMap((value): UnknownRecord[] => {
+    const resource = asRecord(value);
+    if (!resource) return [];
+    if (version !== 2 || resource._type !== 'request' || typeof resource.body !== 'string') return [{ ...resource }];
+    return [{
+      ...resource,
+      body: {
+        mimeType: asString(legacyContentType(resource.headers)?.value).split(';')[0],
+        text: resource.body,
+      },
+    }];
+  });
+};
+
+export const importInsomniaLegacy = (sourceName: string, document: UnknownRecord): ArtifactImport => {
+  const version = insomniaLegacyVersion(document);
+  if (!version) throw new Error('The document is not an Insomnia v1, v2, or v3 export.');
+  const imported = importInsomniaV4(sourceName, {
+    __export_format: 4,
+    __export_source: `insomnia.legacy:v${version}`,
+    resources: legacyResources(document, version),
+  });
+  return {
+    ...imported,
+    format: `insomnia-v${version}` as const,
+    warnings: [{ code: 'legacy-format', message: `Insomnia v${version} was migrated through the pinned legacy compatibility model; review imported requests before use.` }, ...imported.warnings],
+    metadata: { ...imported.metadata, legacyVersion: String(version) },
+  };
+};
+
 export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): ArtifactImport => {
   const warnings: ImportWarning[] = [];
   const resources = asArray(document.resources).map(asRecord).filter((resource): resource is UnknownRecord => Boolean(resource));

@@ -272,6 +272,33 @@ testSuites:
     expect(new Set(appliedAgain.testSuites.flatMap((suite) => suite.tests.map((test) => test.id))).size).toBe(appliedAgain.testSuites.reduce((total, suite) => total + suite.tests.length, 0));
   });
 
+  it.each([
+    [1, {
+      __export_format: 1,
+      items: [{ name: 'Legacy group', environments: { base: { host: 'https://legacy.example' } }, requests: [{ name: 'Create item', method: 'POST', url: '{{ host }}/items', headers: [], body: '{"ok":true}', __insomnia: { format: 'json' } }] }],
+    }],
+    [2, {
+      __export_format: 2,
+      resources: [
+        { _id: 'wrk_legacy', parentId: null, name: 'Legacy v2', _type: 'workspace' },
+        { _id: 'req_legacy', parentId: 'wrk_legacy', name: 'Create item', method: 'POST', url: 'https://legacy.example/items', headers: [{ name: 'Content-Type', value: 'application/json' }], body: '{"ok":true}', _type: 'request' },
+      ],
+    }],
+    [3, {
+      __export_format: 3,
+      resources: [
+        { _id: 'wrk_legacy', parentId: null, name: 'Legacy v3', _type: 'workspace' },
+        { _id: 'req_legacy', parentId: 'wrk_legacy', name: 'Create item', method: 'POST', url: 'https://legacy.example/items', headers: [], body: { mimeType: 'application/json', text: '{"ok":true}' }, _type: 'request' },
+      ],
+    }],
+  ])('imports bounded Insomnia v%s exports through the v4 compatibility mapper', (version, document) => {
+    const result = importArtifact(JSON.stringify(document), `insomnia-v${version}.json`);
+    expect(result.format).toBe(`insomnia-v${version}`);
+    expect(result.metadata.legacyVersion).toBe(String(version));
+    expect(result.warnings[0]).toMatchObject({ code: 'legacy-format' });
+    expect(result.collections[0].requests[0]).toMatchObject({ name: 'Create item', method: 'POST', bodyMode: 'json', body: '{"ok":true}' });
+  });
+
   it('imports Socket.IO requests and promotes legacy nested MCP data to a disabled client', () => {
     const result = importArtifact(`type: collection.insomnia.rest/5.0
 schema_version: "5.1"
