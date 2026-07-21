@@ -1583,8 +1583,10 @@ kbd {
 .plugin-tools code { background: #0d1418; border: 1px solid var(--border-soft); color: #f0c08f; font-size: 8px; padding: 8px; }
 .plugin-tools p { color: var(--faint); font-size: 8px; margin: 4px 0; }
 .plugin-source-card textarea, .plugin-installer > textarea { display: block; font: 9px/1.55 var(--font-mono); min-height: 290px; padding: 11px; resize: vertical; width: 100%; }
+.plugin-module-review label { align-items: center; display: grid; gap: 8px; grid-template-columns: auto minmax(180px, 1fr); margin-bottom: 9px; }
+.plugin-module-review textarea { display: block; font: 9px/1.55 var(--font-mono); min-height: 220px; padding: 11px; resize: vertical; width: 100%; }
 .plugin-installer { margin: auto; max-width: 860px; width: 100%; }
-.local-plugin-row { display: grid; gap: 7px; grid-template-columns: minmax(200px, 1fr) auto; margin-bottom: 9px; }
+.local-plugin-row { display: grid; gap: 7px; grid-template-columns: minmax(200px, 1fr) auto auto; margin-bottom: 9px; }
 .local-plugin-row input { min-width: 0; }
 .local-plugin-row button { align-items: center; display: flex; gap: 6px; }
 .plugin-metadata { display: grid; gap: 7px; grid-template-columns: minmax(130px, 1fr) 130px minmax(180px, 2fr); margin-bottom: 9px; }

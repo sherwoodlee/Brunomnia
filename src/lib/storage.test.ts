@@ -781,6 +781,18 @@ describe('workspace migrations', () => {
     expect(imported.preferences).toMatchObject({ fontSize: 11, interfaceFontSize: 13, fontInterface: '', fontMonospace: '', showPasswords: false, allowHtmlPreviewRemoteResources: false, allowHtmlPreviewScripts: false, disableResponsePreviewLinks: false });
   });
 
+  it('retains bounded multi-file plugin package maps', () => {
+    const exported = cloneSeedWorkspace();
+    exported.plugins = [{
+      id: 'plugin-package', name: 'Package', version: '1.0.0', description: '', source: `module.exports = require('./lib/value');`, sourcePath: '/plugins/package',
+      moduleFiles: { 'index.js': `module.exports = require('./lib/value');`, 'lib/value.js': 'module.exports = {};', '../escape.js': 'unsafe' }, entryModuleKey: 'index.js',
+      sourceFormat: 'insomnia-commonjs', enabled: false, requestedPermissions: [], grantedPermissions: [], installedAt: '2026-07-20T00:00:00.000Z',
+    }];
+    const imported = migrateWorkspace(exported);
+    expect(imported.plugins[0]).toMatchObject({ entryModuleKey: 'index.js', moduleFiles: { 'index.js': expect.any(String), 'lib/value.js': 'module.exports = {};' } });
+    expect(imported.plugins[0].moduleFiles).not.toHaveProperty('../escape.js');
+  });
+
   it('normalizes preference bounds and shortcut values', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
     workspace.preferences = { theme: 'unknown', density: 'compact', fontSize: 99, interfaceFontSize: 2, fontInterface: 'Fancy\nUI', fontMonospace: 42, showPasswords: 'yes', allowHtmlPreviewRemoteResources: 'yes', allowHtmlPreviewScripts: 'yes', disableResponsePreviewLinks: 'yes', preferredHttpVersion: 'http3', maxRedirects: -99.8, followRedirects: 'sometimes', maxTimelineDataSizeKB: -400.2, maxHistoryResponses: -400.2, filterResponsesByEnv: 'yes', requestTimeoutMs: 1, validateCertificates: false, validateAuthCertificates: 'no', proxyEnabled: 'yes', httpProxy: 42, httpsProxy: false, noProxy: null, forceVerticalLayout: 'yes', editorIndentWithTabs: 0, editorIndentSize: 999, editorLineWrapping: null, fontVariantLigatures: 1, scriptTimeoutMs: 999_999, allowScriptRequests: 'yes', allowScriptFileAccess: 'yes', dataFolders: [' /tmp/fixtures ', '/tmp/fixtures', 42, '', 'x'.repeat(5_000)], enableVaultInScripts: 1, shortcuts: { palette: ' mod + shift + p ', send: 42 } };

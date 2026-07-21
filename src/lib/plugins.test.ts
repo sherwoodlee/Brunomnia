@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPluginWorkerSource, inferPluginPermissions, pluginStarterSource, validatePluginSource } from './plugins';
+import { buildPluginWorkerSource, inferPluginPermissions, pluginSourceText, pluginStarterSource, validatePluginSource } from './plugins';
 
 describe('permissioned plugin runtime source', () => {
   it('builds an isolated CommonJS worker for Insomnia-compatible exports', () => {
@@ -13,6 +13,23 @@ describe('permissioned plugin runtime source', () => {
     expect(source).toContain('getBodyStream');
     expect(source).toContain('requestGroupActions');
     expect(source).toContain("'data-export'");
+  });
+
+  it('builds a relative module loader and validates package paths', () => {
+    const source = `module.exports = require('./lib/value');`;
+    const worker = buildPluginWorkerSource(source, '__br_package', { 'index.js': source, 'lib/value.js': 'module.exports = {};' }, 'index.js');
+    expect(() => new Function(worker)).not.toThrow();
+    expect(worker).toContain('resolveModuleKey');
+    expect(worker).toContain('lib/value.js');
+    expect(() => buildPluginWorkerSource(source, '__br_unsafe', { 'index.js': source, '../escape.js': '' }, 'index.js')).toThrow(/not safe/);
+  });
+
+  it('infers permissions across every packaged source file', () => {
+    expect(inferPluginPermissions(pluginSourceText({
+      source: `module.exports = require('./hook');`,
+      moduleFiles: { 'index.js': `module.exports = require('./hook');`, 'hook.js': `module.exports.requestHooks = [context => context.request.setHeader('X-Test', 'yes')];` },
+      entryModuleKey: 'index.js',
+    }))).toEqual(expect.arrayContaining(['request:read', 'request:write']));
   });
 
   it('infers folder, data, private-value, and file-path authorities', () => {

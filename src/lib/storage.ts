@@ -58,6 +58,19 @@ const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(valu
   const permissions = (candidate: unknown) => Array.isArray(candidate)
     ? knownPluginPermissions.filter((permission) => candidate.includes(permission))
     : [];
+  const safeModuleKey = (key: string) => !key.startsWith('/') && !key.includes('\\') && !key.includes('\0') && /\.(?:js|json)$/.test(key) && key.split('/').every((part) => Boolean(part) && part !== '.' && part !== '..');
+  const rawModuleFiles = plugin.moduleFiles && typeof plugin.moduleFiles === 'object' && !Array.isArray(plugin.moduleFiles)
+    ? Object.entries(plugin.moduleFiles as Record<string, unknown>)
+      .filter(([key, source]) => typeof source === 'string' && safeModuleKey(key))
+      .slice(0, 500)
+    : [];
+  let moduleBytes = 0;
+  const moduleFiles = Object.fromEntries(rawModuleFiles.filter(([, source]) => {
+    const bytes = new TextEncoder().encode(source as string).byteLength;
+    moduleBytes += bytes;
+    return bytes <= 1_000_000 && moduleBytes <= 5_000_000;
+  })) as Record<string, string>;
+  const entryModuleKey = typeof plugin.entryModuleKey === 'string' && plugin.entryModuleKey in moduleFiles ? plugin.entryModuleKey : undefined;
   return [{
     id: typeof plugin.id === 'string' && plugin.id ? plugin.id : `migrated-plugin-${index}`,
     name: typeof plugin.name === 'string' && plugin.name ? plugin.name : 'Local plugin',
@@ -65,6 +78,8 @@ const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(valu
     description: typeof plugin.description === 'string' ? plugin.description : '',
     source: plugin.source,
     sourcePath: typeof plugin.sourcePath === 'string' ? plugin.sourcePath : undefined,
+    moduleFiles: entryModuleKey ? moduleFiles : undefined,
+    entryModuleKey,
     sourceFormat: plugin.sourceFormat === 'brunomnia' ? 'brunomnia' : 'insomnia-commonjs',
     enabled: plugin.enabled === true,
     requestedPermissions: permissions(plugin.requestedPermissions),

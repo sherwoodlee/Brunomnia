@@ -8,6 +8,7 @@ import {
   inferPluginPermissions,
   pluginPermissionLabels,
   pluginPermissions,
+  pluginSourceText,
   pluginStarterSource,
   runPluginAction,
   validatePluginSource,
@@ -15,7 +16,7 @@ import {
   type PluginHostCallbacks,
   type PluginNotification,
 } from '../lib/plugins';
-import { readLocalPluginSource } from '../lib/project';
+import { discoverLocalPluginSources, readLocalPluginSource, type LocalPluginSource } from '../lib/project';
 import { readDesktopTemplateFile } from '../lib/scriptFiles';
 import { applyCollectionConfiguration, requestAncestorNames, resolveEnvironment } from '../lib/resources';
 import { environmentMap } from '../lib/request';
@@ -59,8 +60,11 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
   const [installDescription, setInstallDescription] = useState('Local CommonJS plugin');
   const [installSource, setInstallSource] = useState('');
   const [installSourcePath, setInstallSourcePath] = useState('');
+  const [installModuleFiles, setInstallModuleFiles] = useState<Record<string, string> | undefined>();
+  const [installEntryModuleKey, setInstallEntryModuleKey] = useState<string | undefined>();
   const [localPath, setLocalPath] = useState('');
   const [draftSource, setDraftSource] = useState('');
+  const [reviewModuleKey, setReviewModuleKey] = useState('');
   const [descriptor, setDescriptor] = useState<PluginDescriptor>(blankDescriptor);
   const [notifications, setNotifications] = useState<PluginNotification[]>([]);
   const [busy, setBusy] = useState('');
@@ -78,6 +82,10 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
     noProxy: workspace.preferences.noProxy,
   };
   const requested = useMemo(() => new Set(selected?.requestedPermissions ?? []), [selected?.requestedPermissions]);
+  const reviewModuleKeys = useMemo(() => Object.keys(selected?.moduleFiles ?? {}).sort(), [selected?.moduleFiles]);
+  const reviewedModuleSource = selected && reviewModuleKey
+    ? reviewModuleKey === selected.entryModuleKey ? selected.source : selected.moduleFiles?.[reviewModuleKey] ?? ''
+    : '';
 
   const changeWorkspace = (updater: (current: Workspace) => Workspace) => onChangeWorkspace(updater);
   const updatePlugin = (id: string, patch: Partial<PluginRecord>) => changeWorkspace((current) => ({
@@ -98,6 +106,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
 
   useEffect(() => {
     setDraftSource(selected?.source ?? '');
+    setReviewModuleKey(selected?.entryModuleKey ?? Object.keys(selected?.moduleFiles ?? {})[0] ?? '');
     setDescriptor(blankDescriptor);
     if (!selected) return;
     let cancelled = false;
@@ -173,34 +182,103 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
       description: installDescription.trim(),
       source: installSource,
       sourcePath: installSourcePath || undefined,
+      moduleFiles: installModuleFiles,
+      entryModuleKey: installEntryModuleKey,
       sourceFormat: 'insomnia-commonjs',
       enabled: false,
-      requestedPermissions: inferPluginPermissions(installSource),
+      requestedPermissions: inferPluginPermissions(pluginSourceText({ source: installSource, moduleFiles: installModuleFiles, entryModuleKey: installEntryModuleKey })),
       grantedPermissions: [],
       installedAt: new Date().toISOString(),
     };
     const found = await describePlugin(plugin);
     changeWorkspace((current) => ({ ...current, plugins: [...current.plugins, plugin] }));
-    setSelectedId(id); setDescriptor(found); setInstallSource(''); setInstallSourcePath('');
+    setSelectedId(id); setDescriptor(found); setInstallSource(''); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined);
     setMessage('Plugin installed disabled. Review and grant only the capabilities it needs.');
   });
 
   const loadLocal = () => run('Reading local plugin', async () => {
     const output = await readLocalPluginSource(localPath);
     setInstallName(output.name); setInstallVersion(output.version); setInstallDescription(output.description); setInstallSource(output.source);
-    setInstallSourcePath(output.path);
+    setInstallSourcePath(output.path); setInstallModuleFiles(output.moduleFiles); setInstallEntryModuleKey(output.entryModuleKey);
     setMessage(`Loaded ${output.path}. Review the source before installing.`);
+  });
+
+  const discoverLocal = () => run('Discovering plugin packages', async () => {
+    const output = await discoverLocalPluginSources(localPath);
+    const warnings = [...output.warnings];
+    const candidates: Array<{ output: LocalPluginSource; plugin: PluginRecord }> = [];
+    for (const discovered of output.plugins) {
+      try {
+        validatePluginSource(discovered.source);
+        const existing = workspace.plugins.find((plugin) => plugin.sourcePath === discovered.path);
+        const plugin: PluginRecord = {
+          id: existing?.id ?? uid(),
+          name: discovered.name,
+          version: discovered.version,
+          description: discovered.description,
+          source: discovered.source,
+          sourcePath: discovered.path,
+          moduleFiles: discovered.moduleFiles,
+          entryModuleKey: discovered.entryModuleKey,
+          sourceFormat: 'insomnia-commonjs',
+          enabled: false,
+          requestedPermissions: inferPluginPermissions(pluginSourceText({ source: discovered.source, moduleFiles: discovered.moduleFiles, entryModuleKey: discovered.entryModuleKey })),
+          grantedPermissions: [],
+          installedAt: existing?.installedAt ?? new Date().toISOString(),
+        };
+        await describePlugin(plugin);
+        candidates.push({ output: discovered, plugin });
+      } catch (caught) {
+        warnings.push(`${discovered.path}: ${caught instanceof Error ? caught.message : String(caught)}`);
+      }
+    }
+    if (!candidates.length) throw new Error(warnings.join(' ') || 'No compatible plugin packages were discovered.');
+    const firstId = candidates[0].plugin.id;
+    changeWorkspace((current) => {
+      const plugins = [...current.plugins];
+      const pluginData = { ...current.pluginData };
+      let activePluginTheme = current.activePluginTheme;
+      for (const candidate of candidates) {
+        const index = plugins.findIndex((plugin) => plugin.sourcePath === candidate.output.path);
+        if (index < 0) {
+          plugins.push(candidate.plugin);
+          continue;
+        }
+        const previous = plugins[index];
+        const changed = previous.source !== candidate.plugin.source
+          || previous.entryModuleKey !== candidate.plugin.entryModuleKey
+          || JSON.stringify(previous.moduleFiles ?? {}) !== JSON.stringify(candidate.plugin.moduleFiles ?? {});
+        plugins[index] = changed ? candidate.plugin : {
+          ...previous,
+          name: candidate.plugin.name,
+          version: candidate.plugin.version,
+          description: candidate.plugin.description,
+          sourcePath: candidate.plugin.sourcePath,
+          moduleFiles: candidate.plugin.moduleFiles,
+          entryModuleKey: candidate.plugin.entryModuleKey,
+          requestedPermissions: candidate.plugin.requestedPermissions,
+          error: undefined,
+        };
+        if (changed) {
+          delete pluginData[previous.id];
+          if (activePluginTheme.startsWith(`${previous.id}::`)) activePluginTheme = '';
+        }
+      }
+      return { ...current, plugins, pluginData, activePluginTheme };
+    });
+    setSelectedId(firstId);
+    setMessage(`Discovered ${candidates.length} plugin package${candidates.length === 1 ? '' : 's'} disabled for review.${warnings.length ? ` ${warnings.slice(0, 3).join(' ')}` : ''}`);
   });
 
   const reloadSelected = () => run('Reloading local plugin', async () => {
     if (!selected?.sourcePath) throw new Error('This plugin has no linked local source path.');
     const output = await readLocalPluginSource(selected.sourcePath);
     validatePluginSource(output.source);
-    const next: PluginRecord = { ...selected, name: output.name, version: output.version, description: output.description, source: output.source, sourcePath: output.path, enabled: false, requestedPermissions: inferPluginPermissions(output.source), grantedPermissions: [], error: undefined };
+    const next: PluginRecord = { ...selected, name: output.name, version: output.version, description: output.description, source: output.source, sourcePath: output.path, moduleFiles: output.moduleFiles, entryModuleKey: output.entryModuleKey, enabled: false, requestedPermissions: inferPluginPermissions(pluginSourceText(output)), grantedPermissions: [], error: undefined };
     const found = await describePlugin(next);
     updatePlugin(selected.id, next);
     setDescriptor(found); setDraftSource(output.source);
-    setMessage('Local source reloaded. Review permissions before enabling it again.');
+    setMessage('Local package reloaded. Review permissions before enabling it again.');
   });
 
   const sendPluginNetwork = async (pluginRequest: Parameters<NonNullable<PluginHostCallbacks['network']>>[0]) => sendRequest(pluginRequest, effectiveEnvironment, {
@@ -285,7 +363,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
   return (
     <section className="plugin-workbench">
       <header className="plugin-header">
-        <div><small>Extensibility</small><h1>Local plugins</h1><p>Run dependency-free Insomnia-style CommonJS hooks, tags, actions, and themes inside a time-limited Worker with explicit permissions.</p></div>
+        <div><small>Extensibility</small><h1>Local plugins</h1><p>Run pasted or bounded multi-file Insomnia-style CommonJS packages inside a time-limited Worker with explicit permissions.</p></div>
         <span className="local-only-badge">Local · no paid gate</span>
       </header>
 
@@ -296,8 +374,8 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
             {workspace.plugins.map((plugin) => <button className={plugin.id === selectedId ? 'active' : ''} key={plugin.id} onClick={() => setSelectedId(plugin.id)} type="button"><span className={plugin.enabled ? 'plugin-state enabled' : 'plugin-state'} /><span><strong>{plugin.name}</strong><small>v{plugin.version} · {plugin.enabled ? 'enabled' : 'disabled'}</small></span></button>)}
             {!workspace.plugins.length ? <p>No plugins installed.</p> : null}
           </div>
-          <button className="secondary-button" onClick={() => { setSelectedId(''); setInstallSource(''); }} type="button"><Icon name="plus" size={15} /> Install plugin</button>
-          <button className="secondary-button quiet" onClick={() => { setSelectedId(''); setInstallSource(pluginStarterSource); setInstallName('Brunomnia starter'); setInstallVersion('0.1.0'); setInstallDescription('Starter request hook, template tag, and action'); }} type="button"><Icon name="code" size={15} /> Use starter source</button>
+          <button className="secondary-button" onClick={() => { setSelectedId(''); setInstallSource(''); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); }} type="button"><Icon name="plus" size={15} /> Install plugin</button>
+          <button className="secondary-button quiet" onClick={() => { setSelectedId(''); setInstallSource(pluginStarterSource); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); setInstallName('Brunomnia starter'); setInstallVersion('0.1.0'); setInstallDescription('Starter request hook, template tag, and action'); }} type="button"><Icon name="code" size={15} /> Use starter source</button>
         </aside>
 
         <div className="plugin-main">
@@ -311,8 +389,9 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
 
             <section className="plugin-card"><header><div><small>Exports</small><h2>Actions, tags, and theme</h2></div></header><div className="plugin-tools"><div><strong>Actions</strong>{descriptor.actions.map((action) => <button disabled={!selected.enabled || !selected.grantedPermissions.includes('action') || Boolean(busy) || (action.kind === 'request-group' && !request?.folderId) || (action.kind === 'document' && selectedDocumentType !== 'document' && !workspace.apiDesigns.length)} key={action.id} onClick={() => runAction(action.id)} type="button">{action.label}<small>{action.kind}</small></button>)}{!descriptor.actions.length ? <p>No actions exported.</p> : null}</div><div><strong>Template tags</strong>{descriptor.templates.map((tag) => <code key={tag.name}>{`{% ${tag.name} %}`}</code>)}{!descriptor.templates.length ? <p>No tags exported.</p> : null}</div><label><strong>Theme</strong><select disabled={!selected.enabled || !selected.grantedPermissions.includes('theme')} value={workspace.activePluginTheme.startsWith(`${selected.id}::`) ? workspace.activePluginTheme : ''} onChange={(event) => selectTheme(event.target.value)}><option value="">System theme</option>{descriptor.themes.map((theme) => <option key={theme.id} value={`${selected.id}::${theme.id}`}>{theme.displayName}</option>)}</select></label></div></section>
 
-            <section className="plugin-card plugin-source-card"><header><div><small>Source</small><h2>Review and update</h2><p>Updating source disables the plugin and clears grants so changed code cannot inherit old authority.</p></div><button disabled={draftSource === selected.source || Boolean(busy)} onClick={() => run('Updating source', async () => { validatePluginSource(draftSource); const next = { ...selected, source: draftSource, sourcePath: undefined, enabled: false, requestedPermissions: inferPluginPermissions(draftSource), grantedPermissions: [] as PluginPermission[], error: undefined }; const found = await describePlugin(next); updatePlugin(selected.id, next); setDescriptor(found); setMessage('Source updated. Review permissions before enabling it again.'); })} type="button">Apply source</button></header><textarea aria-label="Plugin source" spellCheck={false} value={draftSource} onChange={(event) => setDraftSource(event.target.value)} /></section>
-          </> : <section className="plugin-card plugin-installer"><header><div><small>Install</small><h2>Review local CommonJS source</h2><p>Package dependencies and remote installs are intentionally not loaded. Bundle a plugin to one file or paste dependency-free source.</p></div></header>{isTauri() ? <div className="local-plugin-row"><input value={localPath} onChange={(event) => setLocalPath(event.target.value)} placeholder="/path/to/plugin folder or main.js" /><button disabled={!localPath || Boolean(busy)} onClick={loadLocal} type="button"><Icon name="folder" size={15} /> Read local</button></div> : null}<div className="plugin-metadata"><input value={installName} onChange={(event) => setInstallName(event.target.value)} placeholder="Plugin name" /><input value={installVersion} onChange={(event) => setInstallVersion(event.target.value)} placeholder="Version" /><input value={installDescription} onChange={(event) => setInstallDescription(event.target.value)} placeholder="Description" /></div><textarea aria-label="Plugin source to install" spellCheck={false} value={installSource} onChange={(event) => setInstallSource(event.target.value)} placeholder="module.exports.requestHooks = […]" /><button disabled={!installSource.trim() || Boolean(busy)} onClick={install} type="button">Install disabled for review</button></section>}
+            <section className="plugin-card plugin-source-card"><header><div><small>Source</small><h2>Review and update</h2><p>Updating only the entry source detaches the local package, disables the plugin, and clears grants so changed code cannot inherit old authority.</p></div><button disabled={draftSource === selected.source || Boolean(busy)} onClick={() => run('Updating source', async () => { validatePluginSource(draftSource); const next = { ...selected, source: draftSource, sourcePath: undefined, moduleFiles: undefined, entryModuleKey: undefined, enabled: false, requestedPermissions: inferPluginPermissions(draftSource), grantedPermissions: [] as PluginPermission[], error: undefined }; const found = await describePlugin(next); updatePlugin(selected.id, next); setDescriptor(found); setMessage('Source updated. Review permissions before enabling it again.'); })} type="button">Apply source</button></header><textarea aria-label="Plugin source" spellCheck={false} value={draftSource} onChange={(event) => setDraftSource(event.target.value)} /></section>
+            {reviewModuleKeys.length > 1 ? <section className="plugin-card plugin-module-review"><header><div><small>Package map</small><h2>Review every module</h2><p>Only bounded JavaScript and JSON files inside the package are available. Dependency folders and hidden directories are excluded.</p></div></header><label><strong>Module</strong><select value={reviewModuleKey} onChange={(event) => setReviewModuleKey(event.target.value)}>{reviewModuleKeys.map((key) => <option key={key} value={key}>{key}{key === selected.entryModuleKey ? ' (entry)' : ''}</option>)}</select></label><textarea aria-label="Plugin package module source" readOnly spellCheck={false} value={reviewedModuleSource} /></section> : null}
+          </> : <section className="plugin-card plugin-installer"><header><div><small>Install</small><h2>Review local CommonJS source</h2><p>Read one JavaScript file/package or discover bounded Insomnia packages in a directory. Relative JavaScript/JSON modules load locally; `node_modules`, remote installs, and native dependencies remain excluded.</p></div></header>{isTauri() ? <div className="local-plugin-row"><input value={localPath} onChange={(event) => setLocalPath(event.target.value)} placeholder="/path/to/plugin, plugins folder, or node_modules" /><button disabled={!localPath || Boolean(busy)} onClick={loadLocal} type="button"><Icon name="folder" size={15} /> Read one</button><button disabled={!localPath || Boolean(busy)} onClick={discoverLocal} type="button"><Icon name="search" size={15} /> Discover</button></div> : null}<div className="plugin-metadata"><input value={installName} onChange={(event) => setInstallName(event.target.value)} placeholder="Plugin name" /><input value={installVersion} onChange={(event) => setInstallVersion(event.target.value)} placeholder="Version" /><input value={installDescription} onChange={(event) => setInstallDescription(event.target.value)} placeholder="Description" /></div><textarea aria-label="Plugin source to install" spellCheck={false} value={installSource} onChange={(event) => setInstallSource(event.target.value)} placeholder="module.exports.requestHooks = […]" /><button disabled={!installSource.trim() || Boolean(busy)} onClick={install} type="button">Install disabled for review</button></section>}
         </div>
       </div>
       {notifications.length ? <div className="plugin-notifications">{notifications.slice(-5).map((notification, index) => <div key={`${notification.title}-${index}`}><strong>{notification.title}</strong><span>{notification.message}</span></div>)}</div> : null}

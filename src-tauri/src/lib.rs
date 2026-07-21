@@ -740,6 +740,11 @@ async fn plugin_read_source(path: String) -> Result<plugin::PluginSourceOutput, 
 }
 
 #[tauri::command]
+async fn plugin_discover_sources(path: String) -> Result<plugin::PluginDiscoveryOutput, String> {
+    blocking(move || plugin::discover_plugin_sources(path)).await
+}
+
+#[tauri::command]
 fn plugin_desktop_path(app: AppHandle) -> Result<String, String> {
     app.path()
         .desktop_dir()
@@ -1116,6 +1121,7 @@ pub fn run() {
             project_git_resolve_conflict,
             project_git_resolve_conflict_side,
             plugin_read_source,
+            plugin_discover_sources,
             plugin_desktop_path,
             secure_vault_status,
             secure_vault_unlock,

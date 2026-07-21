@@ -103,8 +103,38 @@ const normalizePluginNetworkRequest = (value: unknown): ApiRequest => {
 
 const safeIdentifier = () => `__br_${crypto.randomUUID().replace(/-/g, '')}`;
 
-export const buildPluginWorkerSource = (source: string, nonce = safeIdentifier()) => {
+const normalizedPluginModules = (source: string, moduleFiles?: Record<string, string>, entryModuleKey?: string) => {
   validatePluginSource(source);
+  const files: Record<string, string> = moduleFiles && Object.keys(moduleFiles).length ? { ...moduleFiles } : { 'index.js': source };
+  const entry = entryModuleKey && entryModuleKey in files ? entryModuleKey : 'index.js';
+  files[entry] = source;
+  const entries = Object.entries(files);
+  if (entries.length > 500) throw new Error('Plugin package exceeds the 500-module limit.');
+  let totalBytes = 0;
+  for (const [key, value] of entries) {
+    const parts = key.split('/');
+    if (!key || key.length > 1_000 || key.startsWith('/') || key.includes('\\') || key.includes('\0') || !/\.(?:js|json)$/.test(key) || parts.some((part) => !part || part === '.' || part === '..')) throw new Error(`Plugin module path '${key}' is not safe.`);
+    if (typeof value !== 'string') throw new Error(`Plugin module '${key}' must contain text.`);
+    const bytes = new TextEncoder().encode(value).byteLength;
+    if (bytes > 1_000_000) throw new Error(`Plugin module '${key}' exceeds the 1 MB limit.`);
+    totalBytes += bytes;
+    if (totalBytes > 5_000_000) throw new Error('Plugin package exceeds the 5 MB aggregate module limit.');
+    if (key.endsWith('.js') && value.trim()) {
+      if (/\bimport\s*(?:\/\*[\s\S]*?\*\/\s*)?\(/.test(value) || /(^|[;\n])\s*import\s/m.test(value)) throw new Error(`Plugin module '${key}' uses unavailable ES module imports.`);
+      if (/(^|[;\n])\s*export\s/m.test(value)) throw new Error(`Plugin module '${key}' uses unavailable ES module exports.`);
+    }
+  }
+  return { files, entry };
+};
+
+export const pluginSourceText = (plugin: Pick<PluginRecord, 'source' | 'moduleFiles' | 'entryModuleKey'>) => {
+  const files: Record<string, string> = plugin.moduleFiles ? { ...plugin.moduleFiles } : { 'index.js': plugin.source };
+  files[plugin.entryModuleKey && plugin.entryModuleKey in files ? plugin.entryModuleKey : 'index.js'] = plugin.source;
+  return Object.values(files).join('\n');
+};
+
+export const buildPluginWorkerSource = (source: string, nonce = safeIdentifier(), moduleFiles?: Record<string, string>, entryModuleKey?: string) => {
+  const packageModules = normalizedPluginModules(source, moduleFiles, entryModuleKey);
   const host = `${nonce}_host`;
   const pending = `${nonce}_pending`;
   const state = `${nonce}_state`;
@@ -117,9 +147,13 @@ export const buildPluginWorkerSource = (source: string, nonce = safeIdentifier()
   const contextApi = `${nonce}_contextApi`;
   const post = `${nonce}_post`;
   const input = `${nonce}_input`;
+  const nativeFunction = `${nonce}_nativeFunction`;
+  const packageFiles = `${nonce}_packageFiles`;
+  const packageCache = `${nonce}_packageCache`;
   return `
 const ${host} = self;
 const ${post} = ${host}.postMessage.bind(${host});
+const ${nativeFunction} = Function;
 const ${pending} = new Map();
 let ${nonce}_sequence = 0;
 const ${rpc} = (type, payload) => new Promise((resolve, reject) => {
@@ -158,13 +192,45 @@ ${host}.onmessage = async ({ data: ${input} }) => {
     if (name === 'buffer') return { Buffer: SafeBuffer };
     throw new Error("Module '" + name + "' is not available in the isolated plugin runtime.");
   };
-  const module = { exports: {} }; let exports = module.exports;
+  const ${packageFiles} = JSON.parse(${JSON.stringify(JSON.stringify(packageModules.files))});
+  const ${packageCache} = Object.create(null);
+  const normalizeModuleKey = value => {
+    const output = [];
+    for (const part of String(value).split('/')) {
+      if (!part || part === '.') continue;
+      if (part === '..') { if (!output.length) return null; output.pop(); }
+      else output.push(part);
+    }
+    return output.join('/');
+  };
+  const resolveModuleKey = (fromKey, specifier) => {
+    const fromParts = String(fromKey).split('/'); fromParts.pop();
+    const normalized = normalizeModuleKey(fromParts.concat(String(specifier).split('/')).join('/'));
+    if (!normalized) return null;
+    const candidates = [normalized, normalized + '.js', normalized + '.json', normalized + '/index.js', normalized + '/index.json'];
+    return candidates.find(candidate => Object.prototype.hasOwnProperty.call(${packageFiles}, candidate)) || null;
+  };
+  const loadPluginModule = key => {
+    if (Object.prototype.hasOwnProperty.call(${packageCache}, key)) return ${packageCache}[key].exports;
+    if (!Object.prototype.hasOwnProperty.call(${packageFiles}, key)) throw new Error("Cannot find plugin module '" + key + "'.");
+    const module = { exports: {}, filename: key }; ${packageCache}[key] = module;
+    if (key.endsWith('.json')) { module.exports = JSON.parse(${packageFiles}[key]); return module.exports; }
+    const localRequire = name => {
+      const specifier = String(name);
+      if (specifier.startsWith('./') || specifier.startsWith('../')) {
+        const resolved = resolveModuleKey(key, specifier);
+        if (!resolved) throw new Error("Cannot find module '" + specifier + "' from '" + key + "'.");
+        return loadPluginModule(resolved);
+      }
+      return safeRequire(specifier);
+    };
+    const directory = key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : '.';
+    const compiled = ${nativeFunction}('module', 'exports', 'require', '__dirname', '__filename', 'Buffer', 'console', 'crypto', 'TextEncoder', 'TextDecoder', 'URL', 'setTimeout', 'clearTimeout', 'globalThis', 'self', 'window', 'document', 'navigator', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'importScripts', 'indexedDB', 'caches', 'postMessage', 'Function', 'WebAssembly', "'use strict';\\n" + ${packageFiles}[key]);
+    compiled(module, module.exports, localRequire, directory, key, SafeBuffer, safeConsole, crypto, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined);
+    return module.exports;
+  };
   try {
-    await (async (module, exports, require, Buffer, console, crypto, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout, globalThis, self, window, document, navigator, fetch, XMLHttpRequest, WebSocket, EventSource, Worker, importScripts, indexedDB, caches, postMessage, Function, WebAssembly) => {
-      'use strict';
-${source}
-    })(module, exports, safeRequire, SafeBuffer, safeConsole, crypto, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined);
-    const ${exportsValue} = module.exports || {};
+    const ${exportsValue} = loadPluginModule(${JSON.stringify(packageModules.entry)}) || {};
     const store = {
       hasItem: async key => { requirePermission('store'); return Object.prototype.hasOwnProperty.call(${state}.store, key); },
       getItem: async key => { requirePermission('store'); return ${state}.store[key] ?? null; },
@@ -328,7 +394,7 @@ const executePlugin = async (
   callbacks: PluginHostCallbacks = {},
   timeoutMs = 2000,
 ): Promise<PluginWorkerResult> => {
-  const source = buildPluginWorkerSource(plugin.source);
+  const source = buildPluginWorkerSource(plugin.source, safeIdentifier(), plugin.moduleFiles, plugin.entryModuleKey);
   const blob = new Blob([source], { type: 'text/javascript' });
   const workerUrl = URL.createObjectURL(blob);
   const worker = new Worker(workerUrl);

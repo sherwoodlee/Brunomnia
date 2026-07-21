@@ -34,6 +34,34 @@ describe('CLI plugin template runtime', () => {
     await expect(runtime.render('missing', [], request)).resolves.toBeUndefined();
   });
 
+  it('loads bounded relative JavaScript and JSON package modules', async () => {
+    const entry = `
+      const helper = require('./lib');
+      const settings = require('./settings.json');
+      module.exports.templateTags = [{ name: 'package_value', run() { return helper(settings.value); } }];
+    `;
+    const packaged = {
+      ...plugin(entry),
+      moduleFiles: {
+        'index.js': entry,
+        'lib/index.js': `module.exports = value => __dirname + ':' + __filename + ':loaded-' + value;`,
+        'settings.json': '{"value":"json"}',
+      },
+      entryModuleKey: 'index.js',
+    };
+    const runtime = createCliPluginRuntime([packaged], {});
+    await expect(runtime.render('package_value', [], createBlankRequest('plugin-request'))).resolves.toBe('lib:lib/index.js:loaded-json');
+  });
+
+  it('refuses missing, traversing, and bare package dependencies', async () => {
+    const request = createBlankRequest('plugin-request');
+    for (const dependency of ['./missing', '../outside', 'uuid']) {
+      const entry = `require(${JSON.stringify(dependency)}); module.exports.templateTags = [{ name: 'value', run() { return 'unsafe'; } }];`;
+      const runtime = createCliPluginRuntime([{ ...plugin(entry), moduleFiles: { 'index.js': entry }, entryModuleKey: 'index.js' }], {});
+      await expect(runtime.render('value', [], request)).rejects.toThrow(/Cannot find|not available/);
+    }
+  });
+
   it('hides Node process authority and refuses host RPC capabilities', async () => {
     const runtime = createCliPluginTemplateRuntime([plugin(`
       module.exports.templateTags = [
