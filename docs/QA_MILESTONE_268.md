@@ -50,7 +50,15 @@ Rendered/manual QA remains omitted under the standing project direction. M268 th
 
 ## Remote gate
 
-Pending implementation commit, GitHub Actions verification/publish, signed multi-architecture image, attestation, and transparency-log evidence.
+Implementation commit `9bdb72f70874138ea96d073df9b90fd6b31b2dd6` completed both verify and publish jobs in [CLI container run 29809190427](https://github.com/sherwoodlee/Brunomnia/actions/runs/29809190427). The verify job rebuilt the committed CLI without a diff, built the verification image, matched the package version, and passed the pinned-image, non-root, no-network, read-only, local-reference lint, standalone-suite, config, and plugin-tag smoke.
+
+The publish job emitted AMD64/ARM64 SBOM and provenance attestations and keylessly signed:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:8b59ad943b8d692c98edef93e1e87729b6200d2e8d676e9e7f60ac24670f45d3
+```
+
+Independent manifest inspection resolved AMD64 `sha256:97aafc813b77387140190bd7df1420156fcff6692bd5b91e999dc1f30cafd324`, ARM64 `sha256:ef0a3af0de15f231990c7c37df97d87e43371a300f8a83f4c79e626ee5dc3104`, and attached attestation manifests `sha256:24091e2e7c961abb1dfc21bf1c36c3cc946ea40f8410e809802e6fa713c99d51` plus `sha256:449e858147d5caad89630bc6f5061c0a9337aeb8b02cab557fc440dcf1f95b62`. Both platform attestations expose SPDX and SLSA provenance predicates. Independent Cosign verification passed claims, trusted certificate-chain validation, exact issuer `https://token.actions.githubusercontent.com`, exact subject `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, branch, repository, workflow, implementation SHA, digest claims, and offline transparency-log inclusion at Rekor index `2210909062`.
 
 ## Acceptance boundary
 
