@@ -49,7 +49,15 @@ Rendered/manual QA remains omitted under the standing project direction. M269 th
 
 ## Remote gate
 
-Remote Node 22 rebuild, constrained container smoke, multi-architecture publication, attestations, signing, and independent Cosign verification are pending the M269 implementation commit. This section will be replaced with exact workflow, digest, platform, attestation, certificate-identity, and Rekor evidence after the implementation commit reaches remote `main`.
+Implementation commit `5b7d995c3ad5d172f227e7308d4b3c65201a972d` completed both verify and publish jobs in [CLI container run 29810904743](https://github.com/sherwoodlee/Brunomnia/actions/runs/29810904743). The verify job rebuilt the committed CLI under Node 22 without a diff, built the verification image, matched the package version, and passed the pinned-image, non-root, no-network, read-only, local-reference lint, standalone-suite, config, and plugin-tag smoke.
+
+The publish job emitted AMD64/ARM64 SBOM and provenance attestations and keylessly signed:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:b3f04390f22a4d9b8470dbb0325bb20ae67bbf1ed419d67b8e64454da538448f
+```
+
+Independent manifest inspection resolved AMD64 `sha256:2eda489f10e5a6bd70678b0df46315a1fc05b76993bc28fcef6e59c93f9b50fa`, ARM64 `sha256:d2d0682298a7a868c77087fd64eff1a1ea8f775d6d667440b8b1cf344ffd6aa7`, and attached attestation manifests `sha256:2f323b6c084e766ff9db926beb6687eb2b1629f4c9e2d0b0ce277a732f2ff186` plus `sha256:457b97f9637bf455b6b408678c552802a48bd179fcddda24a3770b907c2c6bf1`. Both platform attestations expose SPDX and SLSA provenance predicates. Independent Cosign verification passed claims, trusted certificate-chain validation, exact issuer `https://token.actions.githubusercontent.com`, exact subject `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, branch, repository, workflow, implementation SHA, digest claims, and offline transparency-log inclusion at Rekor index `2211064544`.
 
 ## Acceptance boundary
 
