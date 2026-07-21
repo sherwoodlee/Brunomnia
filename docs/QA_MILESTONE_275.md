@@ -12,19 +12,20 @@ Scope: add unsigned cross-platform Tauri desktop installers, checksums, direct G
 - Unsupported platform names, non-full lowercase commit SHAs, absent/empty bundle roots, line-breaking paths, and colliding release basenames fail closed.
 - GitHub build provenance uses `subject-checksums`, making each installer digest a direct attestation subject rather than attesting only the JSON manifest. Main artifacts retain installers and both evidence files for 30 days; `v*` pushes create a GitHub release from all three platform artifacts.
 - `src-tauri/tauri.conf.json` raises the macOS deployment floor from 10.13 to 10.15. The pinned llama.cpp dependency uses C++ filesystem symbols absent from the older deployment target.
+- The bundle config names the existing square 512×512 PNG for AppImage and existing six-resolution `.ico` for MSI; the focused regression validates both formats before a long native matrix can start.
 - No account, plan, license, hosted build vendor, telemetry, entitlement, signing identity, or updater service is involved.
 
 ## Automated gates
 
 | Gate | Result |
 | --- | --- |
-| Manifest/workflow regressions | Pass — 1 file/4 tests covers stable exact hashes, stale-DMG/app-file exclusion, flat release checksums, malformed/empty/duplicate-name rejection, the current three-runner architecture matrix, immutable action pins, `CI=true`, explicit `--no-sign`, final-directory-only upload paths, direct installer provenance, 30-day retention, and tagged publication |
+| Manifest/workflow regressions | Pass — 1 file/4 tests covers stable exact hashes, stale-DMG/app-file exclusion, flat release checksums, malformed/empty/duplicate-name rejection, valid square PNG/six-resolution ICO inputs, the current three-runner architecture matrix, immutable action pins, `CI=true`, explicit `--no-sign`, final-directory-only upload paths, direct installer provenance, 30-day retention, and tagged publication |
 | Full frontend suite | Pass in required partition — 105 regular files/725 tests passed with 2 opt-in integration files/4 tests skipped; the real MCP loopback file passed separately, so all 726 active frontend tests were observed passing |
 | Production and CLI build | Pass — TypeScript, Vite renderer, 1,547 transformed modules, and the generated 23,684,253-byte CLI bundle completed; CLI SHA-256 is `aefe09d6f643ab9f8587237fd6c3ef0ce65b0d3141d0195918604a2c8fa061e0` |
 | Packaged CLI smokes | Pass — template/file grants, authoritative physical store, runner/config/plugin/transport/report matrices, and the pinned non-root/no-network/read-only container matrix passed; the container was rerun from the Docker-shared workspace after the isolated `/private/tmp` source mount was unavailable |
 | Native aggregate suite | Pass outside the localhost sandbox — 189 tests passed and 4 opt-in public/model fixtures were ignored |
 | Native formatting, check, and lint | Pass — `cargo fmt --check`, locked all-target/all-feature Cargo check, and strict Clippy completed without diagnostics with `CARGO_INCREMENTAL=0` |
-| Local release bundle | Pass — the `CI=true` ARM64 release build produced `Brunomnia.app` and `Brunomnia_0.1.0_aarch64.dmg`; the DMG is 12,084,287 bytes with SHA-256 `bd23904aa2089b172caca09a6edcabd8f17635a2aa1f3ba4887e007945a63d85` |
+| Local release bundle | Pass — the final explicit-icon `CI=true` ARM64 release build produced `Brunomnia.app` and `Brunomnia_0.1.0_aarch64.dmg`; the DMG is 12,158,985 bytes with SHA-256 `b1e4939b25be158137bcccb80d662bee3821991716ae933fb7f9271ff6e73355` |
 
 ## Local bundle inspection
 

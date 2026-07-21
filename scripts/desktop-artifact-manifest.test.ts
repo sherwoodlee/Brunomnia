@@ -62,6 +62,9 @@ describe('desktop artifact manifest', () => {
 
   it('pins actions and preserves unsigned cross-platform release provenance', async () => {
     const workflow = parse(await readFile('.github/workflows/desktop-release.yml', 'utf8')) as { jobs: { build: { env: Record<string, unknown>; strategy: { matrix: { include: Array<{ platform: string; runner: string; bundles: string }> } }; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, string | number> }> }; release: { steps: Array<{ name?: string; run?: string; uses?: string }> } } };
+    const tauriConfig = JSON.parse(await readFile('src-tauri/tauri.conf.json', 'utf8')) as { bundle: { icon: string[] } };
+    const icon = await readFile('src-tauri/icons/icon.png');
+    const windowsIcon = await readFile('src-tauri/icons/icon.ico');
     expect(workflow.jobs.build.strategy.matrix.include.map(item => item.platform)).toEqual(['macos-arm64', 'windows-x64', 'linux-x64']);
     expect(workflow.jobs.build.strategy.matrix.include.map(item => item.runner)).toEqual(['macos-15', 'windows-2022', 'ubuntu-22.04']);
     expect(workflow.jobs.build.strategy.matrix.include.map(item => item.bundles)).toEqual(['app,dmg', 'nsis,msi', 'appimage,deb,rpm']);
@@ -82,5 +85,10 @@ describe('desktop artifact manifest', () => {
     expect(release).not.toContain('${{#');
     expect(release).not.toContain('${{files');
     expect(release).toContain('gh release create');
+    expect(tauriConfig.bundle.icon).toContain('icons/icon.png');
+    expect(tauriConfig.bundle.icon).toContain('icons/icon.ico');
+    expect([icon.readUInt32BE(16), icon.readUInt32BE(20)]).toEqual([512, 512]);
+    expect([...windowsIcon.subarray(0, 4)]).toEqual([0, 0, 1, 0]);
+    expect(windowsIcon.readUInt16LE(4)).toBe(6);
   });
 });
