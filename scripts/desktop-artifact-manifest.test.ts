@@ -77,6 +77,10 @@ describe('desktop artifact manifest', () => {
     expect(upload?.['retention-days']).toBe(30);
     expect(upload?.path).toContain('bundle/dmg/*.dmg');
     expect(upload?.path).not.toContain('**/*.dmg');
-    expect(workflow.jobs.release.steps.find(step => step.name === 'Publish tagged desktop installers')?.run).toContain('gh release create');
+    const release = workflow.jobs.release.steps.find(step => step.name === 'Publish tagged desktop installers')?.run;
+    expect(release).toContain('test "${#files[@]}"');
+    expect(release).not.toContain('${{#');
+    expect(release).not.toContain('${{files');
+    expect(release).toContain('gh release create');
   });
 });
