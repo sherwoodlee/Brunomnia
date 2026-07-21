@@ -39,7 +39,11 @@ Rendered/manual and assistive-technology QA remain omitted under the standing pr
 
 ## Remote gate
 
-The implementation commit and exact GitHub workflow evidence will be attached after the implementation is pushed to `main`.
+Implementation commit `20a491f5146cf050f05e79b7a3440d0895162268` completed both verify/publish jobs in [CLI container workflow 29849924909](https://github.com/sherwoodlee/Brunomnia/actions/runs/29849924909) and all three platform jobs in [Desktop bundles workflow 29849924912](https://github.com/sherwoodlee/Brunomnia/actions/runs/29849924912).
+
+The CLI verify job rebuilt the committed bundle without a diff, built the verification image, matched the package version, and passed the pinned-image, non-root, no-network, read-only, local-reference lint, standalone-suite, config, and plugin-tag smoke. Publication emitted AMD64/ARM64 provenance and SBOM attestations, then keylessly signed `ghcr.io/sherwoodlee/brunomnia-cli@sha256:01ae3f126c64093b58b9813caed9b7137c52e3e1e4b7757de52b866755565d3d`; the Cosign transparency-log entry is Rekor index `2212774387`.
+
+The desktop workflow rebuilt and attested the unsigned macOS ARM64 DMG, Windows x64 NSIS/MSI, and Linux x64 AppImage/DEB/RPM artifacts successfully. Its tag-only release job correctly remained skipped for this `main` push.
 
 ## Acceptance boundary
 
