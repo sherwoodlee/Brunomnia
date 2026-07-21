@@ -25,6 +25,8 @@ const MAX_MULTIPART_HEADER_BYTES: usize = 16_000;
 const MAX_MULTIPART_BOUNDARY_BYTES: usize = 200;
 const MAX_MULTIPART_FIELD_NAME_BYTES: usize = 1_000;
 const MAX_REQUEST_COLLECTION_VALUES: usize = 1_000;
+const MAX_DEPLOYMENT_ROUTES: usize = 1_000;
+const MAX_DEPLOYMENT_HEADERS: usize = 200;
 
 type TemplateResult<T> = Result<T, String>;
 
@@ -47,9 +49,22 @@ pub async fn start(
     input: MockServerInput,
     state: MockServerState,
 ) -> Result<MockServerOutput, String> {
-    if input.host != "127.0.0.1" {
-        return Err("Mock servers must bind to 127.0.0.1 in this milestone.".into());
-    }
+    start_with_policy(input, state, false).await
+}
+
+pub async fn start_deployment(
+    input: MockServerInput,
+    state: MockServerState,
+) -> Result<MockServerOutput, String> {
+    start_with_policy(input, state, true).await
+}
+
+async fn start_with_policy(
+    input: MockServerInput,
+    state: MockServerState,
+    allow_network_bind: bool,
+) -> Result<MockServerOutput, String> {
+    validate_server_input(&input, allow_network_bind)?;
     if state.servers.lock().await.contains_key(&input.server_id) {
         return Err("This mock server is already running.".into());
     }
@@ -98,9 +113,73 @@ pub async fn start(
         }
     });
     Ok(MockServerOutput {
-        base_url: format!("http://{}:{}", address.ip(), address.port()),
+        base_url: if address.is_ipv6() {
+            format!("http://[{}]:{}", address.ip(), address.port())
+        } else {
+            format!("http://{}:{}", address.ip(), address.port())
+        },
         route_count,
     })
+}
+
+pub fn validate_server_input(
+    input: &MockServerInput,
+    allow_network_bind: bool,
+) -> Result<(), String> {
+    let allowed_host = input.host == "127.0.0.1"
+        || (allow_network_bind && matches!(input.host.as_str(), "0.0.0.0" | "::" | "::1"));
+    if !allowed_host {
+        return Err(if allow_network_bind {
+            "Mock deployments must bind to 127.0.0.1, 0.0.0.0, ::1, or ::.".into()
+        } else {
+            "Desktop mock servers must bind to 127.0.0.1.".into()
+        });
+    }
+    if input.server_id.is_empty() || input.server_id.len() > 500 {
+        return Err("Mock server IDs must contain 1–500 bytes.".into());
+    }
+    if input.routes.len() > MAX_DEPLOYMENT_ROUTES {
+        return Err(format!(
+            "Mock deployments cannot exceed {MAX_DEPLOYMENT_ROUTES} routes."
+        ));
+    }
+    for route in &input.routes {
+        if route.id.is_empty() || route.id.len() > 500 {
+            return Err("Mock route IDs must contain 1–500 bytes.".into());
+        }
+        if route.name.len() > 2_000 || route.method.is_empty() || route.method.len() > 64 {
+            return Err("Mock route names and methods exceed deployment limits.".into());
+        }
+        if !route.path.starts_with('/') || route.path.len() > 8_192 {
+            return Err(
+                "Mock route paths must start with / and contain at most 8,192 bytes.".into(),
+            );
+        }
+        if !(100..=599).contains(&route.status) {
+            return Err("Mock response status codes must be between 100 and 599.".into());
+        }
+        if route.delay_ms > 30_000 {
+            return Err("Mock response delays cannot exceed 30,000 ms.".into());
+        }
+        if route.body.chars().count() > MAX_TEMPLATE_SOURCE_CHARS {
+            return Err(format!(
+                "Mock response templates cannot exceed {MAX_TEMPLATE_SOURCE_CHARS} characters."
+            ));
+        }
+        if route.headers.len() > MAX_DEPLOYMENT_HEADERS {
+            return Err(format!(
+                "Mock responses cannot exceed {MAX_DEPLOYMENT_HEADERS} headers."
+            ));
+        }
+        if route
+            .headers
+            .iter()
+            .any(|header| header.name.len() > 8_192 || header.value.len() > 65_536)
+        {
+            return Err("Mock response header names or values exceed deployment limits.".into());
+        }
+    }
+    Ok(())
 }
 
 pub async fn stop(server_id: String, state: MockServerState) -> Result<(), String> {
@@ -120,6 +199,15 @@ pub async fn update(
     input: MockServerUpdateInput,
     state: MockServerState,
 ) -> Result<MockServerUpdateOutput, String> {
+    validate_server_input(
+        &MockServerInput {
+            server_id: input.server_id.clone(),
+            host: "127.0.0.1".into(),
+            port: 0,
+            routes: input.routes.clone(),
+        },
+        false,
+    )?;
     let routes = state
         .servers
         .lock()

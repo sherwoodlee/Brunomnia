@@ -1,6 +1,36 @@
-# Local mock servers
+# Local and self-hosted mock servers
 
-Brunomnia serves editable mock routes from the native desktop process on `127.0.0.1`. While a server is running, route additions, deletions, enablement, matching fields, delays, headers, status, and response-body edits are applied to the existing listener after a short local debounce. An in-flight request keeps the route snapshot it matched, while the next request uses the latest saved editor state. Route matching uses the configured HTTP method and path, including `{parameter}` segments. Responses can set status, headers, delay, and a text body.
+Brunomnia serves editable mock routes from the native desktop process on `127.0.0.1` and exports the same route contract to an account-free headless runtime. While a desktop server is running, route additions, deletions, enablement, matching fields, delays, headers, status, and response-body edits are applied to the existing listener after a short local debounce. An in-flight request keeps the route snapshot it matched, while the next request uses the latest saved editor state. Route matching uses the configured HTTP method and path, including `{parameter}` segments. Responses can set status, headers, delay, and a text body.
+
+## Export and self-host
+
+Open a mock server and choose **Export self-host**. Brunomnia downloads a versioned `*.brunomnia-mock.json` deployment containing the selected server's routes, a public-bind default, and no account, organization, credential, or entitlement data. The desktop listener remains loopback-only; only the explicit headless deployment path accepts `0.0.0.0`, `::`, or `::1` binds.
+
+Run the exported deployment through the built Tauri executable:
+
+```sh
+./brunomnia --brunomnia-mock-server ./orders.brunomnia-mock.json
+```
+
+Or build and run the smaller standalone executable, which reuses the exact Tauri mock engine:
+
+```sh
+cargo build --release --manifest-path mock-server/Cargo.toml --locked
+./mock-server/target/release/brunomnia-mock-server ./orders.brunomnia-mock.json
+```
+
+`--host` and `--port` override the exported bind settings. `BRUNOMNIA_MOCK_HOST` and `BRUNOMNIA_MOCK_PORT` provide equivalent deployment-environment overrides; explicit flags win. Replacing the deployment file reloads valid route edits within about 500 ms without rebinding the listener. Server identity, host, and port changes require restart. Invalid or partially written replacements leave the last valid route set running.
+
+The signed multi-architecture container defaults to `0.0.0.0:8080`, runs as `65532:65532`, and supports a read-only root filesystem with all Linux capabilities dropped:
+
+```sh
+docker run --read-only --cap-drop ALL --security-opt no-new-privileges \
+  -p 8080:8080 \
+  -v "$PWD/orders.brunomnia-mock.json:/config/mock.json:ro" \
+  ghcr.io/sherwoodlee/brunomnia-mock-server:edge
+```
+
+For Kubernetes, create a ConfigMap or read-only volume whose file is mounted at `/config/mock.json`, expose container port `8080` through a Service, and place TLS at an Ingress or Gateway. Run as UID/GID `65532`, set `readOnlyRootFilesystem: true`, disable privilege escalation, and drop `ALL` capabilities. Node process managers can supervise the standalone executable in the same way they supervise any child service. Brunomnia does not operate a shared hosted tier: a public URL comes from infrastructure you control, without a Brunomnia subscription, quota, or account.
 
 ## Create or overwrite from a response
 
@@ -70,11 +100,12 @@ Every occurrence is generated independently for the response. Image variables re
 - Query strings and URL-encoded bodies retain at most the first 1,000 decoded pairs, matching Node's default query-string bound.
 - Multipart parsing accepts at most 100 parts, 16,000 header bytes per part, a 200-byte boundary, and 1,000-byte field names. Malformed or over-limit multipart exposes no parsed fields; its bounded valid-UTF-8 raw body remains available.
 - A response template can contain at most 1,000,000 Unicode characters, evaluate at most 1,000 template-token operations, and enter at most 20 nested conditional levels.
+- A deployment file must be a regular UTF-8 JSON file no larger than 20,000,000 bytes and use the supported format version. Server, route, header, path, delay, status, and template fields are validated before the listener starts or reloads.
 - Dynamically inserted values contribute at most 5,000,000 response bytes. Static route text does not consume this expansion budget.
 - Missing known variables render as an empty string unless `default` is present.
 - Unknown variables and Faker names render as an empty string. Unsupported filters or tags, malformed/unclosed outputs, strings, properties, or controls, invalid assignments, and source/token/nesting/local/expansion limit failures stop rendering rather than preserving a literal remainder. Syntax in an inactive conditional branch is still validated.
 - A render failure returns HTTP 500 JSON shaped as `{"error":"Error rendering body template","message":"<diagnostic>"}` with CORS and mock-route identity headers. Brunomnia does not evaluate arbitrary filters, loops, includes, or code; those tags and filters are also disabled by the current Mockbin allowlist.
-- Exact LiquidJS parser diagnostics, range literals, quoted/range base-value property reads, JavaScript lone-surrogate identity, runtime wall-clock/memory accounting, object/Drop identity, and exact FakerJS corpus/distribution identity remain tracked parity work.
+- Exact LiquidJS parser diagnostics, JavaScript object identity, FakerJS corpus strings, and probability distributions are implementation details rather than separate mock-server operations. Brunomnia preserves the documented variables, request-aware controls, errors, and bounded response behavior without embedding arbitrary JavaScript.
 - Native mock CORS remains permissive for local front-end development. Do not place secrets in mock response bodies.
 
-The implemented contract is reconciled against Kong's current [dynamic mocking documentation](https://developer.konghq.com/insomnia/dynamic-mocking/). Brunomnia's mock server is local and account-free; it does not depend on Insomnia Mockbin or a hosted service.
+The implemented contract is reconciled against Kong's current [dynamic mocking documentation](https://developer.konghq.com/insomnia/dynamic-mocking/) plus its cloud-hosted and self-hosted Mockbin workflows. Brunomnia's local, standalone, Tauri-headless, and container paths are account-free and do not depend on Insomnia Mockbin or a paid hosted service.

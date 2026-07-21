@@ -8,6 +8,7 @@ mod grpc_client;
 mod http_client;
 mod mcp_http;
 mod mcp_stdio;
+mod mock_deployment;
 mod mock_faker;
 mod mock_server;
 mod models;
@@ -41,6 +42,16 @@ fn workspace_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 
 pub fn run_gguf_worker() -> i32 {
     gguf::run_worker()
+}
+
+pub fn run_mock_server() -> i32 {
+    match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime.block_on(mock_deployment::run_cli(std::env::args_os().skip(2))),
+        Err(error) => {
+            eprintln!("Unable to start the mock deployment runtime: {error}");
+            1
+        }
+    }
 }
 
 fn workspace_store_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {

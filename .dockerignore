@@ -1,3 +1,11 @@
 *
 !bin/
 !bin/brunomnia.cjs
+!mock-server/
+!mock-server/**
+!src-tauri/
+!src-tauri/src/
+!src-tauri/src/mock_deployment.rs
+!src-tauri/src/mock_faker.rs
+!src-tauri/src/mock_server.rs
+!src-tauri/src/models.rs

@@ -1,0 +1,30 @@
+{
+  "format": "brunomnia-mock-deployment",
+  "version": 1,
+  "name": "Orders deployment",
+  "server": {
+    "serverId": "mock-deployment-orders",
+    "host": "0.0.0.0",
+    "port": 8080,
+    "routes": [
+      {
+        "id": "route-deployment-order",
+        "name": "Order status",
+        "enabled": true,
+        "method": "GET",
+        "path": "/orders/{id}",
+        "status": 200,
+        "headers": [
+          {
+            "id": "header-deployment-content-type",
+            "name": "content-type",
+            "value": "application/json",
+            "enabled": true
+          }
+        ],
+        "body": "{\"id\":\"{{ request.path.id }}\",\"role\":\"{{ req.queryParams.role | default: 'guest' }}\"}",
+        "delayMs": 0
+      }
+    ]
+  }
+}

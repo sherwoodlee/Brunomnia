@@ -34,6 +34,7 @@ import { resolveAuthorizedExternalSecret } from '../lib/security';
 import { generateMockWithAi } from '../lib/ai';
 import { buildMockAiContext, buildMockSpecUrlContext, composeMockAiInput, findActiveRequest, findLatestResponseForActiveRequest, validateMockSpecUrl, type MockAiContext, type MockAiContextSource } from '../lib/mockAiContext';
 import { createMockRouteFromResponse, overwriteMockRouteFromResponse } from '../lib/mockRouteFromResponse';
+import { downloadMockDeployment, mockDeploymentFileName } from '../lib/mockDeployment';
 import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
 import { emptyWorkspaceFileState, getWorkspaceFileState, setWorkspaceFileCookies, workspaceFileIdForCollection, workspaceFileIdForRequest } from '../lib/workspaceFileState';
 import { Icon } from './Icon';
@@ -714,6 +715,7 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
     certificates: mockFileState.certificates,
   });
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [showAi, setShowAi] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiContextSource, setAiContextSource] = useState<MockAiContextSource>('manual');
@@ -763,7 +765,7 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
   }, []);
   const toggleServer = async () => {
     if (!server) return;
-    setError('');
+    setError(''); setNotice('');
     try {
       if (runningMocks[server.id]) {
         const pending = mockSyncTimeouts.current[server.id];
@@ -819,6 +821,12 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
       updateServer({ routes: server.routes.map((candidate) => candidate.id === route.id ? updated : candidate) });
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
   };
+  const exportDeployment = () => {
+    if (!server) return;
+    setError('');
+    downloadMockDeployment(server);
+    setNotice(`Exported ${mockDeploymentFileName(server)} for the headless app binary or signed container.`);
+  };
 
   if (!server) return <AutomationEmpty title="No mock servers" action="Create local mock" onAction={() => {
     const created: MockServer = { id: uid('mock'), name: 'Local mock', host: '127.0.0.1', port: 4010, routes: [] };
@@ -827,10 +835,11 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
 
   return (
     <section className="automation-workbench mock-workbench">
-      <AutomationHeader eyebrow="Mock" title="Local mock servers" subtitle="Serve deterministic scenarios from this device with no account or hosted dependency.">
+      <AutomationHeader eyebrow="Mock" title="Local and self-hosted mocks" subtitle="Serve deterministic scenarios locally or on infrastructure you control, with no account, quota, or entitlement.">
         <select aria-label="Mock server" value={server.id} onChange={(event) => onOpenMock?.(event.target.value)}>{workspace.mockServers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         <button className="secondary-action" disabled={!workspace.ai.enabled || !workspace.ai.mockGeneration} onClick={() => setShowAi((current) => !current)} type="button">AI generate</button>
         <button className="secondary-action" disabled={!latestResponse} onClick={createRouteFromLatestResponse} title={latestResponse ? `Create a route from ${latestResponse.status} ${latestResponse.statusText}` : 'Send the active request first'} type="button">Response → route</button>
+        <button className="secondary-action" onClick={exportDeployment} title="Download a bounded deployment file for the headless runtime" type="button">Export self-host</button>
         <button className={activeRun ? 'danger-action' : 'primary-action'} onClick={() => void toggleServer()} type="button">{activeRun ? 'Stop server' : 'Start server'}</button>
       </AutomationHeader>
       <div className="mock-content">
@@ -858,10 +867,10 @@ function MockWorkbench({ workspace, activeEnvironment, vault, onChangeWorkspace,
           </div>
           <CodeEditor ariaLabel="Mock response body" value={route.body} onChange={(body) => updateRoute({ body })} />
         </div> : <AutomationEmpty title={server.routes.length ? 'Select a route' : 'No routes'} action={server.routes.length ? 'Open first route' : 'Add route'} onAction={() => { if (server.routes[0]) { onOpenMock?.(server.id, server.routes[0].id); return; } const created: MockRoute = { id: uid('route'), name: 'New scenario', enabled: true, method: 'GET', path: '/resource', status: 200, headers: [], body: '{}', delayMs: 0 }; updateServer({ routes: [created] }, false); onOpenMock?.(server.id, created.id); }} />}
-        <aside className="mock-inspector"><div className={`mock-status-card${activeRun ? ' running' : ''}`}><i /><small>{activeRun ? 'Running locally · edits apply live' : 'Server stopped'}</small><strong>{activeRun?.baseUrl ?? `http://${server.host}:${server.port}`}</strong><span>{server.routes.filter((item) => item.enabled).length} enabled routes</span></div><h3>Dynamic tokens</h3><code>{'{{$timestamp}}'}</code><code>{'{{$randomUUID}}'}</code><code>{'{{request.path.id}}'}</code><h3>Request-aware output</h3><code>{"{{ req.headers['X-Client'] }}"}</code><code>{'{{ req.queryParams.id }}'}</code><code>{'{{ req.queryParams.tag[0] }}'}</code><code>{'{{ req.pathSegments[0] }}'}</code><code>{'{{ req.body.name | default: "Guest" }}'}</code><code>{'{{ req.body.tags.0 }}'}</code><h3>Control tags</h3><code>{'{% assign greeting = "Hello" %}'}</code><code>{'{% if req.queryParams.role == "admin" %}allowed{% elsif req.queryParams.role contains "edit" %}limited{% else %}denied{% endif %}'}</code><code>{'{% unless req.body.disabled %}enabled{% endunless %}'}</code><code>{'{% raw %}{{ unchanged }}{% endraw %}'}</code><h3>Faker values</h3><code>{'{{ faker.randomUUID }}'}</code><code>{'{{ faker.randomFullName }}'}</code><code>{'{{ faker.randomExampleEmail }}'}</code><code>{'{{ faker.isoTimestamp }}'}</code><p>All 118 documented Faker names render locally. Conditions support LiquidJS comparisons, <code>contains</code>, <code>not</code>, right-associative <code>and</code>/<code>or</code>, and <code>elsif</code>. JSON, form, and multipart bodies are parsed inside a 1 MB request inspection limit. Repeated pairs preserve order and use zero-based bracket or dotted indices; path values percent-decode without changing +. Undefined variables render empty. Unsupported tags, filters, malformed controls, and exceeded render limits return a structured 500 response.</p></aside>
+        <aside className="mock-inspector"><div className={`mock-status-card${activeRun ? ' running' : ''}`}><i /><small>{activeRun ? 'Running locally · edits apply live' : 'Server stopped'}</small><strong>{activeRun?.baseUrl ?? `http://${server.host}:${server.port}`}</strong><span>{server.routes.filter((item) => item.enabled).length} enabled routes</span></div><h3>Self-hosted deployment</h3><code>{'brunomnia --brunomnia-mock-server ./mock.brunomnia-mock.json'}</code><code>{'docker run --read-only -p 8080:8080 -v ./mock.json:/config/mock.json:ro ghcr.io/sherwoodlee/brunomnia-mock-server:edge'}</code><p>Export the selected server, mount or copy the file to your host, and expose it through your own TLS reverse proxy or ingress. Replacing the mounted file reloads route edits without a process restart; bind identity or port changes require restart.</p><h3>Dynamic tokens</h3><code>{'{{$timestamp}}'}</code><code>{'{{$randomUUID}}'}</code><code>{'{{request.path.id}}'}</code><h3>Request-aware output</h3><code>{"{{ req.headers['X-Client'] }}"}</code><code>{'{{ req.queryParams.id }}'}</code><code>{'{{ req.queryParams.tag[0] }}'}</code><code>{'{{ req.pathSegments[0] }}'}</code><code>{'{{ req.body.name | default: "Guest" }}'}</code><code>{'{{ req.body.tags.0 }}'}</code><h3>Control tags</h3><code>{'{% assign greeting = "Hello" %}'}</code><code>{'{% if req.queryParams.role == "admin" %}allowed{% elsif req.queryParams.role contains "edit" %}limited{% else %}denied{% endif %}'}</code><code>{'{% unless req.body.disabled %}enabled{% endunless %}'}</code><code>{'{% raw %}{{ unchanged }}{% endraw %}'}</code><h3>Faker values</h3><code>{'{{ faker.randomUUID }}'}</code><code>{'{{ faker.randomFullName }}'}</code><code>{'{{ faker.randomExampleEmail }}'}</code><code>{'{{ faker.isoTimestamp }}'}</code><p>All 118 documented Faker names render locally and in the headless runtime. Conditions support LiquidJS comparisons, <code>contains</code>, <code>not</code>, right-associative <code>and</code>/<code>or</code>, and <code>elsif</code>. JSON, form, and multipart bodies are parsed inside a 1 MB request inspection limit. Repeated pairs preserve order and use zero-based bracket or dotted indices; path values percent-decode without changing +. Undefined variables render empty. Unsupported tags, filters, malformed controls, and exceeded render limits return a structured 500 response.</p></aside>
         </div>
       </div>
-      {error ? <div className="automation-message error" role="alert">{error}</div> : null}
+      {error ? <div className="automation-message error" role="alert">{error}</div> : notice ? <div className="automation-message" role="status">{notice}</div> : null}
     </section>
   );
 }

@@ -279,11 +279,11 @@ fn digits(random: &mut LocalRandom, length: usize) -> String {
 }
 
 fn first_name(random: &mut LocalRandom) -> &'static str {
-    pick(random, FIRST_NAMES)
+    FIRST_NAMES[random.index(FIRST_NAMES.len())]
 }
 
 fn last_name(random: &mut LocalRandom) -> &'static str {
-    pick(random, LAST_NAMES)
+    LAST_NAMES[random.index(LAST_NAMES.len())]
 }
 
 fn domain_word(random: &mut LocalRandom) -> String {
