@@ -15,8 +15,6 @@
     "test:cli-physical-store": "npm run build:cli && node scripts/cli-physical-store-smoke.mjs",
     "test:cli-runner-smoke": "npm run build:cli && node scripts/cli-runner-preview-smoke.mjs",
     "test:cli-container": "npm run build:cli && node scripts/cli-container-smoke.mjs",
-    "build:mock-server": "cargo build --manifest-path mock-server/Cargo.toml --locked",
-    "test:mock-server": "cargo test --manifest-path mock-server/Cargo.toml --locked && npm run build:mock-server && node scripts/mock-server-smoke.mjs",
     "test:mcp-public": "BRUNOMNIA_MCP_LIVE=1 vitest run src/lib/mcpPublic.integration.test.ts",
     "test:konnect-live": "BRUNOMNIA_KONNECT_LIVE=1 vitest run src/lib/konnectLive.integration.test.ts",
     "preview": "vite preview",
