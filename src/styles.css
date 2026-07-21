@@ -1586,6 +1586,9 @@ kbd {
 .plugin-module-review label { align-items: center; display: grid; gap: 8px; grid-template-columns: auto minmax(180px, 1fr); margin-bottom: 9px; }
 .plugin-module-review textarea { display: block; font: 9px/1.55 var(--font-mono); min-height: 220px; padding: 11px; resize: vertical; width: 100%; }
 .plugin-installer { margin: auto; max-width: 860px; width: 100%; }
+.registry-plugin-row { display: grid; gap: 7px; grid-template-columns: minmax(170px, 1fr) minmax(240px, 2fr) auto; margin-bottom: 9px; }
+.registry-plugin-row input { min-width: 0; }
+.registry-plugin-row button { align-items: center; display: flex; gap: 6px; }
 .local-plugin-row { display: grid; gap: 7px; grid-template-columns: minmax(200px, 1fr) auto auto; margin-bottom: 9px; }
 .local-plugin-row input { min-width: 0; }
 .local-plugin-row button { align-items: center; display: flex; gap: 6px; }
@@ -2152,7 +2155,7 @@ kbd {
   .plugin-sidebar { border-bottom: 1px solid var(--border); border-right: 0; min-height: 230px; }
   .plugin-list { max-height: 220px; }
   .plugin-main { padding: 10px; }
-  .permission-grid, .plugin-tools, .plugin-metadata { grid-template-columns: minmax(0, 1fr); }
+  .permission-grid, .plugin-tools, .plugin-metadata, .registry-plugin-row { grid-template-columns: minmax(0, 1fr); }
   .plugin-summary > header, .plugin-summary-actions { align-items: flex-start; flex-direction: column; }
   .security-header { align-items: flex-start; flex-direction: column; gap: 10px; padding: 15px; }
   .security-tabs { overflow-x: auto; padding: 0 12px; }

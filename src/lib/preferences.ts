@@ -53,6 +53,7 @@ export const defaultPreferences: AppPreferences = {
   httpProxy: '',
   httpsProxy: '',
   noProxy: '',
+  pluginRegistryUrl: 'https://registry.npmjs.org/',
   useBulkHeaderEditor: false,
   useBulkParametersEditor: false,
   forceVerticalLayout: false,

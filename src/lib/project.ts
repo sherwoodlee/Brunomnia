@@ -32,6 +32,7 @@ export type GitProviderRepository = { id: string; name: string; fullName: string
 export type GitRepositoryProbe = { defaultBranch: string; branches: string[]; totalFiles: number; brunomniaFiles: number; insomniaFiles: number; specificationFiles: number; truncated: boolean };
 export type LocalPluginSource = { source: string; name: string; version: string; description: string; path: string; moduleFiles: Record<string, string>; entryModuleKey: string; requestedModules: string[]; moduleWarnings: string[] };
 export type LocalPluginDiscovery = { plugins: LocalPluginSource[]; warnings: string[] };
+export type PluginRegistryInstallInput = { packageName: string; registryUrl: string; validateCertificates: boolean; caCertificatePem: string; proxyEnabled: boolean; httpProxy: string; httpsProxy: string; noProxy: string };
 
 const nativeOnly = () => {
   if (!isTauri()) throw new Error('Filesystem projects and Git operations are available in the Tauri desktop app.');
@@ -133,6 +134,10 @@ export const resolveGitConflictSide = async (path: string, file: string, side: '
 export const readLocalPluginSource = async (path: string) => {
   nativeOnly();
   return invoke<LocalPluginSource>('plugin_read_source', { path });
+};
+export const readRegistryPluginSource = async (input: PluginRegistryInstallInput) => {
+  nativeOnly();
+  return invoke<LocalPluginSource>('plugin_install_registry', { input });
 };
 export const discoverLocalPluginSources = async (path: string) => {
   nativeOnly();

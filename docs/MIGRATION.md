@@ -2659,6 +2659,18 @@ Compatibility bounds remain explicit: remote npm/custom-registry installation, d
 
 Compatibility bounds remain explicit: remote/custom-registry installation, dependency download and native dependency behavior for host-loaded hooks/actions, exact context-menu placement, broader ecosystem compatibility, and CLI host RPC/user-invoked actions remain. `Plugins and extension API` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 265 — bounded remote plugin acquisition (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned installer audit | Complete | Strict unscoped names, default/custom registry metadata, `insomnia` identity, npm/GitHub/custom-host tarballs, HTTPS/custom HTTP policy, SHA-1, proxy, CA, and production dependency behavior are source-pinned |
+| Native acquisition | Complete baseline | Bounded Reqwest metadata/tarball fetches enforce same-origin metadata redirects, allowed tarball protocol/hosts, system/manual proxy policy, validation/custom CA, byte/time/redirect limits, and advertised SHA-1 before parsing |
+| Archive confinement | Complete baseline | In-memory gzip/tar parsing validates header checksums, UTF-8/PAX/GNU paths, traversal/depth/count/byte limits, duplicate modules, manifest/name/version/entry identity, and never extracts or runs package code |
+| Review lifecycle | Complete baseline | The Tauri workbench stores a device-local registry URL, fetches strict package names into the existing complete-module review form, omits filesystem linkage, and installs only through the separate disabled/zero-grant action |
+| Verification | Complete | Exact validator, valid/corrupt/traversal/oversized archive, custom HTTP registry, migration, full frontend, production/CLI build, native, formatting, and strict Clippy evidence is recorded in [Milestone 265 verification](QA_MILESTONE_265.md) |
+
+Compatibility bounds remain explicit: production dependencies are not downloaded, native dependency behavior for host-loaded hooks/actions is absent, and registry authentication, automatic updates, exact context-menu placement, broader ecosystem compatibility, plus CLI host RPC/user-invoked actions remain. `Plugins and extension API` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

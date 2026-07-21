@@ -500,6 +500,7 @@ export type AppPreferences = {
   httpProxy: string;
   httpsProxy: string;
   noProxy: string;
+  pluginRegistryUrl: string;
   useBulkHeaderEditor: boolean;
   useBulkParametersEditor: boolean;
   forceVerticalLayout: boolean;

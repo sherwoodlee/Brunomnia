@@ -373,6 +373,7 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     httpProxy: stringValue(source?.httpProxy).slice(0, 4_096),
     httpsProxy: stringValue(source?.httpsProxy).slice(0, 4_096),
     noProxy: stringValue(source?.noProxy).slice(0, 20_000),
+    pluginRegistryUrl: stringValue(source?.pluginRegistryUrl, defaultPreferences.pluginRegistryUrl).trim().slice(0, 4_096) || defaultPreferences.pluginRegistryUrl,
     useBulkHeaderEditor: source?.useBulkHeaderEditor === true,
     useBulkParametersEditor: source?.useBulkParametersEditor === true,
     forceVerticalLayout: source?.forceVerticalLayout === true,

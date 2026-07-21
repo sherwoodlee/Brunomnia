@@ -12,11 +12,12 @@ import {
   pluginStarterSource,
   runPluginAction,
   validatePluginSource,
+  validateRegistryPluginName,
   type PluginDescriptor,
   type PluginHostCallbacks,
   type PluginNotification,
 } from '../lib/plugins';
-import { discoverLocalPluginSources, readLocalPluginSource, type LocalPluginSource } from '../lib/project';
+import { discoverLocalPluginSources, readLocalPluginSource, readRegistryPluginSource, type LocalPluginSource } from '../lib/project';
 import { pluginBaselineModules, pluginCuratedModules, pluginModuleVersions, pluginPackageChanged, requestedPluginModules, retainedPluginModuleGrants } from '../lib/pluginModules';
 import { readDesktopTemplateFile } from '../lib/scriptFiles';
 import { applyCollectionConfiguration, requestAncestorNames, resolveEnvironment } from '../lib/resources';
@@ -75,6 +76,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
   const [installRequestedModules, setInstallRequestedModules] = useState<string[]>([]);
   const [installModuleWarnings, setInstallModuleWarnings] = useState<string[]>([]);
   const [localPath, setLocalPath] = useState('');
+  const [registryPackageName, setRegistryPackageName] = useState('');
   const [draftSource, setDraftSource] = useState('');
   const [reviewModuleKey, setReviewModuleKey] = useState('');
   const [descriptor, setDescriptor] = useState<PluginDescriptor>(blankDescriptor);
@@ -219,6 +221,26 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
     setInstallSourcePath(output.path); setInstallModuleFiles(output.moduleFiles); setInstallEntryModuleKey(output.entryModuleKey);
     setInstallRequestedModules(output.requestedModules); setInstallModuleWarnings(output.moduleWarnings);
     setMessage(`Loaded ${output.path}. Review the source before installing.`);
+  });
+
+  const loadRegistry = () => run('Fetching registry plugin', async () => {
+    const packageName = registryPackageName.trim();
+    validateRegistryPluginName(packageName);
+    const output = await readRegistryPluginSource({
+      packageName,
+      registryUrl: workspace.preferences.pluginRegistryUrl,
+      validateCertificates: workspace.preferences.validateCertificates,
+      caCertificatePem: activeFileState.certificates.ca.enabled ? activeFileState.certificates.ca.pem : '',
+      proxyEnabled: workspace.preferences.proxyEnabled,
+      httpProxy: workspace.preferences.httpProxy,
+      httpsProxy: workspace.preferences.httpsProxy,
+      noProxy: workspace.preferences.noProxy,
+    });
+    validatePluginSource(output.source);
+    setInstallName(output.name); setInstallVersion(output.version); setInstallDescription(output.description); setInstallSource(output.source);
+    setInstallSourcePath(''); setInstallModuleFiles(output.moduleFiles); setInstallEntryModuleKey(output.entryModuleKey);
+    setInstallRequestedModules(output.requestedModules); setInstallModuleWarnings(output.moduleWarnings);
+    setMessage(`Fetched ${output.path}. Review every module before installing it disabled.`);
   });
 
   const discoverLocal = () => run('Discovering plugin packages', async () => {
@@ -421,7 +443,20 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
 
             <section className="plugin-card plugin-source-card"><header><div><small>Source</small><h2>Review and update</h2><p>Updating only the entry source detaches the local package, disables the plugin, and clears grants so changed code cannot inherit old authority.</p></div><button disabled={draftSource === selected.source || Boolean(busy)} onClick={() => run('Updating source', async () => { validatePluginSource(draftSource); const next = { ...selected, source: draftSource, sourcePath: undefined, moduleFiles: undefined, entryModuleKey: undefined, enabled: false, requestedModules: requestedPluginModules(draftSource), grantedModules: [] as string[], moduleWarnings: [], requestedPermissions: inferPluginPermissions(draftSource), grantedPermissions: [] as PluginPermission[], error: undefined }; const found = await describePluginForReview(next); updatePlugin(selected.id, next); setDescriptor(found); setMessage('Source updated. Review permissions and modules before enabling it again.'); })} type="button">Apply source</button></header><textarea aria-label="Plugin source" spellCheck={false} value={draftSource} onChange={(event) => setDraftSource(event.target.value)} /></section>
             {reviewModuleKeys.length > 1 ? <section className="plugin-card plugin-module-review"><header><div><small>Package map</small><h2>Review every module</h2><p>Only bounded JavaScript and JSON files inside the package are available. Dependency folders and hidden directories are excluded.</p></div></header><label><strong>Module</strong><select value={reviewModuleKey} onChange={(event) => setReviewModuleKey(event.target.value)}>{reviewModuleKeys.map((key) => <option key={key} value={key}>{key}{key === selected.entryModuleKey ? ' (entry)' : ''}</option>)}</select></label><textarea aria-label="Plugin package module source" readOnly spellCheck={false} value={reviewedModuleSource} /></section> : null}
-          </> : <section className="plugin-card plugin-installer"><header><div><small>Install</small><h2>Review local CommonJS source</h2><p>Read one JavaScript file/package or discover bounded Insomnia packages in a directory. Relative JavaScript/JSON modules load locally; `node_modules`, remote installs, and native dependencies remain excluded.</p></div></header>{isTauri() ? <div className="local-plugin-row"><input value={localPath} onChange={(event) => setLocalPath(event.target.value)} placeholder="/path/to/plugin, plugins folder, or node_modules" /><button disabled={!localPath || Boolean(busy)} onClick={loadLocal} type="button"><Icon name="folder" size={15} /> Read one</button><button disabled={!localPath || Boolean(busy)} onClick={discoverLocal} type="button"><Icon name="search" size={15} /> Discover</button></div> : null}<div className="plugin-metadata"><input value={installName} onChange={(event) => setInstallName(event.target.value)} placeholder="Plugin name" /><input value={installVersion} onChange={(event) => setInstallVersion(event.target.value)} placeholder="Version" /><input value={installDescription} onChange={(event) => setInstallDescription(event.target.value)} placeholder="Description" /></div><textarea aria-label="Plugin source to install" spellCheck={false} value={installSource} onChange={(event) => setInstallSource(event.target.value)} placeholder="module.exports.requestHooks = […]" /><button disabled={!installSource.trim() || Boolean(busy)} onClick={install} type="button">Install disabled for review</button></section>}
+          </> : <section className="plugin-card plugin-installer">
+            <header><div><small>Install</small><h2>Fetch and review CommonJS source</h2><p>Fetch an unscoped `insomnia-plugin-*` package, read a local package, or paste source. Registry downloads verify the advertised SHA-1 and parse a bounded archive without running package scripts. Production dependencies and native modules are not downloaded.</p></div></header>
+            {isTauri() ? <>
+              <div className="registry-plugin-row">
+                <input aria-label="Registry plugin package" autoCapitalize="none" autoComplete="off" spellCheck={false} value={registryPackageName} onChange={(event) => setRegistryPackageName(event.target.value)} placeholder="insomnia-plugin-example" />
+                <input aria-label="Plugin registry URL" autoCapitalize="none" autoComplete="off" spellCheck={false} value={workspace.preferences.pluginRegistryUrl} onChange={(event) => changeWorkspace((current) => ({ ...current, preferences: { ...current.preferences, pluginRegistryUrl: event.target.value.slice(0, 4_096) } }))} placeholder="https://registry.npmjs.org/" />
+                <button disabled={!registryPackageName.trim() || !workspace.preferences.pluginRegistryUrl.trim() || Boolean(busy)} onClick={loadRegistry} type="button"><Icon name="search" size={15} /> Fetch for review</button>
+              </div>
+              <div className="local-plugin-row"><input value={localPath} onChange={(event) => setLocalPath(event.target.value)} placeholder="/path/to/plugin, plugins folder, or node_modules" /><button disabled={!localPath || Boolean(busy)} onClick={loadLocal} type="button"><Icon name="folder" size={15} /> Read one</button><button disabled={!localPath || Boolean(busy)} onClick={discoverLocal} type="button"><Icon name="search" size={15} /> Discover</button></div>
+            </> : null}
+            <div className="plugin-metadata"><input value={installName} onChange={(event) => setInstallName(event.target.value)} placeholder="Plugin name" /><input value={installVersion} onChange={(event) => setInstallVersion(event.target.value)} placeholder="Version" /><input value={installDescription} onChange={(event) => setInstallDescription(event.target.value)} placeholder="Description" /></div>
+            <textarea aria-label="Plugin source to install" spellCheck={false} value={installSource} onChange={(event) => setInstallSource(event.target.value)} placeholder="module.exports.requestHooks = […]" />
+            <button disabled={!installSource.trim() || Boolean(busy)} onClick={install} type="button">Install disabled for review</button>
+          </section>}
         </div>
       </div>
       {notifications.length ? <div className="plugin-notifications">{notifications.slice(-5).map((notification, index) => <div key={`${notification.title}-${index}`}><strong>{notification.title}</strong><span>{notification.message}</span></div>)}</div> : null}

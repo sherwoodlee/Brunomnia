@@ -79,6 +79,23 @@ export const validatePluginSource = (source: string) => {
   if (/(^|[;\n])\s*export\s/m.test(source)) throw new Error('ES module exports are not available in the isolated plugin runtime.');
 };
 
+export const validateRegistryPluginName = (pluginName: string) => {
+  const suffix = pluginName.replace(/^insomnia-plugin-/, '');
+  if (!suffix.trim() || suffix.length > 214) throw new Error('Plugin name must not be empty or too long.');
+  if (suffix.includes('..') || suffix.includes('/') || suffix.includes('\\')) throw new Error('Plugin name must not contain path traversal characters.');
+  if (/[|;&$`\\]/.test(suffix)) throw new Error('Plugin name must not contain shell metacharacters.');
+  if (suffix.trim() === '-') throw new Error('Plugin name must not be a single dash.');
+  if (suffix.startsWith('-')) throw new Error('Plugin name must not start with a dash.');
+  if (suffix.endsWith('-')) throw new Error('Plugin name must not end with a dash.');
+  if (suffix.includes('--')) throw new Error('Plugin name must not contain consecutive dashes.');
+  if (suffix.startsWith('.')) throw new Error('Plugin name cannot start with a period.');
+  if (suffix.startsWith('_')) throw new Error('Plugin name cannot start with an underscore.');
+  if (suffix.trim() !== suffix) throw new Error('Plugin name cannot contain leading or trailing spaces.');
+  if (!/^[a-zA-Z0-9_.-]+$/.test(suffix)) throw new Error('Plugin name must be alphanumeric and dash-separated.');
+  if (['con', 'prn', 'aux', 'nul'].includes(suffix.toLowerCase())) throw new Error('Plugin name is not allowed.');
+  if (!pluginName.startsWith('insomnia-plugin-')) throw new Error('Plugin name must start with "insomnia-plugin-".');
+};
+
 const normalizePluginNetworkRequest = (value: unknown): ApiRequest => {
   const raw = value && typeof value === 'object' ? value as Partial<ApiRequest> & { _id?: string; parameters?: Array<{ name?: unknown; value?: unknown; disabled?: unknown }> } : {};
   const request = createBlankRequest(typeof raw.id === 'string' ? raw.id : typeof raw._id === 'string' ? raw._id : `plugin-network-${crypto.randomUUID()}`);

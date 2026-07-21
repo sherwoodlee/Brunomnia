@@ -740,6 +740,13 @@ async fn plugin_read_source(path: String) -> Result<plugin::PluginSourceOutput, 
 }
 
 #[tauri::command]
+async fn plugin_install_registry(
+    input: plugin::PluginRegistryInstallInput,
+) -> Result<plugin::PluginSourceOutput, String> {
+    plugin::install_registry_plugin(input).await
+}
+
+#[tauri::command]
 async fn plugin_discover_sources(path: String) -> Result<plugin::PluginDiscoveryOutput, String> {
     blocking(move || plugin::discover_plugin_sources(path)).await
 }
@@ -1121,6 +1128,7 @@ pub fn run() {
             project_git_resolve_conflict,
             project_git_resolve_conflict_side,
             plugin_read_source,
+            plugin_install_registry,
             plugin_discover_sources,
             plugin_desktop_path,
             secure_vault_status,

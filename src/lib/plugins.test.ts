@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPluginWorkerSource, inferPluginPermissions, pluginSourceText, pluginStarterSource, validatePluginSource } from './plugins';
+import { buildPluginWorkerSource, inferPluginPermissions, pluginSourceText, pluginStarterSource, validatePluginSource, validateRegistryPluginName } from './plugins';
 
 describe('permissioned plugin runtime source', () => {
   it('builds an isolated CommonJS worker for Insomnia-compatible exports', () => {
@@ -47,5 +47,13 @@ describe('permissioned plugin runtime source', () => {
     expect(() => validatePluginSource('import thing from "module"')).toThrow(/imports/);
     expect(() => validatePluginSource('export const thing = true')).toThrow(/exports/);
     expect(() => validatePluginSource('x'.repeat(1_000_001))).toThrow(/1 MB/);
+  });
+
+  it('validates strict unscoped registry plugin names', () => {
+    expect(() => validateRegistryPluginName('insomnia-plugin-example')).not.toThrow();
+    expect(() => validateRegistryPluginName('insomnia-plugin-Example_1.2')).not.toThrow();
+    for (const invalid of ['example', '@scope/example', 'insomnia-plugin-../escape', 'insomnia-plugin--example', 'insomnia-plugin-example-', 'insomnia-plugin-con']) {
+      expect(() => validateRegistryPluginName(invalid)).toThrow();
+    }
   });
 });
