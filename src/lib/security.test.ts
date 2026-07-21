@@ -182,5 +182,12 @@ describe('encrypted collaboration boundaries', () => {
     const base = externalSecretReferenceKey({ provider: 'aws', reference: 'orders-token', scope: 'us-west-2', version: 'AWSCURRENT' });
     expect(base).not.toBe(externalSecretReferenceKey({ provider: 'aws', reference: 'orders-token', scope: 'us-east-1', version: 'AWSCURRENT' }));
     expect(base).not.toBe(externalSecretReferenceKey({ provider: 'aws', reference: 'orders-token', scope: 'us-west-2', version: 'AWSPREVIOUS' }));
+    const profiled = externalSecretReferenceKey({ provider: 'aws', reference: 'orders-token', scope: 'us-west-2', version: 'AWSCURRENT', credentialId: 'production' });
+    expect(profiled).toMatch(/^v2:/);
+    expect(profiled).not.toBe(base);
+    expect(profiled).not.toBe(externalSecretReferenceKey({ provider: 'aws', reference: 'orders-token', scope: 'us-west-2', version: 'AWSCURRENT', credentialId: 'staging' }));
+    const hcp = externalSecretReferenceKey({ provider: 'hashicorp', reference: 'orders-token', scope: 'organization', field: 'project', credentialId: 'production', appName: 'checkout' });
+    expect(hcp).toMatch(/^v3:/);
+    expect(hcp).not.toBe(externalSecretReferenceKey({ provider: 'hashicorp', reference: 'orders-token', scope: 'organization', field: 'project', credentialId: 'production', appName: 'billing' }));
   });
 });

@@ -19,7 +19,7 @@ export type TemplateContext = {
   requestValueDepth?: number;
   readFile?: (path: string) => Promise<string>;
   customTag?: (name: string, args: string[]) => Promise<string | undefined>;
-  externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
+  externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string; credentialId?: string; appName?: string }) => Promise<string>;
 };
 
 export type TemplatePromptInput = {
@@ -331,7 +331,7 @@ const resolveRawTag = async (name: string, args: string[], context: TemplateCont
     if (!['aws', 'gcp', 'azure', 'hashicorp'].includes(provider)) throw new Error("External vault provider must be 'aws', 'gcp', 'azure', or 'hashicorp'.");
     if (!args[1]) throw new Error('External vault tags need a secret reference.');
     if (!context.externalSecret) throw new Error('External vault tags require the Tauri desktop credential adapter.');
-    return context.externalSecret({ provider: provider as 'aws' | 'gcp' | 'azure' | 'hashicorp', reference: args[1], scope: args[2], field: args[3], version: args[4] });
+    return context.externalSecret({ provider: provider as 'aws' | 'gcp' | 'azure' | 'hashicorp', reference: args[1], scope: args[2], field: args[3], version: args[4], credentialId: args[5], appName: args[6] });
   }
   const custom = await context.customTag?.(name, args);
   if (custom !== undefined) return custom;

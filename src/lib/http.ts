@@ -74,7 +74,7 @@ export type SendRequestContext = {
   maxTimelineDataSizeKB?: number;
   filterResponsesByEnv?: boolean;
   vault?: Record<string, string>;
-  externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
+  externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string; credentialId?: string; appName?: string }) => Promise<string>;
   readFile?: (path: string) => Promise<string>;
   requestAncestors?: RequestRenderContext['requestAncestors'];
   prompt?: RequestRenderContext['prompt'];

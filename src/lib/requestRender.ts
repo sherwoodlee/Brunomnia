@@ -13,7 +13,7 @@ export type RequestRenderContext = {
   requestChain?: string[];
   osInfo?: TemplateContext['osInfo'];
   customTag?: (name: string, args: string[]) => Promise<string | undefined>;
-  externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string }) => Promise<string>;
+  externalSecret?: (input: { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string; credentialId?: string; appName?: string }) => Promise<string>;
   readFile?: (path: string) => Promise<string>;
 };
 

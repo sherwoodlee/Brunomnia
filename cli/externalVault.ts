@@ -6,6 +6,8 @@ export type CliExternalSecretInput = {
   scope?: string;
   field?: string;
   version?: string;
+  credentialId?: string;
+  appName?: string;
 };
 
 export type CliExternalVaultInvocation = {
@@ -68,6 +70,7 @@ export const externalSecretReferenceKey = (input: CliExternalSecretInput) => `v1
   .join(':')}`;
 
 export const cliExternalVaultInvocation = (input: CliExternalSecretInput): CliExternalVaultInvocation => {
+  if (input.credentialId?.trim() || input.appName?.trim()) throw new Error('Device-local external-vault profiles are unavailable in the portable CLI. Use an ambient official CLI credential chain and approve that unprofiled reference separately.');
   const reference = required(input.reference, 'secret reference');
   const scope = optional(input.scope, 'scope');
   const version = optional(input.version, 'version');
@@ -108,6 +111,7 @@ const executeCli: ExecuteCli = (program, args, label) => new Promise((resolve, r
 export const createCliExternalSecretResolver = (allowlist: string[], execute: ExecuteCli = executeCli) => {
   const cache = new Map<string, { bytes: number; storedAt: number; value: string }>();
   return async (input: CliExternalSecretInput) => {
+    if (input.credentialId?.trim() || input.appName?.trim()) throw new Error('Device-local external-vault profiles are unavailable in the portable CLI. Use an ambient official CLI credential chain and approve that unprofiled reference separately.');
     const key = externalSecretReferenceKey(input);
     if (!allowlist.includes(key)) throw new Error(`External vault reference '${key}' is not approved by workspace policy.`);
     const cached = cache.get(key);

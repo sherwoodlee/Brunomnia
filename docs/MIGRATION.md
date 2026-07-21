@@ -2719,6 +2719,18 @@ Compatibility bounds remain explicit: native addons/install scripts, ESM/export 
 
 Compatibility bounds remain explicit: OS-backed local-vault key retention is available in the packaged macOS target, not browser development or non-macOS Tauri builds. External-provider native login SDKs, other provider-secret stores, script access to external providers, and broader secret-field UX remain. `Secrets and external vaults` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 270 — protected cloud-service credential profiles (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned paid-gate audit | Complete | Pinned Insomnia exposes Cloud Credentials only to enterprise plans, while its exact AWS, GCP, HashiCorp, and Azure records are explicitly non-syncable |
+| Protected profile store | Complete baseline | The packaged macOS app validates and stores the bounded complete profile list in one Keychain generic-password item; no profile enters project, export, Git, or encrypted-sync data |
+| Native provider authority | Complete baseline | AWS, GCP, Vault token/AppRole, HCP Vault Secrets, and Azure OAuth profiles resolve without secret child arguments; ambient official CLI chains remain available |
+| Approval and cache isolation | Complete | Credential IDs and HCP app names are included in reference approvals and memory-cache identity; deleted selections clear locally and portable CLI runs reject device-profile arguments |
+| Verification | Complete | Record validation, provider application, HCP URL construction, Azure safety bounds, tag propagation, static forms, selection cleanup, focused/full frontend, production build, native regression, formatting, and strict Clippy evidence is recorded in [Milestone 270 verification](QA_MILESTONE_270.md) |
+
+Compatibility bounds remain explicit: the protected profile store is macOS-only, Azure guided browser authorization/token refresh is not implemented, and script-facing external-provider APIs plus broader secret-field UX remain. `Secrets and external vaults` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

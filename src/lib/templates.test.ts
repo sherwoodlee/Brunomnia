@@ -104,11 +104,11 @@ describe('template engine', () => {
     await expect(renderTemplate("{% cookie 'session' %}", { variables: { baseUrl: 'https://api.example.com' }, cookies, responses: [], request: templatedRequest })).resolves.toBe('abc');
   });
 
-  it('delegates four-family external vault tags without exposing provider credentials', async () => {
+  it('delegates profiled external vault tags without exposing provider credentials', async () => {
     const calls: unknown[] = [];
     const externalSecret = async (input: unknown) => { calls.push(input); return 'resolved-secret'; };
-    await expect(renderTemplate("{% external 'hashicorp', 'secret/orders', '', 'token', 'latest' %}", { variables: {}, cookies: [], responses: [], request, externalSecret })).resolves.toBe('resolved-secret');
-    expect(calls[0]).toMatchObject({ provider: 'hashicorp', reference: 'secret/orders', field: 'token', version: 'latest' });
+    await expect(renderTemplate("{% external 'hashicorp', 'orders', 'organization', 'project', 'latest', 'hcp-profile', 'checkout' %}", { variables: {}, cookies: [], responses: [], request, externalSecret })).resolves.toBe('resolved-secret');
+    expect(calls[0]).toMatchObject({ provider: 'hashicorp', reference: 'orders', scope: 'organization', field: 'project', version: 'latest', credentialId: 'hcp-profile', appName: 'checkout' });
   });
 
   it('matches the pinned 118-function Faker registry', async () => {

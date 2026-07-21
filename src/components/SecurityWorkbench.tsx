@@ -8,6 +8,7 @@ import {
   externalSecretReferenceKey,
   forgetVaultKey,
   mergeSyncedWorkspace,
+  loadExternalCredentials,
   plaintextSecretCandidates,
   pullEncryptedSync,
   pushEncryptedSync,
@@ -16,12 +17,14 @@ import {
   resetVault,
   saveVault,
   saveVaultWithSavedKey,
+  saveExternalCredentials,
   shareableWorkspace,
   unlockVault,
   vaultKeyStatus,
   vaultStatus,
   type SecureFileStatus,
   type ExternalSecretInput,
+  type ExternalCredentialRecord,
   type VaultEntry,
   type VaultKeyStatus,
   type VaultSession,
@@ -29,6 +32,7 @@ import {
 import type { GovernanceMember, GovernanceRole, Workspace } from '../types';
 import { CertificateManager } from './CertificateManager';
 import { Icon } from './Icon';
+import { ExternalCredentialManager } from './ExternalCredentialManager';
 import { getWorkspaceFileState, updateWorkspaceFileState } from '../lib/workspaceFileState';
 
 type SecurityWorkbenchProps = {
@@ -62,6 +66,9 @@ export function VaultKeyRetentionControl({ supported, retained, canRetain, busy,
   </>;
 }
 
+export const retainedExternalCredentialId = (credentialId: string | undefined, credentials: ExternalCredentialRecord[]) => credentialId && credentials.some((credential) => credential.id === credentialId) ? credentialId : '';
+export const externalCredentialsForProvider = (credentials: ExternalCredentialRecord[], provider: ExternalSecretInput['provider']) => credentials.filter((credential) => credential.provider === provider);
+
 export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vaultSession, onVaultSession, onChangeWorkspace }: SecurityWorkbenchProps) {
   const [tab, setTab] = useState<'vault' | 'certificates' | 'sync' | 'governance'>('vault');
   const [status, setStatus] = useState<SecureFileStatus>(blankStatus);
@@ -74,7 +81,8 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
   const [newSecretValue, setNewSecretValue] = useState('');
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberEmail, setNewMemberEmail] = useState('');
-  const [external, setExternal] = useState<ExternalSecretInput>({ provider: 'aws', reference: '', scope: '', field: '', version: '', cacheSeconds: 1800 });
+  const [external, setExternal] = useState<ExternalSecretInput>({ provider: 'aws', reference: '', scope: '', field: '', version: '', credentialId: '', appName: '', cacheSeconds: 1800 });
+  const [externalCredentials, setExternalCredentials] = useState<ExternalCredentialRecord[]>([]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -85,6 +93,9 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
   const plaintextSecrets = workspace.governance.policy.requireVaultForSecrets ? plaintextSecretCandidates(withoutOAuth2RuntimeCredentials(workspace)) : [];
   const externalKey = externalSecretReferenceKey(external);
   const externalApproved = workspace.governance.policy.externalVaultAllowlist.includes(externalKey);
+  const selectedExternalCredential = externalCredentials.find((credential) => credential.id === external.credentialId);
+  const usesHcpVaultSecrets = selectedExternalCredential?.credentials.type === 'hcpVaultSecrets';
+  const usesAzureOauth = selectedExternalCredential?.credentials.type === 'azureOauth';
 
   const run = async (label: string, operation: () => Promise<void>) => {
     if (busy) return;
@@ -125,6 +136,13 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
     }).catch((caught) => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)); });
     return () => { cancelled = true; };
   }, [native, workspaceId]);
+
+  useEffect(() => {
+    if (!native) return;
+    let cancelled = false;
+    void loadExternalCredentials().then((credentials) => { if (!cancelled) setExternalCredentials(credentials); }).catch((caught) => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)); });
+    return () => { cancelled = true; };
+  }, [native]);
 
   const vaultNames = useMemo(() => new Set(vaultSession.entries.map((entry) => entry.name.trim().toLowerCase())), [vaultSession.entries]);
   const unlockOrCreate = () => run(status.exists ? 'Unlocking vault' : 'Creating vault', async () => {
@@ -233,7 +251,8 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
       {tab === 'vault' ? <div className="security-grid vault-grid">
         <section className="security-card vault-control"><header><div><small>AES-256-GCM · PBKDF2-SHA256</small><h2>{vaultSession.unlocked ? 'Vault unlocked in memory' : status.exists ? 'Unlock local vault' : 'Create local vault'}</h2></div><Icon name="lock" size={24} /></header>{!native ? <p>The browser build cannot access the encrypted application-data file. Use the Tauri desktop app.</p> : vaultSession.unlocked ? <><div className="vault-actions"><button onClick={() => { onVaultSession({ unlocked: false, passphrase: '', entries: [] }); setRevealed(false); setMessage('Vault locked and decrypted values cleared from application memory.'); }} type="button">Lock and clear memory</button><button disabled={!canEdit || Boolean(busy) || (!vaultSession.passphrase && !keyStatus.retained)} onClick={persistVault} type="button">Save encrypted vault</button></div><label className="reveal-toggle"><input checked={revealed} onChange={(event) => setRevealed(event.target.checked)} type="checkbox" /> Reveal secret values on this screen</label></> : <><label>Encryption passphrase<input autoComplete="off" type="password" value={vaultSession.passphrase} onChange={(event) => onVaultSession({ ...vaultSession, passphrase: event.target.value })} /></label><button disabled={vaultSession.passphrase.length < 12 || Boolean(busy)} onClick={unlockOrCreate} type="button">{status.exists ? 'Unlock vault' : 'Create encrypted vault'}</button><small>The passphrase stays in memory unless you explicitly retain it in macOS Keychain.</small></>}{native && status.exists ? <VaultKeyRetentionControl busy={Boolean(busy)} canRetain={vaultSession.unlocked && vaultSession.passphrase.length >= 12} onToggle={toggleSavedKey} retained={keyStatus.retained} supported={keyStatus.supported} /> : null}</section>
         <section className="security-card vault-entries"><header><div><small>Request syntax</small><h2>{'{{ vault.secret_name }}'}</h2></div><span>{vaultSession.entries.length} entries</span></header>{vaultSession.unlocked ? <><div className="vault-new"><input placeholder="secret_name" value={newSecretName} onChange={(event) => setNewSecretName(event.target.value)} /><input placeholder="Secret value" type={revealed ? 'text' : 'password'} value={newSecretValue} onChange={(event) => setNewSecretValue(event.target.value)} /><button disabled={!canEdit} onClick={addSecret} type="button">Add</button></div><div className="vault-list">{vaultSession.entries.map((entry) => <article key={entry.id}><input aria-label={`${entry.name} name`} disabled={!canEdit} value={entry.name} onChange={(event) => onVaultSession({ ...vaultSession, entries: vaultSession.entries.map((candidate) => candidate.id === entry.id ? { ...candidate, name: event.target.value, updatedAt: new Date().toISOString() } : candidate) })} /><input aria-label={`${entry.name} value`} disabled={!canEdit} type={revealed ? 'text' : 'password'} value={entry.value} onChange={(event) => onVaultSession({ ...vaultSession, entries: vaultSession.entries.map((candidate) => candidate.id === entry.id ? { ...candidate, value: event.target.value, updatedAt: new Date().toISOString() } : candidate) })} /><button disabled={!canEdit} onClick={() => onVaultSession({ ...vaultSession, entries: vaultSession.entries.filter((candidate) => candidate.id !== entry.id) })} type="button"><Icon name="trash" size={14} /></button></article>)}{!vaultSession.entries.length ? <p>No secrets yet. Values exist only in memory until you save the encrypted vault.</p> : null}</div></> : <div className="empty-state"><Icon name="lock" size={28} /><strong>Vault is locked</strong><span>Unlock it to resolve vault-prefixed request variables.</span></div>}</section>
-        <section className="security-card external-vault-card"><header><div><small>Official CLI credential chains</small><h2>External vault resolver</h2></div><span>30 minute memory cache</span></header><div className="external-vault-fields"><label>Provider<select disabled={!native} value={external.provider} onChange={(event) => setExternal({ ...external, provider: event.target.value as ExternalSecretInput['provider'] })}><option value="aws">AWS Secrets Manager</option><option value="gcp">GCP Secret Manager</option><option value="azure">Azure Key Vault</option><option value="hashicorp">HashiCorp Vault</option></select></label><label>Secret reference<input disabled={!native} value={external.reference} onChange={(event) => setExternal({ ...external, reference: event.target.value })} placeholder={external.provider === 'hashicorp' ? 'secret/data/orders' : 'orders-api-token'} /></label><label>{external.provider === 'aws' ? 'Region' : external.provider === 'gcp' ? 'Project' : external.provider === 'azure' ? 'Vault name' : 'Scope (unused)'}<input disabled={!native} value={external.scope} onChange={(event) => setExternal({ ...external, scope: event.target.value })} /></label><label>{external.provider === 'hashicorp' ? 'Field' : 'Field (provider default)'}<input disabled={!native} value={external.field} onChange={(event) => setExternal({ ...external, field: event.target.value })} placeholder={external.provider === 'hashicorp' ? 'token' : ''} /></label><label>Version / stage<input disabled={!native} value={external.version} onChange={(event) => setExternal({ ...external, version: event.target.value })} placeholder="latest" /></label></div><code>{`{% external '${external.provider}', '${external.reference || 'secret-reference'}', '${external.scope ?? ''}', '${external.field ?? ''}', '${external.version ?? ''}' %}`}</code><div className="vault-actions"><button disabled={!native || !external.reference || Boolean(busy)} onClick={() => run('Resolving external secret', async () => { const value = await resolveExternalSecret(external); audit('external-vault.resolve', `Resolved a ${external.provider} secret through its official CLI credential chain.`); setMessage(`External secret resolved successfully · ${new TextEncoder().encode(value).length} bytes cached in memory.`); })} type="button">Test without revealing</button><button disabled={!canGovern || !external.reference} onClick={toggleExternalApproval} type="button">{externalApproved ? 'Revoke request use' : 'Approve for requests'}</button><button disabled={!native || Boolean(busy)} onClick={() => run('Clearing external cache', async () => { await clearExternalSecretCache(); audit('external-vault.cache.clear', 'Cleared the in-memory external secret cache.'); setMessage('External secret cache cleared.'); })} type="button">Clear cache</button></div><p>Brunomnia never stores provider credentials here. Authenticate with the installed aws, gcloud, az, or vault CLI. Explicit approval is required before an imported or edited request can resolve each complete provider/reference/scope/field/version tuple.</p></section>
+        <section className="security-card external-vault-card"><header><div><small>Official CLI chains or protected profiles</small><h2>External vault resolver</h2></div><span>30 minute memory cache</span></header><div className="external-vault-fields"><label>Provider<select disabled={!native} value={external.provider} onChange={(event) => setExternal({ ...external, provider: event.target.value as ExternalSecretInput['provider'], credentialId: '', appName: '' })}><option value="aws">AWS Secrets Manager</option><option value="gcp">GCP Secret Manager</option><option value="azure">Azure Key Vault</option><option value="hashicorp">HashiCorp Vault</option></select></label><label>Credential<select disabled={!native} value={external.credentialId ?? ''} onChange={(event) => { const credentialId = event.target.value; const selected = externalCredentials.find((credential) => credential.id === credentialId); setExternal({ ...external, credentialId, appName: selected?.credentials.type === 'hcpVaultSecrets' ? external.appName : '' }); }}><option value="">Ambient official CLI login</option>{externalCredentialsForProvider(externalCredentials, external.provider).map((credential) => <option key={credential.id} value={credential.id}>{credential.name}</option>)}</select></label><label>{usesAzureOauth ? 'Secret identifier URL' : 'Secret reference'}<input disabled={!native} value={external.reference} onChange={(event) => setExternal({ ...external, reference: event.target.value })} placeholder={usesAzureOauth ? 'https://vault-name.vault.azure.net/secrets/secret-name/version' : external.provider === 'hashicorp' ? 'secret/data/orders' : 'orders-api-token'} /></label>{!usesAzureOauth ? <><label>{usesHcpVaultSecrets ? 'Organization ID' : external.provider === 'aws' ? 'Region' : external.provider === 'gcp' ? 'Project' : external.provider === 'azure' ? 'Vault name' : 'Scope (unused)'}<input disabled={!native} value={external.scope} onChange={(event) => setExternal({ ...external, scope: event.target.value })} /></label><label>{usesHcpVaultSecrets ? 'Project ID' : external.provider === 'hashicorp' ? 'Field' : 'Field (provider default)'}<input disabled={!native} value={external.field} onChange={(event) => setExternal({ ...external, field: event.target.value })} placeholder={usesHcpVaultSecrets ? 'project-id' : external.provider === 'hashicorp' ? 'token' : ''} /></label>{usesHcpVaultSecrets ? <label>App name<input disabled={!native} value={external.appName} onChange={(event) => setExternal({ ...external, appName: event.target.value })} /></label> : null}<label>Version / stage<input disabled={!native} value={external.version} onChange={(event) => setExternal({ ...external, version: event.target.value })} placeholder="latest" /></label></> : null}</div><code>{`{% external '${external.provider}', '${external.reference || 'secret-reference'}', '${external.scope ?? ''}', '${external.field ?? ''}', '${external.version ?? ''}', '${external.credentialId ?? ''}', '${external.appName ?? ''}' %}`}</code><div className="vault-actions"><button disabled={!native || !external.reference || Boolean(busy)} onClick={() => run('Resolving external secret', async () => { const value = await resolveExternalSecret(external); audit('external-vault.resolve', `Resolved a ${external.provider} secret through its selected local credential authority.`); setMessage(`External secret resolved successfully · ${new TextEncoder().encode(value).length} bytes cached in memory.`); })} type="button">Test without revealing</button><button disabled={!canGovern || !external.reference} onClick={toggleExternalApproval} type="button">{externalApproved ? 'Revoke request use' : 'Approve for requests'}</button><button disabled={!native || Boolean(busy)} onClick={() => run('Clearing external cache', async () => { await clearExternalSecretCache(); audit('external-vault.cache.clear', 'Cleared the in-memory external secret cache.'); setMessage('External secret cache cleared.'); })} type="button">Clear cache</button></div><p>Credential selection and HCP app coordinates are part of the exact approval and cache key. Workspace data cannot grant itself access to another device profile.</p></section>
+        {native ? <ExternalCredentialManager credentials={externalCredentials} disabled={Boolean(busy)} onSave={async (credentials) => { const saved = await saveExternalCredentials(credentials); setExternalCredentials(saved); const credentialId = retainedExternalCredentialId(external.credentialId, saved); if (credentialId !== external.credentialId) setExternal({ ...external, credentialId, appName: '' }); }} /> : null}
         {native && status.exists && !vaultSession.unlocked ? <section className="security-card danger-zone"><header><h2>Recovery boundary</h2></header><p>Brunomnia cannot recover a lost passphrase. Reset permanently deletes this project's encrypted local vault and any saved Keychain key.</p><button onClick={() => { if (!window.confirm('Permanently delete this project’s encrypted local vault?')) return; void run('Resetting vault', async () => { await resetVault(workspaceId); setStatus(blankStatus); setKeyStatus((current) => ({ ...current, retained: false })); onVaultSession({ unlocked: false, passphrase: '', entries: [] }); audit('vault.reset', 'Permanently reset the project encrypted local vault.'); }); }} type="button">Reset encrypted vault</button></section> : null}
       </div> : null}
 

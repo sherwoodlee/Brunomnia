@@ -1,4 +1,6 @@
+use crate::external_credential_store::{self, ExternalCredential, ExternalCredentialRecord};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -14,6 +16,8 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_OUTPUT_BYTES: usize = 10_000_000;
 const MAX_CACHE_BYTES: usize = 20_000_000;
 const MAX_CACHE_ENTRIES: usize = 256;
+const HCP_AUTH_URL: &str = "https://auth.idp.hashicorp.com/oauth2/token";
+const HCP_API_URL: &str = "https://api.cloud.hashicorp.com";
 
 #[derive(Clone, Default)]
 pub struct ExternalSecretCache(Arc<Mutex<HashMap<String, (Instant, String)>>>);
@@ -29,8 +33,141 @@ pub struct ExternalSecretInput {
     pub field: String,
     #[serde(default)]
     pub version: String,
+    #[serde(default)]
+    pub credential_id: String,
+    #[serde(default)]
+    pub app_name: String,
     #[serde(default = "default_cache_seconds")]
     pub cache_seconds: u64,
+}
+
+fn selected_credential(
+    input: &ExternalSecretInput,
+) -> Result<Option<ExternalCredentialRecord>, String> {
+    let credential_id = input.credential_id.trim();
+    if credential_id.is_empty() {
+        return Ok(None);
+    }
+    let credential = external_credential_store::load()?
+        .into_iter()
+        .find(|credential| credential.id == credential_id)
+        .ok_or_else(|| "The selected external credential no longer exists.".to_string())?;
+    if credential.provider != input.provider.trim().to_ascii_lowercase() {
+        return Err("The selected external credential belongs to another provider.".into());
+    }
+    Ok(Some(credential))
+}
+
+fn apply_aws_credential(
+    command: &mut Command,
+    credential: &ExternalCredential,
+) -> Result<String, String> {
+    match credential {
+        ExternalCredential::AwsTemporary {
+            access_key_id,
+            secret_access_key,
+            session_token,
+            region,
+        } => {
+            command.env("AWS_ACCESS_KEY_ID", access_key_id);
+            command.env("AWS_SECRET_ACCESS_KEY", secret_access_key);
+            command.env("AWS_SESSION_TOKEN", session_token);
+            Ok(region.clone())
+        }
+        ExternalCredential::AwsFile {
+            section,
+            file_path,
+            region,
+            ..
+        } => {
+            command.args(["--profile", section]);
+            if !file_path.is_empty() {
+                command.env("AWS_SHARED_CREDENTIALS_FILE", file_path);
+            }
+            Ok(region.clone())
+        }
+        ExternalCredential::AwsSso {
+            section,
+            file_path,
+            config_file_path,
+            region,
+            ..
+        } => {
+            command.args(["--profile", section]);
+            if !file_path.is_empty() {
+                command.env("AWS_SHARED_CREDENTIALS_FILE", file_path);
+            }
+            if !config_file_path.is_empty() {
+                command.env("AWS_CONFIG_FILE", config_file_path);
+            }
+            Ok(region.clone())
+        }
+        _ => Err("The selected external credential is not an AWS profile.".into()),
+    }
+}
+
+fn apply_gcp_credential(
+    command: &mut Command,
+    credential: &ExternalCredential,
+) -> Result<(), String> {
+    match credential {
+        ExternalCredential::GcpServiceAccount {
+            service_account_key_file_path,
+        } => {
+            command.env(
+                "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
+                service_account_key_file_path,
+            );
+            Ok(())
+        }
+        _ => Err("The selected external credential is not a GCP profile.".into()),
+    }
+}
+
+fn hashicorp_credential_token(
+    credential: &ExternalCredential,
+) -> Result<(String, String, String), String> {
+    match credential {
+        ExternalCredential::HashicorpToken {
+            server_address,
+            access_token,
+            namespace,
+            ..
+        } => Ok((
+            server_address.clone(),
+            access_token.clone(),
+            namespace.clone(),
+        )),
+        ExternalCredential::HashicorpAppRole {
+            server_address,
+            role_id,
+            secret_id,
+            namespace,
+            ..
+        } => {
+            let mut login = Command::new("vault");
+            login.args([
+                "write",
+                "-field=token",
+                "auth/approle/login",
+                &format!("role_id={role_id}"),
+                &format!("secret_id={secret_id}"),
+            ]);
+            login.env("VAULT_ADDR", server_address);
+            if !namespace.is_empty() {
+                login.env("VAULT_NAMESPACE", namespace);
+            }
+            let token = text(
+                command_output(login, "HashiCorp Vault AppRole")?,
+                "HashiCorp Vault AppRole",
+            )?;
+            Ok((server_address.clone(), token, namespace.clone()))
+        }
+        ExternalCredential::HcpVaultSecrets { .. } => {
+            Err("The selected HCP Vault Secrets profile requires HCP secret coordinates.".into())
+        }
+        _ => Err("The selected external credential is not a HashiCorp profile.".into()),
+    }
 }
 
 fn default_cache_seconds() -> u64 {
@@ -139,6 +276,198 @@ fn text(output: Output, provider: &str) -> Result<String, String> {
     }
 }
 
+fn http_client(provider: &str) -> Result<Client, String> {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(COMMAND_TIMEOUT)
+        .build()
+        .map_err(|error| format!("Unable to initialize the {provider} HTTPS client: {error}"))
+}
+
+fn http_text(mut response: Response, provider: &str) -> Result<String, String> {
+    let status = response.status();
+    let mut bytes = Vec::new();
+    response
+        .by_ref()
+        .take((MAX_OUTPUT_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("Unable to read the {provider} HTTPS response: {error}"))?;
+    if bytes.len() > MAX_OUTPUT_BYTES {
+        return Err(format!(
+            "The {provider} HTTPS response exceeded the 10 MB safety limit."
+        ));
+    }
+    let body = String::from_utf8(bytes)
+        .map_err(|_| format!("The {provider} HTTPS response was not UTF-8 text."))?;
+    if status.is_success() {
+        if body.trim().is_empty() {
+            Err(format!("The {provider} HTTPS response was empty."))
+        } else {
+            Ok(body)
+        }
+    } else {
+        let detail = body.trim().chars().take(4_096).collect::<String>();
+        Err(format!(
+            "The {provider} HTTPS request failed with {status}: {}",
+            if detail.is_empty() {
+                "no response details"
+            } else {
+                &detail
+            }
+        ))
+    }
+}
+
+fn http_json(response: Response, provider: &str) -> Result<Value, String> {
+    let source = http_text(response, provider)?;
+    serde_json::from_str(&source)
+        .map_err(|error| format!("{provider} returned invalid JSON: {error}"))
+}
+
+fn hcp_secret_url(
+    organization_id: &str,
+    project_id: &str,
+    app_name: &str,
+    secret_name: &str,
+    version: &str,
+) -> Result<url::Url, String> {
+    let mut url = url::Url::parse(HCP_API_URL)
+        .map_err(|error| format!("Unable to initialize the HCP Vault Secrets URL: {error}"))?;
+    let mut segments = url
+        .path_segments_mut()
+        .map_err(|_| "Unable to construct the HCP Vault Secrets URL.".to_string())?;
+    segments.extend([
+        "secrets",
+        "2023-11-28",
+        "organizations",
+        organization_id,
+        "projects",
+        project_id,
+        "apps",
+        app_name,
+        "secrets",
+        secret_name,
+    ]);
+    if version.is_empty() {
+        segments.pop().push(&format!("{secret_name}:open"));
+    } else {
+        segments.extend(["versions", &format!("{version}:open")]);
+    }
+    drop(segments);
+    Ok(url)
+}
+
+fn hcp_vault_secrets_value(
+    credential: &ExternalCredential,
+    organization_id: &str,
+    project_id: &str,
+    app_name: &str,
+    secret_name: &str,
+    version: &str,
+) -> Result<String, String> {
+    let ExternalCredential::HcpVaultSecrets {
+        client_id,
+        client_secret,
+    } = credential
+    else {
+        return Err("The selected external credential is not an HCP Vault Secrets profile.".into());
+    };
+    let client = http_client("HCP Vault Secrets")?;
+    let token = http_json(
+        client
+            .post(HCP_AUTH_URL)
+            .form(&[
+                ("client_id", client_id.as_str()),
+                ("client_secret", client_secret.as_str()),
+                ("grant_type", "client_credentials"),
+                ("audience", "https://api.hashicorp.cloud"),
+            ])
+            .send()
+            .map_err(|error| format!("Unable to authenticate with HCP Vault Secrets: {error}"))?,
+        "HCP Vault Secrets authentication",
+    )?
+    .get("access_token")
+    .and_then(Value::as_str)
+    .filter(|value| !value.is_empty())
+    .ok_or_else(|| "HCP Vault Secrets authentication returned no access token.".to_string())?
+    .to_string();
+
+    let url = hcp_secret_url(organization_id, project_id, app_name, secret_name, version)?;
+    let value =
+        http_json(
+            client.get(url).bearer_auth(token).send().map_err(|error| {
+                format!("Unable to retrieve the HCP Vault Secrets value: {error}")
+            })?,
+            "HCP Vault Secrets",
+        )?;
+    value
+        .pointer("/secret/static_version/value")
+        .or_else(|| value.pointer("/static_version/value"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "HCP Vault Secrets returned no static secret value.".to_string())
+}
+
+fn azure_key_vault_value(
+    credential: &ExternalCredential,
+    secret_identifier: &str,
+) -> Result<String, String> {
+    let ExternalCredential::AzureOauth {
+        expires_on,
+        access_token,
+        ..
+    } = credential
+    else {
+        return Err("The selected external credential is not an Azure OAuth profile.".into());
+    };
+    let expires_on = chrono::DateTime::parse_from_rfc3339(expires_on)
+        .map_err(|_| "The selected Azure OAuth profile has an invalid expiry.".to_string())?;
+    if expires_on <= chrono::Utc::now() {
+        return Err("The selected Azure OAuth profile has expired. Re-authenticate and save a fresh access token.".into());
+    }
+    let mut url = url::Url::parse(secret_identifier)
+        .map_err(|_| "Enter the full HTTPS Azure Key Vault secret identifier.".to_string())?;
+    if url.scheme() != "https" {
+        return Err("Azure Key Vault secret identifiers must use HTTPS.".into());
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "Azure Key Vault secret identifiers require a host.".to_string())?
+        .to_ascii_lowercase();
+    let allowed = [
+        ".vault.azure.net",
+        ".vault.azure.cn",
+        ".vault.usgovcloudapi.net",
+        ".vault.microsoftazure.de",
+    ];
+    if !allowed.iter().any(|suffix| host.ends_with(suffix)) {
+        return Err(
+            "Azure OAuth tokens may only be sent to an Azure Key Vault service host.".into(),
+        );
+    }
+    if !url.path().split('/').any(|segment| segment == "secrets") {
+        return Err(
+            "Enter an Azure Key Vault secret identifier containing the /secrets/ path.".into(),
+        );
+    }
+    if !url.query_pairs().any(|(name, _)| name == "api-version") {
+        url.query_pairs_mut().append_pair("api-version", "7.4");
+    }
+    let value = http_json(
+        http_client("Azure Key Vault")?
+            .get(url)
+            .bearer_auth(access_token)
+            .send()
+            .map_err(|error| format!("Unable to retrieve the Azure Key Vault secret: {error}"))?,
+        "Azure Key Vault",
+    )?;
+    value
+        .get("value")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "Azure Key Vault returned no secret value.".to_string())
+}
+
 fn aws_value(output: Output) -> Result<String, String> {
     let source = text(output, "AWS")?;
     let value: Value = serde_json::from_str(&source)
@@ -184,6 +513,7 @@ fn fetch(input: &ExternalSecretInput) -> Result<String, String> {
     let scope = optional_value(&input.scope, "scope")?;
     let version = optional_value(&input.version, "version")?;
     let field = optional_value(&input.field, "field")?;
+    let credential = selected_credential(input)?;
     match input.provider.trim().to_ascii_lowercase().as_str() {
         "aws" => {
             let mut command = Command::new("aws");
@@ -195,8 +525,18 @@ fn fetch(input: &ExternalSecretInput) -> Result<String, String> {
                 "--output",
                 "json",
             ]);
-            if !scope.is_empty() {
-                command.args(["--region", &scope]);
+            let profile_region = credential
+                .as_ref()
+                .map(|credential| apply_aws_credential(&mut command, &credential.credentials))
+                .transpose()?
+                .unwrap_or_default();
+            let region = if scope.is_empty() {
+                &profile_region
+            } else {
+                &scope
+            };
+            if !region.is_empty() {
+                command.args(["--region", region]);
             }
             if !version.is_empty() {
                 command.args(["--version-stage", &version]);
@@ -210,6 +550,9 @@ fn fetch(input: &ExternalSecretInput) -> Result<String, String> {
                 &version
             };
             let mut command = Command::new("gcloud");
+            if let Some(credential) = &credential {
+                apply_gcp_credential(&mut command, &credential.credentials)?;
+            }
             command.args([
                 "secrets",
                 "versions",
@@ -223,6 +566,9 @@ fn fetch(input: &ExternalSecretInput) -> Result<String, String> {
             text(command_output(command, "GCP")?, "GCP")
         }
         "azure" => {
+            if let Some(credential) = &credential {
+                return azure_key_vault_value(&credential.credentials, &reference);
+            }
             let vault = require_value(&scope, "Azure vault name")?;
             let mut command = Command::new("az");
             command.args([
@@ -241,7 +587,34 @@ fn fetch(input: &ExternalSecretInput) -> Result<String, String> {
             text(command_output(command, "Azure")?, "Azure")
         }
         "hashicorp" => {
+            if let Some(credential) = &credential {
+                if matches!(
+                    credential.credentials,
+                    ExternalCredential::HcpVaultSecrets { .. }
+                ) {
+                    let organization_id = require_value(&scope, "HCP organization ID")?;
+                    let project_id = require_value(&field, "HCP project ID")?;
+                    let app_name = require_value(&input.app_name, "HCP app name")?;
+                    return hcp_vault_secrets_value(
+                        &credential.credentials,
+                        &organization_id,
+                        &project_id,
+                        &app_name,
+                        &reference,
+                        &version,
+                    );
+                }
+            }
             let mut command = Command::new("vault");
+            if let Some(credential) = &credential {
+                let (server_address, token, namespace) =
+                    hashicorp_credential_token(&credential.credentials)?;
+                command.env("VAULT_ADDR", server_address);
+                command.env("VAULT_TOKEN", token);
+                if !namespace.is_empty() {
+                    command.env("VAULT_NAMESPACE", namespace);
+                }
+            }
             command.args(["kv", "get", "-format=json", &reference]);
             hashicorp_value(command_output(command, "HashiCorp Vault")?, &field)
         }
@@ -252,14 +625,7 @@ fn fetch(input: &ExternalSecretInput) -> Result<String, String> {
 impl ExternalSecretCache {
     pub fn resolve(&self, input: ExternalSecretInput) -> Result<String, String> {
         let cache_seconds = input.cache_seconds.min(3_600);
-        let cache_key = format!(
-            "{}\n{}\n{}\n{}\n{}",
-            input.provider.trim().to_ascii_lowercase(),
-            input.reference.trim(),
-            input.scope.trim(),
-            input.field.trim(),
-            input.version.trim()
-        );
+        let cache_key = external_secret_cache_key(&input);
         if cache_seconds > 0 {
             let cache = self
                 .0
@@ -305,9 +671,23 @@ impl ExternalSecretCache {
     }
 }
 
+fn external_secret_cache_key(input: &ExternalSecretInput) -> String {
+    format!(
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        input.provider.trim().to_ascii_lowercase(),
+        input.reference.trim(),
+        input.scope.trim(),
+        input.field.trim(),
+        input.version.trim(),
+        input.credential_id.trim(),
+        input.app_name.trim()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::external_credential_store::{ExternalCredential, ExternalCredentialRecord};
 
     fn success(source: &str) -> Output {
         #[cfg(unix)]
@@ -338,6 +718,107 @@ mod tests {
             )
             .unwrap(),
             "vault-secret"
+        );
+    }
+
+    #[test]
+    fn applies_selected_profiles_without_putting_secrets_in_arguments() {
+        let _serial = external_credential_store::test_serial_guard();
+        external_credential_store::save(vec![ExternalCredentialRecord {
+            id: "aws-profile".into(),
+            name: "AWS profile".into(),
+            provider: "aws".into(),
+            credentials: ExternalCredential::AwsTemporary {
+                access_key_id: "access-id".into(),
+                secret_access_key: "secret-key".into(),
+                session_token: "session-token".into(),
+                region: "us-west-2".into(),
+            },
+        }])
+        .unwrap();
+        let input = ExternalSecretInput {
+            provider: "aws".into(),
+            reference: "orders".into(),
+            scope: String::new(),
+            field: String::new(),
+            version: String::new(),
+            credential_id: "aws-profile".into(),
+            app_name: String::new(),
+            cache_seconds: 0,
+        };
+        let selected = selected_credential(&input).unwrap().unwrap();
+        let mut command = Command::new("aws");
+        let region = apply_aws_credential(&mut command, &selected.credentials).unwrap();
+        assert_eq!(region, "us-west-2");
+        let arguments = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(!arguments
+            .iter()
+            .any(|argument| argument.contains("secret-key")));
+        let environment = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.unwrap().to_string_lossy().into_owned(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        assert_eq!(environment["AWS_ACCESS_KEY_ID"], "access-id");
+        assert_eq!(environment["AWS_SECRET_ACCESS_KEY"], "secret-key");
+        assert_eq!(environment["AWS_SESSION_TOKEN"], "session-token");
+
+        let mut wrong_provider = input;
+        wrong_provider.provider = "gcp".into();
+        assert!(selected_credential(&wrong_provider)
+            .unwrap_err()
+            .contains("another provider"));
+    }
+
+    #[test]
+    fn keeps_profile_and_hcp_app_coordinates_in_cache_identity() {
+        let input = ExternalSecretInput {
+            provider: "hashicorp".into(),
+            reference: "orders".into(),
+            scope: "organization".into(),
+            field: "project".into(),
+            version: "3".into(),
+            credential_id: "production".into(),
+            app_name: "checkout".into(),
+            cache_seconds: 1_800,
+        };
+        let key = external_secret_cache_key(&input);
+        assert_ne!(
+            key,
+            external_secret_cache_key(&ExternalSecretInput {
+                credential_id: "staging".into(),
+                ..input.clone()
+            })
+        );
+        assert_ne!(
+            key,
+            external_secret_cache_key(&ExternalSecretInput {
+                app_name: "billing".into(),
+                ..input
+            })
+        );
+    }
+
+    #[test]
+    fn builds_encoded_hcp_latest_and_versioned_secret_urls() {
+        assert_eq!(
+            hcp_secret_url("org", "project", "checkout app", "orders/key", "")
+                .unwrap()
+                .as_str(),
+            "https://api.cloud.hashicorp.com/secrets/2023-11-28/organizations/org/projects/project/apps/checkout%20app/secrets/orders%2Fkey:open"
+        );
+        assert_eq!(
+            hcp_secret_url("org", "project", "checkout", "orders", "7")
+                .unwrap()
+                .as_str(),
+            "https://api.cloud.hashicorp.com/secrets/2023-11-28/organizations/org/projects/project/apps/checkout/secrets/orders/versions/7:open"
         );
     }
 }

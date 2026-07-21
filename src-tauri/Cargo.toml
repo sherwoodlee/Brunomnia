@@ -40,7 +40,7 @@ ntlmclient = "0.2.0"
 p12-keystore = { version = "=0.1.5", default-features = true }
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
 pkcs5 = { version = "0.7", features = ["3des", "alloc", "pbes2", "sha1-insecure"] }
-reqwest = { version = "0.12", default-features = false, features = ["brotli", "deflate", "gzip", "http2", "json", "multipart", "rustls-tls", "stream", "zstd"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "brotli", "deflate", "gzip", "http2", "json", "multipart", "rustls-tls", "stream", "zstd"] }
 ring = "0.17"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"

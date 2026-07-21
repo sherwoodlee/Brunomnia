@@ -1,4 +1,5 @@
 mod client_identity;
+mod external_credential_store;
 mod external_url;
 mod external_vault;
 mod gguf;
@@ -868,6 +869,19 @@ async fn secure_external_secret(
 }
 
 #[tauri::command]
+async fn external_credential_store_load(
+) -> Result<Vec<external_credential_store::ExternalCredentialRecord>, String> {
+    blocking(external_credential_store::load).await
+}
+
+#[tauri::command]
+async fn external_credential_store_save(
+    credentials: Vec<external_credential_store::ExternalCredentialRecord>,
+) -> Result<Vec<external_credential_store::ExternalCredentialRecord>, String> {
+    blocking(move || external_credential_store::save(credentials)).await
+}
+
+#[tauri::command]
 async fn mcp_stdio_call(
     input: mcp_stdio::McpStdioInput,
     on_event: Channel<mcp_stdio::McpStdioEvent>,
@@ -1189,6 +1203,8 @@ pub fn run() {
             secure_sync_push,
             secure_external_secret,
             secure_external_cache_clear,
+            external_credential_store_load,
+            external_credential_store_save,
             mcp_stdio_call,
             respond_mcp_stdio_server_request,
             update_mcp_stdio_roots,

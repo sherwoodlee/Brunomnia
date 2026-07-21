@@ -11,7 +11,17 @@ export type VaultSession = { unlocked: boolean; passphrase: string; entries: Vau
 export type SecureFileStatus = { exists: boolean; updatedAt: string };
 export type VaultKeyStatus = { supported: boolean; retained: boolean };
 export type SyncPayload = { revision: number; actor: string; savedAt: string; workspace: unknown };
-export type ExternalSecretInput = { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string; cacheSeconds?: number };
+export type ExternalSecretInput = { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string; credentialId?: string; appName?: string; cacheSeconds?: number };
+export type ExternalCredential =
+  | { type: 'awsTemporary'; accessKeyId: string; secretAccessKey: string; sessionToken: string; region: string }
+  | { type: 'awsFile'; section: string; filePath: string; enableCache: boolean; region: string }
+  | { type: 'awsSso'; section: string; filePath: string; configFilePath: string; enableCache: boolean; region: string }
+  | { type: 'gcpServiceAccount'; serviceAccountKeyFilePath: string }
+  | { type: 'hashicorpToken'; systemType: 'onPrem' | 'cloudVaultDedicated'; serverAddress: string; accessToken: string; namespace: string }
+  | { type: 'hashicorpAppRole'; systemType: 'onPrem' | 'cloudVaultDedicated'; serverAddress: string; roleId: string; secretId: string; namespace: string }
+  | { type: 'hcpVaultSecrets'; clientId: string; clientSecret: string }
+  | { type: 'azureOauth'; expiresOn: string; uniqueId: string; username: string; accessToken: string };
+export type ExternalCredentialRecord = { id: string; name: string; provider: ExternalSecretInput['provider']; credentials: ExternalCredential };
 
 const nativeOnly = () => {
   if (!isTauri()) throw new Error('Encrypted vault and sync files require the Tauri desktop app.');
@@ -90,9 +100,9 @@ export const resolveExternalSecret = async (input: ExternalSecretInput) => {
 };
 
 export const externalSecretReferenceKey = (input: ExternalSecretInput) => {
-  const fields = [input.provider, input.reference, input.scope, input.field, input.version]
+  const fields = [input.provider, input.reference, input.scope, input.field, input.version, ...(input.credentialId ? [input.credentialId] : []), ...(input.appName ? [input.appName] : [])]
     .map((value) => encodeURIComponent(value?.trim() ?? ''));
-  return `v1:${fields.join(':')}`;
+  return `${input.appName ? 'v3' : input.credentialId ? 'v2' : 'v1'}:${fields.join(':')}`;
 };
 
 export const resolveAuthorizedExternalSecret = async (workspace: Workspace, input: ExternalSecretInput) => {
@@ -104,6 +114,16 @@ export const resolveAuthorizedExternalSecret = async (workspace: Workspace, inpu
 export const clearExternalSecretCache = async () => {
   nativeOnly();
   return invoke<void>('secure_external_cache_clear');
+};
+
+export const loadExternalCredentials = async () => {
+  nativeOnly();
+  return invoke<ExternalCredentialRecord[]>('external_credential_store_load');
+};
+
+export const saveExternalCredentials = async (credentials: ExternalCredentialRecord[]) => {
+  nativeOnly();
+  return invoke<ExternalCredentialRecord[]>('external_credential_store_save', { credentials });
 };
 
 export const vaultVariables = (session: VaultSession) => session.unlocked

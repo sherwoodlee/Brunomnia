@@ -20,26 +20,32 @@ Local vault variables resolve in HTTP, GraphQL, gRPC, WebSocket/SSE connection f
 
 ## External vault providers
 
-Brunomnia supports four providers through their official command-line clients:
+Brunomnia supports four providers through ambient official command-line logins or protected device profiles:
 
-| Provider | Executable and credential source |
-| --- | --- |
-| AWS Secrets Manager | `aws`; normal AWS CLI credential chain/profile/SSO |
-| GCP Secret Manager | `gcloud`; active gcloud account or service-account configuration |
-| Azure Key Vault | `az`; active Azure CLI login |
-| HashiCorp Vault | `vault`; normal Vault CLI environment/token/agent configuration |
+| Provider | Ambient authority | Protected profile authority |
+| --- | --- | --- |
+| AWS Secrets Manager | `aws` normal credential chain | Temporary key/session values, credential-file section, or SSO profile/config paths |
+| GCP Secret Manager | `gcloud` active account | Absolute service-account key-file path |
+| Azure Key Vault | `az` active login | Browser-OAuth result containing account identity, RFC 3339 expiry, and access token |
+| HashiCorp Vault | `vault` environment/token/agent | On-premises or Vault Dedicated token/AppRole, or HCP Vault Secrets client credentials |
 
-Brunomnia does not persist provider credentials. It starts the executable directly with an argument array—never a shell—rejects option-shaped references, enforces a 30-second limit and 10 MB output limit, and caches resolved values in memory for up to 30 minutes. The cache is capped at 20 MB and 256 entries; values larger than the cache ceiling are returned without being cached. Clearing the cache does not change the provider login.
+Profiles are free, account-independent, non-syncable records. The packaged macOS app validates at most 100 records, 250 KB aggregate JSON, 32 KB per value, unique IDs, unique provider/name pairs, absolute file paths, HTTP(S) Vault addresses, and Azure expiry before storing the complete list as one generic-password item under the `dev.brunomnia.desktop.external-vault-credentials` Keychain service. Profiles never enter workspace JSON, project records, exports, Git/folder publication, encrypted sync, or browser storage. Browser development and non-macOS Tauri builds do not claim a protected profile store.
+
+AWS temporary secrets are passed only through child environment variables; file/SSO selection uses non-secret profile arguments and credential/config environment paths. GCP uses its credential-file override environment. HashiCorp token/AppRole resolution uses Vault environment variables, with bounded direct AppRole login. HCP Vault Secrets exchanges client credentials and reads the static value through fixed HashiCorp HTTPS hosts. Azure selected profiles send a non-expired token only to validated Azure Key Vault HTTPS service hosts. Ambient mode continues to start the official executable directly with an argument array—never a shell. Child processes and direct HTTPS responses have 30-second and 10 MB bounds.
 
 Template syntax is:
 
 ```text
-{% external 'provider', 'reference', 'scope', 'field', 'version' %}
+{% external 'provider', 'reference', 'scope', 'field', 'version', 'credential-id', 'app-name' %}
 ```
 
-`scope` means AWS region, GCP project, or Azure vault name. `field` is used for HashiCorp KV responses. `version` is a provider version/stage where supported. Before request rendering can resolve a reference, an owner or admin must approve the exact provider/reference/scope/field/version tuple in **Security & Sync**. Changing any part of that tuple requires a new approval. The explicit **Test without revealing** action can check a reference and reports only its byte length.
+The final two arguments are optional and device-local. Without a selected profile, `scope` means AWS region, GCP project, or Azure vault name; `field` selects a HashiCorp KV value. With HCP Vault Secrets, `reference` is the secret name, `scope` is the organization ID, `field` is the project ID, and `app-name` names the HCP application. With an Azure OAuth profile, `reference` is the full Key Vault secret identifier URL and the remaining service coordinates are blank. AWS profile region is used only when the tag does not override it.
 
-External tags cover HTTP, GraphQL, OAuth/schema requests, non-streaming collection runs, plugin-mediated HTTP, integrations, generated client code, direct and interactive gRPC, and WebSocket/GraphQL-subscription/SSE/Socket.IO connection and outbound rendering. Portable CLI HTTP/GraphQL runs require `--allow-external-vaults` in addition to the same exact workspace reference allowlist. The CLI invokes the installed official provider executable directly with the ambient user/service credential chain, applies the same 30-second/10 MB process bounds, rejects malformed or option-shaped values, strictly decodes AWS binary secrets as UTF-8, and keeps at most 20 MB/256 entries in process memory. Workspace files cannot grant this process authority to themselves.
+Before request rendering can resolve a reference, an owner or admin must approve its exact provider/reference/scope/field/version tuple. Selecting a profile upgrades the identity to include its credential ID; HCP additionally includes the app name. Changing any part requires a new approval and creates a distinct cache entry. The explicit **Test without revealing** action reports only resolved byte length. The memory cache lasts at most 30 minutes and is capped at 20 MB and 256 entries; oversized values are returned without caching.
+
+External tags cover HTTP, GraphQL, OAuth/schema requests, non-streaming collection runs, plugin-mediated HTTP, integrations, generated client code, direct and interactive gRPC, and WebSocket/GraphQL-subscription/SSE/Socket.IO connection and outbound rendering. Portable CLI HTTP/GraphQL runs require `--allow-external-vaults`; they retain ambient official-CLI behavior with the same exact unprofiled allowlist and process/cache bounds. Device-profile or HCP-app arguments are rejected explicitly in the portable CLI rather than falling back to another credential authority. Workspace files cannot grant either process authority to themselves.
+
+The profile CRUD and runtime adapters are implemented without an entitlement check. Guided Azure browser authorization/token refresh and other provider-native login SDK experiences are not claimed yet; Azure OAuth result fields must currently be supplied from a trusted authorization flow.
 
 ## Local File template tags
 

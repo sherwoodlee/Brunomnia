@@ -8,6 +8,7 @@ describe('CLI external vault adapter', () => {
     expect(cliExternalVaultInvocation({ provider: 'azure', reference: 'orders', scope: 'vault', version: 'v1' })).toMatchObject({ program: 'az', args: ['keyvault', 'secret', 'show', '--vault-name', 'vault', '--name', 'orders', '--version', 'v1', '--query', 'value', '--output', 'tsv'] });
     expect(cliExternalVaultInvocation({ provider: 'hashicorp', reference: 'secret/orders' })).toMatchObject({ program: 'vault', args: ['kv', 'get', '-format=json', 'secret/orders'] });
     expect(() => cliExternalVaultInvocation({ provider: 'aws', reference: '--profile' })).toThrow('invalid');
+    expect(() => cliExternalVaultInvocation({ provider: 'aws', reference: 'orders', credentialId: 'device-profile' })).toThrow('unavailable in the portable CLI');
   });
 
   it('enforces workspace approval, parses provider output, and caches values', async () => {
@@ -18,6 +19,7 @@ describe('CLI external vault adapter', () => {
     await expect(resolve(input)).resolves.toBe('token');
     expect(execute).toHaveBeenCalledTimes(1);
     await expect(createCliExternalSecretResolver([], execute)(input)).rejects.toThrow('not approved');
+    await expect(createCliExternalSecretResolver([], execute)({ ...input, credentialId: 'device-profile' })).rejects.toThrow('unavailable in the portable CLI');
   });
 
   it('decodes AWS binary and HashiCorp KV response shapes', () => {
