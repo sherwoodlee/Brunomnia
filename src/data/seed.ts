@@ -140,7 +140,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 49,
+  version: 50,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -304,7 +304,7 @@ paths:
   plugins: [],
   pluginData: {},
   activePluginTheme: '',
-  collaboration: { mode: 'off', path: '', actor: 'Local owner', revision: 0 },
+  collaboration: { mode: 'off', path: '', actor: 'Local owner', revision: 0, autoSync: false, stagedResourceKeys: [], repository: { version: 1, activeBranches: {}, branches: [], commits: [] } },
   governance: {
     currentMemberId: 'local-owner',
     members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }],

@@ -841,8 +841,20 @@ async fn secure_vault_reset(app: AppHandle, workspace_id: String) -> Result<(), 
 }
 
 #[tauri::command]
-async fn secure_sync_status(path: String) -> Result<secure_store::SecureFileStatus, String> {
+async fn secure_sync_status(path: String) -> Result<secure_store::SyncFileStatus, String> {
     blocking(move || secure_store::sync_status(path)).await
+}
+
+#[tauri::command]
+async fn secure_sync_identity(label: String) -> Result<secure_store::SyncIdentity, String> {
+    blocking(move || secure_store::sync_identity(label)).await
+}
+
+#[tauri::command]
+async fn secure_sync_recipient_from_invite(
+    invite_code: String,
+) -> Result<secure_store::SyncRecipient, String> {
+    blocking(move || secure_store::sync_recipient_from_invite(invite_code)).await
 }
 
 #[tauri::command]
@@ -1208,6 +1220,8 @@ pub fn run() {
             secure_vault_save_saved,
             secure_vault_reset,
             secure_sync_status,
+            secure_sync_identity,
+            secure_sync_recipient_from_invite,
             secure_sync_pull,
             secure_sync_push,
             secure_external_secret,

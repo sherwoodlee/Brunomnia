@@ -102,7 +102,7 @@ export const createBlankWorkspace = (name: string, preferences: AppPreferences):
     plugins: [],
     pluginData: {},
     activePluginTheme: '',
-    collaboration: { mode: 'off', path: '', actor: 'Local owner', revision: 0 },
+    collaboration: { mode: 'off', path: '', actor: 'Local owner', revision: 0, autoSync: false, stagedResourceKeys: [], repository: { version: 1, activeBranches: {}, branches: [], commits: [] } },
     governance: structuredClone(workspace.governance),
     mcpClients: [],
     ai: structuredClone(workspace.ai),
@@ -119,7 +119,7 @@ export const createWorkspaceDuplicate = (source: Workspace, name: string, prefer
   copy.streamSessions = [];
   copy.runnerReports = [];
   copy.project = { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' };
-  copy.collaboration = { mode: 'off', path: '', actor: copy.collaboration.actor || 'Local owner', revision: 0 };
+  copy.collaboration = { mode: 'off', path: '', actor: copy.collaboration.actor || 'Local owner', revision: 0, autoSync: false, stagedResourceKeys: [], repository: { version: 1, activeBranches: {}, branches: [], commits: [] } };
   if (copy.konnect.managedControlPlaneId) copy.konnect = {
     ...copy.konnect,
     enabled: false,

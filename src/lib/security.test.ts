@@ -14,6 +14,8 @@ describe('encrypted collaboration boundaries', () => {
     workspace.project.path = '/private/repository';
     workspace.plugins = [{ id: 'plugin', name: 'Private plugin', version: '1', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true, requestedPermissions: [], grantedPermissions: [], installedAt: new Date().toISOString() }];
     workspace.collaboration.path = '/private/share.enc.json';
+    workspace.collaboration.stagedResourceKeys = [`collection:${workspace.collections[0].id}`];
+    workspace.collaboration.repository = { version: 1, activeBranches: {}, branches: [], commits: [{ id: 'private-commit', resourceKey: `collection:${workspace.collections[0].id}`, branch: 'main', parentId: '', actor: 'Local', message: 'Private local cache', createdAt: new Date().toISOString(), snapshot: { private: true } }] };
     workspace.certificates = { ca: { enabled: true, pem: 'private-ca' }, clients: [{ id: 'cert', host: 'private.example', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }] };
     workspace.fileState[workspace.collections[0].id] = { cookies: workspace.cookies, certificates: workspace.certificates };
     workspace.collections[0].requests[0].auth = { ...workspace.collections[0].requests[0].auth, type: 'oauth2', code: 'code', codeVerifier: 'verifier', accessToken: 'access', identityToken: 'identity', refreshToken: 'refresh', expiresAt: 123 };
@@ -27,6 +29,8 @@ describe('encrypted collaboration boundaries', () => {
     expect(shared.project.path).toBe('');
     expect(shared.plugins).toEqual([]);
     expect(shared.collaboration.path).toBe('');
+    expect(shared.collaboration.stagedResourceKeys).toEqual([]);
+    expect(shared.collaboration.repository).toEqual({ version: 1, activeBranches: {}, branches: [], commits: [] });
     expect(shared.certificates).toEqual({ ca: { enabled: false, pem: '' }, clients: [] });
     expect(shared.fileState).toEqual({});
     expect(shared.collections).toHaveLength(workspace.collections.length);
@@ -75,7 +79,7 @@ describe('encrypted collaboration boundaries', () => {
     remote.governance.members.push({ id: 'remote-editor', name: 'Remote editor', email: '', role: 'editor', active: true });
     remote.governance.currentMemberId = 'remote-editor';
 
-    const merged = mergeSyncedWorkspace(current, { revision: 4, actor: 'Remote editor', savedAt: new Date().toISOString(), workspace: remote });
+    const merged = mergeSyncedWorkspace(current, { revision: 4, actor: 'Remote editor', savedAt: new Date().toISOString(), workspace: remote, repository: { version: 1, activeBranches: {}, branches: [], commits: [] } });
     expect(merged.name).toBe('Remote workspace');
     expect(merged.history[0].name).toBe('Keep');
     expect(merged.streamSessions.map((session) => session.id)).toEqual(['stream']);

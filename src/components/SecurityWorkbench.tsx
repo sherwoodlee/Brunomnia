@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   appendAudit,
   clearExternalSecretCache,
+  encryptedSyncIdentity,
+  encryptedSyncRecipientFromInvite,
   encryptedSyncStatus,
   externalSecretReferenceKey,
   forgetVaultKey,
@@ -23,6 +25,9 @@ import {
   vaultKeyStatus,
   vaultStatus,
   type SecureFileStatus,
+  type SyncFileStatus,
+  type SyncIdentity,
+  type SyncRecipient,
   type ExternalSecretInput,
   type ExternalCredentialRecord,
   type VaultEntry,
@@ -34,7 +39,9 @@ import type { GovernanceMember, GovernanceRole, Workspace } from '../types';
 import { CertificateManager } from './CertificateManager';
 import { Icon } from './Icon';
 import { ExternalCredentialManager } from './ExternalCredentialManager';
+import { CollaborationRepositoryPanel } from './CollaborationRepositoryPanel';
 import { getWorkspaceFileState, updateWorkspaceFileState } from '../lib/workspaceFileState';
+import { dirtyCollaborationResources } from '../lib/collaboration';
 
 type SecurityWorkbenchProps = {
   workspaceId: string;
@@ -46,6 +53,7 @@ type SecurityWorkbenchProps = {
 };
 
 const blankStatus: SecureFileStatus = { exists: false, updatedAt: '' };
+const blankSyncStatus: SyncFileStatus = { exists: false, updatedAt: '', encryptionMode: 'none', recipients: [] };
 const blankKeyStatus: VaultKeyStatus = { supported: false, retained: false };
 const roles: GovernanceRole[] = ['owner', 'admin', 'editor', 'viewer'];
 const secretId = () => `secret-${crypto.randomUUID()}`;
@@ -67,6 +75,29 @@ export function VaultKeyRetentionControl({ supported, retained, canRetain, busy,
   </>;
 }
 
+type SyncRecipientEncryptionControlProps = {
+  status: SyncFileStatus;
+  identity?: SyncIdentity;
+  enabled: boolean;
+  recipients: SyncRecipient[];
+  invite: string;
+  canGovern: boolean;
+  busy: boolean;
+  onToggle: (enabled: boolean) => void;
+  onInvite: (value: string) => void;
+  onAdd: () => void;
+  onRemove: (recipient: SyncRecipient) => void;
+};
+
+export function SyncRecipientEncryptionControl({ status, identity, enabled, recipients, invite, canGovern, busy, onToggle, onInvite, onAdd, onRemove }: SyncRecipientEncryptionControlProps) {
+  return <section className="security-card sync-recipient-card">
+    <header><div><small>X25519 · rotating AES-256-GCM key</small><h2>Per-user recipients</h2></div><span>{enabled ? `${recipients.length} active` : 'Optional'}</span></header>
+    <label className="force-toggle"><input checked={enabled} disabled={busy || status.encryptionMode === 'recipients'} onChange={(event) => onToggle(event.target.checked)} type="checkbox" /> Encrypt new revisions only for listed device identities</label>
+    {identity ? <><label>Your public invitation<textarea aria-label="Your public encrypted-sync invitation" readOnly rows={3} value={identity.inviteCode} /></label><small>Share this public invitation with an owner. The private X25519 key remains in this device's operating-system credential store.</small></> : <p>Creating the device identity…</p>}
+    {enabled ? <><div className="sync-recipient-add"><textarea aria-label="Recipient invitation" disabled={!canGovern || busy} onChange={(event) => onInvite(event.target.value)} placeholder="Paste a brunomnia-sync-recipient-v1 invitation" rows={3} value={invite} /><button disabled={!canGovern || busy || !invite.trim()} onClick={onAdd} type="button">Add recipient</button></div><div className="sync-recipient-list">{recipients.map((recipient) => <article key={recipient.id}><span><strong>{recipient.label}</strong><code>{recipient.id}</code></span><button disabled={!canGovern || busy || recipient.id === identity?.recipient.id} onClick={() => onRemove(recipient)} type="button">{recipient.id === identity?.recipient.id ? 'This device' : 'Remove'}</button></article>)}</div><p>Every push creates a fresh random content key. Removing a recipient takes effect when the next revision is published and cannot erase copies of older ciphertext retained outside Brunomnia.</p></> : <p>Shared-passphrase files remain supported. Enable recipients before the next push to migrate without exposing a shared decryption secret.</p>}
+  </section>;
+}
+
 export const retainedExternalCredentialId = (credentialId: string | undefined, credentials: ExternalCredentialRecord[]) => credentialId && credentials.some((credential) => credential.id === credentialId) ? credentialId : '';
 export const externalCredentialsForProvider = (credentials: ExternalCredentialRecord[], provider: ExternalSecretInput['provider']) => credentials.filter((credential) => credential.provider === provider);
 
@@ -74,8 +105,12 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
   const [tab, setTab] = useState<'vault' | 'certificates' | 'sync' | 'governance'>('vault');
   const [status, setStatus] = useState<SecureFileStatus>(blankStatus);
   const [keyStatus, setKeyStatus] = useState<VaultKeyStatus>(blankKeyStatus);
-  const [syncStatus, setSyncStatus] = useState<SecureFileStatus>(blankStatus);
+  const [syncStatus, setSyncStatus] = useState<SyncFileStatus>(blankSyncStatus);
   const [syncPassphrase, setSyncPassphrase] = useState('');
+  const [syncIdentity, setSyncIdentity] = useState<SyncIdentity>();
+  const [syncRecipients, setSyncRecipients] = useState<SyncRecipient[]>([]);
+  const [syncRecipientInvite, setSyncRecipientInvite] = useState('');
+  const [recipientEncryption, setRecipientEncryption] = useState(false);
   const [forcePush, setForcePush] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const [newSecretName, setNewSecretName] = useState('');
@@ -97,6 +132,9 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
   const selectedExternalCredential = externalCredentials.find((credential) => credential.id === external.credentialId);
   const usesHcpVaultSecrets = selectedExternalCredential?.credentials.type === 'hcpVaultSecrets';
   const usesAzureOauth = selectedExternalCredential?.credentials.type === 'azureOauth';
+  const syncActorLabel = workspace.collaboration.actor || currentMember?.name || 'Local collaborator';
+  const syncUsesRecipients = recipientEncryption || syncStatus.encryptionMode === 'recipients';
+  const syncCredentialReady = syncStatus.encryptionMode === 'passphrase' ? syncPassphrase.length >= 12 : syncUsesRecipients ? Boolean(syncIdentity) : syncPassphrase.length >= 12;
 
   const run = async (label: string, operation: () => Promise<void>) => {
     if (busy) return;
@@ -144,6 +182,27 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
     void loadExternalCredentials().then((credentials) => { if (!cancelled) setExternalCredentials(credentials); }).catch((caught) => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)); });
     return () => { cancelled = true; };
   }, [native]);
+
+  useEffect(() => {
+    if (!native || tab !== 'sync') return;
+    let cancelled = false;
+    const statusPromise = workspace.collaboration.path
+      ? encryptedSyncStatus(workspace.collaboration.path)
+      : Promise.resolve(blankSyncStatus);
+    void Promise.all([encryptedSyncIdentity(syncActorLabel), statusPromise]).then(([identity, nextStatus]) => {
+      if (cancelled) return;
+      setSyncIdentity(identity);
+      setSyncStatus(nextStatus);
+      if (nextStatus.encryptionMode === 'recipients') {
+        setRecipientEncryption(true);
+        setSyncRecipients(nextStatus.recipients);
+      } else {
+        setRecipientEncryption(false);
+        setSyncRecipients([identity.recipient]);
+      }
+    }).catch((caught) => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)); });
+    return () => { cancelled = true; };
+  }, [native, tab, workspace.collaboration.path]);
 
   const visibleVaultEntries = useMemo(() => directVaultEntries(vaultSession.entries), [vaultSession.entries]);
   const environmentSecretCount = useMemo(() => vaultSession.entries.filter(isEnvironmentSecretEntry).length, [vaultSession.entries]);
@@ -208,10 +267,53 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
     setNewSecretName(''); setNewSecretValue(''); setError('');
   };
 
+  const refreshSyncStatus = async () => {
+    const next = await encryptedSyncStatus(workspace.collaboration.path);
+    setSyncStatus(next);
+    if (next.encryptionMode === 'recipients') {
+      setRecipientEncryption(true);
+      setSyncRecipients(next.recipients);
+    }
+    return next;
+  };
+
+  const toggleRecipientEncryption = (enabled: boolean) => {
+    if (syncStatus.encryptionMode === 'recipients' && !enabled) return;
+    if (!enabled) { setRecipientEncryption(false); return; }
+    if (syncIdentity) {
+      setRecipientEncryption(true);
+      setSyncRecipients((current) => current.some((recipient) => recipient.id === syncIdentity.recipient.id) ? current : [syncIdentity.recipient, ...current]);
+      return;
+    }
+    void run('Creating device collaboration identity', async () => {
+      const identity = await encryptedSyncIdentity(syncActorLabel);
+      setSyncIdentity(identity);
+      setSyncRecipients((current) => current.some((recipient) => recipient.id === identity.recipient.id) ? current : [identity.recipient, ...current]);
+      setRecipientEncryption(true);
+      setMessage('Created an X25519 collaboration identity in the operating-system credential store.');
+    });
+  };
+
+  const addSyncRecipient = () => run('Validating recipient invitation', async () => {
+    if (!canGovern) throw new Error('Only an owner or admin can change encrypted-sync recipients.');
+    const recipient = await encryptedSyncRecipientFromInvite(syncRecipientInvite);
+    setSyncRecipients((current) => current.some((candidate) => candidate.id === recipient.id) ? current.map((candidate) => candidate.id === recipient.id ? recipient : candidate) : [...current, recipient]);
+    setSyncRecipientInvite('');
+    setRecipientEncryption(true);
+    setMessage(`Added ${recipient.label}. Publish a new revision to rotate the data key for the updated recipient list.`);
+  });
+
+  const removeSyncRecipient = (recipient: SyncRecipient) => {
+    if (!canGovern) { setError('Only an owner or admin can change encrypted-sync recipients.'); return; }
+    if (recipient.id === syncIdentity?.recipient.id) { setError('This device must remain a recipient while it rotates the sync key.'); return; }
+    setSyncRecipients((current) => current.filter((candidate) => candidate.id !== recipient.id));
+    setMessage(`Removed ${recipient.label} from the pending recipient list. Publish a new revision to rotate the data key.`);
+  };
+
   const pull = () => run('Pulling encrypted revision', async () => {
     const payload = await pullEncryptedSync(workspace.collaboration.path, syncPassphrase);
     onChangeWorkspace((current) => appendAudit(mergeSyncedWorkspace(current, payload), 'sync.pull', `Pulled encrypted revision ${payload.revision} from ${payload.actor || 'another collaborator'}.`));
-    const next = await encryptedSyncStatus(workspace.collaboration.path); setSyncStatus(next);
+    await refreshSyncStatus();
     setMessage(`Pulled revision ${payload.revision}, saved by ${payload.actor || 'unknown actor'}.`);
   });
 
@@ -226,11 +328,51 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
       baseRevision: workspace.collaboration.revision,
       force: forcePush,
       workspace: shareableWorkspace(workspace),
+      repository: workspace.collaboration.repository,
+      recipientEncryption: syncUsesRecipients,
+      recipients: syncUsesRecipients ? syncRecipients : [],
     });
-    onChangeWorkspace((current) => appendAudit({ ...current, collaboration: { ...current.collaboration, mode: 'encrypted-file', revision: payload.revision, lastPushedAt: new Date().toISOString() } }, forcePush ? 'sync.force-push' : 'sync.push', `Published encrypted revision ${payload.revision}.`));
-    const next = await encryptedSyncStatus(workspace.collaboration.path); setSyncStatus(next); setForcePush(false);
-    setMessage(`Published encrypted revision ${payload.revision}.`);
+    onChangeWorkspace((current) => appendAudit({ ...current, collaboration: { ...current.collaboration, mode: 'encrypted-file', revision: payload.revision, lastPushedAt: new Date().toISOString() } }, forcePush ? 'sync.force-push' : 'sync.push', `Published encrypted revision ${payload.revision}${syncUsesRecipients ? ` for ${syncRecipients.length} recipient${syncRecipients.length === 1 ? '' : 's'}` : ''}.`));
+    await refreshSyncStatus(); setForcePush(false);
+    setMessage(`Published encrypted revision ${payload.revision}${syncUsesRecipients ? ' with a freshly rotated recipient data key' : ''}.`);
   });
+
+  useEffect(() => {
+    if (!native || tab !== 'sync' || !workspace.collaboration.autoSync || !workspace.collaboration.path || !syncCredentialReady || busy) return;
+    let cancelled = false;
+    let polling = false;
+    const poll = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const nextStatus = await encryptedSyncStatus(workspace.collaboration.path);
+        if (cancelled || !nextStatus.exists) return;
+        if (!syncStatus.updatedAt) {
+          setSyncStatus(nextStatus);
+          if (nextStatus.encryptionMode === 'recipients') { setRecipientEncryption(true); setSyncRecipients(nextStatus.recipients); }
+          return;
+        }
+        if (nextStatus.updatedAt === syncStatus.updatedAt) return;
+        const dirty = dirtyCollaborationResources(workspace, workspace.collaboration.repository);
+        if (workspace.collaboration.stagedResourceKeys.length || dirty.length) {
+          setMessage(`Encrypted revision changed remotely at ${new Date(nextStatus.updatedAt).toLocaleString()}. Commit or restore ${dirty.length || workspace.collaboration.stagedResourceKeys.length} local resource change${dirty.length === 1 ? '' : 's'} before automatic pull.`);
+          return;
+        }
+        const payload = await pullEncryptedSync(workspace.collaboration.path, syncPassphrase);
+        if (cancelled) return;
+        if (payload.revision > workspace.collaboration.revision) {
+          onChangeWorkspace((current) => appendAudit(mergeSyncedWorkspace(current, payload), 'sync.auto-pull', `Automatically pulled encrypted revision ${payload.revision} from ${payload.actor || 'another collaborator'}.`));
+          setMessage(`Automatically pulled revision ${payload.revision} from ${payload.actor || 'another collaborator'}.`);
+        }
+        setSyncStatus(nextStatus);
+        if (nextStatus.encryptionMode === 'recipients') { setRecipientEncryption(true); setSyncRecipients(nextStatus.recipients); }
+      } catch (caught) {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
+      } finally { polling = false; }
+    };
+    const interval = window.setInterval(() => { void poll(); }, 5_000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [busy, native, onChangeWorkspace, syncCredentialReady, syncPassphrase, syncStatus.updatedAt, tab, workspace]);
 
   const addMember = () => {
     if (!canGovern) { setError('Only an owner or admin can add local governance actors.'); return; }
@@ -260,7 +402,12 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
         {native && status.exists && !vaultSession.unlocked ? <section className="security-card danger-zone"><header><h2>Recovery boundary</h2></header><p>Brunomnia cannot recover a lost passphrase. Reset permanently deletes this project's encrypted local vault, any saved Keychain key, and every private-environment Secret row.</p><button onClick={() => { if (!window.confirm('Permanently delete this project’s encrypted local vault and all private-environment Secret rows?')) return; void run('Resetting vault', async () => { await resetVault(workspaceId); setStatus(blankStatus); setKeyStatus((current) => ({ ...current, retained: false })); onVaultSession({ unlocked: false, passphrase: '', entries: [] }); onChangeWorkspace((current) => withoutEnvironmentSecrets(current)); audit('vault.reset', 'Permanently reset the project encrypted local vault and removed private-environment Secret rows.'); }); }} type="button">Reset encrypted vault</button></section> : null}
       </div> : null}
 
-      {tab === 'sync' ? <div className="security-grid sync-grid"><section className="security-card"><header><div><small>Revision checked</small><h2>Encrypted shared file</h2></div><span>Revision {workspace.collaboration.revision}</span></header><label>Shared file path<input disabled={!native} value={workspace.collaboration.path} onChange={(event) => updateCollaboration({ mode: event.target.value ? 'encrypted-file' : 'off', path: event.target.value })} placeholder="/Volumes/team/orders.brunomnia-sync.json" /></label><label>Actor label<input value={workspace.collaboration.actor} onChange={(event) => updateCollaboration({ actor: event.target.value })} placeholder={currentMember?.name || 'Local collaborator'} /></label><label>Shared passphrase<input autoComplete="off" type="password" value={syncPassphrase} onChange={(event) => setSyncPassphrase(event.target.value)} /></label>{plaintextSecrets.length ? <div className="policy-warning"><strong>Vault policy blocked {plaintextSecrets.length} plaintext candidate{plaintextSecrets.length === 1 ? '' : 's'}</strong><span>{plaintextSecrets.slice(0, 4).join(' · ')}</span></div> : null}<div className="sync-actions"><button disabled={!native || !workspace.collaboration.path || syncPassphrase.length < 12 || Boolean(busy)} onClick={pull} type="button">Pull and decrypt</button><button disabled={!native || !workspace.collaboration.path || syncPassphrase.length < 12 || !canEdit || Boolean(busy)} onClick={push} type="button">Encrypt and push</button><button disabled={!native || !workspace.collaboration.path || Boolean(busy)} onClick={() => run('Inspecting sync file', async () => { const next = await encryptedSyncStatus(workspace.collaboration.path); setSyncStatus(next); setMessage(next.exists ? `Encrypted sync file updated ${new Date(next.updatedAt).toLocaleString()}.` : 'No encrypted sync file exists yet.'); })} type="button">Check</button></div><label className="force-toggle"><input checked={forcePush} onChange={(event) => setForcePush(event.target.checked)} type="checkbox" /> Explicitly force past a revision mismatch on the next push</label>{syncStatus.updatedAt ? <small>Encrypted file updated {new Date(syncStatus.updatedAt).toLocaleString()}</small> : null}</section><section className="security-card"><header><div><small>Shareable scope</small><h2>What crosses the boundary</h2></div><Icon name="archive" size={22} /></header><ul><li>Collections, environments, designs, mocks, and governance metadata are encrypted before writing.</li><li>History, responses, cookies, reports, Git paths, plugins, plugin data, vault contents, and the shared-file path stay local.</li><li>A mismatched base revision blocks push until you pull or deliberately select force.</li></ul><p>This file can live on a self-hosted file share, mounted WebDAV volume, or another user-controlled synchronization system. Real-time presence and server-mediated comments are not claimed yet.</p></section></div> : null}
+      {tab === 'sync' ? <div className="security-grid sync-grid">
+        <section className="security-card"><header><div><small>Revision checked</small><h2>Encrypted shared file</h2></div><span>Revision {workspace.collaboration.revision}</span></header><label>Shared file path<input disabled={!native} value={workspace.collaboration.path} onChange={(event) => updateCollaboration({ mode: event.target.value ? 'encrypted-file' : 'off', path: event.target.value })} placeholder="/Volumes/team/orders.brunomnia-sync.json" /></label><label>Actor label<input value={workspace.collaboration.actor} onChange={(event) => updateCollaboration({ actor: event.target.value })} placeholder={currentMember?.name || 'Local collaborator'} /></label>{!syncUsesRecipients || syncStatus.encryptionMode === 'passphrase' ? <label>{recipientEncryption ? 'Current shared passphrase for migration' : 'Shared passphrase'}<input autoComplete="off" type="password" value={syncPassphrase} onChange={(event) => setSyncPassphrase(event.target.value)} /></label> : null}{plaintextSecrets.length ? <div className="policy-warning"><strong>Vault policy blocked {plaintextSecrets.length} plaintext candidate{plaintextSecrets.length === 1 ? '' : 's'}</strong><span>{plaintextSecrets.slice(0, 4).join(' · ')}</span></div> : null}<div className="sync-actions"><button disabled={!native || !workspace.collaboration.path || !syncCredentialReady || Boolean(busy)} onClick={pull} type="button">Pull and decrypt</button><button disabled={!native || !workspace.collaboration.path || !syncCredentialReady || !canEdit || Boolean(busy)} onClick={push} type="button">Encrypt and push</button><button disabled={!native || !workspace.collaboration.path || Boolean(busy)} onClick={() => run('Inspecting sync file', async () => { const next = await refreshSyncStatus(); setMessage(next.exists ? `Encrypted sync file updated ${new Date(next.updatedAt).toLocaleString()} using ${next.encryptionMode === 'recipients' ? `${next.recipients.length} per-user recipient${next.recipients.length === 1 ? '' : 's'}` : 'a shared passphrase'}.` : 'No encrypted sync file exists yet.'); })} type="button">Check</button></div><label className="force-toggle"><input checked={workspace.collaboration.autoSync} onChange={(event) => updateCollaboration({ autoSync: event.target.checked })} type="checkbox" /> Automatically pull clean remote revisions every five seconds</label><label className="force-toggle"><input checked={forcePush} onChange={(event) => setForcePush(event.target.checked)} type="checkbox" /> Explicitly force past a revision mismatch on the next push</label>{syncStatus.updatedAt ? <small>Encrypted file updated {new Date(syncStatus.updatedAt).toLocaleString()} · {syncStatus.encryptionMode === 'recipients' ? `${syncStatus.recipients.length} recipient keys` : 'shared passphrase'}</small> : null}</section>
+        <SyncRecipientEncryptionControl busy={Boolean(busy)} canGovern={Boolean(canGovern)} enabled={syncUsesRecipients} identity={syncIdentity} invite={syncRecipientInvite} onAdd={addSyncRecipient} onInvite={setSyncRecipientInvite} onRemove={removeSyncRecipient} onToggle={toggleRecipientEncryption} recipients={syncRecipients} status={syncStatus} />
+        <section className="security-card"><header><div><small>Shareable scope</small><h2>What crosses the boundary</h2></div><Icon name="archive" size={22} /></header><ul><li>Collections, environments, designs, mocks, repository commits, branches, and governance metadata are encrypted before writing.</li><li>History, responses, cookies, reports, Git paths, plugins, plugin data, vault contents, recipient private keys, and the shared-file path stay local.</li><li>A mismatched base revision blocks push until you pull or deliberately select force.</li></ul><p>This file can live on a self-hosted file share, mounted WebDAV volume, or another user-controlled synchronization system. The pinned product has no comments or presence surface; collaboration is encrypted commits, branches, history, merge, and remote refresh.</p></section>
+        <CollaborationRepositoryPanel actor={syncActorLabel} disabled={!canEdit || Boolean(busy)} onChangeWorkspace={onChangeWorkspace} workspace={workspace} />
+      </div> : null}
 
       {tab === 'governance' ? <div className="security-grid governance-grid"><section className="security-card"><header><div><small>Local actor model</small><h2>Members and roles</h2></div><select aria-label="Current governance actor" value={workspace.governance.currentMemberId} onChange={(event) => onChangeWorkspace((current) => ({ ...current, governance: { ...current.governance, currentMemberId: event.target.value } }))}>{workspace.governance.members.filter((member) => member.active).map((member) => <option key={member.id} value={member.id}>{member.name} · {member.role}</option>)}</select></header><div className="member-list">{workspace.governance.members.map((member) => <article key={member.id}><span><strong>{member.name}</strong><small>{member.email || 'No email'} · {member.active ? 'active' : 'inactive'}</small></span><select disabled={!canGovern} value={member.role} onChange={(event) => updateMember(member.id, { role: event.target.value as GovernanceRole })}>{roles.map((role) => <option key={role}>{role}</option>)}</select><label><input checked={member.active} disabled={!canGovern} onChange={(event) => updateMember(member.id, { active: event.target.checked })} type="checkbox" /> Active</label></article>)}</div><div className="member-new"><input placeholder="Member name" value={newMemberName} onChange={(event) => setNewMemberName(event.target.value)} /><input placeholder="Email (optional)" value={newMemberEmail} onChange={(event) => setNewMemberEmail(event.target.value)} /><button disabled={!canGovern} onClick={addMember} type="button">Add editor</button></div><p>These roles protect local sync/governance actions; they are not authentication. SSO and SCIM adapters require a self-hosted identity service in the next closure step.</p></section><section className="security-card"><header><div><small>Workspace policy</small><h2>Guardrails</h2></div></header><div className="policy-list"><div className="storage-policy">{(['local', 'folder', 'git', 'encrypted-file'] as const).map((mode) => <label key={mode}><input checked={workspace.governance.policy.allowedStorage.includes(mode)} disabled={!canGovern} onChange={(event) => updateStoragePolicy(mode, event.target.checked)} type="checkbox" /> {mode}</label>)}</div><label><input checked={workspace.governance.policy.requireEncryptedSync} disabled={!canGovern} onChange={(event) => onChangeWorkspace((current) => appendAudit({ ...current, governance: { ...current.governance, policy: { ...current.governance.policy, requireEncryptedSync: event.target.checked } } }, 'governance.policy.update', 'Changed encrypted-sync requirement.'))} type="checkbox" /> Require encrypted collaboration files</label><label><input checked={workspace.governance.policy.requireVaultForSecrets} disabled={!canGovern} onChange={(event) => onChangeWorkspace((current) => appendAudit({ ...current, governance: { ...current.governance, policy: { ...current.governance.policy, requireVaultForSecrets: event.target.checked } } }, 'governance.policy.update', 'Changed local-vault secret policy.'))} type="checkbox" /> Require the encrypted vault for secret values</label><label>Audit retention<input disabled={!canGovern} min="1" max="10000" type="number" value={workspace.governance.policy.auditRetention} onChange={(event) => onChangeWorkspace((current) => ({ ...current, governance: { ...current.governance, policy: { ...current.governance.policy, auditRetention: Math.min(10000, Math.max(1, Number(event.target.value))) } } }))} /></label></div></section><section className="security-card audit-card"><header><div><small>Append-only in UI</small><h2>Audit trail</h2></div><span>{workspace.governance.audit.length}</span></header><div>{workspace.governance.audit.map((event) => <article key={event.id}><time>{new Date(event.timestamp).toLocaleString()}</time><strong>{event.action}</strong><span>{event.detail}</span><small>{workspace.governance.members.find((member) => member.id === event.actorId)?.name ?? event.actorId}</small></article>)}{!workspace.governance.audit.length ? <p>No governance events recorded yet.</p> : null}</div></section></div> : null}
       {busy ? <div className="automation-message">{busy}…</div> : null}{error ? <div className="automation-message error">{error}</div> : null}{message ? <div className="automation-message">{message}</div> : null}

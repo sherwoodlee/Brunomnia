@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { cloneSeedWorkspace } from '../data/seed';
-import type { AiSettings, ApiRequest, AppPreferences, AuditEvent, AuthConfig, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ScriptTestResult, ShortcutAction, StoredResponse, StoredStreamSession, StreamMessage, Workspace } from '../types';
+import type { AiSettings, ApiRequest, AppPreferences, AuditEvent, AuthConfig, CollaborationBranch, CollaborationCommit, CollaborationConfig, Environment, GovernanceMember, GovernancePolicy, GovernanceRole, JsonValue, KeyValue, KonnectConfig, McpClient, McpPrompt, McpResource, McpTool, PluginPermission, PluginRecord, RequestFolder, ResponseTimelineEntry, ScriptTestResult, ShortcutAction, StoredResponse, StoredStreamSession, StreamMessage, Workspace } from '../types';
 import { normalizeGraphqlSchema } from './graphqlSchema';
 import { normalizeGrpcProtoTree } from './grpcProto';
 import { emptyWorkspaceCertificates, normalizeCertificatePassphrase, normalizeCertificatePfxBase64, normalizeWorkspaceCertificates } from './certificates';
@@ -167,11 +167,54 @@ const normalizeGovernance = (value: unknown, defaults: Workspace['governance']):
 
 const normalizeCollaboration = (value: unknown, defaults: CollaborationConfig): CollaborationConfig => {
   const source = record(value);
+  const repository = record(source?.repository);
+  const allowedResourceKey = (candidate: unknown): candidate is string => typeof candidate === 'string' && /^(?:collection|environment|api-design|mock-server|mcp-client):[^\s:]{1,500}$/.test(candidate);
+  const allowedBranch = (candidate: unknown): candidate is string => typeof candidate === 'string' && /^[A-Za-z0-9](?:[A-Za-z0-9._/-]{0,98}[A-Za-z0-9])?$/.test(candidate) && !candidate.includes('..') && !candidate.includes('//');
+  const commitsPerResource = new Map<string, number>();
+  let repositoryBytes = 0;
+  const commits = (Array.isArray(repository?.commits) ? repository.commits : []).flatMap((value): CollaborationCommit[] => {
+    const commit = record(value);
+    if (!commit || !allowedResourceKey(commit.resourceKey) || !allowedBranch(commit.branch) || typeof commit.id !== 'string' || !commit.id || typeof commit.snapshot === 'undefined') return [];
+    const count = commitsPerResource.get(commit.resourceKey) ?? 0;
+    if (count >= 200) return [];
+    let snapshot: JsonValue;
+    try {
+      const encoded = JSON.stringify(commit.snapshot);
+      const bytes = new TextEncoder().encode(encoded).byteLength;
+      if (bytes > 5_000_000 || repositoryBytes + bytes > 20_000_000) return [];
+      snapshot = JSON.parse(encoded) as JsonValue;
+      repositoryBytes += bytes;
+    } catch { return []; }
+    commitsPerResource.set(commit.resourceKey, count + 1);
+    return [{
+      id: commit.id.slice(0, 500), resourceKey: commit.resourceKey, branch: commit.branch,
+      parentId: stringValue(commit.parentId).slice(0, 500), ...(typeof commit.mergeParentId === 'string' && commit.mergeParentId ? { mergeParentId: commit.mergeParentId.slice(0, 500) } : {}),
+      actor: stringValue(commit.actor).slice(0, 500), message: stringValue(commit.message).slice(0, 1_000), createdAt: stringValue(commit.createdAt, new Date(0).toISOString()).slice(0, 128), snapshot,
+    }];
+  }).slice(0, 10_000);
+  const commitIds = new Set(commits.map((commit) => commit.id));
+  const branchesPerResource = new Map<string, number>();
+  const branches = (Array.isArray(repository?.branches) ? repository.branches : []).flatMap((value): CollaborationBranch[] => {
+    const branch = record(value);
+    if (!branch || !allowedResourceKey(branch.resourceKey) || !allowedBranch(branch.name) || (typeof branch.headCommitId === 'string' && branch.headCommitId && !commitIds.has(branch.headCommitId))) return [];
+    const count = branchesPerResource.get(branch.resourceKey) ?? 0;
+    if (count >= 50) return [];
+    branchesPerResource.set(branch.resourceKey, count + 1);
+    return [{
+      resourceKey: branch.resourceKey, name: branch.name, headCommitId: stringValue(branch.headCommitId).slice(0, 500),
+      createdAt: stringValue(branch.createdAt, new Date(0).toISOString()).slice(0, 128), updatedAt: stringValue(branch.updatedAt, new Date(0).toISOString()).slice(0, 128),
+    }];
+  }).slice(0, 5_000);
+  const branchIdentities = new Set(branches.map((branch) => `${branch.resourceKey}\0${branch.name}`));
+  const activeBranches = Object.fromEntries(Object.entries(record(repository?.activeBranches) ?? {}).flatMap(([key, branch]) => allowedResourceKey(key) && allowedBranch(branch) && branchIdentities.has(`${key}\0${branch}`) ? [[key, branch]] : []).slice(0, 1_000));
   return {
     mode: source?.mode === 'encrypted-file' ? 'encrypted-file' : 'off',
     path: typeof source?.path === 'string' ? source.path : defaults.path,
     actor: typeof source?.actor === 'string' ? source.actor : defaults.actor,
     revision: Math.max(0, Number(source?.revision) || 0),
+    autoSync: source?.autoSync === true,
+    stagedResourceKeys: [...new Set((Array.isArray(source?.stagedResourceKeys) ? source.stagedResourceKeys : []).filter(allowedResourceKey))].slice(0, 100),
+    repository: { version: 1, activeBranches, branches, commits },
     lastPulledAt: typeof source?.lastPulledAt === 'string' ? source.lastPulledAt : undefined,
     lastPushedAt: typeof source?.lastPushedAt === 'string' ? source.lastPushedAt : undefined,
   };
@@ -956,7 +999,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   }));
   return {
     ...workspace,
-    version: 49,
+    version: 50,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',
@@ -1002,6 +1045,7 @@ export const secureImportedWorkspace = (value: unknown): Workspace => {
     pluginData: {},
     activePluginTheme: '',
     project: structuredClone(cloneSeedWorkspace().project),
+    collaboration: structuredClone(cloneSeedWorkspace().collaboration),
     mcpSessions: [],
     mcpClients: workspace.mcpClients.map((client) => ({ ...client, enabled: false, token: '', password: '', oauthClientSecret: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none' })),
     ai: { ...workspace.ai, enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false },

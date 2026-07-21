@@ -1,5 +1,5 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
-import type { AuditEvent, Workspace } from '../types';
+import type { AuditEvent, CollaborationRepository, Workspace } from '../types';
 import { migrateWorkspace } from './storage';
 import { defaultPreferences } from './preferences';
 import { emptyWorkspaceCertificates } from './certificates';
@@ -10,8 +10,11 @@ import { collectionWithoutPrivateEnvironments, mergePrivateCollectionEnvironment
 export type VaultEntry = { id: string; name: string; value: string; updatedAt: string; kind?: 'environment'; ownerId?: string };
 export type VaultSession = { unlocked: boolean; passphrase: string; entries: VaultEntry[] };
 export type SecureFileStatus = { exists: boolean; updatedAt: string };
+export type SyncRecipient = { id: string; label: string; publicKeyBase64: string };
+export type SyncIdentity = { recipient: SyncRecipient; inviteCode: string };
+export type SyncFileStatus = SecureFileStatus & { encryptionMode: 'none' | 'passphrase' | 'recipients'; recipients: SyncRecipient[] };
 export type VaultKeyStatus = { supported: boolean; retained: boolean };
-export type SyncPayload = { revision: number; actor: string; savedAt: string; workspace: unknown };
+export type SyncPayload = { revision: number; actor: string; savedAt: string; workspace: unknown; repository: CollaborationRepository };
 export type ExternalSecretInput = { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string; credentialId?: string; appName?: string; cacheSeconds?: number };
 export type ExternalCredential =
   | { type: 'awsTemporary'; accessKeyId: string; secretAccessKey: string; sessionToken: string; region: string }
@@ -83,7 +86,17 @@ export const resetVault = async (workspaceId: string) => {
 
 export const encryptedSyncStatus = async (path: string) => {
   nativeOnly();
-  return invoke<SecureFileStatus>('secure_sync_status', { path });
+  return invoke<SyncFileStatus>('secure_sync_status', { path });
+};
+
+export const encryptedSyncIdentity = async (label: string) => {
+  nativeOnly();
+  return invoke<SyncIdentity>('secure_sync_identity', { label });
+};
+
+export const encryptedSyncRecipientFromInvite = async (inviteCode: string) => {
+  nativeOnly();
+  return invoke<SyncRecipient>('secure_sync_recipient_from_invite', { inviteCode });
 };
 
 export const pullEncryptedSync = async (path: string, passphrase: string) => {
@@ -91,7 +104,7 @@ export const pullEncryptedSync = async (path: string, passphrase: string) => {
   return invoke<SyncPayload>('secure_sync_pull', { path, passphrase });
 };
 
-export const pushEncryptedSync = async (input: { path: string; passphrase: string; actor: string; baseRevision: number; force: boolean; workspace: Workspace }) => {
+export const pushEncryptedSync = async (input: { path: string; passphrase: string; actor: string; baseRevision: number; force: boolean; workspace: Workspace; repository: CollaborationRepository; recipientEncryption?: boolean; recipients?: SyncRecipient[] }) => {
   nativeOnly();
   return invoke<SyncPayload>('secure_sync_push', { input });
 };
@@ -220,12 +233,13 @@ export const shareableWorkspace = (workspace: Workspace): Workspace => {
     ai: { ...workspace.ai, enabled: false, apiKey: '' },
     konnect: { ...workspace.konnect, enabled: false, token: '', controlPlanes: [], controlPlaneId: '', managedByWorkspaceId: undefined, managedControlPlaneId: undefined, managedRegion: undefined, managedClusterType: undefined, managedDeploymentType: undefined },
     preferences: structuredClone(defaultPreferences),
-    collaboration: { ...workspace.collaboration, path: '' },
+    collaboration: { ...workspace.collaboration, path: '', stagedResourceKeys: [], repository: { version: 1, activeBranches: {}, branches: [], commits: [] } },
   });
 };
 
 export const mergeSyncedWorkspace = (current: Workspace, payload: SyncPayload): Workspace => {
   const shared = migrateWorkspace(payload.workspace);
+  const repository = migrateWorkspace({ ...shared, collaboration: { ...shared.collaboration, repository: payload.repository } }).collaboration.repository;
   const currentPublicIds = new Set(publicEnvironments(current.environments).map((environment) => environment.id));
   const privateEnvironments = current.environments.filter((environment) => !currentPublicIds.has(environment.id));
   const privateIds = new Set(privateEnvironments.map((environment) => environment.id));
@@ -256,7 +270,7 @@ export const mergeSyncedWorkspace = (current: Workspace, payload: SyncPayload): 
     ai: current.ai,
     konnect: current.konnect,
     preferences: current.preferences,
-    collaboration: { ...current.collaboration, mode: 'encrypted-file', revision: payload.revision, lastPulledAt: new Date().toISOString() },
+    collaboration: { ...current.collaboration, mode: 'encrypted-file', revision: payload.revision, stagedResourceKeys: [], repository, lastPulledAt: new Date().toISOString() },
     governance: { ...shared.governance, currentMemberId },
   });
 };

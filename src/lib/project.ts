@@ -42,7 +42,7 @@ const nativeOnly = () => {
 export const writeProject = async (path: string, workspace: Workspace) => {
   nativeOnly();
   const environments = publicEnvironments(workspace.environments);
-  const projectWorkspace = withoutOAuth2RuntimeCredentials({ ...workspace, collections: workspace.collections.map((collection) => collectionWithoutPrivateEnvironments(collection)), cookies: [], fileState: {}, certificates: emptyWorkspaceCertificates(), environments, activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '' });
+  const projectWorkspace = withoutOAuth2RuntimeCredentials({ ...workspace, collections: workspace.collections.map((collection) => collectionWithoutPrivateEnvironments(collection)), cookies: [], fileState: {}, certificates: emptyWorkspaceCertificates(), environments, activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '', collaboration: { ...workspace.collaboration, mode: 'off', path: '', revision: 0, autoSync: false, stagedResourceKeys: [], repository: { version: 1, activeBranches: {}, branches: [], commits: [] }, lastPulledAt: undefined, lastPushedAt: undefined } });
   return invoke<ProjectWriteResult>('project_write', { input: { path, workspace: projectWorkspace } });
 };
 
@@ -57,7 +57,7 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     ...current,
     ...project,
     format: 'brunomnia',
-    version: 49,
+    version: 50,
     history: current.history,
     runnerReports: current.runnerReports,
     unitTestResults: current.unitTestResults,
@@ -71,6 +71,7 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     plugins: current.plugins,
     pluginData: current.pluginData,
     activePluginTheme: current.activePluginTheme,
+    collaboration: current.collaboration,
     environments: [...projectEnvironments, ...privateEnvironments],
     activeEnvironmentId: privateEnvironments.some((environment) => environment.id === current.activeEnvironmentId) ? current.activeEnvironmentId : project.activeEnvironmentId ?? current.activeEnvironmentId,
     project: { ...current.project, mode: current.project.mode === 'git' ? 'git' : 'folder', path },

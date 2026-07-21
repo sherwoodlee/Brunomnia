@@ -28,6 +28,22 @@ describe('filesystem project OAuth boundaries', () => {
     workspace.fileState[workspace.collections[0].id] = { cookies: [], certificates: workspace.certificates };
     workspace.collections[0].subEnvironments = [{ id: 'private-collection', name: 'Private collection', private: true, variables: [{ id: 'private-secret', name: 'token', value: '', enabled: true, valueType: 'secret' }] }];
     workspace.collections[0].activeSubEnvironmentId = 'private-collection';
+    workspace.collaboration = {
+      mode: 'encrypted-file',
+      path: '/tmp/team.brunomnia-sync',
+      actor: 'Avery',
+      revision: 7,
+      autoSync: true,
+      stagedResourceKeys: [`collection:${workspace.collections[0].id}`],
+      repository: {
+        version: 1,
+        activeBranches: { [`collection:${workspace.collections[0].id}`]: 'main' },
+        branches: [{ resourceKey: `collection:${workspace.collections[0].id}`, name: 'main', headCommitId: 'commit-one', createdAt: '2026-07-21T00:00:00Z', updatedAt: '2026-07-21T00:00:00Z' }],
+        commits: [{ id: 'commit-one', resourceKey: `collection:${workspace.collections[0].id}`, branch: 'main', parentId: '', actor: 'Avery', message: 'Local commit', createdAt: '2026-07-21T00:00:00Z', snapshot: {} }],
+      },
+      lastPulledAt: '2026-07-21T00:00:00Z',
+      lastPushedAt: '2026-07-21T00:00:00Z',
+    };
     tauri.invoke.mockResolvedValue({ path: '/tmp/project', filesWritten: 1, filesUnchanged: 0, filesRemoved: 0 });
 
     await writeProject('/tmp/project', workspace);
@@ -38,7 +54,9 @@ describe('filesystem project OAuth boundaries', () => {
     expect(payload.input.workspace.fileState).toEqual({});
     expect(payload.input.workspace.collections[0].subEnvironments).toEqual([]);
     expect(payload.input.workspace.collections[0].activeSubEnvironmentId).toBe('');
+    expect(payload.input.workspace.collaboration).toEqual({ mode: 'off', path: '', actor: 'Avery', revision: 0, autoSync: false, stagedResourceKeys: [], repository: { version: 1, activeBranches: {}, branches: [], commits: [] } });
     expect(workspace.collections[0].requests[0].auth.accessToken).toBe('access');
+    expect(workspace.collaboration.repository.commits).toHaveLength(1);
   });
 
   it('restores matching local OAuth credentials after a project reload', async () => {
@@ -50,10 +68,27 @@ describe('filesystem project OAuth boundaries', () => {
     current.fileState[current.collections[0].id] = { cookies: [], certificates: current.certificates };
     current.collections[0].subEnvironments = [{ id: 'local-private', name: 'Local private', private: true, variables: [] }];
     current.collections[0].activeSubEnvironmentId = 'local-private';
+    current.collaboration = {
+      mode: 'encrypted-file',
+      path: '/tmp/local-team.brunomnia-sync',
+      actor: 'Local collaborator',
+      revision: 11,
+      autoSync: true,
+      stagedResourceKeys: [`collection:${current.collections[0].id}`],
+      repository: {
+        version: 1,
+        activeBranches: { [`collection:${current.collections[0].id}`]: 'feature/local' },
+        branches: [{ resourceKey: `collection:${current.collections[0].id}`, name: 'feature/local', headCommitId: 'local-commit', createdAt: '2026-07-21T00:00:00Z', updatedAt: '2026-07-21T00:00:00Z' }],
+        commits: [{ id: 'local-commit', resourceKey: `collection:${current.collections[0].id}`, branch: 'feature/local', parentId: '', actor: 'Local collaborator', message: 'Keep local authority', createdAt: '2026-07-21T00:00:00Z', snapshot: {} }],
+      },
+      lastPulledAt: '2026-07-21T00:00:00Z',
+      lastPushedAt: '2026-07-21T00:00:00Z',
+    };
     const incoming = cloneSeedWorkspace();
     incoming.collections[0].requests[0].auth = { ...incoming.collections[0].requests[0].auth, type: 'oauth2', clientId: 'project-client' };
     incoming.collections[0].subEnvironments = [{ id: 'project-shared', name: 'Project shared', variables: [] }];
     incoming.collections[0].activeSubEnvironmentId = 'project-shared';
+    incoming.collaboration = { ...incoming.collaboration, mode: 'encrypted-file', path: '/tmp/project-controlled.brunomnia-sync', actor: 'Project actor', revision: 99, autoSync: true, stagedResourceKeys: ['environment:project'], repository: { version: 1, activeBranches: { 'environment:project': 'main' }, branches: [], commits: [] } };
     tauri.invoke.mockResolvedValue(incoming);
 
     const loaded = await readProject('/tmp/project', current);
@@ -64,6 +99,8 @@ describe('filesystem project OAuth boundaries', () => {
     expect(loaded.collections[0].subEnvironments?.map((environment) => environment.id)).toEqual(['project-shared', 'local-private']);
     expect(loaded.collections[0].activeSubEnvironmentId).toBe('local-private');
     expect(loaded.fileState[current.collections[0].id]).toEqual(current.fileState[current.collections[0].id]);
+    expect(loaded.collaboration).toEqual(current.collaboration);
+    expect(loaded.collaboration.path).not.toBe(incoming.collaboration.path);
   });
 });
 

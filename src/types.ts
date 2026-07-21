@@ -440,7 +440,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 49;
+  version: 50;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -659,8 +659,47 @@ export type CollaborationConfig = {
   path: string;
   actor: string;
   revision: number;
+  autoSync: boolean;
+  stagedResourceKeys: string[];
+  repository: CollaborationRepository;
   lastPulledAt?: string;
   lastPushedAt?: string;
+};
+
+export type CollaborationResourceKind = 'collection' | 'environment' | 'api-design' | 'mock-server' | 'mcp-client';
+
+export type CollaborationResource = {
+  key: string;
+  kind: CollaborationResourceKind;
+  id: string;
+  name: string;
+};
+
+export type CollaborationCommit = {
+  id: string;
+  resourceKey: string;
+  branch: string;
+  parentId: string;
+  mergeParentId?: string;
+  actor: string;
+  message: string;
+  createdAt: string;
+  snapshot: JsonValue;
+};
+
+export type CollaborationBranch = {
+  resourceKey: string;
+  name: string;
+  headCommitId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CollaborationRepository = {
+  version: 1;
+  activeBranches: Record<string, string>;
+  branches: CollaborationBranch[];
+  commits: CollaborationCommit[];
 };
 
 export type GovernanceRole = 'owner' | 'admin' | 'editor' | 'viewer';
