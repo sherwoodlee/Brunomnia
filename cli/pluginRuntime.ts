@@ -1,4 +1,5 @@
 import { Worker } from 'node:worker_threads';
+import os from 'node:os';
 import { buildPluginWorkerSource, type PluginActionDescriptor, type PluginActionTarget, type PluginNotification } from '../src/lib/plugins';
 import type { ApiRequest, HttpResponse, PluginRecord, Workspace } from '../src/types';
 
@@ -25,6 +26,16 @@ type CliPluginWorkerRpc = {
   type: string;
 };
 
+const nodeOsInfo = () => ({
+  arch: os.arch(),
+  cpus: os.cpus(),
+  freemem: os.freemem(),
+  hostname: os.hostname(),
+  platform: os.platform(),
+  release: os.release(),
+  userInfo: os.userInfo(),
+});
+
 const boundedStore = (value: Record<string, string>) => {
   const entries = Object.entries(value);
   if (entries.length > 256) throw new Error('CLI plugin store exceeds 256 entries.');
@@ -46,11 +57,12 @@ const executeCliPluginOperation = async (
   environment: Record<string, string>,
   timeoutMs = 2_000,
 ): Promise<CliPluginWorkerResult> => {
+  const osInfo = nodeOsInfo();
   const bootstrap = `
 import { parentPort } from 'node:worker_threads';
 globalThis.self = globalThis;
 globalThis.postMessage = value => parentPort.postMessage(value);
-Object.defineProperty(globalThis, 'process', { value: undefined, writable: false, configurable: false });
+Object.defineProperty(globalThis, 'process', { value: undefined, writable: false, configurable: true });
 Object.defineProperty(globalThis, 'global', { value: undefined, writable: false, configurable: false });
 parentPort.on('message', data => globalThis.onmessage?.({ data }));
 ${buildPluginWorkerSource(plugin.source, undefined, plugin.moduleFiles, plugin.entryModuleKey, plugin.grantedModules ?? [], plugin.dependencyModuleFiles, plugin.dependencyPackages)}
@@ -91,7 +103,8 @@ ${buildPluginWorkerSource(plugin.source, undefined, plugin.moduleFiles, plugin.e
           response: operation.kind === 'response' ? structuredClone(operation.response) : undefined,
           workspace: operation.kind === 'action' ? structuredClone(operation.workspace) : undefined,
           environment: structuredClone(environment),
-          platform: process.platform,
+          platform: osInfo.platform,
+          osInfo,
           store: boundedStore(store),
         },
       });

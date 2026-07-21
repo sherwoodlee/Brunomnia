@@ -1,6 +1,7 @@
 import type { ApiRequest, HttpResponse, PluginDependencyPackage, PluginPermission, PluginRecord, Workspace } from '../types';
 import { createBlankRequest } from '../data/seed';
 import { buildPluginModuleRegistrySource, canonicalPluginModule, inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginDependencyPackageName, pluginModuleVersions, validateRegistryPluginName } from './pluginModules';
+import { templateOsInfo } from './templates';
 
 export { inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginDependencyPackageName, pluginModuleVersions, validateRegistryPluginName };
 
@@ -35,6 +36,7 @@ export type PluginHostCallbacks = {
   importData?: (source: 'raw' | 'uri', value: string) => Promise<void>;
   exportData?: (format: 'insomnia' | 'har', options: Record<string, unknown>) => Promise<string>;
   environment?: Record<string, unknown>;
+  osInfo?: () => Promise<Record<string, unknown>>;
 };
 
 type PluginOperation =
@@ -201,6 +203,9 @@ export const buildPluginWorkerSource = (source: string, nonce = safeIdentifier()
   const grantedModuleSet = `${nonce}_grantedModuleSet`;
   const reservedModuleSet = `${nonce}_reservedModuleSet`;
   const packageCache = `${nonce}_packageCache`;
+  const osInfo = `${nonce}_osInfo`;
+  const processStub = `${nonce}_process`;
+  const safeGlobal = `${nonce}_global`;
   return `
 const ${host} = self;
 const ${post} = ${host}.postMessage.bind(${host});
@@ -238,6 +243,22 @@ ${host}.onmessage = async ({ data: ${input} }) => {
     static concat(values) { const length = values.reduce((sum, value) => sum + value.length, 0); const output = new SafeBuffer(length); let offset = 0; values.forEach(value => { output.set(value, offset); offset += value.length; }); return output; }
     toString(encoding = 'utf8') { if (encoding === 'base64') return btoa(String.fromCharCode(...this)); if (encoding === 'hex') return Array.from(this, value => value.toString(16).padStart(2, '0')).join(''); if (encoding === 'latin1' || encoding === 'binary') return String.fromCharCode(...this); return new TextDecoder().decode(this); }
   }
+  const ${osInfo} = ${state}.osInfo && typeof ${state}.osInfo === 'object' ? structuredClone(${state}.osInfo) : {};
+  const ${processStub} = Object.freeze({
+    platform: String(${osInfo}.platform || 'unknown'), arch: String(${osInfo}.arch || 'unknown'), version: '',
+    versions: Object.freeze({}), env: Object.freeze({}), argv: Object.freeze([]),
+    nextTick: (callback, ...args) => { Promise.resolve().then(() => callback(...args)); },
+  });
+  try { Object.defineProperty(${host}, 'process', { value: ${processStub}, writable: false, configurable: false, enumerable: true }); } catch {}
+  if (${input}.operation?.kind === 'template') {
+    try { Object.defineProperty(${host}, 'INSOMNIA_TEMPLATE_SANDBOX', { value: true, writable: false, configurable: false, enumerable: true }); } catch {}
+  }
+  const ${safeGlobal} = Object.create(null);
+  Object.assign(${safeGlobal}, {
+    Buffer: SafeBuffer, URL, URLSearchParams, TextEncoder, TextDecoder, process: ${processStub}, crypto: ${host}.crypto,
+    setTimeout, clearTimeout, INSOMNIA_TEMPLATE_SANDBOX: ${input}.operation?.kind === 'template' ? true : undefined,
+  });
+  ${safeGlobal}.globalThis = ${safeGlobal}; ${safeGlobal}.self = ${safeGlobal}; Object.freeze(${safeGlobal});
 ${moduleRegistry.source}
   const safeConsole = {
     log: (...values) => ${notifications}.push({ type: 'log', title: 'Plugin log', message: values.map(String).join(' ') }),
@@ -319,7 +340,7 @@ ${moduleRegistry.source}
     };
     const directory = key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : '.';
     const compiled = ${nativeFunction}('module', 'exports', 'require', '__dirname', '__filename', 'Buffer', 'console', 'TextEncoder', 'TextDecoder', 'URL', 'setTimeout', 'clearTimeout', 'globalThis', 'self', 'window', 'document', 'navigator', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'importScripts', 'indexedDB', 'caches', 'postMessage', 'Function', 'WebAssembly', "'use strict';\\n" + files[key]);
-    compiled(module, module.exports, localRequire, directory, key, SafeBuffer, safeConsole, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined);
+    compiled(module, module.exports, localRequire, directory, key, SafeBuffer, safeConsole, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout, ${safeGlobal}, ${safeGlobal}, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined);
     return module.exports;
   };
   try {
@@ -356,6 +377,7 @@ ${moduleRegistry.source}
       },
     };
     const network = { sendRequest: async request => { requirePermission('network'); const response = await ${rpc}('network', { request }); return { ...response, statusCode: response.status, statusMessage: response.statusText, elapsedTime: response.durationMs, bytesRead: response.wireSizeBytes ?? response.sizeBytes }; } };
+    const util = { nodeOS: async () => structuredClone(${osInfo}) };
     const nextRow = (prefix, rows, name, value) => ({ id: 'plugin-' + prefix + '-' + Date.now() + '-' + rows.length, name: String(name), value: String(value), enabled: true });
     const requestBody = request => {
       if (request.protocol === 'graphql') return { mimeType: 'application/graphql', text: request.graphql?.query || '' };
@@ -431,7 +453,7 @@ ${moduleRegistry.source}
       getHeaders: () => responseRead(responseLines(response).map(({ name, value }) => ({ name, value }))),
       hasHeader: name => responseRead(responseLines(response).some(header => header.name.toLowerCase() === String(name).toLowerCase())),
     });
-    const ${contextApi} = (request, response) => ({ app, data, store, network, request: request ? ${requestApi}(request) : undefined, response: response ? ${responseApi}(response) : undefined });
+    const ${contextApi} = (request, response) => ({ app, data, store, network, util, request: request ? ${requestApi}(request) : undefined, response: response ? ${responseApi}(response) : undefined });
     const descriptor = () => ({
       templates: Array.isArray(${exportsValue}.templateTags) ? ${exportsValue}.templateTags.map(tag => ({ name: String(tag.name || ''), displayName: String(tag.displayName || tag.name || ''), description: String(tag.description || '') })).filter(tag => tag.name) : [],
       actions: [
@@ -487,6 +509,7 @@ const executePlugin = async (
   callbacks: PluginHostCallbacks = {},
   timeoutMs = 2000,
 ): Promise<PluginWorkerResult> => {
+  const osInfo = await (callbacks.osInfo ? callbacks.osInfo() : templateOsInfo());
   const source = buildPluginWorkerSource(plugin.source, safeIdentifier(), plugin.moduleFiles, plugin.entryModuleKey, plugin.grantedModules ?? [], plugin.dependencyModuleFiles, plugin.dependencyPackages);
   const blob = new Blob([source], { type: 'text/javascript' });
   const workerUrl = URL.createObjectURL(blob);
@@ -542,7 +565,7 @@ const executePlugin = async (
         window.clearTimeout(timeout);
         resolve(data as PluginWorkerResult);
       };
-      worker.postMessage({ pluginId: plugin.id, permissions: plugin.grantedPermissions, operation, state: { request: 'request' in operation ? structuredClone(operation.request) : undefined, response: 'response' in operation ? structuredClone(operation.response) : undefined, workspace: 'workspace' in operation ? structuredClone(operation.workspace) : undefined, environment: structuredClone(callbacks.environment ?? {}), platform: navigator.platform, store: { ...store } } });
+      worker.postMessage({ pluginId: plugin.id, permissions: plugin.grantedPermissions, operation, state: { request: 'request' in operation ? structuredClone(operation.request) : undefined, response: 'response' in operation ? structuredClone(operation.response) : undefined, workspace: 'workspace' in operation ? structuredClone(operation.workspace) : undefined, environment: structuredClone(callbacks.environment ?? {}), platform: navigator.platform, osInfo: structuredClone(osInfo), store: { ...store } } });
     }).then((result) => {
       if (!result.ok) throw new Error(result.error || `Plugin '${plugin.name}' failed.`);
       return result;

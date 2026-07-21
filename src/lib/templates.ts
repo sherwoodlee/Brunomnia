@@ -181,7 +181,7 @@ const responseValue = async (context: TemplateContext, attribute: string, reques
   return path.startsWith('$') ? responseJsonPath(response.body, path) : responseXPath(response.body, path);
 };
 
-const templateOsInfo = async (context: TemplateContext) => {
+export const templateOsInfo = async (context: Pick<TemplateContext, 'osInfo'> = {}) => {
   if (context.osInfo) return context.osInfo();
   return import('@tauri-apps/api/core').then(({ invoke, isTauri }) => isTauri()
     ? invoke<Record<string, unknown>>('template_os_info')

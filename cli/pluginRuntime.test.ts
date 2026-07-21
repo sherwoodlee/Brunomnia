@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import nodeCrypto from 'node:crypto';
+import os from 'node:os';
 import { cloneSeedWorkspace, createBlankRequest } from '../src/data/seed';
 import type { PluginRecord } from '../src/types';
 import { createCliPluginRuntime, createCliPluginTemplateRuntime } from './pluginRuntime';
@@ -207,15 +208,66 @@ describe('CLI plugin template runtime', () => {
     }
   });
 
-  it('hides Node process authority and refuses host RPC capabilities', async () => {
+  it('matches the official sandbox demo globals, utility, and multi-file contract', async () => {
+    const source = `
+      const greeting = require('./lib/greeting');
+      module.exports.templateTags = [{
+        name: 'sandbox_demo',
+        async run(context) {
+          let mutated = false;
+          try { process.env.SECRET = 'unsafe'; } catch { mutated = true; }
+          const tick = await new Promise(resolve => process.nextTick(resolve, 'next-tick'));
+          const info = await context.util.nodeOS();
+          return JSON.stringify({
+            marker: typeof INSOMNIA_TEMPLATE_SANDBOX !== 'undefined' && INSOMNIA_TEMPLATE_SANDBOX,
+            globalMarker: globalThis.INSOMNIA_TEMPLATE_SANDBOX,
+            globalProcess: globalThis.process === process,
+            platform: process.platform,
+            arch: process.arch,
+            version: process.version,
+            versions: Object.keys(process.versions),
+            env: Object.keys(process.env),
+            argv: process.argv,
+            mutated,
+            tick,
+            nodeOS: { platform: info.platform, arch: info.arch },
+            buffer: Buffer.from('hi 👋').toString('base64'),
+            url: new URL('https://example.com:8443/p?a=1').host,
+            greeting: greeting.greet('sandbox'),
+          });
+        },
+      }];
+    `;
+    const runtime = createCliPluginTemplateRuntime([{ ...plugin(source), moduleFiles: { 'index.js': source, 'lib/greeting.js': `module.exports.greet = value => 'hello-' + value;` }, entryModuleKey: 'index.js' }], {});
+    const raw = await runtime.render('sandbox_demo', [], createBlankRequest('plugin-request'));
+    expect(JSON.parse(raw ?? '{}')).toEqual({
+      marker: true,
+      globalMarker: true,
+      globalProcess: true,
+      platform: os.platform(),
+      arch: os.arch(),
+      version: '',
+      versions: [],
+      env: [],
+      argv: [],
+      mutated: true,
+      tick: 'next-tick',
+      nodeOS: { platform: os.platform(), arch: os.arch() },
+      buffer: 'aGkg8J+Riw==',
+      url: 'example.com:8443',
+      greeting: 'hello-sandbox',
+    });
+  });
+
+  it('keeps ambient environment authority hidden and refuses privileged host RPC', async () => {
     const runtime = createCliPluginTemplateRuntime([plugin(`
       module.exports.templateTags = [
-        { name: 'process_type', run() { return typeof process; } },
+        { name: 'process_shape', run() { return JSON.stringify({ type: typeof process, env: process.env, argv: process.argv, frozen: Object.isFrozen(process) }); } },
         { name: 'network_call', async run(context) { await context.network.sendRequest({ url: 'https://example.test' }); } },
       ];
     `, ['template', 'network'])], {});
     const request = createBlankRequest('plugin-request');
-    await expect(runtime.render('process_type', [], request)).resolves.toBe('undefined');
+    await expect(runtime.render('process_shape', [], request)).resolves.toBe('{"type":"object","env":{},"argv":[],"frozen":true}');
     await expect(runtime.render('network_call', [], request)).rejects.toThrow("cannot use host capability 'network'");
   });
 

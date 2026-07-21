@@ -2792,6 +2792,18 @@ Compatibility bounds remain explicit: all pinned keyboard actions now have edita
 
 Compatibility bounds remain explicit: these are unsigned downloadable installers rather than trusted OS-distribution identities. The workflow does not create a universal/x64 macOS build, sign or notarize macOS, code-sign Windows, or implement update metadata/application. A complete accessibility audit also remains omitted by standing direction. `Preferences, shortcuts, themes, accessibility, and packaging` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete.
 
+## Milestone 276 — pinned plugin contract reconciliation (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Loader contract audit | Complete | Pinned desktop discovery and execution use CommonJS `require`; ESM-only entries, lifecycle/native side effects, ambient Node authority, and conflicting graphs are not declared extension contracts |
+| Official sandbox surface | Complete | Frozen process metadata, empty environment/arguments/version maps, platform/architecture, `nextTick`, `INSOMNIA_TEMPLATE_SANDBOX`, safe `globalThis`, relative modules, and `context.util.nodeOS()` match the pinned demo |
+| Desktop and CLI authority | Complete | Desktop workers receive cloned Tauri OS metadata while CLI workers replace the hidden real process with the same safe stub; host process/environment and ungranted RPC remain inaccessible |
+| Cross-surface reconciliation | Complete | Pinned Inso has no arbitrary desktop plugin host, host RPC, user-invoked plugin actions, or local-vault API, so those are not imported into CLI parity |
+| Verification | Complete | Source audit, 22 focused regressions, 727 active frontend tests, production/CLI builds, packaged smokes, 189 native tests, formatting, check, and strict Clippy are recorded in [Milestone 276 verification](QA_MILESTONE_276.md) |
+
+Compatibility bounds remain explicit: Brunomnia deliberately does not reproduce undocumented unrestricted Electron/Node loader authority, package lifecycle side effects, native addons, ESM-only entrypoints, or conflicting dependency graphs. The finite pinned CommonJS export, context, action, theme, installation/review, and template-sandbox contract is complete. `Plugins and extension API` is now `Complete`; exactly four parity rows remain incomplete—three `Baseline` and one `Early baseline`—so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

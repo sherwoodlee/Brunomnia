@@ -37,6 +37,9 @@ describe('permissioned plugin runtime source', () => {
     expect(source).toContain('getBodyStream');
     expect(source).toContain('requestGroupActions');
     expect(source).toContain("'data-export'");
+    expect(source).toContain('INSOMNIA_TEMPLATE_SANDBOX');
+    expect(source).toContain('nextTick: (callback, ...args)');
+    expect(source).toContain('nodeOS: async ()');
   });
 
   it('builds a relative module loader and validates package paths', () => {
