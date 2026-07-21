@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the two-hundred-seventy-fourth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the two-hundred-seventy-fifth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -50,6 +50,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Workspace v48 migrations with explicit empty-project preservation, per-file cookie/CA/client-certificate ownership, private-environment Secret metadata normalization, bounded complete shortcut-registry migration with the create-menu/create-request split, managed Konnect project metadata, device-local global Git credential selection, generated-design collection inheritance, OAuth browser-mode/session settings, bounded GGUF settings, MCP process-environment/history and collection-owned standalone test-suite/result normalization, device-local bulk/editor/layout/typography/password/variable-visibility/HTML-script and script-data-folder preferences, legacy-safe timeout/certificate/proxy overrides, complete bounded GraphQL schema-cache refresh, bounded resource hierarchy, request-row/Socket.IO/session-history/request-snapshot/handshake-metadata normalization, collection sub-environment repair, private-global publication filtering, split-YAML serialization, import-time authority stripping, and device-local integration/script permissions
 - Atomic per-project persistence in the OS application-data directory with recoverable prior revisions and restorable soft-deleted workspace/backup/vault snapshots in device-local trash
 - System/dark/light appearance, comfortable/compact density, horizontal/responsive or forced-vertical request layout, separate interface/editor font families and 8–24 px sizes, configurable editor wrapping/indentation/ligatures, masked authentication and integration credentials with device-wide or per-field reveal, request defaults, and all 33 pinned keyboard actions with bounded editable multi-bindings and contextual request/sidebar/response/workspace focus and command targets
+- Unsigned CI-built macOS ARM64 DMG, Windows x64 NSIS/MSI, and Linux x64 AppImage/DEB/RPM installers with stable JSON/SHA-256 manifests, direct GitHub build-provenance attestations, 30-day main-branch artifacts, and tagged GitHub releases
 - Responsive desktop UI with no login, upgrade, or cloud dependency
 
 ## Run it
@@ -71,6 +72,33 @@ The browser development build uses deterministic protocol demos for the `*.acme.
 
 See [local and self-hosted mock servers](docs/MOCK_SERVERS.md) for deployment, request-aware response-template syntax, and bounds.
 See [local projects and recovery](docs/LOCAL_PROJECTS.md) for lifecycle, storage, backup, migration, and vault-isolation behavior.
+
+## Desktop bundles
+
+The pinned [desktop bundle workflow](.github/workflows/desktop-release.yml) builds the following account-free targets on every relevant `main` push and every `v*` tag:
+
+| Platform | Tauri targets | Published installers |
+| --- | --- | --- |
+| macOS ARM64 | `app,dmg` | `.dmg` containing `Brunomnia.app` |
+| Windows x64 | `nsis,msi` | `.exe`, `.msi` |
+| Linux x64 | `appimage,deb,rpm` | `.AppImage`, `.deb`, `.rpm` |
+
+Each platform artifact includes a versioned JSON manifest and flat `SHA256SUMS-<platform>.txt`. GitHub build provenance is attached directly to every installer digest. Main-branch artifacts are retained for 30 days; a `v*` tag also publishes the installers and checksum evidence to that tag's GitHub release.
+
+These bundles deliberately use `--no-sign`: macOS Developer ID signing/notarization, Windows code signing, and an updater are not claimed. Expect operating-system trust warnings. The macOS bundle requires macOS 10.15 or newer because the pinned local llama.cpp runtime uses C++ filesystem APIs unavailable on 10.13.
+
+Build the equivalent unsigned macOS bundle locally:
+
+```sh
+CI=true npm run tauri build -- --ci --no-sign --bundles app,dmg
+```
+
+After downloading one release's files into a flat directory, verify its checksum and GitHub provenance:
+
+```sh
+shasum -a 256 -c SHA256SUMS-macos-arm64.txt
+gh attestation verify Brunomnia_0.1.0_aarch64.dmg --repo sherwoodlee/Brunomnia
+```
 
 ## Use the CLI
 

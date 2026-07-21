@@ -16,6 +16,7 @@
     "test:cli-physical-store": "npm run build:cli && node scripts/cli-physical-store-smoke.mjs",
     "test:cli-runner-smoke": "npm run build:cli && node scripts/cli-runner-preview-smoke.mjs",
     "test:cli-container": "npm run build:cli && node scripts/cli-container-smoke.mjs",
+    "test:desktop-artifacts": "vitest run scripts/desktop-artifact-manifest.test.ts",
     "test:mcp-public": "BRUNOMNIA_MCP_LIVE=1 vitest run src/lib/mcpPublic.integration.test.ts",
     "test:konnect-live": "BRUNOMNIA_KONNECT_LIVE=1 vitest run src/lib/konnectLive.integration.test.ts",
     "preview": "vite preview",

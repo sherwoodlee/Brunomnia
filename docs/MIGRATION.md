@@ -2779,6 +2779,19 @@ Compatibility bounds remain explicit: M273 establishes the pinned multi-binding 
 
 Compatibility bounds remain explicit: all pinned keyboard actions now have editable bindings and local command targets, but rendered interaction and assistive-technology QA remain omitted by standing direction. A complete accessibility audit, updater, desktop signing/notarization, and Windows/Linux desktop release artifacts remain, so `Preferences, shortcuts, themes, accessibility, and packaging` stays `Baseline`. Exactly five parity rows remain incomplete, and Brunomnia is not declared feature-complete.
 
+## Milestone 275 — unsigned cross-platform desktop releases (complete baseline increment)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Platform matrix | Complete baseline | A commit-SHA-pinned workflow builds macOS ARM64 app/DMG, Windows x64 NSIS/MSI, and Linux x64 AppImage/DEB/RPM outputs with `CI=true`, no commercial service, and explicit `--no-sign` |
+| Artifact integrity | Complete | The bounded manifest writer includes only final expected platform directories/extensions, excludes stale read/write DMG staging images, emits deterministic JSON and release-basename SHA-256 sums, and rejects malformed inputs or basename collisions |
+| Provenance and retention | Complete baseline | GitHub attests each installer digest from the checksum file, uploads installers plus evidence for 30 days, and publishes all platform files on `v*` tags |
+| macOS compatibility | Complete baseline | The app declares macOS 10.15 because the pinned llama.cpp C++ filesystem dependency cannot link against 10.13; CI-mode DMG generation skips Finder automation and succeeds headlessly |
+| Honest trust boundary | Complete | Local inspection records a valid HFS+ DMG, linker ad-hoc executable signature, unsigned disk image, and expected Gatekeeper rejection; signing, notarization, SmartScreen trust, and an updater remain unclaimed |
+| Verification | Complete | Four focused workflow/manifest regressions, 726 active frontend tests, production/CLI build and packaged smokes, 189 active native tests, formatting/check/strict Clippy, and local CI-mode app/DMG evidence are recorded in [Milestone 275 verification](QA_MILESTONE_275.md) |
+
+Compatibility bounds remain explicit: these are unsigned downloadable installers rather than trusted OS-distribution identities. The workflow does not create a universal/x64 macOS build, sign or notarize macOS, code-sign Windows, or implement update metadata/application. A complete accessibility audit also remains omitted by standing direction. `Preferences, shortcuts, themes, accessibility, and packaging` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

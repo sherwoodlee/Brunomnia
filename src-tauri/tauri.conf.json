@@ -29,6 +29,9 @@
     "active": true,
     "targets": "all",
     "category": "DeveloperTool",
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
     "shortDescription": "Local-first API workbench",
     "longDescription": "A free, local-first workbench for building, sending, and testing API requests."
   }
