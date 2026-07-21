@@ -882,6 +882,14 @@ async fn external_credential_store_save(
 }
 
 #[tauri::command]
+async fn external_credential_azure_authenticate(
+    use_device_code: bool,
+    on_event: Channel<external_vault::AzureAuthenticationEvent>,
+) -> Result<external_credential_store::ExternalCredential, String> {
+    blocking(move || external_vault::authenticate_azure(use_device_code, on_event)).await
+}
+
+#[tauri::command]
 async fn mcp_stdio_call(
     input: mcp_stdio::McpStdioInput,
     on_event: Channel<mcp_stdio::McpStdioEvent>,
@@ -1205,6 +1213,7 @@ pub fn run() {
             secure_external_cache_clear,
             external_credential_store_load,
             external_credential_store_save,
+            external_credential_azure_authenticate,
             mcp_stdio_call,
             respond_mcp_stdio_server_request,
             update_mcp_stdio_roots,

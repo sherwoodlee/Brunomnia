@@ -1,4 +1,4 @@
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import type { AuditEvent, Workspace } from '../types';
 import { migrateWorkspace } from './storage';
 import { defaultPreferences } from './preferences';
@@ -22,6 +22,7 @@ export type ExternalCredential =
   | { type: 'hcpVaultSecrets'; clientId: string; clientSecret: string }
   | { type: 'azureOauth'; expiresOn: string; uniqueId: string; username: string; accessToken: string };
 export type ExternalCredentialRecord = { id: string; name: string; provider: ExternalSecretInput['provider']; credentials: ExternalCredential };
+export type AzureAuthenticationEvent = { kind: 'status'; message: string };
 
 const nativeOnly = () => {
   if (!isTauri()) throw new Error('Encrypted vault and sync files require the Tauri desktop app.');
@@ -124,6 +125,15 @@ export const loadExternalCredentials = async () => {
 export const saveExternalCredentials = async (credentials: ExternalCredentialRecord[]) => {
   nativeOnly();
   return invoke<ExternalCredentialRecord[]>('external_credential_store_save', { credentials });
+};
+
+export const authenticateAzureExternalCredential = async (useDeviceCode = false, onStatus?: (message: string) => void) => {
+  nativeOnly();
+  const onEvent = new Channel<AzureAuthenticationEvent>();
+  onEvent.onmessage = (event) => {
+    if (event.kind === 'status') onStatus?.(event.message);
+  };
+  return invoke<Extract<ExternalCredential, { type: 'azureOauth' }>>('external_credential_azure_authenticate', { useDeviceCode, onEvent });
 };
 
 export const vaultVariables = (session: VaultSession) => session.unlocked

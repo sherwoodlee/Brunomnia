@@ -1,16 +1,17 @@
 use crate::external_credential_store::{self, ExternalCredential, ExternalCredentialRecord};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use reqwest::blocking::{Client, Response};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    io::Read,
+    io::{BufRead, BufReader, Read},
     process::{Command, Output, Stdio},
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
+use tauri::ipc::Channel;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_OUTPUT_BYTES: usize = 10_000_000;
@@ -18,6 +19,9 @@ const MAX_CACHE_BYTES: usize = 20_000_000;
 const MAX_CACHE_ENTRIES: usize = 256;
 const HCP_AUTH_URL: &str = "https://auth.idp.hashicorp.com/oauth2/token";
 const HCP_API_URL: &str = "https://api.cloud.hashicorp.com";
+const AZURE_LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
+const AZURE_KEY_VAULT_SCOPE: &str = "https://vault.azure.net/.default";
+const AZURE_KEY_VAULT_RESOURCE: &str = "https://vault.azure.net";
 
 #[derive(Clone, Default)]
 pub struct ExternalSecretCache(Arc<Mutex<HashMap<String, (Instant, String)>>>);
@@ -39,6 +43,13 @@ pub struct ExternalSecretInput {
     pub app_name: String,
     #[serde(default = "default_cache_seconds")]
     pub cache_seconds: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AzureAuthenticationEvent {
+    pub kind: String,
+    pub message: String,
 }
 
 fn selected_credential(
@@ -274,6 +285,229 @@ fn text(output: Output, provider: &str) -> Result<String, String> {
             if stderr.is_empty() { stdout } else { stderr }
         ))
     }
+}
+
+fn command_success(output: Output, provider: &str) -> Result<(), String> {
+    if output.stdout.len() > MAX_OUTPUT_BYTES || output.stderr.len() > MAX_OUTPUT_BYTES {
+        return Err(format!(
+            "The {provider} CLI output exceeded the 10 MB safety limit."
+        ));
+    }
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(format!(
+            "The {provider} CLI failed: {}",
+            if stderr.is_empty() { stdout } else { stderr }
+        ))
+    }
+}
+
+fn send_azure_authentication_status(
+    on_event: &Channel<AzureAuthenticationEvent>,
+    message: impl Into<String>,
+) {
+    let message = message.into();
+    if !message.trim().is_empty() {
+        let _ = on_event.send(AzureAuthenticationEvent {
+            kind: "status".into(),
+            message,
+        });
+    }
+}
+
+fn read_azure_login_output<R: Read>(
+    reader: R,
+    on_event: &Channel<AzureAuthenticationEvent>,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    let mut reader = BufReader::new(reader).take((MAX_OUTPUT_BYTES + 1) as u64);
+    let mut output = Vec::new();
+    loop {
+        let line_start = output.len();
+        let read = reader
+            .read_until(b'\n', &mut output)
+            .map_err(|error| format!("Unable to read Azure login {label}: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        if output.len() > MAX_OUTPUT_BYTES {
+            return Err("The Azure login CLI output exceeded the 10 MB safety limit.".into());
+        }
+        let message = String::from_utf8_lossy(&output[line_start..])
+            .trim()
+            .to_string();
+        send_azure_authentication_status(on_event, message);
+    }
+    Ok(output)
+}
+
+fn azure_login(
+    mut command: Command,
+    on_event: Channel<AzureAuthenticationEvent>,
+) -> Result<(), String> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|error| {
+        format!("Unable to start the Azure browser authentication CLI: {error}")
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        "Unable to capture the Azure browser authentication CLI output.".to_string()
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        "Unable to capture the Azure browser authentication CLI errors.".to_string()
+    })?;
+    let stdout_channel = on_event.clone();
+    let stdout_reader =
+        thread::spawn(move || read_azure_login_output(stdout, &stdout_channel, "output"));
+    let stderr_channel = on_event.clone();
+    let stderr_reader =
+        thread::spawn(move || read_azure_login_output(stderr, &stderr_channel, "errors"));
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().map_err(|error| {
+            format!("Unable to inspect the Azure browser authentication CLI: {error}")
+        })? {
+            let stdout = stdout_reader
+                .join()
+                .map_err(|_| "The Azure login output reader failed.".to_string())??;
+            let stderr = stderr_reader
+                .join()
+                .map_err(|_| "The Azure login error reader failed.".to_string())??;
+            return command_success(
+                Output {
+                    status,
+                    stdout,
+                    stderr,
+                },
+                "Azure browser authentication",
+            );
+        }
+        if started.elapsed() >= AZURE_LOGIN_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err(format!(
+                "The Azure browser authentication CLI exceeded the {} second limit.",
+                AZURE_LOGIN_TIMEOUT.as_secs()
+            ));
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn azure_login_command(use_device_code: bool) -> Command {
+    let mut command = Command::new("az");
+    command.args([
+        "login",
+        "--scope",
+        AZURE_KEY_VAULT_SCOPE,
+        "--output",
+        "none",
+        "--only-show-errors",
+    ]);
+    if use_device_code {
+        command.arg("--use-device-code");
+    }
+    command
+}
+
+fn azure_access_token_command() -> Command {
+    let mut command = Command::new("az");
+    command.args([
+        "account",
+        "get-access-token",
+        "--resource",
+        AZURE_KEY_VAULT_RESOURCE,
+        "--output",
+        "json",
+        "--only-show-errors",
+    ]);
+    command
+}
+
+fn azure_account_command() -> Command {
+    let mut command = Command::new("az");
+    command.args(["account", "show", "--output", "json", "--only-show-errors"]);
+    command
+}
+
+fn azure_cli_credential(
+    token_source: &str,
+    account_source: &str,
+) -> Result<ExternalCredential, String> {
+    let token: Value = serde_json::from_str(token_source)
+        .map_err(|error| format!("Azure CLI returned invalid access-token JSON: {error}"))?;
+    let account: Value = serde_json::from_str(account_source)
+        .map_err(|error| format!("Azure CLI returned invalid account JSON: {error}"))?;
+    let access_token = token
+        .get("accessToken")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Azure CLI returned no Key Vault access token.".to_string())?;
+    let expires_at = token
+        .get("expires_on")
+        .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+        .ok_or_else(|| {
+            "Azure CLI returned no numeric expires_on value. Update Azure CLI and authenticate again."
+                .to_string()
+        })?;
+    let expires_on = chrono::DateTime::<chrono::Utc>::from_timestamp(expires_at, 0)
+        .filter(|value| *value > chrono::Utc::now())
+        .ok_or_else(|| "Azure CLI returned an invalid or expired Key Vault token.".to_string())?
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let username = account
+        .pointer("/user/name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Azure CLI returned no active account username.".to_string())?;
+    let unique_id = account
+        .get("id")
+        .or_else(|| account.get("tenantId"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Azure CLI returned no active subscription or tenant ID.".to_string())?;
+    Ok(ExternalCredential::AzureOauth {
+        expires_on,
+        unique_id: unique_id.to_string(),
+        username: username.to_string(),
+        access_token: access_token.to_string(),
+    })
+}
+
+pub fn authenticate_azure(
+    use_device_code: bool,
+    on_event: Channel<AzureAuthenticationEvent>,
+) -> Result<ExternalCredential, String> {
+    send_azure_authentication_status(
+        &on_event,
+        if use_device_code {
+            "Starting Azure CLI device-code authentication."
+        } else {
+            "Starting Azure CLI browser authentication."
+        },
+    );
+    azure_login(azure_login_command(use_device_code), on_event.clone())?;
+    send_azure_authentication_status(
+        &on_event,
+        "Azure sign-in completed. Requesting Key Vault access.",
+    );
+    let token = text(
+        command_output(azure_access_token_command(), "Azure access token")?,
+        "Azure access token",
+    )?;
+    let account = text(
+        command_output(azure_account_command(), "Azure account")?,
+        "Azure account",
+    )?;
+    let credential = azure_cli_credential(&token, &account)?;
+    send_azure_authentication_status(&on_event, "Azure Key Vault credential is ready.");
+    Ok(credential)
 }
 
 fn http_client(provider: &str) -> Result<Client, String> {
@@ -687,6 +921,21 @@ fn external_secret_cache_key(input: &ExternalSecretInput) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tauri::ipc::InvokeResponseBody;
+
+    fn recording_azure_channel() -> (
+        Channel<AzureAuthenticationEvent>,
+        std::sync::mpsc::Receiver<Value>,
+    ) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let channel = Channel::new(move |body| {
+            if let InvokeResponseBody::Json(json) = body {
+                sender.send(serde_json::from_str::<Value>(&json)?).unwrap();
+            }
+            Ok(())
+        });
+        (channel, receiver)
+    }
     use crate::external_credential_store::{ExternalCredential, ExternalCredentialRecord};
 
     fn success(source: &str) -> Output {
@@ -819,6 +1068,89 @@ mod tests {
                 .unwrap()
                 .as_str(),
             "https://api.cloud.hashicorp.com/secrets/2023-11-28/organizations/org/projects/project/apps/checkout/secrets/orders/versions/7:open"
+        );
+    }
+
+    #[test]
+    fn builds_browser_and_device_code_azure_cli_authorization_commands() {
+        let browser = azure_login_command(false)
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            browser,
+            [
+                "login",
+                "--scope",
+                AZURE_KEY_VAULT_SCOPE,
+                "--output",
+                "none",
+                "--only-show-errors"
+            ]
+        );
+        let device = azure_login_command(true)
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(device.last().map(String::as_str), Some("--use-device-code"));
+        assert!(azure_access_token_command()
+            .get_args()
+            .all(|argument| !argument.to_string_lossy().contains("access-token-value")));
+    }
+
+    #[test]
+    fn converts_azure_cli_token_and_account_output_to_the_exact_profile() {
+        let expires_at = (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp();
+        let credential = azure_cli_credential(
+            &serde_json::json!({ "accessToken": "access-token-value", "expires_on": expires_at })
+                .to_string(),
+            r#"{"id":"subscription-id","tenantId":"tenant-id","user":{"name":"user@example.com"}}"#,
+        )
+        .unwrap();
+        let ExternalCredential::AzureOauth {
+            expires_on,
+            unique_id,
+            username,
+            access_token,
+        } = credential
+        else {
+            panic!("expected Azure OAuth credential")
+        };
+        assert!(chrono::DateTime::parse_from_rfc3339(&expires_on).is_ok());
+        assert_eq!(unique_id, "subscription-id");
+        assert_eq!(username, "user@example.com");
+        assert_eq!(access_token, "access-token-value");
+        assert!(azure_cli_credential(
+            r#"{"accessToken":"expired","expires_on":1}"#,
+            r#"{"id":"subscription-id","user":{"name":"user@example.com"}}"#,
+        )
+        .unwrap_err()
+        .contains("expired"));
+    }
+
+    #[test]
+    fn streams_bounded_azure_login_lines_before_process_completion() {
+        let (channel, receiver) = recording_azure_channel();
+        let output = read_azure_login_output(
+            std::io::Cursor::new(b"Open https://microsoft.com/devicelogin\nEnter code ABCD-EFGH\n"),
+            &channel,
+            "output",
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            b"Open https://microsoft.com/devicelogin\nEnter code ABCD-EFGH\n"
+        );
+        assert_eq!(
+            receiver.recv().unwrap(),
+            serde_json::json!({
+                "kind": "status",
+                "message": "Open https://microsoft.com/devicelogin"
+            })
+        );
+        assert_eq!(
+            receiver.recv().unwrap(),
+            serde_json::json!({ "kind": "status", "message": "Enter code ABCD-EFGH" })
         );
     }
 }

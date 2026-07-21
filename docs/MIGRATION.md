@@ -2731,6 +2731,18 @@ Compatibility bounds remain explicit: OS-backed local-vault key retention is ava
 
 Compatibility bounds remain explicit: the protected profile store is macOS-only, Azure guided browser authorization/token refresh is not implemented, and script-facing external-provider APIs plus broader secret-field UX remain. `Secrets and external vaults` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 271 — guided Azure protected-credential lifecycle (complete baseline increment)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned lifecycle audit | Complete | Pinned Cloud Credentials opens Azure authorization externally, handles the custom-protocol callback, shows expired state and Renew, and intentionally provides no Azure token editor; the optional runtime plugin remains unavailable source |
+| Account-free authorization | Complete baseline | Official `az login` handles browser or device-code authentication for the Key Vault scope without a Brunomnia account, borrowed public client ID, or hidden app registration |
+| Safe credential capture | Complete | Only bounded login status lines reach React; token/account commands retain 30-second/10 MB bounds, parse a future numeric expiry plus active identity, and never stream their output |
+| Guided profile lifecycle | Complete | Add authenticates, device-code instructions remain visible while login is pending, expired profiles warn and renew, successful account-matched renewal preserves record identity, and Azure tokens cannot be edited manually |
+| Verification | Complete | Command construction, live status-channel delivery, exact profile conversion, expiry/upsert behavior, static lifecycle rendering, focused/full frontend, production build, native regression, formatting, and strict Clippy evidence is recorded in [Milestone 271 verification](QA_MILESTONE_271.md) |
+
+Compatibility bounds remain explicit: the protected profile store remains macOS-only, renewal is explicit rather than silent/background, and script-facing external-provider APIs plus broader secret-field UX remain. `Secrets and external vaults` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.
