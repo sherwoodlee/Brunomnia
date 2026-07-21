@@ -379,12 +379,24 @@ environments:
     expect(JSON.stringify(result)).not.toContain('encrypted-account-ciphertext');
   });
 
+  it('strips owner-bound Secret metadata from imported Brunomnia replacements', () => {
+    const imported = cloneSeedWorkspace();
+    imported.environments[0].private = true;
+    imported.environments[0].variables.push({ id: 'global-owner-collision', name: 'globalToken', value: '', enabled: true, valueType: 'secret' });
+    imported.collections[0].subEnvironments = [{ id: 'private-collection', name: 'Private collection', private: true, variables: [{ id: 'collection-owner-collision', name: 'collectionToken', value: '', enabled: true, valueType: 'secret' }] }];
+    imported.collections[0].activeSubEnvironmentId = 'private-collection';
+    const result = importArtifact(JSON.stringify(imported), 'untrusted.brunomnia.json');
+    const applied = applyArtifactImport(cloneSeedWorkspace(), result);
+    expect(applied.environments[0].variables.some((row) => row.valueType === 'secret')).toBe(false);
+    expect(applied.collections[0].subEnvironments?.[0].variables).toEqual([]);
+  });
+
   it('imports Postman environments and applies resources with collision-safe IDs', () => {
     const result = importArtifact(JSON.stringify({ id: 'environment', name: 'Staging', _postman_variable_scope: 'environment', _postman_exported_at: '2026-01-01', values: [{ key: 'host', value: 'https://staging.example.com', enabled: true }] }), 'staging.postman_environment.json');
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(48);
+    expect(second.version).toBe(49);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

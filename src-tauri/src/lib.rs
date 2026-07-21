@@ -16,6 +16,7 @@ mod models;
 mod oauth2_callback;
 #[cfg(target_os = "macos")]
 mod oauth2_webview_macos;
+mod platform_keyring;
 mod plugin;
 mod project;
 mod runtime_credentials;

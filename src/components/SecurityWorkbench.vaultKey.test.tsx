@@ -13,6 +13,6 @@ describe('vault key retention control', () => {
 
   it('disables unsupported or not-yet-unlocked retention', () => {
     expect(renderToStaticMarkup(<VaultKeyRetentionControl busy={false} canRetain={false} onToggle={vi.fn()} retained={false} supported />)).toContain('disabled=""');
-    expect(renderToStaticMarkup(<VaultKeyRetentionControl busy={false} canRetain onToggle={vi.fn()} retained={false} supported={false} />)).toContain('requires macOS Keychain');
+    expect(renderToStaticMarkup(<VaultKeyRetentionControl busy={false} canRetain onToggle={vi.fn()} retained={false} supported={false} />)).toContain('requires an operating-system credential store');
   });
 });

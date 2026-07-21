@@ -612,11 +612,14 @@ const normalizeCollectionEnvironments = (value: unknown, collectionId: string) =
   const environment = record(item);
   if (!environment) return [];
   const id = stringValue(environment.id, `${collectionId}-sub-environment-${index}`);
+  const privateEnvironment = environment.private === true;
+  const variables = normalizeRows(environment.variables, `${id}-variable`, true).filter((row) => privateEnvironment || row.valueType !== 'secret');
   return [{
     id,
     name: stringValue(environment.name, `Environment ${index + 1}`),
-    variables: normalizeRows(environment.variables, `${id}-variable`),
-    environmentEditorMode: environmentEditorMode(environment.environmentEditorMode),
+    variables,
+    environmentEditorMode: variables.some((row) => row.valueType === 'secret') ? 'table' : environmentEditorMode(environment.environmentEditorMode),
+    ...(privateEnvironment ? { private: true } : {}),
   }];
 });
 
@@ -953,7 +956,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   }));
   return {
     ...workspace,
-    version: 48,
+    version: 49,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',

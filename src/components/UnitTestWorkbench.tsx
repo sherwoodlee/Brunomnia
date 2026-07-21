@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, ReactNode } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from '../data/seed';
-import type { ApiRequest, Environment, HttpResponse, StoredResponse, UnitTest, UnitTestCaseResult, UnitTestRunResult, UnitTestSuite, Workspace } from '../types';
+import type { ApiRequest, Collection, Environment, HttpResponse, StoredResponse, UnitTest, UnitTestCaseResult, UnitTestRunResult, UnitTestSuite, Workspace } from '../types';
 import { sendRequest as sendHttpRequest, type SendRequestContext } from '../lib/http';
 import { storeResponseCookies } from '../lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
@@ -24,7 +24,7 @@ type UnitTestWorkbenchProps = {
   workspace: Workspace;
   suite: UnitTestSuite;
   activeEnvironment: Environment;
-  vault: Record<string, string>;
+  vaultForCollection: (collection: Collection | undefined, environment: Environment) => Record<string, string>;
   documentTabStrip: ReactNode;
   templatePrompt: SendRequestContext['prompt'];
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
@@ -45,7 +45,7 @@ const folderScriptScopes = (folders: Workspace['collections'][number]['folders']
   return { id: folder.id, name: folder.name, environment: scope.values, disabled: scope.disabled };
 });
 
-export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, documentTabStrip, templatePrompt, onChangeWorkspace, onDeleteSuite, onOpenSuite, onPromote }: UnitTestWorkbenchProps) {
+export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vaultForCollection, documentTabStrip, templatePrompt, onChangeWorkspace, onDeleteSuite, onOpenSuite, onPromote }: UnitTestWorkbenchProps) {
   const [expandedTests, setExpandedTests] = useState<Set<string>>(() => new Set(suite.tests.slice(0, 1).map((test) => test.id)));
   const [running, setRunning] = useState(false);
   const [liveResults, setLiveResults] = useState<UnitTestCaseResult[]>([]);
@@ -160,6 +160,7 @@ export function UnitTestWorkbench({ workspace, suite, activeEnvironment, vault, 
     let runResponses = [...workspace.responses];
     const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const selectedGlobalEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId) ?? activeEnvironment;
+    const vault = vaultForCollection(suiteCollection, activeEnvironment);
     const globalScopes = scriptEnvironmentScopes(workspace.environments, selectedGlobalEnvironment.id);
     if (!globalScopes) {
       setRunning(false);

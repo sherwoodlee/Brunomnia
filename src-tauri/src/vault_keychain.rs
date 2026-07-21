@@ -1,8 +1,10 @@
+#[cfg(not(test))]
+use crate::platform_keyring;
 use crate::{secure_store, workspace_store};
 use serde::Serialize;
 use std::{path::Path, sync::Mutex};
 
-#[cfg(all(not(test), target_os = "macos"))]
+#[cfg(not(test))]
 const KEYCHAIN_SERVICE: &str = "dev.brunomnia.desktop.local-vault-key";
 const KEYCHAIN_ACCOUNT_PREFIX: &str = "workspace-v1:";
 #[cfg(all(not(test), target_os = "macos"))]
@@ -23,7 +25,11 @@ fn account(workspace_id: &str) -> Result<String, String> {
 }
 
 fn supported() -> bool {
-    cfg!(target_os = "macos") || cfg!(test)
+    cfg!(any(
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "linux"
+    )) || cfg!(test)
 }
 
 fn validate_saved_key(passphrase: &str) -> Result<(), String> {
@@ -32,7 +38,7 @@ fn validate_saved_key(passphrase: &str) -> Result<(), String> {
         return Err("Use an encryption passphrase with at least 12 bytes.".into());
     }
     if length > MAX_SAVED_KEY_BYTES {
-        return Err("The local vault key exceeds the 4 KB Keychain limit.".into());
+        return Err("The local vault key exceeds the 4 KB credential-store limit.".into());
     }
     Ok(())
 }
@@ -54,7 +60,7 @@ fn read_secret(account: &str) -> Result<Option<Vec<u8>>, String> {
 }
 
 #[cfg(all(not(test), target_os = "macos"))]
-fn read_secret(account: &str) -> Result<Option<Vec<u8>>, String> {
+fn read_legacy_secret(account: &str) -> Result<Option<Vec<u8>>, String> {
     use security_framework::passwords::get_generic_password;
     match get_generic_password(KEYCHAIN_SERVICE, account) {
         Ok(secret) => Ok(Some(secret)),
@@ -65,9 +71,18 @@ fn read_secret(account: &str) -> Result<Option<Vec<u8>>, String> {
     }
 }
 
-#[cfg(all(not(test), not(target_os = "macos")))]
-fn read_secret(_account: &str) -> Result<Option<Vec<u8>>, String> {
-    Err("Saved local vault keys require macOS Keychain.".into())
+#[cfg(not(test))]
+fn read_secret(account: &str) -> Result<Option<Vec<u8>>, String> {
+    if let Some(secret) = platform_keyring::read(KEYCHAIN_SERVICE, account, MAX_SAVED_KEY_BYTES)? {
+        return Ok(Some(secret));
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(secret) = read_legacy_secret(account)? {
+        platform_keyring::write(KEYCHAIN_SERVICE, account, &secret, MAX_SAVED_KEY_BYTES)?;
+        delete_legacy_secret(account)?;
+        return Ok(Some(secret));
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -80,16 +95,23 @@ fn write_secret(account: &str, secret: &[u8]) -> Result<(), String> {
 }
 
 #[cfg(all(not(test), target_os = "macos"))]
-fn write_secret(account: &str, secret: &[u8]) -> Result<(), String> {
-    use security_framework::passwords::set_generic_password;
-    set_generic_password(KEYCHAIN_SERVICE, account, secret).map_err(|error| {
-        format!("The local vault key could not be saved in macOS Keychain: {error}")
-    })
+fn delete_legacy_secret(account: &str) -> Result<(), String> {
+    use security_framework::passwords::delete_generic_password;
+    match delete_generic_password(KEYCHAIN_SERVICE, account) {
+        Ok(()) => Ok(()),
+        Err(error) if error.code() == ITEM_NOT_FOUND => Ok(()),
+        Err(error) => Err(format!(
+            "The legacy local vault key could not be removed from macOS Keychain: {error}"
+        )),
+    }
 }
 
-#[cfg(all(not(test), not(target_os = "macos")))]
-fn write_secret(_account: &str, _secret: &[u8]) -> Result<(), String> {
-    Err("Saved local vault keys require macOS Keychain.".into())
+#[cfg(not(test))]
+fn write_secret(account: &str, secret: &[u8]) -> Result<(), String> {
+    platform_keyring::write(KEYCHAIN_SERVICE, account, secret, MAX_SAVED_KEY_BYTES)?;
+    #[cfg(target_os = "macos")]
+    delete_legacy_secret(account)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -101,20 +123,11 @@ fn delete_secret(account: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(all(not(test), target_os = "macos"))]
+#[cfg(not(test))]
 fn delete_secret(account: &str) -> Result<(), String> {
-    use security_framework::passwords::delete_generic_password;
-    match delete_generic_password(KEYCHAIN_SERVICE, account) {
-        Ok(()) => Ok(()),
-        Err(error) if error.code() == ITEM_NOT_FOUND => Ok(()),
-        Err(error) => Err(format!(
-            "The local vault key could not be removed from macOS Keychain: {error}"
-        )),
-    }
-}
-
-#[cfg(all(not(test), not(target_os = "macos")))]
-fn delete_secret(_account: &str) -> Result<(), String> {
+    platform_keyring::delete(KEYCHAIN_SERVICE, account, MAX_SAVED_KEY_BYTES)?;
+    #[cfg(target_os = "macos")]
+    delete_legacy_secret(account)?;
     Ok(())
 }
 
@@ -125,7 +138,7 @@ fn read_saved_key(workspace_id: &str) -> Result<Option<String>, String> {
     }
     let _guard = KEYCHAIN_LOCK
         .lock()
-        .map_err(|_| "The local vault Keychain lock is unavailable.".to_string())?;
+        .map_err(|_| "The local vault credential-store lock is unavailable.".to_string())?;
     let Some(secret) = read_secret(&account)? else {
         return Ok(None);
     };
@@ -164,7 +177,7 @@ pub fn retain(
     passphrase: String,
 ) -> Result<VaultKeyStatus, String> {
     if !supported() {
-        return Err("Saved local vault keys require macOS Keychain.".into());
+        return Err("Saved local vault keys require an operating-system credential store.".into());
     }
     validate_saved_key(&passphrase)?;
     secure_store::vault_unlock(vault_path, passphrase.clone()).map_err(|_| {
@@ -174,7 +187,7 @@ pub fn retain(
     let account = account(workspace_id)?;
     let _guard = KEYCHAIN_LOCK
         .lock()
-        .map_err(|_| "The local vault Keychain lock is unavailable.".to_string())?;
+        .map_err(|_| "The local vault credential-store lock is unavailable.".to_string())?;
     write_secret(&account, passphrase.as_bytes())?;
     Ok(VaultKeyStatus {
         supported: true,
@@ -187,7 +200,7 @@ pub fn forget(workspace_id: &str) -> Result<VaultKeyStatus, String> {
     if supported() {
         let _guard = KEYCHAIN_LOCK
             .lock()
-            .map_err(|_| "The local vault Keychain lock is unavailable.".to_string())?;
+            .map_err(|_| "The local vault credential-store lock is unavailable.".to_string())?;
         delete_secret(&account)?;
     }
     Ok(VaultKeyStatus {
@@ -199,7 +212,7 @@ pub fn forget(workspace_id: &str) -> Result<VaultKeyStatus, String> {
 fn stale_key_error(workspace_id: &str) -> String {
     match forget(workspace_id) {
         Ok(_) => "The saved local vault key no longer unlocks this project's encrypted vault. It was removed; enter the passphrase manually.".into(),
-        Err(error) => format!("The saved local vault key no longer unlocks this project's encrypted vault, and macOS Keychain could not remove it: {error}"),
+        Err(error) => format!("The saved local vault key no longer unlocks this project's encrypted vault, and the operating-system credential store could not remove it: {error}"),
     }
 }
 

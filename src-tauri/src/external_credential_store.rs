@@ -1,9 +1,11 @@
+#[cfg(not(test))]
+use crate::platform_keyring;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
-#[cfg(all(not(test), target_os = "macos"))]
+#[cfg(not(test))]
 const KEYCHAIN_SERVICE: &str = "dev.brunomnia.desktop.external-vault-credentials";
-#[cfg(all(not(test), target_os = "macos"))]
+#[cfg(not(test))]
 const KEYCHAIN_ACCOUNT: &str = "profiles-v1";
 #[cfg(all(not(test), target_os = "macos"))]
 const ITEM_NOT_FOUND: i32 = -25_300;
@@ -74,7 +76,11 @@ pub enum ExternalCredential {
 }
 
 fn supported() -> bool {
-    cfg!(target_os = "macos") || cfg!(test)
+    cfg!(any(
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "linux"
+    )) || cfg!(test)
 }
 
 fn validate_id(value: &str) -> Result<(), String> {
@@ -324,7 +330,7 @@ fn delete_secret() -> Result<(), String> {
 }
 
 #[cfg(all(not(test), target_os = "macos"))]
-fn read_secret() -> Result<Option<Vec<u8>>, String> {
+fn read_legacy_secret() -> Result<Option<Vec<u8>>, String> {
     use security_framework::passwords::get_generic_password;
     match get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
         Ok(value) => Ok(Some(value)),
@@ -336,15 +342,7 @@ fn read_secret() -> Result<Option<Vec<u8>>, String> {
 }
 
 #[cfg(all(not(test), target_os = "macos"))]
-fn write_secret(value: &[u8]) -> Result<(), String> {
-    use security_framework::passwords::set_generic_password;
-    set_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, value).map_err(|error| {
-        format!("External credentials could not be saved in macOS Keychain: {error}")
-    })
-}
-
-#[cfg(all(not(test), target_os = "macos"))]
-fn delete_secret() -> Result<(), String> {
+fn delete_legacy_secret() -> Result<(), String> {
     use security_framework::passwords::delete_generic_password;
     match delete_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
         Ok(()) => Ok(()),
@@ -355,28 +353,48 @@ fn delete_secret() -> Result<(), String> {
     }
 }
 
-#[cfg(all(not(test), not(target_os = "macos")))]
+#[cfg(not(test))]
 fn read_secret() -> Result<Option<Vec<u8>>, String> {
-    Err("Protected external credential profiles require macOS Keychain.".into())
+    if let Some(value) =
+        platform_keyring::read(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, MAX_STORE_BYTES)?
+    {
+        return Ok(Some(value));
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(value) = read_legacy_secret()? {
+        platform_keyring::write(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &value, MAX_STORE_BYTES)?;
+        delete_legacy_secret()?;
+        return Ok(Some(value));
+    }
+    Ok(None)
 }
 
-#[cfg(all(not(test), not(target_os = "macos")))]
-fn write_secret(_value: &[u8]) -> Result<(), String> {
-    Err("Protected external credential profiles require macOS Keychain.".into())
+#[cfg(not(test))]
+fn write_secret(value: &[u8]) -> Result<(), String> {
+    platform_keyring::write(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, value, MAX_STORE_BYTES)?;
+    #[cfg(target_os = "macos")]
+    delete_legacy_secret()?;
+    Ok(())
 }
 
-#[cfg(all(not(test), not(target_os = "macos")))]
+#[cfg(not(test))]
 fn delete_secret() -> Result<(), String> {
+    platform_keyring::delete(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, MAX_STORE_BYTES)?;
+    #[cfg(target_os = "macos")]
+    delete_legacy_secret()?;
     Ok(())
 }
 
 pub fn load() -> Result<Vec<ExternalCredentialRecord>, String> {
     if !supported() {
-        return Err("Protected external credential profiles require macOS Keychain.".into());
+        return Err(
+            "Protected external credential profiles require an operating-system credential store."
+                .into(),
+        );
     }
     let _guard = KEYCHAIN_LOCK
         .lock()
-        .map_err(|_| "The external credential Keychain lock is unavailable.".to_string())?;
+        .map_err(|_| "The external credential-store lock is unavailable.".to_string())?;
     let Some(bytes) = read_secret()? else {
         return Ok(Vec::new());
     };
@@ -392,7 +410,10 @@ pub fn save(
     records: Vec<ExternalCredentialRecord>,
 ) -> Result<Vec<ExternalCredentialRecord>, String> {
     if !supported() {
-        return Err("Protected external credential profiles require macOS Keychain.".into());
+        return Err(
+            "Protected external credential profiles require an operating-system credential store."
+                .into(),
+        );
     }
     let records = normalize(records)?;
     let bytes = serde_json::to_vec(&records).map_err(|error| error.to_string())?;
@@ -401,7 +422,7 @@ pub fn save(
     }
     let _guard = KEYCHAIN_LOCK
         .lock()
-        .map_err(|_| "The external credential Keychain lock is unavailable.".to_string())?;
+        .map_err(|_| "The external credential-store lock is unavailable.".to_string())?;
     if records.is_empty() {
         delete_secret()?;
     } else {

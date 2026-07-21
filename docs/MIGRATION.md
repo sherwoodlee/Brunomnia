@@ -2804,6 +2804,19 @@ Compatibility bounds remain explicit: these are unsigned downloadable installers
 
 Compatibility bounds remain explicit: Brunomnia deliberately does not reproduce undocumented unrestricted Electron/Node loader authority, package lifecycle side effects, native addons, ESM-only entrypoints, or conflicting dependency graphs. The finite pinned CommonJS export, context, action, theme, installation/review, and template-sandbox contract is complete. `Plugins and extension API` is now `Complete`; exactly four parity rows remain incomplete—three `Baseline` and one `Early baseline`—so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 277 — collection Secret scope and cross-platform protected stores (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned gap reconciliation | Complete | Pinned source permits Secret rows in private workspace sub-environments, exposes only `insomnia.vault` to scripts, and shows explicit Azure renewal after expiry; external-provider scripting and silent renewal are not separate user-facing requirements |
+| Workspace v49 collection secrets | Complete | Private collection sub-environments accept normalized empty-value Secret metadata, share the masked/reveal editor and conversion/privacy/delete guards, remove owner entries on deletion/reset, and strip imported owner authority |
+| Runtime isolation | Complete | Each request derives `vault.*` aliases from its selected private collection environment across direct/dependent sends, OAuth/schema, runner, scripts, plugins, code generation, GraphQL, gRPC, realtime, and unit tests without leaking another collection's aliases; direct vault entries retain precedence |
+| Publication and merge boundary | Complete | Default export, Git/folder projects, and encrypted sync omit private collection environments; explicit private exports still omit Secret rows; matching local private environments and active selection survive project/sync pulls |
+| Cross-platform protection | Complete | A generation-switched 1,200-byte chunk manifest with exact length and SHA-256 integrity stores vault keys, external profiles, runtime OAuth keys, and reusable Git credentials through macOS Keychain, Windows Credential Manager, or Linux Secret Service while migrating legacy macOS items/envelopes |
+| Verification | Complete | Model/UI/migration/interchange/project/sync regressions, TypeScript, production/CLI build, packaged smokes, 191 active native tests, formatting/check/strict Clippy, and cross-platform desktop CI evidence are recorded in [Milestone 277 verification](QA_MILESTONE_277.md) |
+
+Compatibility bounds remain explicit: Insomnia account-vault ciphertext cannot be decrypted without its non-portable key, browser development has no OS credential store, and a missing or denied native credential service fails closed instead of using Electron's plaintext fallback. The pinned local/external vault behavior is complete. `Secrets and external vaults` is now `Complete`; exactly three parity rows remain incomplete—two `Baseline` and one `Early baseline`—so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

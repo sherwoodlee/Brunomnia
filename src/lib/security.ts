@@ -5,6 +5,7 @@ import { defaultPreferences } from './preferences';
 import { emptyWorkspaceCertificates } from './certificates';
 import { mergeLocalOAuth2RuntimeCredentials, withoutOAuth2RuntimeCredentials } from './oauth2Tokens';
 import { publicEnvironments } from './resources';
+import { collectionWithoutPrivateEnvironments, mergePrivateCollectionEnvironments } from './environmentSecrets';
 
 export type VaultEntry = { id: string; name: string; value: string; updatedAt: string; kind?: 'environment'; ownerId?: string };
 export type VaultSession = { unlocked: boolean; passphrase: string; entries: VaultEntry[] };
@@ -160,7 +161,7 @@ export const plaintextSecretCandidates = (workspace: Workspace): string[] => {
     .forEach((row) => candidates.push(`${label}: ${kind} ${row.name}`));
   workspace.collections.forEach((collection) => {
     scanRows(collection.name, 'variable', collection.environment ?? []);
-    (collection.subEnvironments ?? []).forEach((environment) => scanRows(`${collection.name} / ${environment.name}`, 'variable', environment.variables));
+    (collection.subEnvironments ?? []).filter((environment) => environment.private !== true).forEach((environment) => scanRows(`${collection.name} / ${environment.name}`, 'variable', environment.variables));
     (collection.folders ?? []).forEach((folder) => {
       const label = `${collection.name} / ${folder.name}`;
       if (folder.auth) scanAuth(label, folder.auth);
@@ -199,6 +200,7 @@ export const shareableWorkspace = (workspace: Workspace): Workspace => {
   const environments = publicEnvironments(workspace.environments);
   return withoutOAuth2RuntimeCredentials({
     ...structuredClone(workspace),
+    collections: workspace.collections.map((collection) => collectionWithoutPrivateEnvironments(collection)),
     environments,
     activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',
     history: [],
@@ -228,11 +230,13 @@ export const mergeSyncedWorkspace = (current: Workspace, payload: SyncPayload): 
   const privateEnvironments = current.environments.filter((environment) => !currentPublicIds.has(environment.id));
   const privateIds = new Set(privateEnvironments.map((environment) => environment.id));
   const sharedEnvironments = publicEnvironments(shared.environments).filter((environment) => !privateIds.has(environment.id));
+  const collections = mergePrivateCollectionEnvironments(current.collections, shared.collections);
   const currentMemberId = shared.governance.members.some((member) => member.id === current.governance.currentMemberId)
     ? current.governance.currentMemberId
     : shared.governance.currentMemberId;
   return mergeLocalOAuth2RuntimeCredentials(current, {
     ...shared,
+    collections,
     environments: [...sharedEnvironments, ...privateEnvironments],
     activeEnvironmentId: privateEnvironments.some((environment) => environment.id === current.activeEnvironmentId) ? current.activeEnvironmentId : sharedEnvironments.some((environment) => environment.id === shared.activeEnvironmentId) ? shared.activeEnvironmentId : sharedEnvironments[0]?.id ?? privateEnvironments[0]?.id ?? '',
     history: current.history,

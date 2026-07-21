@@ -5,6 +5,7 @@ import { normalizeGrpcProtoTree } from '../grpcProto';
 import { orderedCollectionChildren, publicEnvironments } from '../resources';
 import { environmentRowsToObject } from '../environmentJson';
 import { emptyWorkspaceFileState, getWorkspaceFileState, workspaceFileIdForCollection } from '../workspaceFileState';
+import { collectionWithoutPrivateEnvironments } from '../environmentSecrets';
 
 export type ExportOptions = {
   format: ExportFormat;
@@ -53,11 +54,11 @@ const selectCollectionRequests = (collection: Collection, requestIds: string[] |
   };
 };
 
-const selectedCollections = (workspace: Workspace, options: ExportOptions) => options.scope === 'collection'
+const selectedCollections = (workspace: Workspace, options: ExportOptions) => (options.scope === 'collection'
   ? workspace.collections.filter((collection) => collection.id === options.collectionId).map((collection) => selectCollectionRequests(collection, options.requestIds))
   : options.scope === 'design'
     ? workspace.collections.filter((collection) => collection.id === workspace.apiDesigns.find((design) => design.id === options.designId)?.generatedCollectionId)
-    : workspace.collections;
+    : workspace.collections).map((collection) => collectionWithoutPrivateEnvironments(collection, options.includePrivateEnvironments === true));
 
 const exportEnvironments = (workspace: Workspace, options: ExportOptions) => (options.includePrivateEnvironments
   ? workspace.environments
@@ -73,8 +74,8 @@ const selectedDesigns = (workspace: Workspace, options: ExportOptions) => option
 const scopedWorkspace = (workspace: Workspace, options: ExportOptions): Workspace => {
   const environments = exportEnvironments(workspace, options);
   const activeEnvironmentId = environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '';
-  if (options.scope === 'all') return { ...workspace, environments, activeEnvironmentId };
   const collections = selectedCollections(workspace, options);
+  if (options.scope === 'all') return { ...workspace, collections, environments, activeEnvironmentId };
   const designs = selectedDesigns(workspace, options);
   const collectionIds = new Set(collections.map((collection) => collection.id));
   const requestIds = new Set(collections.flatMap((collection) => collection.requests.map((request) => request.id)));
@@ -542,10 +543,11 @@ export const exportArtifact = (workspace: Workspace, options: ExportOptions): Ar
     if (!design) throw new Error('There is no OpenAPI design to export.');
     artifact = { contents: design.contents, fileName: `${safeName(design.name)}.yaml`, mimeType: 'application/yaml', warnings: [] };
   }
-  if (options.format !== 'openapi' && options.includePrivateEnvironments && publicEnvironments(workspace.environments).length < workspace.environments.length) {
+  const hasPrivateCollectionEnvironment = workspace.collections.some((collection) => collection.subEnvironments?.some((environment) => environment.private === true));
+  if (options.format !== 'openapi' && options.includePrivateEnvironments && (publicEnvironments(workspace.environments).length < workspace.environments.length || hasPrivateCollectionEnvironment)) {
     artifact.warnings.unshift({ code: 'private-environment-export', message: 'This export intentionally includes device-private environment values. Review and protect the downloaded file.' });
   }
-  if (options.format !== 'openapi' && workspace.environments.some((environment) => environment.variables.some((row) => row.valueType === 'secret'))) {
+  if (options.format !== 'openapi' && (workspace.environments.some((environment) => environment.variables.some((row) => row.valueType === 'secret')) || workspace.collections.some((collection) => collection.subEnvironments?.some((environment) => environment.variables.some((row) => row.valueType === 'secret'))))) {
     artifact.warnings.unshift({ code: 'environment-secrets-omitted', message: 'Private-environment Secret rows and values were omitted because their plaintext exists only in the local encrypted vault.' });
   }
   return artifact;

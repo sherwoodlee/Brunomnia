@@ -398,6 +398,7 @@ export type CollectionEnvironment = {
   name: string;
   variables: KeyValue[];
   environmentEditorMode?: 'table' | 'raw';
+  private?: boolean;
 };
 
 export type Collection = {
@@ -439,7 +440,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 48;
+  version: 49;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

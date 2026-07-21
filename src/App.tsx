@@ -15,7 +15,7 @@ import { Icon } from './components/Icon';
 import type { ArtifactImport } from './lib/interchange/types';
 import { applyContextualPluginActionResult, applyPluginTheme, contextualPluginActionsFor, createPluginRuntime, describePlugin, discoverContextualPluginActions, pluginActionAuthorityKey, resolveContextualPluginActionInvocation, runPluginAction, type ContextualPluginAction, type PluginActionTarget, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
 import { autoUnlockSavedVault, plaintextSecretCandidates, resolveAuthorizedExternalSecret, saveVault, saveVaultWithSavedKey, vaultVariables, type ExternalSecretInput, type VaultEntry, type VaultSession } from './lib/security';
-import { duplicateEnvironmentSecrets, environmentHasSecrets, environmentSecretValue, environmentSecretVariables, removeEnvironmentSecrets, upsertEnvironmentSecret } from './lib/environmentSecrets';
+import { collectionEnvironmentHasSecrets, collectionEnvironmentSecretVariables, duplicateEnvironmentSecrets, environmentHasSecrets, environmentSecretValue, environmentSecretVariables, removeEnvironmentSecrets, upsertEnvironmentSecret } from './lib/environmentSecrets';
 import { defaultPreferences, shortcutDisplayLabel, shortcutEventOwner, shortcutMatches } from './lib/preferences';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWorkspaceEnvironment, duplicateWorkspaceFolder, environmentAncestors, folderAncestors, folderPath, keyboardWorkspaceEnvironmentMove, keyboardWorkspaceResourceMove, moveWorkspaceEnvironment, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
 import type { WorkspaceEnvironmentMove, WorkspaceResourceKeyboardAction, WorkspaceResourceMove } from './lib/resources';
@@ -1453,26 +1453,40 @@ type CollectionDocumentPanelProps = {
   collection: Workspace['collections'][number];
   documentTabStrip: ReactNode;
   onChange: (collection: Workspace['collections'][number]) => void;
+  vaultSession: VaultSession;
+  onVaultEntriesChange: (entries: VaultEntry[]) => void;
+  vaultSaveError: string;
 };
 
-function CollectionDocumentPanel({ collection, documentTabStrip, onChange }: CollectionDocumentPanelProps) {
+export function CollectionDocumentPanel({ collection, documentTabStrip, onChange, vaultSession, onVaultEntriesChange, vaultSaveError }: CollectionDocumentPanelProps) {
   const [tab, setTab] = useState<'variables' | 'docs'>('variables');
   const selectedEnvironment = (collection.subEnvironments ?? []).find((environment) => environment.id === collection.activeSubEnvironmentId);
+  const selectedHasSecrets = selectedEnvironment ? collectionEnvironmentHasSecrets(selectedEnvironment) : false;
   const selectEnvironment = (activeSubEnvironmentId: string) => onChange({ ...collection, activeSubEnvironmentId });
   const addEnvironment = () => {
     const id = uid('collection-environment');
     onChange({
       ...collection,
       activeSubEnvironmentId: id,
-      subEnvironments: [...(collection.subEnvironments ?? []), { id, name: `Environment ${(collection.subEnvironments?.length ?? 0) + 1}`, variables: [], environmentEditorMode: 'table' }],
+      subEnvironments: [...(collection.subEnvironments ?? []), { id, name: `Environment ${(collection.subEnvironments?.length ?? 0) + 1}`, variables: [], environmentEditorMode: 'table', private: false }],
     });
   };
   const updateSelectedEnvironment = (patch: Partial<NonNullable<typeof selectedEnvironment>>) => {
     if (!selectedEnvironment) return;
+    if (selectedHasSecrets && patch.private === false) {
+      window.alert('Convert or remove this collection environment’s Secret variables before making it shared.');
+      return;
+    }
     onChange({ ...collection, subEnvironments: (collection.subEnvironments ?? []).map((environment) => environment.id === selectedEnvironment.id ? { ...environment, ...patch } : environment) });
   };
   const deleteSelectedEnvironment = () => {
-    if (!selectedEnvironment || !window.confirm(`Delete collection environment “${selectedEnvironment.name}”?`)) return;
+    if (!selectedEnvironment) return;
+    if (selectedHasSecrets && !vaultSession.unlocked) {
+      window.alert('Unlock the local vault before deleting a collection environment with Secret variables.');
+      return;
+    }
+    if (!window.confirm(`Delete collection environment “${selectedEnvironment.name}”?`)) return;
+    if (selectedHasSecrets) onVaultEntriesChange(removeEnvironmentSecrets(vaultSession.entries, selectedEnvironment.variables.map((row) => row.id)));
     onChange({ ...collection, activeSubEnvironmentId: '', subEnvironments: (collection.subEnvironments ?? []).filter((environment) => environment.id !== selectedEnvironment.id) });
   };
   return <section aria-labelledby="collection-settings-title" className="folder-document-panel collection-document-panel">
@@ -1481,11 +1495,13 @@ function CollectionDocumentPanel({ collection, documentTabStrip, onChange }: Col
     <div className="folder-identity"><label>Name<input onChange={(event) => onChange({ ...collection, name: event.target.value })} value={collection.name} /></label></div>
     <nav aria-label="Collection settings" className="interchange-tabs"><button className={tab === 'variables' ? 'active' : ''} onClick={() => setTab('variables')} type="button">Variables</button><button className={tab === 'docs' ? 'active' : ''} onClick={() => setTab('docs')} type="button">Docs</button></nav>
     <div className="folder-modal-content">
-      {tab === 'variables' ? <div className="environment-layout collection-environment-layout"><aside><div><button className={!selectedEnvironment ? 'active' : ''} onClick={() => selectEnvironment('')} type="button"><i /><span>Base environment</span><small>BASE</small></button>{(collection.subEnvironments ?? []).map((environment) => <button className={selectedEnvironment?.id === environment.id ? 'active' : ''} key={environment.id} onClick={() => selectEnvironment(environment.id)} type="button"><i /><span>{environment.name}</span></button>)}</div><button onClick={addEnvironment} type="button"><Icon name="plus" size={13} /> Sub-environment</button></aside><main>
-        {selectedEnvironment ? <div className="environment-identity collection-environment-identity"><label>Name<input onChange={(event) => updateSelectedEnvironment({ name: event.target.value })} value={selectedEnvironment.name} /></label></div> : <strong>Collection base environment</strong>}
-        <p>{selectedEnvironment ? 'The selected collection environment overrides the collection base and selected global values.' : 'Base collection values override selected and base global values for every request in this collection.'}</p>
-        <EnvironmentVariablesEditor key={selectedEnvironment?.id ?? `${collection.id}-base-environment`} mode={selectedEnvironment?.environmentEditorMode ?? collection.environmentEditorMode} onChange={(variables, environmentEditorMode) => selectedEnvironment ? updateSelectedEnvironment({ variables, environmentEditorMode }) : onChange({ ...collection, environment: variables, environmentEditorMode })} rows={selectedEnvironment?.variables ?? collection.environment ?? []} />
-        {selectedEnvironment ? <button className="danger-action collection-environment-delete" onClick={deleteSelectedEnvironment} type="button">Delete sub-environment</button> : null}
+      {tab === 'variables' ? <div className="environment-layout collection-environment-layout"><aside><div><button className={!selectedEnvironment ? 'active' : ''} onClick={() => selectEnvironment('')} type="button"><i /><span>Base environment</span><small>BASE</small></button>{(collection.subEnvironments ?? []).map((environment) => <button className={selectedEnvironment?.id === environment.id ? 'active' : ''} key={environment.id} onClick={() => selectEnvironment(environment.id)} type="button"><i /><span>{environment.name}</span>{environment.private ? <small>PRIVATE</small> : null}</button>)}</div><button onClick={addEnvironment} type="button"><Icon name="plus" size={13} /> Sub-environment</button></aside><main>
+        {selectedEnvironment ? <div className="environment-identity collection-environment-identity"><label>Name<input onChange={(event) => updateSelectedEnvironment({ name: event.target.value })} value={selectedEnvironment.name} /></label><label className="private-environment"><input checked={selectedEnvironment.private === true} onChange={(event) => updateSelectedEnvironment({ private: event.target.checked })} type="checkbox" /> Private on this device</label></div> : <strong>Collection base environment</strong>}
+        <p>{selectedEnvironment ? selectedEnvironment.private ? 'This private collection environment stays on this device and can store encrypted Secret rows under vault.* while the local vault is unlocked.' : 'The selected shared collection environment overrides the collection base and selected global values.' : 'Base collection values override selected and base global values for every request in this collection.'}</p>
+        <EnvironmentVariablesEditor allowSecrets={selectedEnvironment?.private === true} key={selectedEnvironment?.id ?? `${collection.id}-base-environment`} mode={selectedEnvironment?.environmentEditorMode ?? collection.environmentEditorMode} onChange={(variables, environmentEditorMode) => selectedEnvironment ? updateSelectedEnvironment({ variables, environmentEditorMode }) : onChange({ ...collection, environment: variables, environmentEditorMode })} onSecretEntriesChange={selectedEnvironment ? onVaultEntriesChange : undefined} rows={selectedEnvironment?.variables ?? collection.environment ?? []} secretAvailable={selectedEnvironment?.private === true && vaultSession.unlocked} secretEntries={vaultSession.entries} />
+        {selectedEnvironment?.private && !vaultSession.unlocked ? <p className="environment-editor-error">Unlock the local vault in Security &amp; Sync to create or edit Secret variables.</p> : null}
+        {vaultSaveError ? <p className="environment-editor-error" role="alert">{vaultSaveError}</p> : null}
+        {selectedEnvironment ? <button className="danger-action collection-environment-delete" disabled={selectedHasSecrets && !vaultSession.unlocked} onClick={deleteSelectedEnvironment} type="button">Delete sub-environment</button> : null}
       </main></div> : null}
       {tab === 'docs' ? <div className="request-docs-editor"><header><strong>Collection documentation</strong><small>Markdown source</small></header><textarea aria-label="Collection documentation" onChange={(event) => onChange({ ...collection, documentation: event.target.value })} value={collection.documentation ?? ''} /><section><small>Preview</small><pre>{collection.documentation || 'No documentation yet.'}</pre></section></div> : null}
     </div>
@@ -1550,7 +1566,7 @@ function FolderDocumentPanel({ documentTabStrip, onConfigure, onRun, ...editorPr
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 48, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], fileState: {}, responses: [], streamSessions: [], mcpSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+    format: 'brunomnia', version: 49, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], fileState: {}, responses: [], streamSessions: [], mcpSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -2062,10 +2078,12 @@ export default function App() {
       return { ...current, responseFilters: { ...current.responseFilters, [requestId]: { ...previous, previewMode } } };
     });
   };
-  const unlockedVault = useMemo(() => ({
-    ...environmentSecretVariables(activeEnvironment?.variables ?? [], vaultSession),
+  const vaultForCollection = useCallback((collection: Collection | undefined, environment: Environment | undefined = activeEnvironment) => ({
+    ...environmentSecretVariables(environment?.variables ?? [], vaultSession),
+    ...collectionEnvironmentSecretVariables(collection, vaultSession),
     ...vaultVariables(vaultSession),
-  }), [activeEnvironment?.variables, vaultSession]);
+  }), [activeEnvironment, vaultSession]);
+  const unlockedVault = useMemo(() => vaultForCollection(activeCollection), [activeCollection, vaultForCollection]);
   const persistEnvironmentVaultSession = useCallback(async (workspaceId: string, session: VaultSession, generation: number) => {
     try {
       if (session.passphrase) await saveVault(workspaceId, session.passphrase, session.entries);
@@ -2150,7 +2168,7 @@ export default function App() {
       responses,
       validateAuthCertificates: workspace.preferences.validateAuthCertificates,
       validateCertificates: workspace.preferences.validateCertificates,
-      vault: unlockedVault,
+      vault: vaultForCollection(collection, activeEnvironment),
     });
     const receivedAt = new Date().toISOString();
     const storedResponse: StoredResponse = {
@@ -2485,13 +2503,13 @@ export default function App() {
         cookies: [...activeRequestFileState.cookies],
         responses: [...workspace.responses],
         filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
-        vault: unlockedVault,
+        vault: vaultForCollection(collection, activeEnvironment),
         externalSecret: externalSecretResolver,
         readFile: templateFileReader,
         prompt: requestTemplatePrompt,
         requestAncestors: requestAncestorNames(workspace.collections, targetRequest),
         resolveResponse: templateResponseResolver.current,
-        pluginRuntime: createPersistentTemplatePluginRuntime(configured.environment),
+        pluginRuntime: createPersistentTemplatePluginRuntime(configured.environment, collection),
       });
       const service = schema.services.find((candidate) => candidate.fullName === targetRequest.grpc.service) ?? schema.services[0];
       const method = service?.methods.find((candidate) => candidate.name === targetRequest.grpc.method) ?? service?.methods[0];
@@ -2516,11 +2534,12 @@ export default function App() {
     if (!active || !activeEnvironment || active.request.protocol !== 'graphql' || graphqlSchemaLoading) return;
     const collection = workspace.collections.find((candidate) => candidate.id === active.collectionId);
     if (!collection) return;
-    const targetRequest = applyCollectionConfiguration(collection, active.request, activeEnvironment).request;
+    const configured = applyCollectionConfiguration(collection, active.request, activeEnvironment);
+    const targetRequest = configured.request;
     setGraphqlSchemaError(undefined);
     setGraphqlSchemaLoading(true);
     try {
-      const schema = await fetchGraphqlSchema(targetRequest, activeEnvironment, { cookies: [...activeRequestFileState.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeRequestFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, targetRequest), resolveResponse: templateResponseResolver.current, pluginRuntime: createPersistentTemplatePluginRuntime(activeEnvironment) }, includeInputValueDeprecation);
+      const schema = await fetchGraphqlSchema(targetRequest, configured.environment, { cookies: [...activeRequestFileState.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeRequestFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: vaultForCollection(collection, activeEnvironment), externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, targetRequest), resolveResponse: templateResponseResolver.current, pluginRuntime: createPersistentTemplatePluginRuntime(configured.environment, collection) }, includeInputValueDeprecation);
       setWorkspace((current) => ({ ...current, collections: current.collections.map((collection) => ({ ...collection, requests: collection.requests.map((request) => request.id === targetRequest.id ? { ...request, graphql: { ...request.graphql, schema, schemaEndpoint: targetRequest.url, schemaFetchedAt: new Date().toISOString(), schemaSource: 'remote', schemaFileName: '', includeInputValueDeprecation, schemaIncludesInputValueDeprecation: includeInputValueDeprecation } } : request) })) }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2560,8 +2579,9 @@ export default function App() {
     }
   };
 
-  const oauthRequestContext = (request?: ApiRequest): SendRequestContext => {
+  const oauthRequestContext = (request?: ApiRequest, collectionOverride?: Collection): SendRequestContext => {
     const fileState = getWorkspaceFileState(workspace, request ? workspaceFileIdForRequest(workspace, request.id) || activeWorkspaceFileId : activeWorkspaceFileId);
+    const requestCollection = collectionOverride ?? (request ? workspace.collections.find((collection) => collection.requests.some((candidate) => candidate.id === request.id)) : activeCollection);
     return {
       cookies: [...fileState.cookies],
       responses: [...workspace.responses],
@@ -2575,7 +2595,7 @@ export default function App() {
       certificates: fileState.certificates,
       maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
       filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
-      vault: unlockedVault,
+      vault: vaultForCollection(requestCollection, activeEnvironment),
       externalSecret: externalSecretResolver,
       readFile: templateFileReader,
       prompt: requestTemplatePrompt,
@@ -2662,10 +2682,10 @@ export default function App() {
     environment: environmentMap(environment),
   });
 
-  const createRealtimePluginContext = (environment: Environment) => {
+  const createRealtimePluginContext = (environment: Environment, collection: Collection) => {
     const state: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const callbacks: PluginHostCallbacks = {
-      network: (pluginRequest) => sendRequest(pluginRequest, environment, { ...oauthRequestContext(), authorizeOAuth2: authorizeOAuth2WithStatus }),
+      network: (pluginRequest) => sendRequest(pluginRequest, environment, { ...oauthRequestContext(undefined, collection), authorizeOAuth2: authorizeOAuth2WithStatus }),
       prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
       readClipboard: () => navigator.clipboard.readText(),
       writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -2679,10 +2699,10 @@ export default function App() {
     return { runtime, flush };
   };
 
-  const createPersistentTemplatePluginRuntime = (environment: Environment): NonNullable<SendRequestContext['pluginRuntime']> => {
+  const createPersistentTemplatePluginRuntime = (environment: Environment, collection: Collection): NonNullable<SendRequestContext['pluginRuntime']> => {
     const state: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const callbacks: PluginHostCallbacks = {
-      network: (pluginRequest) => sendRequest(pluginRequest, environment, { ...oauthRequestContext(), authorizeOAuth2: authorizeOAuth2WithStatus }),
+      network: (pluginRequest) => sendRequest(pluginRequest, environment, { ...oauthRequestContext(undefined, collection), authorizeOAuth2: authorizeOAuth2WithStatus }),
       prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
       readClipboard: () => navigator.clipboard.readText(),
       writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -2808,7 +2828,7 @@ export default function App() {
           current.preferences.filterResponsesByEnv,
         ),
       }));
-      const realtimePlugins = createRealtimePluginContext(executionEnvironment);
+      const realtimePlugins = createRealtimePluginContext(executionEnvironment, collection);
       try {
         const metadata = await connectStream(request, executionEnvironment, sessionId, onStreamEvent, workspace.preferences.preferredHttpVersion, workspace.preferences.maxRedirects, workspace.preferences.followRedirects, workspace.preferences.requestTimeoutMs, workspace.preferences.validateCertificates, proxyPreferences, activeRequestFileState.cookies, activeRequestFileState.certificates, realtimeRequestContext(request, realtimePlugins.runtime));
         setStreamSessionView((current) => current?.id === sessionId ? applyStreamConnectionMetadata([current], sessionId, metadata)[0] : current);
@@ -2836,7 +2856,7 @@ export default function App() {
     let scriptResponses = [...workspace.responses];
     const pluginState: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const pluginCallbacks: PluginHostCallbacks = {
-      network: (pluginRequest) => sendRequest(pluginRequest, executionEnvironment, { cookies: scriptCookies, responses: scriptResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, authorizeOAuth2: authorizeOAuth2WithStatus }),
+      network: (pluginRequest) => sendRequest(pluginRequest, executionEnvironment, { cookies: scriptCookies, responses: scriptResponses, preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: vaultForCollection(collection, activeEnvironment), externalSecret: externalSecretResolver, authorizeOAuth2: authorizeOAuth2WithStatus }),
       prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
       readClipboard: () => navigator.clipboard.readText(),
       writeClipboard: (value) => navigator.clipboard.writeText(value),
@@ -3256,7 +3276,7 @@ export default function App() {
     try {
       if (active.request.protocol === 'socketio') {
         const configured = applyCollectionConfiguration(activeCollection, active.request, activeEnvironment);
-        const realtimePlugins = createRealtimePluginContext(configured.environment);
+        const realtimePlugins = createRealtimePluginContext(configured.environment, activeCollection);
         const { sendSocketIoMessage } = await import('./lib/socketIo');
         try {
           await sendSocketIoMessage(configured.request, configured.environment, streamSession.current, onStreamEvent, realtimeRequestContext(configured.request, realtimePlugins.runtime));
@@ -3265,7 +3285,7 @@ export default function App() {
         }
       } else if (active.request.protocol === 'websocket' && streamDraft.trim()) {
         const configured = applyCollectionConfiguration(activeCollection, active.request, activeEnvironment);
-        const realtimePlugins = createRealtimePluginContext(configured.environment);
+        const realtimePlugins = createRealtimePluginContext(configured.environment, activeCollection);
         try {
           const message = streamFrameKind === 'text'
             ? await renderRequestValue(streamDraft, configured.request, configured.environment, realtimeRequestContext(configured.request, realtimePlugins.runtime))
@@ -3286,7 +3306,7 @@ export default function App() {
     if (!streamSession.current || streamProtocol.current !== 'socketio' || streamStatus !== 'connected' || !active || !activeCollection || !activeEnvironment) return;
     try {
       const configured = applyCollectionConfiguration(activeCollection, active.request, activeEnvironment);
-      const realtimePlugins = createRealtimePluginContext(configured.environment);
+      const realtimePlugins = createRealtimePluginContext(configured.environment, activeCollection);
       const { setSocketIoListener } = await import('./lib/socketIo');
       try {
         await setSocketIoListener(streamSession.current, await renderRequestValue(eventName, configured.request, configured.environment, realtimeRequestContext(configured.request, realtimePlugins.runtime)), enabled);
@@ -3629,7 +3649,7 @@ export default function App() {
     runningMocks={runningMocks}
     section={section}
     templatePrompt={requestTemplatePrompt}
-    vault={unlockedVault}
+    vaultForCollection={vaultForCollection}
     workspace={workspace}
     workspaceId={activeWorkspaceId}
   /></Suspense>;
@@ -3801,7 +3821,7 @@ export default function App() {
           onVaultEntriesChange={updateEnvironmentVaultEntries}
           vaultSaveError={environmentVaultSaveError}
           vaultSession={vaultSession}
-        /> : activeCollectionDocument ? <CollectionDocumentPanel collection={activeCollectionDocument} documentTabStrip={renderDocumentTabStrip()} onChange={(collection) => { promoteRequestDocument(collection.id); updateCollection(collection); }} /> : activeDesignDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('design')}</section> : activeMockDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('mocks')}</section> : activeTestSuiteDocument ? <Suspense fallback={<div className="dialog-loading">Loading unit tests…</div>}><UnitTestWorkbench activeEnvironment={runtimeEnvironment} documentTabStrip={renderDocumentTabStrip()} key={activeTestSuiteDocument.id} onChangeWorkspace={(updater) => setWorkspace(updater)} onDeleteSuite={deleteTestSuite} onOpenSuite={openTestSuiteDocument} onPromote={() => promoteRequestDocument(activeTestSuiteDocument.id)} suite={activeTestSuiteDocument} templatePrompt={requestTemplatePrompt} vault={unlockedVault} workspace={workspace} /></Suspense> : activeFolderDocument ? <FolderDocumentPanel
+        /> : activeCollectionDocument ? <CollectionDocumentPanel collection={activeCollectionDocument} documentTabStrip={renderDocumentTabStrip()} onChange={(collection) => { promoteRequestDocument(collection.id); updateCollection(collection); }} onVaultEntriesChange={updateEnvironmentVaultEntries} vaultSaveError={environmentVaultSaveError} vaultSession={vaultSession} /> : activeDesignDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('design')}</section> : activeMockDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('mocks')}</section> : activeTestSuiteDocument ? <Suspense fallback={<div className="dialog-loading">Loading unit tests…</div>}><UnitTestWorkbench activeEnvironment={runtimeEnvironment} documentTabStrip={renderDocumentTabStrip()} key={activeTestSuiteDocument.id} onChangeWorkspace={(updater) => setWorkspace(updater)} onDeleteSuite={deleteTestSuite} onOpenSuite={openTestSuiteDocument} onPromote={() => promoteRequestDocument(activeTestSuiteDocument.id)} suite={activeTestSuiteDocument} templatePrompt={requestTemplatePrompt} vaultForCollection={vaultForCollection} workspace={workspace} /></Suspense> : activeFolderDocument ? <FolderDocumentPanel
           collection={activeFolderDocument.collection}
           cookies={activeWorkspaceFileState.cookies}
           documentTabStrip={renderDocumentTabStrip()}
@@ -3810,7 +3830,7 @@ export default function App() {
           onChange={(folder) => { promoteRequestDocument(folder.id); updateFolder(activeFolderDocument.collection.id, folder); }}
           onConfigure={() => setFolderEditor({ collectionId: activeFolderDocument.collection.id, folderId: activeFolderDocument.folder.id })}
           onRun={() => openRunnerDocument(activeFolderDocument.folder.id)}
-          requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }}
+          requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: vaultForCollection(activeFolderDocument.collection, activeEnvironment), externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }}
           responses={workspace.responses}
           showPasswords={workspace.preferences.showPasswords}
         /> : isRunnerDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('runner', activeRunnerTarget)}</section> : <div className="workbench">
@@ -3836,7 +3856,7 @@ export default function App() {
             onSocketIoListenerToggle={(eventName, enabled) => void toggleSocketIoListener(eventName, enabled)}
             onTabChange={setRequestTab}
             request={runtimeActive.request}
-            requestContext={{ cookies: [...activeRequestFileState.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeRequestFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, runtimeActive.request), resolveResponse: templateResponseResolver.current, authorizeOAuth2: authorizeOAuth2WithStatus, pluginRuntime: createPersistentTemplatePluginRuntime(runtimeEnvironment) }}
+            requestContext={{ cookies: [...activeRequestFileState.cookies], responses: [...workspace.responses], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeRequestFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, requestAncestors: requestAncestorNames(workspace.collections, runtimeActive.request), resolveResponse: templateResponseResolver.current, authorizeOAuth2: authorizeOAuth2WithStatus, pluginRuntime: createPersistentTemplatePluginRuntime(runtimeEnvironment, runtimeCollection) }}
             scheduledSendLabel={scheduledSendLabel}
             showPasswords={workspace.preferences.showPasswords}
             showVariableSourceAndValue={workspace.preferences.showVariableSourceAndValue}
@@ -3920,7 +3940,7 @@ export default function App() {
 
       {contextualPluginActionFeedback ? <div className={`contextual-plugin-feedback${contextualPluginActionFeedback.error ? ' error' : ''}`} role={contextualPluginActionFeedback.error ? 'alert' : 'status'}><span>{contextualPluginActionFeedback.message}</span><button aria-label="Dismiss plugin action result" onClick={() => setContextualPluginActionFeedback(undefined)} type="button"><Icon name="x" size={12} /></button></div> : null}
 
-      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={getWorkspaceFileState(workspace, workspaceFileIdForCollection(workspace, editingCollection.id)).cookies} environment={runtimeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} onDuplicate={() => duplicateFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
+      {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={getWorkspaceFileState(workspace, workspaceFileIdForCollection(workspace, editingCollection.id)).cookies} environment={runtimeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} onDuplicate={() => duplicateFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: vaultForCollection(editingCollection, activeEnvironment), externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
       {showSendOptions ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSendOptions(false)}>
         <section aria-labelledby="send-options-title" aria-modal="true" className="modal send-options-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog">
           <header><div><small>Request scheduling</small><h2 id="send-options-title">Send options</h2></div><button aria-label="Close" className="icon-button subtle" onClick={() => setShowSendOptions(false)} type="button"><Icon name="x" /></button></header>

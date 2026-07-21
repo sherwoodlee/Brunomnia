@@ -110,6 +110,6 @@ export function ExternalCredentialManager({ credentials, disabled, onSave, initi
       {draft.provider === 'azure' ? <p>Azure profiles are created and renewed through official Azure CLI browser authentication; access tokens cannot be edited manually.</p> : null}
       <div className="vault-actions"><button onClick={() => setDraft(undefined)} type="button">Cancel</button><button disabled={disabled || draft.provider === 'azure' || !draft.name.trim()} onClick={() => void saveDraft()} type="button">Save credential</button></div>
     </div> : null}
-    <p>Profiles are non-syncable device records protected by macOS Keychain. AWS temporary/file/SSO, GCP service-account, HashiCorp token/AppRole/HCP Vault Secrets, and Azure OAuth profiles are available to the native resolver; ambient official CLI chains remain available.</p>
+    <p>Profiles are non-syncable device records protected by the operating-system credential store. AWS temporary/file/SSO, GCP service-account, HashiCorp token/AppRole/HCP Vault Secrets, and Azure OAuth profiles are available to the native resolver; ambient official CLI chains remain available.</p>
   </section>;
 }

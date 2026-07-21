@@ -1,5 +1,6 @@
 import type { Collection, Environment, ImportRecord, McpClient, MockServer, UnitTestSuite, Workspace } from '../../types';
 import { emptyWorkspaceFileState } from '../workspaceFileState';
+import { withoutEnvironmentSecrets } from '../environmentSecrets';
 import { sourceId } from './common';
 import type { ArtifactImport } from './types';
 
@@ -16,7 +17,7 @@ const rekeyCollection = (collection: Collection, batch: string): Collection => {
     subEnvironments: (collection.subEnvironments ?? []).map((environment) => ({
       ...environment,
       id: `${batch}-${environment.id}`,
-      variables: environment.variables.map((variable) => ({ ...variable, id: `${batch}-${variable.id}` })),
+      variables: environment.variables.filter((variable) => variable.valueType !== 'secret').map((variable) => ({ ...variable, id: `${batch}-${variable.id}` })),
     })),
     activeSubEnvironmentId: collection.activeSubEnvironmentId ? `${batch}-${collection.activeSubEnvironmentId}` : '',
     resourceOrder: (collection.resourceOrder ?? []).flatMap((id) => {
@@ -50,7 +51,7 @@ const rekeyEnvironments = (environments: Environment[], batch: string): Environm
     ...environment,
     id: ids.get(environment.id)!,
     parentId: environment.parentId ? ids.get(environment.parentId) ?? '' : '',
-    variables: environment.variables.map((variable) => ({ ...variable, id: `${batch}-${variable.id}` })),
+    variables: environment.variables.filter((variable) => variable.valueType !== 'secret').map((variable) => ({ ...variable, id: `${batch}-${variable.id}` })),
   }));
 };
 
@@ -88,7 +89,10 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
     warnings: result.warnings,
     metadata: result.metadata,
   };
-  if (result.replacement) return { ...result.replacement, version: 48, imports: [record, ...result.replacement.imports].slice(0, 100) };
+  if (result.replacement) {
+    const replacement = withoutEnvironmentSecrets(result.replacement);
+    return { ...replacement, version: 49, imports: [record, ...replacement.imports].slice(0, 100) };
+  }
 
   const collections = result.collections.map((collection) => rekeyCollection(collection, batch));
   const collectionIds = new Map(result.collections.map((collection, index) => [collection.id, collections[index].id]));
@@ -118,7 +122,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
   const firstRequest = collections.flatMap((collection) => collection.requests)[0];
   return {
     ...workspace,
-    version: 48,
+    version: 49,
     activeRequestId: firstRequest?.id ?? workspace.activeRequestId,
     activeEnvironmentId: environments[0]?.id ?? workspace.activeEnvironmentId,
     collections: [...workspace.collections, ...collections],

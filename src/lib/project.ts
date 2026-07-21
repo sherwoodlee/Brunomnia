@@ -4,6 +4,7 @@ import { migrateWorkspace } from './storage';
 import { publicEnvironments } from './resources';
 import { mergeLocalOAuth2RuntimeCredentials, withoutOAuth2RuntimeCredentials } from './oauth2Tokens';
 import { emptyWorkspaceCertificates } from './certificates';
+import { collectionWithoutPrivateEnvironments, mergePrivateCollectionEnvironments } from './environmentSecrets';
 
 export type ProjectWriteResult = { path: string; filesWritten: number; filesUnchanged: number; filesRemoved: number };
 export type GitFileStatus = { path: string; indexStatus: string; worktreeStatus: string; staged: boolean; conflicted: boolean };
@@ -41,7 +42,7 @@ const nativeOnly = () => {
 export const writeProject = async (path: string, workspace: Workspace) => {
   nativeOnly();
   const environments = publicEnvironments(workspace.environments);
-  const projectWorkspace = withoutOAuth2RuntimeCredentials({ ...workspace, cookies: [], fileState: {}, certificates: emptyWorkspaceCertificates(), environments, activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '' });
+  const projectWorkspace = withoutOAuth2RuntimeCredentials({ ...workspace, collections: workspace.collections.map((collection) => collectionWithoutPrivateEnvironments(collection)), cookies: [], fileState: {}, certificates: emptyWorkspaceCertificates(), environments, activeEnvironmentId: environments.some((environment) => environment.id === workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '' });
   return invoke<ProjectWriteResult>('project_write', { input: { path, workspace: projectWorkspace } });
 };
 
@@ -56,7 +57,7 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     ...current,
     ...project,
     format: 'brunomnia',
-    version: 48,
+    version: 49,
     history: current.history,
     runnerReports: current.runnerReports,
     unitTestResults: current.unitTestResults,
@@ -74,6 +75,7 @@ export const readProject = async (path: string, current: Workspace): Promise<Wor
     activeEnvironmentId: privateEnvironments.some((environment) => environment.id === current.activeEnvironmentId) ? current.activeEnvironmentId : project.activeEnvironmentId ?? current.activeEnvironmentId,
     project: { ...current.project, mode: current.project.mode === 'git' ? 'git' : 'folder', path },
   });
+  merged.collections = mergePrivateCollectionEnvironments(current.collections, merged.collections);
   return mergeLocalOAuth2RuntimeCredentials(current, merged);
 };
 

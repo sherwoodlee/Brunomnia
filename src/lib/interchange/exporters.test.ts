@@ -266,7 +266,7 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(48);
+    expect(parsed.version).toBe(49);
     expect(parsed.testSuites).toEqual([expect.objectContaining({ id: 'suite', tests: [expect.objectContaining({ id: 'included' })] }), expect.objectContaining({ id: 'empty-suite', tests: [] })]);
     expect(parsed.unitTestResults).toEqual([expect.objectContaining({ id: 'run', suiteId: 'suite', tests: [expect.objectContaining({ testId: 'included' })] })]);
     expect(parsed.certificates).toEqual({ ca: { enabled: false, pem: '' }, clients: [] });
@@ -318,16 +318,26 @@ describe('artifact export adapters', () => {
       { id: 'private-root', name: 'Private', private: true, variables: [{ id: 'private-token', name: 'token', value: 'device-secret', enabled: true }, { id: 'private-secret-row', name: 'vaultToken', value: '', valueType: 'secret', enabled: true }] },
       { id: 'private-child', parentId: 'private-root', name: 'Private child', variables: [{ id: 'private-child-token', name: 'childToken', value: 'child-secret', enabled: true }] },
     );
+    workspace.collections[0].subEnvironments = [
+      { id: 'shared-collection', name: 'Shared collection', variables: [{ id: 'shared-row', name: 'region', value: 'west', enabled: true }] },
+      { id: 'private-collection', name: 'Private collection', private: true, variables: [{ id: 'private-plain', name: 'device', value: 'private-collection-value', enabled: true }, { id: 'private-collection-secret', name: 'token', value: '', enabled: true, valueType: 'secret' }] },
+    ];
+    workspace.collections[0].activeSubEnvironmentId = 'private-collection';
 
     const safe = exportArtifact(workspace, { format: 'brunomnia', scope: 'all' });
     expect(safe.contents).not.toContain('device-secret');
     expect(safe.contents).not.toContain('child-secret');
+    expect(safe.contents).not.toContain('private-collection-value');
     expect(JSON.parse(safe.contents).environments.some((environment: { id: string }) => environment.id === 'private-root')).toBe(false);
+    expect(JSON.parse(safe.contents).collections[0].subEnvironments.map((environment: { id: string }) => environment.id)).toEqual(['shared-collection']);
+    expect(JSON.parse(safe.contents).collections[0].activeSubEnvironmentId).toBe('');
 
     const consented = exportArtifact(workspace, { format: 'brunomnia', scope: 'all', includePrivateEnvironments: true });
     expect(consented.contents).toContain('device-secret');
     expect(consented.contents).toContain('child-secret');
+    expect(consented.contents).toContain('private-collection-value');
     expect(consented.contents).not.toContain('private-secret-row');
+    expect(consented.contents).not.toContain('private-collection-secret');
     expect(consented.warnings).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'private-environment-export' }), expect.objectContaining({ code: 'environment-secrets-omitted' })]));
   });
 });

@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { KeyValueEditor } from './App';
+import { cloneSeedWorkspace } from './data/seed';
+import { CollectionDocumentPanel, KeyValueEditor } from './App';
 import type { VaultEntry } from './lib/security';
 
 const entry: VaultEntry = {
@@ -29,5 +30,16 @@ describe('private environment Secret row rendering', () => {
     expect(locked).toContain('Unlock vault to edit');
     expect(locked).toContain('disabled=""');
     expect(locked).not.toContain('private-value');
+  });
+
+  it('exposes Secret controls only for a selected private collection environment', () => {
+    const collection = cloneSeedWorkspace().collections[0];
+    collection.subEnvironments = [{ id: 'private', name: 'Device', private: true, variables: [{ id: 'secret-row', name: 'api_token', value: '', enabled: true, valueType: 'secret' }] }];
+    collection.activeSubEnvironmentId = 'private';
+    const markup = renderToStaticMarkup(<CollectionDocumentPanel collection={collection} documentTabStrip={null} onChange={vi.fn()} onVaultEntriesChange={vi.fn()} vaultSaveError="" vaultSession={{ unlocked: true, passphrase: 'passphrase', entries: [entry] }} />);
+    expect(markup).toContain('PRIVATE');
+    expect(markup).toContain('Private on this device');
+    expect(markup).toContain('Reveal secret value for api_token');
+    expect(markup).toContain('type="password"');
   });
 });

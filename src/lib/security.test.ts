@@ -41,11 +41,18 @@ describe('encrypted collaboration boundaries', () => {
       { id: 'private-child', name: 'Private child', parentId: 'base-environment', private: true, variables: [] },
       { id: 'private-descendant', name: 'Private descendant', parentId: 'private-child', variables: [] },
     );
+    workspace.collections[0].subEnvironments = [
+      { id: 'shared-collection', name: 'Shared collection', variables: [] },
+      { id: 'private-collection', name: 'Private collection', private: true, variables: [{ id: 'secret-row', name: 'token', value: '', enabled: true, valueType: 'secret' }] },
+    ];
+    workspace.collections[0].activeSubEnvironmentId = 'private-collection';
     workspace.activeEnvironmentId = 'private-descendant';
     const shared = shareableWorkspace(workspace);
     expect(shared.environments.map((environment) => environment.id)).not.toContain('private-child');
     expect(shared.environments.map((environment) => environment.id)).not.toContain('private-descendant');
     expect(shared.environments.some((environment) => environment.id === shared.activeEnvironmentId)).toBe(true);
+    expect(shared.collections[0].subEnvironments?.map((environment) => environment.id)).toEqual(['shared-collection']);
+    expect(shared.collections[0].activeSubEnvironmentId).toBe('');
   });
 
   it('preserves device-local data and the current actor while applying a pulled revision', () => {
@@ -58,9 +65,13 @@ describe('encrypted collaboration boundaries', () => {
     current.certificates = { ca: { enabled: true, pem: 'local-ca' }, clients: [{ id: 'cert', host: 'local.test', enabled: true, certificatePem: '', keyPem: '', pfxBase64: 'cGZ4', passphrase: 'secret' }] };
     current.fileState[current.collections[0].id] = { cookies: [], certificates: current.certificates };
     current.collections[0].requests[0].auth = { ...current.collections[0].requests[0].auth, type: 'oauth2', accessToken: 'local-access', refreshToken: 'local-refresh', expiresAt: 123 };
+    current.collections[0].subEnvironments = [{ id: 'local-private', name: 'Local private', private: true, variables: [] }];
+    current.collections[0].activeSubEnvironmentId = 'local-private';
     const remote = cloneSeedWorkspace();
     remote.name = 'Remote workspace';
     remote.collections[0].requests[0].auth = { ...remote.collections[0].requests[0].auth, type: 'oauth2', clientId: 'remote-client' };
+    remote.collections[0].subEnvironments = [{ id: 'remote-shared', name: 'Remote shared', variables: [] }];
+    remote.collections[0].activeSubEnvironmentId = 'remote-shared';
     remote.governance.members.push({ id: 'remote-editor', name: 'Remote editor', email: '', role: 'editor', active: true });
     remote.governance.currentMemberId = 'remote-editor';
 
@@ -75,6 +86,8 @@ describe('encrypted collaboration boundaries', () => {
     expect(merged.fileState[current.collections[0].id]).toEqual(current.fileState[current.collections[0].id]);
     expect(merged.governance.currentMemberId).toBe('local-owner');
     expect(merged.collections[0].requests[0].auth).toMatchObject({ accessToken: 'local-access', refreshToken: 'local-refresh', expiresAt: 123 });
+    expect(merged.collections[0].subEnvironments?.map((environment) => environment.id)).toEqual(['remote-shared', 'local-private']);
+    expect(merged.collections[0].activeSubEnvironmentId).toBe('local-private');
   });
 
   it('exposes vault-prefixed variables only while the vault is unlocked and bounds audit retention', () => {

@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { cloneSeedWorkspace } from '../data/seed';
 import type { KeyValue, Workspace } from '../types';
 import {
+  collectionEnvironmentSecretVariables,
+  collectionWithoutPrivateEnvironments,
   directVaultEntries,
   duplicateEnvironmentSecrets,
   environmentSecretVariables,
   environmentSecretValue,
+  mergePrivateCollectionEnvironments,
   removeEnvironmentSecrets,
   upsertEnvironmentSecret,
   withoutEnvironmentSecrets,
@@ -36,9 +40,43 @@ describe('private environment secret vault mapping', () => {
   });
 
   it('removes secret metadata from a workspace when its vault is reset', () => {
-    const workspace = {
+    const workspace: Workspace = {
+      ...cloneSeedWorkspace(),
+      collections: [{ id: 'collection', name: 'Collection', expanded: true, requests: [], subEnvironments: [{ id: 'private-collection', name: 'Private collection', private: true, variables: [secretRow('collection-secret', 'collectionToken')] }], activeSubEnvironmentId: 'private-collection' }],
       environments: [{ id: 'base', name: 'Base', variables: [{ id: 'plain', name: 'region', value: 'us', enabled: true }, secretRow('secret', 'token')], environmentEditorMode: 'table', parentId: '', private: true, color: '' }],
-    } as Workspace;
+    };
     expect(withoutEnvironmentSecrets(workspace).environments[0].variables).toEqual([{ id: 'plain', name: 'region', value: 'us', enabled: true }]);
+    expect(withoutEnvironmentSecrets(workspace).collections[0].subEnvironments?.[0].variables).toEqual([]);
+  });
+
+  it('scopes selected private collection aliases without leaking another collection', () => {
+    const entries = upsertEnvironmentSecret([], 'collection-secret', 'collection-value', () => 'collection-entry');
+    const session: VaultSession = { unlocked: true, passphrase: 'passphrase', entries };
+    const collection = { id: 'one', name: 'One', expanded: true, requests: [], activeSubEnvironmentId: 'private', subEnvironments: [{ id: 'private', name: 'Private', private: true, variables: [secretRow('collection-secret', 'token')] }] };
+    expect(collectionEnvironmentSecretVariables(collection, session)).toEqual({ 'vault.token': 'collection-value' });
+    expect(collectionEnvironmentSecretVariables({ ...collection, id: 'two', activeSubEnvironmentId: '' }, session)).toEqual({});
+    expect(collectionEnvironmentSecretVariables({ ...collection, subEnvironments: [{ ...collection.subEnvironments[0], private: false }] }, session)).toEqual({});
+  });
+
+  it('omits private collection environments from sharing and restores them after a pull', () => {
+    const current = [{ id: 'collection', name: 'Local', expanded: true, requests: [], activeSubEnvironmentId: 'private', subEnvironments: [
+      { id: 'shared', name: 'Shared', variables: [{ id: 'shared-row', name: 'region', value: 'west', enabled: true }] },
+      { id: 'private', name: 'Private', private: true, variables: [secretRow('private-row', 'token')] },
+    ] }];
+    const shareable = collectionWithoutPrivateEnvironments(current[0]);
+    expect(shareable.subEnvironments?.map((environment) => environment.id)).toEqual(['shared']);
+    expect(shareable.activeSubEnvironmentId).toBe('');
+    const consented = collectionWithoutPrivateEnvironments(current[0], true);
+    expect(consented.subEnvironments?.map((environment) => environment.id)).toEqual(['shared', 'private']);
+    expect(consented.subEnvironments?.[1].variables).toEqual([]);
+
+    const remote = [{ id: 'collection', name: 'Remote', expanded: true, requests: [], activeSubEnvironmentId: 'remote', subEnvironments: [
+      { id: 'remote', name: 'Remote shared', variables: [] },
+      { id: 'private', name: 'Untrusted collision', variables: [] },
+    ] }];
+    const merged = mergePrivateCollectionEnvironments(current, remote);
+    expect(merged[0].name).toBe('Remote');
+    expect(merged[0].subEnvironments?.map((environment) => environment.name)).toEqual(['Remote shared', 'Private']);
+    expect(merged[0].activeSubEnvironmentId).toBe('private');
   });
 });

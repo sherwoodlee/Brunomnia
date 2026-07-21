@@ -1,3 +1,5 @@
+#[cfg(not(test))]
+use crate::platform_keyring;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ring::{
     aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM},
@@ -5,7 +7,7 @@ use ring::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-#[cfg(target_os = "macos")]
+#[cfg(not(test))]
 use std::sync::OnceLock;
 use std::{collections::HashMap, sync::Mutex};
 
@@ -13,18 +15,20 @@ const ENVELOPE_FIELD: &str = "protectedRuntimeCredentials";
 const ENVELOPE_VERSION: u8 = 1;
 const PAYLOAD_VERSION: u8 = 1;
 const ALGORITHM: &str = "AES-256-GCM";
-const KEY_PROVIDER: &str = "macOS Keychain";
-#[cfg(target_os = "macos")]
+const KEY_PROVIDER: &str = "OS credential store";
+const LEGACY_KEY_PROVIDER: &str = "macOS Keychain";
+#[cfg(not(test))]
 const KEYCHAIN_SERVICE: &str = "dev.brunomnia.desktop.runtime-credentials";
-#[cfg(target_os = "macos")]
+#[cfg(not(test))]
 const KEYCHAIN_ACCOUNT: &str = "workspace-master-key-v1";
 const MASTER_KEY_BYTES: usize = 32;
 const NONCE_BYTES: usize = 12;
 const TAG_BYTES: usize = 16;
 const MAX_PAYLOAD_BYTES: usize = 5_000_000;
 const MAX_ENCODED_CIPHERTEXT_BYTES: usize = 7_000_000;
+#[cfg(not(test))]
 static KEYCHAIN_LOCK: Mutex<()> = Mutex::new(());
-#[cfg(target_os = "macos")]
+#[cfg(not(test))]
 static MASTER_KEY_CACHE: OnceLock<[u8; MASTER_KEY_BYTES]> = OnceLock::new();
 #[cfg(test)]
 static TEST_MASTER_KEY: Mutex<Option<[u8; MASTER_KEY_BYTES]>> = Mutex::new(None);
@@ -493,7 +497,10 @@ fn decrypt_payload(
 ) -> Result<RuntimeCredentialPayload, String> {
     if envelope.version != ENVELOPE_VERSION
         || envelope.algorithm != ALGORITHM
-        || envelope.key_provider != KEY_PROVIDER
+        || !matches!(
+            envelope.key_provider.as_str(),
+            KEY_PROVIDER | LEGACY_KEY_PROVIDER
+        )
         || envelope.nonce.len() > 64
         || envelope.ciphertext.len() > MAX_ENCODED_CIPHERTEXT_BYTES
     {
@@ -543,57 +550,80 @@ fn test_master_key() -> Option<[u8; MASTER_KEY_BYTES]> {
     *TEST_MASTER_KEY.lock().unwrap()
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(test)]
 fn master_key() -> Result<[u8; MASTER_KEY_BYTES], String> {
-    use security_framework::passwords::{get_generic_password, set_generic_password};
+    test_master_key().ok_or_else(|| "The runtime credential test key is unavailable.".into())
+}
+
+#[cfg(all(not(test), target_os = "macos"))]
+fn legacy_master_key() -> Result<Option<Vec<u8>>, String> {
+    use security_framework::passwords::get_generic_password;
     const ITEM_NOT_FOUND: i32 = -25_300;
-    #[cfg(test)]
-    if let Some(key) = test_master_key() {
-        return Ok(key);
+    match get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+        Ok(key) => Ok(Some(key)),
+        Err(error) if error.code() == ITEM_NOT_FOUND => Ok(None),
+        Err(error) => Err(format!(
+            "The legacy runtime credential key could not be read from macOS Keychain: {error}"
+        )),
     }
+}
+
+#[cfg(all(not(test), target_os = "macos"))]
+fn delete_legacy_master_key() -> Result<(), String> {
+    use security_framework::passwords::delete_generic_password;
+    const ITEM_NOT_FOUND: i32 = -25_300;
+    match delete_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+        Ok(()) => Ok(()),
+        Err(error) if error.code() == ITEM_NOT_FOUND => Ok(()),
+        Err(error) => Err(format!(
+            "The legacy runtime credential key could not be removed from macOS Keychain: {error}"
+        )),
+    }
+}
+
+#[cfg(not(test))]
+fn master_key() -> Result<[u8; MASTER_KEY_BYTES], String> {
     if let Some(key) = MASTER_KEY_CACHE.get() {
         return Ok(*key);
     }
     let _guard = KEYCHAIN_LOCK
         .lock()
-        .map_err(|_| "The runtime credential Keychain lock is unavailable.".to_string())?;
+        .map_err(|_| "The runtime credential-store lock is unavailable.".to_string())?;
     if let Some(key) = MASTER_KEY_CACHE.get() {
         return Ok(*key);
     }
-    let key = match get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-        Ok(key) => key.try_into().map_err(|_| {
-            "The macOS Keychain runtime credential key has an invalid length.".to_string()
-        })?,
-        Err(error) if error.code() == ITEM_NOT_FOUND => {
-            let mut key = [0_u8; MASTER_KEY_BYTES];
-            SystemRandom::new().fill(&mut key).map_err(|_| {
-                "The operating system could not generate a runtime credential key.".to_string()
-            })?;
-            set_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &key).map_err(|error| {
-                format!("The runtime credential key could not be saved in macOS Keychain: {error}")
-            })?;
-            key
+    let stored = platform_keyring::read(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, MASTER_KEY_BYTES)?;
+    #[cfg(target_os = "macos")]
+    let stored = if stored.is_none() {
+        if let Some(legacy) = legacy_master_key()? {
+            platform_keyring::write(
+                KEYCHAIN_SERVICE,
+                KEYCHAIN_ACCOUNT,
+                &legacy,
+                MASTER_KEY_BYTES,
+            )?;
+            delete_legacy_master_key()?;
+            Some(legacy)
+        } else {
+            None
         }
-        Err(error) => {
-            return Err(format!(
-                "The runtime credential key could not be read from macOS Keychain: {error}"
-            ))
-        }
+    } else {
+        stored
+    };
+    let key = if let Some(stored) = stored {
+        stored.try_into().map_err(|_| {
+            "The operating-system runtime credential key has an invalid length.".to_string()
+        })?
+    } else {
+        let mut key = [0_u8; MASTER_KEY_BYTES];
+        SystemRandom::new().fill(&mut key).map_err(|_| {
+            "The operating system could not generate a runtime credential key.".to_string()
+        })?;
+        platform_keyring::write(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &key, MASTER_KEY_BYTES)?;
+        key
     };
     let _ = MASTER_KEY_CACHE.set(key);
     Ok(key)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn master_key() -> Result<[u8; MASTER_KEY_BYTES], String> {
-    #[cfg(test)]
-    if let Some(key) = test_master_key() {
-        return Ok(key);
-    }
-    let _guard = KEYCHAIN_LOCK
-        .lock()
-        .map_err(|_| "The runtime credential protection lock is unavailable.".to_string())?;
-    Err("OS-protected runtime credential storage is not available on this platform.".into())
 }
 
 pub fn is_protected(workspace: &Value) -> bool {
