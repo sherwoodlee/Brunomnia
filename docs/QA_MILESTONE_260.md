@@ -44,7 +44,15 @@ Rendered/manual QA remains omitted under the standing project direction. M260 th
 
 ## Remote gate
 
-Pending implementation push and immutable GitHub workflow evidence.
+Implementation commit `b5bdf0ffd98112263cc3058a9f5d2d206171d588` plus CLI-bundle metadata correction `c56ecb405d59ce08db0c27f176c3424e832cccb3` are on remote `main`. The correction removes nonessential package scripts so the unchanged committed CLI remains reproducible; the replacement [CLI container run 29792678066](https://github.com/sherwoodlee/Brunomnia/actions/runs/29792678066) and [Mock server container run 29792678127](https://github.com/sherwoodlee/Brunomnia/actions/runs/29792678127) both passed.
+
+The mock workflow reproduced the serializer test, Rust formatting/tests/Clippy, standalone live-reload smoke, non-root/read-only verification image, and constrained request smoke before publishing and signing:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-mock-server@sha256:26273fc25e33a5396f2c5375d393d7418592a04171f33dacee04ddf3f26e1fb3
+```
+
+Independent manifest inspection resolved AMD64 `sha256:0f98e29fd59815e0d34f862b9cd18878fb978ffeeccb89d6da6b2b2d108cada1`, ARM64 `sha256:3418033e26140a83207754ee68621d5bbe39583e63bba13563a0e5bb8fab65a7`, and attached attestation manifests `sha256:0d38b2b4eb772736f870b54af81587f830ffb3e19f0ccaadc9e50d836560c4f3` plus `sha256:b4297f1b24cd8d992235f24fd394c0410c8c7c9a3961645869b2010f37dc7188`. Independent Cosign verification passed claims, trusted certificate-chain validation, exact issuer `https://token.actions.githubusercontent.com`, exact subject `https://github.com/sherwoodlee/Brunomnia/.github/workflows/mock-server-container.yml@refs/heads/main`, branch, repository, workflow, correction SHA, digest claims, and offline transparency-log inclusion at Rekor index `2209488474`.
 
 ## Acceptance boundary
 
