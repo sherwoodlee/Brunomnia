@@ -14,7 +14,7 @@ import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import type { ArtifactImport } from './lib/interchange/types';
 import { applyContextualPluginActionResult, applyPluginTheme, contextualPluginActionsFor, createPluginRuntime, describePlugin, discoverContextualPluginActions, pluginActionAuthorityKey, resolveContextualPluginActionInvocation, runPluginAction, type ContextualPluginAction, type PluginActionTarget, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
-import { plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
+import { autoUnlockSavedVault, plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
 import { defaultPreferences, shortcutMatches } from './lib/preferences';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWorkspaceEnvironment, duplicateWorkspaceFolder, environmentAncestors, folderAncestors, folderPath, keyboardWorkspaceEnvironmentMove, keyboardWorkspaceResourceMove, moveWorkspaceEnvironment, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
 import type { WorkspaceEnvironmentMove, WorkspaceResourceKeyboardAction, WorkspaceResourceMove } from './lib/resources';
@@ -1572,6 +1572,16 @@ export default function App() {
     if (!hydrated || !isTauri()) return;
     void invoke('oauth2_configure_session', { clearOnRestart: workspace.preferences.clearOAuth2SessionOnRestart }).catch(() => undefined);
   }, [hydrated, workspace.preferences.clearOAuth2SessionOnRestart]);
+
+  useEffect(() => {
+    if (!hydrated || !activeWorkspaceId || !isTauri()) return;
+    let cancelled = false;
+    void autoUnlockSavedVault(activeWorkspaceId).then((entries) => {
+      if (cancelled || !entries) return;
+      setVaultSession((current) => current.unlocked ? current : { unlocked: true, passphrase: '', entries });
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [activeWorkspaceId, hydrated]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspaceId || requestPinState.workspaceId !== activeWorkspaceId) return;

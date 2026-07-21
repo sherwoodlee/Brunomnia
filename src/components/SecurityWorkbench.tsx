@@ -6,19 +6,24 @@ import {
   clearExternalSecretCache,
   encryptedSyncStatus,
   externalSecretReferenceKey,
+  forgetVaultKey,
   mergeSyncedWorkspace,
   plaintextSecretCandidates,
   pullEncryptedSync,
   pushEncryptedSync,
+  retainVaultKey,
   resolveExternalSecret,
   resetVault,
   saveVault,
+  saveVaultWithSavedKey,
   shareableWorkspace,
   unlockVault,
+  vaultKeyStatus,
   vaultStatus,
   type SecureFileStatus,
   type ExternalSecretInput,
   type VaultEntry,
+  type VaultKeyStatus,
   type VaultSession,
 } from '../lib/security';
 import type { GovernanceMember, GovernanceRole, Workspace } from '../types';
@@ -36,13 +41,31 @@ type SecurityWorkbenchProps = {
 };
 
 const blankStatus: SecureFileStatus = { exists: false, updatedAt: '' };
+const blankKeyStatus: VaultKeyStatus = { supported: false, retained: false };
 const roles: GovernanceRole[] = ['owner', 'admin', 'editor', 'viewer'];
 const secretId = () => `secret-${crypto.randomUUID()}`;
 const memberId = () => `member-${crypto.randomUUID()}`;
 
+type VaultKeyRetentionControlProps = {
+  supported: boolean;
+  retained: boolean;
+  canRetain: boolean;
+  busy: boolean;
+  onToggle: () => void;
+};
+
+export function VaultKeyRetentionControl({ supported, retained, canRetain, busy, onToggle }: VaultKeyRetentionControlProps) {
+  if (!supported) return <small>Automatic vault-key retention requires macOS Keychain.</small>;
+  return <>
+    <label className="reveal-toggle"><input checked={retained} disabled={busy || (!retained && !canRetain)} onChange={onToggle} type="checkbox" /> Save encrypted vault key locally</label>
+    <small>{retained ? 'macOS Keychain can unlock this project without returning the saved key to the renderer.' : 'Unlock the vault manually to enable optional macOS Keychain retention.'}</small>
+  </>;
+}
+
 export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vaultSession, onVaultSession, onChangeWorkspace }: SecurityWorkbenchProps) {
   const [tab, setTab] = useState<'vault' | 'certificates' | 'sync' | 'governance'>('vault');
   const [status, setStatus] = useState<SecureFileStatus>(blankStatus);
+  const [keyStatus, setKeyStatus] = useState<VaultKeyStatus>(blankKeyStatus);
   const [syncStatus, setSyncStatus] = useState<SecureFileStatus>(blankStatus);
   const [syncPassphrase, setSyncPassphrase] = useState('');
   const [forcePush, setForcePush] = useState(false);
@@ -92,30 +115,67 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
   useEffect(() => {
     if (!native) return;
     let cancelled = false;
-    void vaultStatus(workspaceId).then((next) => { if (!cancelled) setStatus(next); }).catch((caught) => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)); });
+    setStatus(blankStatus);
+    setKeyStatus(blankKeyStatus);
+    void Promise.all([vaultStatus(workspaceId), vaultKeyStatus(workspaceId)]).then(([nextStatus, nextKeyStatus]) => {
+      if (!cancelled) {
+        setStatus(nextStatus);
+        setKeyStatus(nextKeyStatus);
+      }
+    }).catch((caught) => { if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught)); });
     return () => { cancelled = true; };
   }, [native, workspaceId]);
 
   const vaultNames = useMemo(() => new Set(vaultSession.entries.map((entry) => entry.name.trim().toLowerCase())), [vaultSession.entries]);
   const unlockOrCreate = () => run(status.exists ? 'Unlocking vault' : 'Creating vault', async () => {
+    const passphrase = vaultSession.passphrase;
     if (status.exists) {
-      const entries = await unlockVault(workspaceId, vaultSession.passphrase);
+      const entries = await unlockVault(workspaceId, passphrase);
       onVaultSession({ ...vaultSession, entries, unlocked: true });
+      if (keyStatus.retained) setKeyStatus(await retainVaultKey(workspaceId, passphrase));
       audit('vault.unlock', `Unlocked ${entries.length} encrypted secret entries.`);
       setMessage(`Vault unlocked · ${entries.length} secret${entries.length === 1 ? '' : 's'} available in memory.`);
     } else {
-      const next = await saveVault(workspaceId, vaultSession.passphrase, []);
+      const next = await saveVault(workspaceId, passphrase, []);
       setStatus(next); onVaultSession({ ...vaultSession, entries: [], unlocked: true });
+      if (keyStatus.retained) setKeyStatus(await retainVaultKey(workspaceId, passphrase));
       audit('vault.create', 'Created the encrypted local vault.');
       setMessage('Encrypted local vault created and unlocked.');
     }
   });
 
   const persistVault = () => run('Encrypting vault', async () => {
-    const next = await saveVault(workspaceId, vaultSession.passphrase, vaultSession.entries);
+    const next = vaultSession.passphrase
+      ? await saveVault(workspaceId, vaultSession.passphrase, vaultSession.entries)
+      : await saveVaultWithSavedKey(workspaceId, vaultSession.entries);
     setStatus(next); audit('vault.save', `Saved ${vaultSession.entries.length} encrypted secret entries.`);
     setMessage(`Encrypted ${vaultSession.entries.length} secret${vaultSession.entries.length === 1 ? '' : 's'} to the local vault.`);
   });
+
+  const toggleSavedKey = () => {
+    const retaining = !keyStatus.retained;
+    const confirmed = window.confirm(retaining
+      ? 'Save this project’s encrypted vault key in macOS Keychain?'
+      : 'Remove this project’s encrypted vault key from macOS Keychain? You will need to enter it again.');
+    if (!confirmed) return;
+    void run(retaining ? 'Saving encrypted vault key' : 'Removing encrypted vault key', async () => {
+      if (retaining) {
+        const next = await retainVaultKey(workspaceId, vaultSession.passphrase);
+        setKeyStatus(next);
+        audit('vault.key.retain', 'Saved the encrypted local vault key in macOS Keychain.');
+        setMessage('Encrypted vault key saved locally in macOS Keychain.');
+      } else {
+        const next = await forgetVaultKey(workspaceId);
+        setKeyStatus(next);
+        if (!vaultSession.passphrase) {
+          onVaultSession({ unlocked: false, passphrase: '', entries: [] });
+          setRevealed(false);
+        }
+        audit('vault.key.forget', 'Removed the encrypted local vault key from macOS Keychain.');
+        setMessage(vaultSession.passphrase ? 'Saved vault key removed. The current in-memory vault remains unlocked.' : 'Saved vault key removed. Enter the passphrase to unlock the vault again.');
+      }
+    });
+  };
 
   const addSecret = () => {
     const name = newSecretName.trim();
@@ -171,10 +231,10 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
       <nav className="security-tabs" aria-label="Security sections"><button className={tab === 'vault' ? 'active' : ''} onClick={() => setTab('vault')} type="button">Local vault</button><button className={tab === 'certificates' ? 'active' : ''} onClick={() => setTab('certificates')} type="button">Certificates</button><button className={tab === 'sync' ? 'active' : ''} onClick={() => setTab('sync')} type="button">Encrypted sync</button><button className={tab === 'governance' ? 'active' : ''} onClick={() => setTab('governance')} type="button">Governance & audit</button></nav>{tab === 'certificates' ? <CertificateManager canEdit={Boolean(canEdit)} certificates={getWorkspaceFileState(workspace, workspaceFileId).certificates} onChange={(certificates) => onChangeWorkspace((current) => updateWorkspaceFileState(current, workspaceFileId, (state) => ({ ...state, certificates })))} /> : null}
 
       {tab === 'vault' ? <div className="security-grid vault-grid">
-        <section className="security-card vault-control"><header><div><small>AES-256-GCM · PBKDF2-SHA256</small><h2>{vaultSession.unlocked ? 'Vault unlocked in memory' : status.exists ? 'Unlock local vault' : 'Create local vault'}</h2></div><Icon name="lock" size={24} /></header>{!native ? <p>The browser build cannot access the encrypted application-data file. Use the Tauri desktop app.</p> : vaultSession.unlocked ? <><div className="vault-actions"><button onClick={() => { onVaultSession({ unlocked: false, passphrase: '', entries: [] }); setRevealed(false); setMessage('Vault locked and decrypted values cleared from application memory.'); }} type="button">Lock and clear memory</button><button disabled={!canEdit || Boolean(busy)} onClick={persistVault} type="button">Save encrypted vault</button></div><label className="reveal-toggle"><input checked={revealed} onChange={(event) => setRevealed(event.target.checked)} type="checkbox" /> Reveal secret values on this screen</label></> : <><label>Encryption passphrase<input autoComplete="off" type="password" value={vaultSession.passphrase} onChange={(event) => onVaultSession({ ...vaultSession, passphrase: event.target.value })} /></label><button disabled={vaultSession.passphrase.length < 12 || Boolean(busy)} onClick={unlockOrCreate} type="button">{status.exists ? 'Unlock vault' : 'Create encrypted vault'}</button><small>The passphrase is kept only in memory and is never saved.</small></>}</section>
+        <section className="security-card vault-control"><header><div><small>AES-256-GCM · PBKDF2-SHA256</small><h2>{vaultSession.unlocked ? 'Vault unlocked in memory' : status.exists ? 'Unlock local vault' : 'Create local vault'}</h2></div><Icon name="lock" size={24} /></header>{!native ? <p>The browser build cannot access the encrypted application-data file. Use the Tauri desktop app.</p> : vaultSession.unlocked ? <><div className="vault-actions"><button onClick={() => { onVaultSession({ unlocked: false, passphrase: '', entries: [] }); setRevealed(false); setMessage('Vault locked and decrypted values cleared from application memory.'); }} type="button">Lock and clear memory</button><button disabled={!canEdit || Boolean(busy) || (!vaultSession.passphrase && !keyStatus.retained)} onClick={persistVault} type="button">Save encrypted vault</button></div><label className="reveal-toggle"><input checked={revealed} onChange={(event) => setRevealed(event.target.checked)} type="checkbox" /> Reveal secret values on this screen</label></> : <><label>Encryption passphrase<input autoComplete="off" type="password" value={vaultSession.passphrase} onChange={(event) => onVaultSession({ ...vaultSession, passphrase: event.target.value })} /></label><button disabled={vaultSession.passphrase.length < 12 || Boolean(busy)} onClick={unlockOrCreate} type="button">{status.exists ? 'Unlock vault' : 'Create encrypted vault'}</button><small>The passphrase stays in memory unless you explicitly retain it in macOS Keychain.</small></>}{native && status.exists ? <VaultKeyRetentionControl busy={Boolean(busy)} canRetain={vaultSession.unlocked && vaultSession.passphrase.length >= 12} onToggle={toggleSavedKey} retained={keyStatus.retained} supported={keyStatus.supported} /> : null}</section>
         <section className="security-card vault-entries"><header><div><small>Request syntax</small><h2>{'{{ vault.secret_name }}'}</h2></div><span>{vaultSession.entries.length} entries</span></header>{vaultSession.unlocked ? <><div className="vault-new"><input placeholder="secret_name" value={newSecretName} onChange={(event) => setNewSecretName(event.target.value)} /><input placeholder="Secret value" type={revealed ? 'text' : 'password'} value={newSecretValue} onChange={(event) => setNewSecretValue(event.target.value)} /><button disabled={!canEdit} onClick={addSecret} type="button">Add</button></div><div className="vault-list">{vaultSession.entries.map((entry) => <article key={entry.id}><input aria-label={`${entry.name} name`} disabled={!canEdit} value={entry.name} onChange={(event) => onVaultSession({ ...vaultSession, entries: vaultSession.entries.map((candidate) => candidate.id === entry.id ? { ...candidate, name: event.target.value, updatedAt: new Date().toISOString() } : candidate) })} /><input aria-label={`${entry.name} value`} disabled={!canEdit} type={revealed ? 'text' : 'password'} value={entry.value} onChange={(event) => onVaultSession({ ...vaultSession, entries: vaultSession.entries.map((candidate) => candidate.id === entry.id ? { ...candidate, value: event.target.value, updatedAt: new Date().toISOString() } : candidate) })} /><button disabled={!canEdit} onClick={() => onVaultSession({ ...vaultSession, entries: vaultSession.entries.filter((candidate) => candidate.id !== entry.id) })} type="button"><Icon name="trash" size={14} /></button></article>)}{!vaultSession.entries.length ? <p>No secrets yet. Values exist only in memory until you save the encrypted vault.</p> : null}</div></> : <div className="empty-state"><Icon name="lock" size={28} /><strong>Vault is locked</strong><span>Unlock it to resolve vault-prefixed request variables.</span></div>}</section>
         <section className="security-card external-vault-card"><header><div><small>Official CLI credential chains</small><h2>External vault resolver</h2></div><span>30 minute memory cache</span></header><div className="external-vault-fields"><label>Provider<select disabled={!native} value={external.provider} onChange={(event) => setExternal({ ...external, provider: event.target.value as ExternalSecretInput['provider'] })}><option value="aws">AWS Secrets Manager</option><option value="gcp">GCP Secret Manager</option><option value="azure">Azure Key Vault</option><option value="hashicorp">HashiCorp Vault</option></select></label><label>Secret reference<input disabled={!native} value={external.reference} onChange={(event) => setExternal({ ...external, reference: event.target.value })} placeholder={external.provider === 'hashicorp' ? 'secret/data/orders' : 'orders-api-token'} /></label><label>{external.provider === 'aws' ? 'Region' : external.provider === 'gcp' ? 'Project' : external.provider === 'azure' ? 'Vault name' : 'Scope (unused)'}<input disabled={!native} value={external.scope} onChange={(event) => setExternal({ ...external, scope: event.target.value })} /></label><label>{external.provider === 'hashicorp' ? 'Field' : 'Field (provider default)'}<input disabled={!native} value={external.field} onChange={(event) => setExternal({ ...external, field: event.target.value })} placeholder={external.provider === 'hashicorp' ? 'token' : ''} /></label><label>Version / stage<input disabled={!native} value={external.version} onChange={(event) => setExternal({ ...external, version: event.target.value })} placeholder="latest" /></label></div><code>{`{% external '${external.provider}', '${external.reference || 'secret-reference'}', '${external.scope ?? ''}', '${external.field ?? ''}', '${external.version ?? ''}' %}`}</code><div className="vault-actions"><button disabled={!native || !external.reference || Boolean(busy)} onClick={() => run('Resolving external secret', async () => { const value = await resolveExternalSecret(external); audit('external-vault.resolve', `Resolved a ${external.provider} secret through its official CLI credential chain.`); setMessage(`External secret resolved successfully · ${new TextEncoder().encode(value).length} bytes cached in memory.`); })} type="button">Test without revealing</button><button disabled={!canGovern || !external.reference} onClick={toggleExternalApproval} type="button">{externalApproved ? 'Revoke request use' : 'Approve for requests'}</button><button disabled={!native || Boolean(busy)} onClick={() => run('Clearing external cache', async () => { await clearExternalSecretCache(); audit('external-vault.cache.clear', 'Cleared the in-memory external secret cache.'); setMessage('External secret cache cleared.'); })} type="button">Clear cache</button></div><p>Brunomnia never stores provider credentials here. Authenticate with the installed aws, gcloud, az, or vault CLI. Explicit approval is required before an imported or edited request can resolve each complete provider/reference/scope/field/version tuple.</p></section>
-        {native && status.exists && !vaultSession.unlocked ? <section className="security-card danger-zone"><header><h2>Recovery boundary</h2></header><p>Brunomnia cannot recover a lost passphrase. Reset permanently deletes this project's encrypted local vault.</p><button onClick={() => { if (!window.confirm('Permanently delete this project’s encrypted local vault?')) return; void run('Resetting vault', async () => { await resetVault(workspaceId); setStatus(blankStatus); onVaultSession({ unlocked: false, passphrase: '', entries: [] }); audit('vault.reset', 'Permanently reset the project encrypted local vault.'); }); }} type="button">Reset encrypted vault</button></section> : null}
+        {native && status.exists && !vaultSession.unlocked ? <section className="security-card danger-zone"><header><h2>Recovery boundary</h2></header><p>Brunomnia cannot recover a lost passphrase. Reset permanently deletes this project's encrypted local vault and any saved Keychain key.</p><button onClick={() => { if (!window.confirm('Permanently delete this project’s encrypted local vault?')) return; void run('Resetting vault', async () => { await resetVault(workspaceId); setStatus(blankStatus); setKeyStatus((current) => ({ ...current, retained: false })); onVaultSession({ unlocked: false, passphrase: '', entries: [] }); audit('vault.reset', 'Permanently reset the project encrypted local vault.'); }); }} type="button">Reset encrypted vault</button></section> : null}
       </div> : null}
 
       {tab === 'sync' ? <div className="security-grid sync-grid"><section className="security-card"><header><div><small>Revision checked</small><h2>Encrypted shared file</h2></div><span>Revision {workspace.collaboration.revision}</span></header><label>Shared file path<input disabled={!native} value={workspace.collaboration.path} onChange={(event) => updateCollaboration({ mode: event.target.value ? 'encrypted-file' : 'off', path: event.target.value })} placeholder="/Volumes/team/orders.brunomnia-sync.json" /></label><label>Actor label<input value={workspace.collaboration.actor} onChange={(event) => updateCollaboration({ actor: event.target.value })} placeholder={currentMember?.name || 'Local collaborator'} /></label><label>Shared passphrase<input autoComplete="off" type="password" value={syncPassphrase} onChange={(event) => setSyncPassphrase(event.target.value)} /></label>{plaintextSecrets.length ? <div className="policy-warning"><strong>Vault policy blocked {plaintextSecrets.length} plaintext candidate{plaintextSecrets.length === 1 ? '' : 's'}</strong><span>{plaintextSecrets.slice(0, 4).join(' · ')}</span></div> : null}<div className="sync-actions"><button disabled={!native || !workspace.collaboration.path || syncPassphrase.length < 12 || Boolean(busy)} onClick={pull} type="button">Pull and decrypt</button><button disabled={!native || !workspace.collaboration.path || syncPassphrase.length < 12 || !canEdit || Boolean(busy)} onClick={push} type="button">Encrypt and push</button><button disabled={!native || !workspace.collaboration.path || Boolean(busy)} onClick={() => run('Inspecting sync file', async () => { const next = await encryptedSyncStatus(workspace.collaboration.path); setSyncStatus(next); setMessage(next.exists ? `Encrypted sync file updated ${new Date(next.updatedAt).toLocaleString()}.` : 'No encrypted sync file exists yet.'); })} type="button">Check</button></div><label className="force-toggle"><input checked={forcePush} onChange={(event) => setForcePush(event.target.checked)} type="checkbox" /> Explicitly force past a revision mismatch on the next push</label>{syncStatus.updatedAt ? <small>Encrypted file updated {new Date(syncStatus.updatedAt).toLocaleString()}</small> : null}</section><section className="security-card"><header><div><small>Shareable scope</small><h2>What crosses the boundary</h2></div><Icon name="archive" size={22} /></header><ul><li>Collections, environments, designs, mocks, and governance metadata are encrypted before writing.</li><li>History, responses, cookies, reports, Git paths, plugins, plugin data, vault contents, and the shared-file path stay local.</li><li>A mismatched base revision blocks push until you pull or deliberately select force.</li></ul><p>This file can live on a self-hosted file share, mounted WebDAV volume, or another user-controlled synchronization system. Real-time presence and server-mediated comments are not claimed yet.</p></section></div> : null}

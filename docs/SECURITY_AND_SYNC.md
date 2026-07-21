@@ -6,7 +6,9 @@ Milestone 7 adds a local security control plane without an account or subscripti
 
 The Tauri desktop app stores `local-vault.enc.json` in its application-data directory. The envelope uses AES-256-GCM with a random 128-bit salt, random 96-bit nonce, and a key derived from the user passphrase using PBKDF2-HMAC-SHA256 at 210,000 iterations. Encrypted files have a 50 MB read limit. Writes use a unique create-only temporary file, flush before replacement, reject symlinks, and use mode `0600` on Unix.
 
-The passphrase and decrypted entries exist only in renderer memory while the vault is unlocked. Locking clears both. Losing the passphrase is intentionally unrecoverable; reset deletes the encrypted file after explicit confirmation.
+By default, the passphrase and decrypted entries exist only in renderer memory while the vault is unlocked. Locking clears both. The optional **Save encrypted vault key locally** control validates the current project vault and stores that project's passphrase as a generic-password item protected by macOS Keychain. No native command returns the saved passphrase: the renderer can inspect only supported/retained booleans, request an unlock that returns decrypted entries, or request a save that reuses the native key. The active project automatically attempts that operation-specific unlock on startup and project switch.
+
+Saved keys are scoped by validated local project ID. A saved key survives soft deletion and restore with its encrypted vault, but reset, individual permanent purge, and Empty Trash remove it. A key that no longer authenticates the current vault is treated as stale and removed before manual entry is requested. Browser development and non-macOS Tauri builds do not claim OS-backed vault-key retention. Losing both the passphrase and its Keychain item is intentionally unrecoverable; reset deletes the encrypted file and saved item after explicit confirmation.
 
 Use a secret in any normal request field with:
 

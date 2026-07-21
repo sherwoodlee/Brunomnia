@@ -9,6 +9,7 @@ import { publicEnvironments } from './resources';
 export type VaultEntry = { id: string; name: string; value: string; updatedAt: string };
 export type VaultSession = { unlocked: boolean; passphrase: string; entries: VaultEntry[] };
 export type SecureFileStatus = { exists: boolean; updatedAt: string };
+export type VaultKeyStatus = { supported: boolean; retained: boolean };
 export type SyncPayload = { revision: number; actor: string; savedAt: string; workspace: unknown };
 export type ExternalSecretInput = { provider: 'aws' | 'gcp' | 'azure' | 'hashicorp'; reference: string; scope?: string; field?: string; version?: string; cacheSeconds?: number };
 
@@ -29,6 +30,38 @@ export const unlockVault = async (workspaceId: string, passphrase: string) => {
 export const saveVault = async (workspaceId: string, passphrase: string, entries: VaultEntry[]) => {
   nativeOnly();
   return invoke<SecureFileStatus>('secure_vault_save', { workspaceId, input: { passphrase, entries } });
+};
+
+export const vaultKeyStatus = async (workspaceId: string) => {
+  nativeOnly();
+  return invoke<VaultKeyStatus>('secure_vault_key_status', { workspaceId });
+};
+
+export const retainVaultKey = async (workspaceId: string, passphrase: string) => {
+  nativeOnly();
+  return invoke<VaultKeyStatus>('secure_vault_key_retain', { workspaceId, passphrase });
+};
+
+export const forgetVaultKey = async (workspaceId: string) => {
+  nativeOnly();
+  return invoke<VaultKeyStatus>('secure_vault_key_forget', { workspaceId });
+};
+
+export const unlockVaultWithSavedKey = async (workspaceId: string) => {
+  nativeOnly();
+  return invoke<VaultEntry[]>('secure_vault_unlock_saved', { workspaceId });
+};
+
+export const saveVaultWithSavedKey = async (workspaceId: string, entries: VaultEntry[]) => {
+  nativeOnly();
+  return invoke<SecureFileStatus>('secure_vault_save_saved', { workspaceId, entries });
+};
+
+export const autoUnlockSavedVault = async (workspaceId: string) => {
+  nativeOnly();
+  const [file, key] = await Promise.all([vaultStatus(workspaceId), vaultKeyStatus(workspaceId)]);
+  if (!file.exists || !key.supported || !key.retained) return undefined;
+  return unlockVaultWithSavedKey(workspaceId);
 };
 
 export const resetVault = async (workspaceId: string) => {

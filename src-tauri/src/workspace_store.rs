@@ -1,4 +1,4 @@
-use crate::{runtime_credentials, workspace_physical_store};
+use crate::{runtime_credentials, vault_keychain, workspace_physical_store};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1832,6 +1832,7 @@ pub fn purge_trash(root: &Path, workspace_id: &str, deleted_at: i64) -> Result<(
     if paths.is_empty() && record_directories.is_empty() && !has_snapshots {
         return Err("This deleted-project recovery copy no longer exists.".into());
     }
+    vault_keychain::forget(workspace_id)?;
     for path in paths {
         fs::remove_file(path).map_err(|error| error.to_string())?;
     }
@@ -1847,7 +1848,8 @@ pub fn purge_trash(root: &Path, workspace_id: &str, deleted_at: i64) -> Result<(
 pub fn empty_trash(root: &Path) -> Result<usize, String> {
     let groups = collect_trash_files(root)?;
     let mut removed = 0;
-    for files in groups.into_values() {
+    for ((workspace_id, _), files) in groups {
+        vault_keychain::forget(&workspace_id)?;
         for path in [files.workspace, files.backup, files.vault, files.metadata]
             .into_iter()
             .flatten()
@@ -2010,6 +2012,88 @@ mod tests {
         assert_eq!(created.active_workspace_id, initial.active_workspace_id);
         assert_eq!(created.workspace["name"], "Coordinator");
         assert_eq!(read(&root, "managed").unwrap()["name"], "Managed");
+    }
+
+    #[test]
+    fn retains_saved_vault_keys_through_trash_restore_and_forgets_on_permanent_purge() {
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("workspaces");
+        load(&root, None, &workspace("Coordinator")).unwrap();
+        let workspace_id = format!("saved-vault-{}", Uuid::new_v4());
+        create(&root, &workspace_id, &workspace("Saved vault")).unwrap();
+        let vault = root.join("vaults").join(format!("{workspace_id}.enc.json"));
+        crate::secure_store::vault_save(
+            &vault,
+            crate::secure_store::VaultSaveInput {
+                passphrase: "saved project vault passphrase".into(),
+                entries: vec![crate::secure_store::VaultEntry {
+                    id: "secret-one".into(),
+                    name: "token".into(),
+                    value: "secret".into(),
+                    updated_at: Utc::now().to_rfc3339(),
+                }],
+            },
+        )
+        .unwrap();
+        crate::vault_keychain::retain(
+            &workspace_id,
+            &vault,
+            "saved project vault passphrase".into(),
+        )
+        .unwrap();
+
+        delete(&root, &workspace_id).unwrap();
+        assert!(
+            crate::vault_keychain::status(&workspace_id)
+                .unwrap()
+                .retained
+        );
+        let trashed = list_trash(&root).unwrap();
+        let deleted_at = trashed
+            .iter()
+            .find(|entry| entry.workspace_id == workspace_id)
+            .unwrap()
+            .deleted_at;
+        restore_trash(&root, &workspace_id, deleted_at).unwrap();
+        assert_eq!(
+            crate::vault_keychain::unlock_saved(&workspace_id, &vault).unwrap()[0].value,
+            "secret"
+        );
+
+        delete(&root, &workspace_id).unwrap();
+        let deleted_at = list_trash(&root)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.workspace_id == workspace_id)
+            .unwrap()
+            .deleted_at;
+        purge_trash(&root, &workspace_id, deleted_at).unwrap();
+        assert!(
+            !crate::vault_keychain::status(&workspace_id)
+                .unwrap()
+                .retained
+        );
+
+        let empty_id = format!("empty-vault-{}", Uuid::new_v4());
+        create(&root, &empty_id, &workspace("Empty vault lifecycle")).unwrap();
+        let empty_vault = root.join("vaults").join(format!("{empty_id}.enc.json"));
+        crate::secure_store::vault_save(
+            &empty_vault,
+            crate::secure_store::VaultSaveInput {
+                passphrase: "empty trash vault passphrase".into(),
+                entries: Vec::new(),
+            },
+        )
+        .unwrap();
+        crate::vault_keychain::retain(
+            &empty_id,
+            &empty_vault,
+            "empty trash vault passphrase".into(),
+        )
+        .unwrap();
+        delete(&root, &empty_id).unwrap();
+        assert!(empty_trash(&root).unwrap() > 0);
+        assert!(!crate::vault_keychain::status(&empty_id).unwrap().retained);
     }
 
     #[test]

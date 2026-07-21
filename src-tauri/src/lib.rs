@@ -22,6 +22,7 @@ mod secure_store;
 mod specification_source;
 mod streaming;
 mod template_os;
+mod vault_keychain;
 mod workspace_physical_store;
 mod workspace_store;
 
@@ -789,9 +790,52 @@ async fn secure_vault_save(
 }
 
 #[tauri::command]
+async fn secure_vault_key_status(
+    workspace_id: String,
+) -> Result<vault_keychain::VaultKeyStatus, String> {
+    blocking(move || vault_keychain::status(&workspace_id)).await
+}
+
+#[tauri::command]
+async fn secure_vault_key_retain(
+    app: AppHandle,
+    workspace_id: String,
+    passphrase: String,
+) -> Result<vault_keychain::VaultKeyStatus, String> {
+    let path = vault_path(&app, &workspace_id)?;
+    blocking(move || vault_keychain::retain(&workspace_id, &path, passphrase)).await
+}
+
+#[tauri::command]
+async fn secure_vault_key_forget(
+    workspace_id: String,
+) -> Result<vault_keychain::VaultKeyStatus, String> {
+    blocking(move || vault_keychain::forget(&workspace_id)).await
+}
+
+#[tauri::command]
+async fn secure_vault_unlock_saved(
+    app: AppHandle,
+    workspace_id: String,
+) -> Result<Vec<secure_store::VaultEntry>, String> {
+    let path = vault_path(&app, &workspace_id)?;
+    blocking(move || vault_keychain::unlock_saved(&workspace_id, &path)).await
+}
+
+#[tauri::command]
+async fn secure_vault_save_saved(
+    app: AppHandle,
+    workspace_id: String,
+    entries: Vec<secure_store::VaultEntry>,
+) -> Result<secure_store::SecureFileStatus, String> {
+    let path = vault_path(&app, &workspace_id)?;
+    blocking(move || vault_keychain::save_saved(&workspace_id, &path, entries)).await
+}
+
+#[tauri::command]
 async fn secure_vault_reset(app: AppHandle, workspace_id: String) -> Result<(), String> {
     let path = vault_path(&app, &workspace_id)?;
-    blocking(move || secure_store::vault_reset(&path)).await
+    blocking(move || vault_keychain::reset(&workspace_id, &path)).await
 }
 
 #[tauri::command]
@@ -1134,6 +1178,11 @@ pub fn run() {
             secure_vault_status,
             secure_vault_unlock,
             secure_vault_save,
+            secure_vault_key_status,
+            secure_vault_key_retain,
+            secure_vault_key_forget,
+            secure_vault_unlock_saved,
+            secure_vault_save_saved,
             secure_vault_reset,
             secure_sync_status,
             secure_sync_pull,

@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the two-hundred-sixty-seventh runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> This is the two-hundred-sixty-ninth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
 
 ## What works now
 
@@ -40,7 +40,7 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Three-way text conflict editing, binary ours/theirs resolution, and explicit merge abort without silently discarding local changes
 - Local CommonJS plugins with disabled-by-default pasted, linked-package, or bounded npm/custom-registry installation; same-origin metadata redirects, confined HTTPS/custom-origin tarballs, per-package SHA-1 verification, identity-aware same-package updates with unchanged-authority retention and changed-code reset, reviewable multi-file JavaScript/JSON/CJS modules plus bounded local/remote pure-CommonJS production graphs, baseline `buffer`/`path`/`crypto`, explicitly granted `events`, pinned `uuid` 11.1.1 and `ajv` 8.18.0, or reviewed dependencies, explicit source reload, request/response hooks, template tags, request/folder/workspace/document actions with pinned request/folder/design menu placement, style-aware themes, plugin-local storage, and the documented request/response/context-data helpers
 - A time-limited Worker boundary for plugin code, exact manifest/availability denials, mediated network/dialog/prompt/clipboard/path/import/export access, opt-in CLI hooks and tags, and automatic capability/module grant removal when source, package requests, reloads, or an imported workspace changes authority
-- A passphrase-derived AES-256-GCM local vault whose decrypted values exist only in memory and resolve through `{{ vault.name }}`
+- A passphrase-derived AES-256-GCM local vault whose decrypted values resolve through `{{ vault.name }}`, with optional per-project macOS Keychain retention and account-free automatic unlock
 - AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and HashiCorp Vault template adapters through user-authenticated official CLIs, an in-memory cache, and an explicit per-reference-tuple allowlist
 - End-to-end encrypted shared-file revisions with optimistic conflict checks, explicit force, device-local data filtering, and self-hosted filesystem/WebDAV compatibility
 - Local owner/admin/editor/viewer metadata, storage and plaintext-secret policies, bounded audit records, and governance migration hardening

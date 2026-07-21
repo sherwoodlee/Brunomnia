@@ -101,7 +101,7 @@ Compatibility bounds remain explicit: Git credential setup uses the user's insta
 
 | Capability | Status | Notes |
 | --- | --- | --- |
-| Local secret vault | Complete baseline | AES-256-GCM envelope, PBKDF2-HMAC-SHA256 with 210,000 iterations, random salt/nonce, 0600 temporary files on Unix, atomic replacement, passphrase never persisted, explicit lock/reset, and `vault.*` request variables |
+| Local secret vault | Complete baseline | AES-256-GCM envelope, PBKDF2-HMAC-SHA256 with 210,000 iterations, random salt/nonce, 0600 temporary files on Unix, atomic replacement, default memory-only passphrase handling, optional per-project macOS Keychain retention, explicit lock/reset, and `vault.*` request variables |
 | Plaintext-secret policy | Complete baseline | Detects likely environment values (including disabled ones), credential headers/query fields, URL credentials, authentication, Netrc, and client-private-key values; blocks managed-project writes/stage/commit/push and encrypted-sync push until values use local-vault or external-vault references |
 | External vaults | Complete baseline | AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and HashiCorp Vault via installed official CLIs and their existing credential chains; 30-minute memory cache with a 20 MB/256-entry bound, 30-second process limit, 10 MB output limit, no shell, and a per-provider/reference/scope/field/version workspace allowlist |
 | Encrypted collaboration | Complete baseline | Passphrase-derived AES-GCM shared file, filtered shareable scope, monotonic revisions, optimistic base-revision conflict rejection, pull, explicit force push, and compatibility with a user-controlled mounted share/WebDAV/sync folder |
@@ -109,7 +109,7 @@ Compatibility bounds remain explicit: Git credential setup uses the user's insta
 | Workspace migration | Complete | Versions 1–6 migrate to v7 collaboration/governance fields; malformed roles, policies, actors, audit events, revisions, and allowed storage modes are normalized safely |
 | Documentation and evidence | Complete | [Security and encrypted sync guide](SECURITY_AND_SYNC.md) and [Milestone 7 verification](QA_MILESTONE_7.md) |
 
-Compatibility bounds remain explicit: shared-file encryption uses one team passphrase rather than per-user public-key wrapping; synchronization is pull/push rather than real-time presence; server-mediated comments, per-resource Cloud Sync branches/history, offline merge UI, and automatic device discovery remain. Local roles are policy metadata and action checks, not strong identity authentication. Self-hosted SAML/OIDC login, SCIM provisioning, tamper-evident remote audit storage, provider SDK login flows, OS-keychain wrapping, and script access to external providers remain later closure work. Milestone 134 later closes explicitly granted HTTP/GraphQL CLI external-vault tags.
+Compatibility bounds remain explicit: shared-file encryption uses one team passphrase rather than per-user public-key wrapping; synchronization is pull/push rather than real-time presence; server-mediated comments, per-resource Cloud Sync branches/history, offline merge UI, and automatic device discovery remain. Local roles are policy metadata and action checks, not strong identity authentication. Self-hosted SAML/OIDC login, SCIM provisioning, tamper-evident remote audit storage, provider SDK login flows, other provider-secret Keychain adapters, and script access to external providers remain later closure work. Milestones 239, 254, and 269 later add Keychain protection for OAuth runtime credentials, reusable Git credentials, and optional local-vault keys; Milestone 134 closes explicitly granted HTTP/GraphQL CLI external-vault tags.
 
 ## Milestone 8 — MCP, AI, and service integrations (complete baseline)
 
@@ -2706,6 +2706,18 @@ Compatibility bounds remain explicit: lifecycle/install scripts, native addons, 
 | Verification | Complete | Catalog filtering, placement rendering, target binding, stale-authority rejection, focused/full frontend, production/CLI build, native regression, formatting, and strict Clippy evidence is recorded in [Milestone 268 verification](QA_MILESTONE_268.md) |
 
 Compatibility bounds remain explicit: native addons/install scripts, ESM/export maps, conflicting multi-version graphs, peer/alias/Git/HTTP/file/workspace specifications, ambient Node/process compatibility, broader plugin-ecosystem compatibility, and CLI host RPC/user-invoked actions remain. Pinned production settings expose no registry-token field, so registry authentication is not carried as a parity gap. `Plugins and extension API` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 269 — optional macOS Keychain local-vault keys (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned storage audit | Complete | Pinned Insomnia exposes **Save encrypted vault key locally**, writes through secret storage only when enabled, deletes when disabled, and automatically retrieves the saved account key later |
+| Native Keychain boundary | Complete baseline | Validated project IDs map to isolated generic-password items; status exposes only supported/retained booleans, while dedicated unlock/save operations consume the key natively and never return it to React |
+| Automatic continuity | Complete baseline | Startup and project switching attempt saved-key unlock only for an existing encrypted vault; manually unlocked sessions can opt in or out, and saved-key sessions can persist edited entries without renderer key access |
+| Lifecycle integrity | Complete | Soft delete/restore retains the matching key; vault reset, individual permanent purge, and Empty remove it; a key that fails authenticated decryption is removed as stale before manual entry |
+| Verification | Complete | Key scoping, stale replacement, saved-key save, reset/trash lifecycle, renderer command authority, exact label rendering, TypeScript, frontend/native suites, build, formatting, and strict Clippy evidence is recorded in [Milestone 269 verification](QA_MILESTONE_269.md) |
+
+Compatibility bounds remain explicit: OS-backed local-vault key retention is available in the packaged macOS target, not browser development or non-macOS Tauri builds. External-provider native login SDKs, other provider-secret stores, script access to external providers, and broader secret-field UX remain. `Secrets and external vaults` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
 ## Architectural boundaries
 
