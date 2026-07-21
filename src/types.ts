@@ -439,7 +439,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 46;
+  version: 47;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -471,7 +471,7 @@ export type Workspace = {
   preferences: AppPreferences;
 };
 
-export type ShortcutAction = 'palette' | 'preferences' | 'send' | 'environment' | 'history' | 'toggle-sidebar' | 'new-request' | 'duplicate-request' | 'delete-request' | 'focus-url' | 'generate-code';
+export type ShortcutAction = 'palette' | 'preferences' | 'send' | 'environment' | 'history' | 'toggle-sidebar' | 'new-request' | 'duplicate-request' | 'delete-request' | 'focus-url' | 'generate-code' | 'close-tab' | 'next-tab' | 'previous-tab' | 'reopen-closed-tab' | 'open-request-new-tab';
 
 export type PreferredHttpVersion = 'default' | 'http1.0' | 'http1.1' | 'http2' | 'http2-prior-knowledge';
 
@@ -515,7 +515,7 @@ export type AppPreferences = {
   enableVaultInScripts: boolean;
   autoFetchGraphqlSchema: boolean;
   confirmDestructive: boolean;
-  shortcuts: Record<ShortcutAction, string>;
+  shortcuts: Record<ShortcutAction, string[]>;
 };
 
 export type McpTool = {

@@ -23,6 +23,7 @@ import { activeRunnerResultPane, parseRunnerNumberDraft, reorderRunnerPlan, runn
 import type { ScriptTestFilter } from '../lib/scriptTests';
 import { formatResponseTimeline } from '../lib/timeline';
 import { applyCollectionConfiguration, folderAncestors, persistEffectiveAuthentication, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes } from '../lib/resources';
+import { shortcutEventOwner } from '../lib/preferences';
 import { applyScriptSubresponse, runBrowserScript } from '../lib/scriptSandbox';
 import { readDesktopScriptFile, readDesktopTemplateFile } from '../lib/scriptFiles';
 import { storeResponseCookies } from '../lib/cookies';
@@ -616,6 +617,7 @@ function RunnerWorkbench({ workspace, workspaceId, activeEnvironment, vault, onC
 
   useEffect(() => {
     const runFromShortcut = (event: KeyboardEvent) => {
+      if (shortcutEventOwner(workspace.preferences.shortcuts, event) !== 'send') return;
       if (!runnerShortcutShouldStart(event, workspace.preferences.shortcuts.send, Boolean(collection && selectedRequestIds.length && !running))) return;
       event.preventDefault();
       void start();

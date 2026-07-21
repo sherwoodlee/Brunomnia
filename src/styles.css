@@ -1860,12 +1860,17 @@ kbd {
 .preference-toggle input { accent-color: var(--accent); height: 13px; width: 13px; }
 .keyboard-card { margin-top: 18px; max-width: 930px; }
 .shortcut-list { border: 1px solid var(--border-soft); }
-.shortcut-list label { align-items: center; border-bottom: 1px solid var(--border-soft); display: grid; gap: 20px; grid-template-columns: minmax(180px, 1fr) minmax(170px, .45fr); min-height: 53px; padding: 7px 10px; }
-.shortcut-list label:last-child { border-bottom: 0; }
-.shortcut-list label > span { display: flex; flex-direction: column; gap: 3px; }
+.shortcut-row { align-items: center; border-bottom: 1px solid var(--border-soft); display: grid; gap: 12px; grid-template-columns: minmax(180px, .7fr) minmax(280px, 1fr) auto; min-height: 53px; padding: 7px 10px; }
+.shortcut-row:last-child { border-bottom: 0; }
+.shortcut-row > span { display: flex; flex-direction: column; gap: 3px; }
 .shortcut-list strong { font-size: 9px; }
 .shortcut-list small { color: var(--faint); font: 7px var(--font-mono); }
 .shortcut-list input:focus { border-color: var(--accent); }
+.shortcut-bindings { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
+.shortcut-bindings code { align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 3px; display: inline-flex; font: 8px var(--font-mono); gap: 5px; padding: 5px 6px; white-space: nowrap; }
+.shortcut-bindings code button { background: transparent; border: 0; color: var(--muted); font-size: 13px; line-height: 1; padding: 0; }
+.shortcut-bindings input { flex: 1 1 130px; max-width: 180px; }
+.shortcut-reset { min-width: 48px; }
 
 .send-options-modal { width: min(560px, calc(100vw - 32px)); }
 .send-options-fields { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; padding: 19px 22px 4px; }
@@ -2153,7 +2158,7 @@ kbd {
   .preferences-card { margin: 12px; }
   .preferences-grid > .preferences-card { margin: 0; }
   .preference-fields { grid-template-columns: minmax(0, 1fr); }
-  .shortcut-list label { gap: 10px; grid-template-columns: minmax(130px, 1fr) minmax(130px, .7fr); }
+  .shortcut-row { gap: 10px; grid-template-columns: minmax(120px, .55fr) minmax(170px, 1fr) auto; }
   .send-options-fields { grid-template-columns: minmax(0, 1fr); }
   .environment-modal, .folder-modal { height: calc(100vh - 18px); width: calc(100vw - 18px); }
   .environment-layout { display: block; overflow: auto; }

@@ -44,9 +44,9 @@ export const parseRunnerNumberDraft = (draft: string, minimum: number, maximum: 
   return Number.isFinite(value) && value >= minimum && value <= maximum ? value : undefined;
 };
 
-export const runnerShortcutLabel = (shortcut: string) => normalizeShortcut(shortcut).replace('Mod', '⌘/Ctrl');
+export const runnerShortcutLabel = (shortcut: string | readonly string[]) => normalizeShortcut(Array.isArray(shortcut) ? shortcut[0] ?? '' : shortcut).replace('Mod', '⌘/Ctrl') || 'Unassigned';
 
-export const runnerShortcutShouldStart = (event: KeyboardEvent, shortcut: string, canStart: boolean) =>
+export const runnerShortcutShouldStart = (event: KeyboardEvent, shortcut: string | readonly string[], canStart: boolean) =>
   canStart && !event.repeat && shortcutMatches(event, shortcut);
 
 export const runnerLayoutDirection = (forceVerticalLayout: boolean): RunnerPaneDirection =>

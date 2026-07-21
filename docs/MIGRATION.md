@@ -2755,6 +2755,18 @@ Compatibility bounds remain explicit: the protected profile store remains macOS-
 
 Compatibility bounds remain explicit: local Secret rows require the encrypted local vault and are limited to private global environments like the pinned source. Insomnia account-vault ciphertext cannot be decrypted without its non-portable key. Silent Azure background renewal, non-macOS protected profile stores, and script access to external providers remain. `Secrets and external vaults` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 273 — multi-binding tab keyboard shortcuts (complete baseline increment)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned registry audit | Complete | Pinned source exposes 34 named actions, platform binding lists, duplicate prevention, add/remove, per-action reset, and reset-all rather than one mutable string per action |
+| Bounded binding model | Complete baseline | Workspace v47 migrates legacy strings into deduplicated lists, preserves explicit empty assignments, limits each action to eight normalized combinations, and deep-clones defaults |
+| Editor lifecycle | Complete baseline | Sixteen current actions expose every binding with capture-to-add, independent removal, per-action reset, reset-all, limit feedback, and visible legacy-collision evidence; new duplicates are refused |
+| Tab and Runner dispatch | Complete | Close, next, previous, reopen, and keep-request-tab now use editable bindings instead of hidden listeners; first-owner collision semantics apply consistently to the request workbench and Runner capture path |
+| Verification | Complete | Normalization/migration/matching/ownership/Runner/static-editor regressions, TypeScript, full frontend, production/CLI build, native regression, formatting, and strict Clippy evidence is recorded in [Milestone 273 verification](QA_MILESTONE_273.md) |
+
+Compatibility bounds remain explicit: M273 establishes the pinned multi-binding behavior for sixteen actions but does not claim the remaining eighteen pinned actions. A complete accessibility audit, updater, desktop signing/notarization, and Windows/Linux desktop release artifacts also remain. `Preferences, shortcuts, themes, accessibility, and packaging` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

@@ -59,9 +59,9 @@ Open **Preferences** from the activity rail, command palette, or its editable sh
 - a 1–60 second script deadline plus separate off-by-default secondary-request, local-file, and local-vault script authorities, with an explicit desktop data-folder allowlist for script attachments;
 - automatic GraphQL introspection;
 - request-deletion confirmation; and
-- eleven editable keyboard bindings.
+- sixteen editable keyboard actions with up to eight bindings each, including close/next/previous/reopen and keep-request-tab lifecycle actions.
 
-Click a shortcut field and press a combination. `Mod` maps to Command on macOS and Control elsewhere. Duplicate bindings are shown and only the first matching action runs. Press Backspace to clear a binding or use **Reset defaults**.
+Focus **Press shortcut** and press a combination to add it. `Mod` maps to Command on macOS and Control elsewhere. Remove combinations individually, reset one action, or use **Reset all**. New duplicates are refused; legacy collisions remain visible and only the first registry owner runs across the request workbench and Runner. Removing every combination leaves that action explicitly unassigned after reload.
 
 Preferences stay on this device. Split-YAML folder/Git projects omit them, encrypted-sync pulls preserve the current device's values, and imported workspace files start with safe defaults. Plugin themes take precedence while active.
 

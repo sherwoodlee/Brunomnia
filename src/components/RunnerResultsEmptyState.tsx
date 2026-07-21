@@ -1,7 +1,7 @@
 import { runnerShortcutLabel } from '../lib/runnerPlan';
 import { Icon } from './Icon';
 
-export function RunnerResultsEmptyState({ hasSavedReport, shortcut }: { hasSavedReport: boolean; shortcut: string }) {
+export function RunnerResultsEmptyState({ hasSavedReport, shortcut }: { hasSavedReport: boolean; shortcut: string | readonly string[] }) {
   return (
     <div className="empty-state compact">
       <Icon name="history" size={28} />

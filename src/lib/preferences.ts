@@ -12,21 +12,35 @@ export const shortcutLabels: Record<ShortcutAction, string> = {
   'delete-request': 'Delete request',
   'focus-url': 'Focus request URL',
   'generate-code': 'Generate client code',
+  'close-tab': 'Close active tab',
+  'next-tab': 'Next tab',
+  'previous-tab': 'Previous tab',
+  'reopen-closed-tab': 'Reopen closed tab',
+  'open-request-new-tab': 'Keep request in a new tab',
 };
 
 export const defaultShortcuts: AppPreferences['shortcuts'] = {
-  palette: 'Mod+K',
-  preferences: 'Mod+,',
-  send: 'Mod+Enter',
-  environment: 'Mod+E',
-  history: 'Mod+Shift+H',
-  'toggle-sidebar': 'Mod+\\',
-  'new-request': 'Mod+N',
-  'duplicate-request': 'Mod+D',
-  'delete-request': 'Mod+Shift+Backspace',
-  'focus-url': 'Mod+L',
-  'generate-code': 'Mod+Shift+G',
+  palette: ['Mod+K'],
+  preferences: ['Mod+,'],
+  send: ['Mod+Enter'],
+  environment: ['Mod+E'],
+  history: ['Mod+Shift+H'],
+  'toggle-sidebar': ['Mod+\\'],
+  'new-request': ['Mod+N'],
+  'duplicate-request': ['Mod+D'],
+  'delete-request': ['Mod+Shift+Backspace'],
+  'focus-url': ['Mod+L'],
+  'generate-code': ['Mod+Shift+G'],
+  'close-tab': ['Mod+W'],
+  'next-tab': ['Mod+Alt+ArrowRight', 'Mod+Tab'],
+  'previous-tab': ['Mod+Alt+ArrowLeft', 'Mod+Shift+Tab'],
+  'reopen-closed-tab': ['Mod+Shift+T'],
+  'open-request-new-tab': ['Mod+Shift+O'],
 };
+
+export const cloneShortcuts = (shortcuts: AppPreferences['shortcuts']): AppPreferences['shortcuts'] => Object.fromEntries(
+  (Object.entries(shortcuts) as Array<[ShortcutAction, string[]]>).map(([action, bindings]) => [action, [...bindings]]),
+) as AppPreferences['shortcuts'];
 
 export const defaultPreferences: AppPreferences = {
   theme: 'system',
@@ -68,7 +82,7 @@ export const defaultPreferences: AppPreferences = {
   enableVaultInScripts: false,
   autoFetchGraphqlSchema: true,
   confirmDestructive: true,
-  shortcuts: { ...defaultShortcuts },
+  shortcuts: cloneShortcuts(defaultShortcuts),
 };
 
 const canonicalPart = (value: string) => {
@@ -81,21 +95,31 @@ const canonicalPart = (value: string) => {
   return value;
 };
 const modifier = (value: string) => value === 'Meta' || value === 'Control' || value === 'Alt' || value === 'Shift';
+const canonicalKeys: Record<string, string> = {
+  enter: 'Enter', tab: 'Tab', space: 'Space', backspace: 'Backspace', delete: 'Delete', escape: 'Escape',
+  arrowup: 'ArrowUp', arrowdown: 'ArrowDown', arrowleft: 'ArrowLeft', arrowright: 'ArrowRight',
+  home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown',
+};
+const canonicalKey = (value: string) => canonicalKeys[value.toLowerCase()] ?? (/^f\d{1,2}$/i.test(value) ? value.toUpperCase() : value.length === 1 ? value.toUpperCase() : value);
 
 export const normalizeShortcut = (value: string): string => {
   const pieces = value.split('+').map((piece) => canonicalPart(piece.trim())).filter(Boolean);
-  const mods = [...new Set(pieces.filter((piece) => modifier(piece) || piece === 'Mod'))];
-  const key = pieces.find((piece) => !modifier(piece) && piece !== 'Mod') ?? '';
-  return key ? [...mods, key.length === 1 ? key.toUpperCase() : key].join('+') : '';
+  const presentModifiers = new Set<string>(pieces.filter((piece) => modifier(piece) || piece === 'Mod'));
+  if (presentModifiers.has('Mod') && (presentModifiers.has('Meta') || presentModifiers.has('Control'))) return '';
+  const keys = pieces.filter((piece) => !modifier(piece) && piece !== 'Mod');
+  if (keys.length !== 1) return '';
+  const mods = ['Mod', 'Meta', 'Control', 'Alt', 'Shift'].filter((piece) => presentModifiers.has(piece));
+  return [...mods, canonicalKey(keys[0])].join('+');
 };
 
 export const shortcutFromEvent = (event: KeyboardEvent): string => {
+  if (event.metaKey && event.ctrlKey) return '';
   const mods = [event.metaKey || event.ctrlKey ? 'Mod' : '', event.altKey ? 'Alt' : '', event.shiftKey ? 'Shift' : ''].filter(Boolean);
   const key = event.key === ' ' ? 'Space' : event.key.length === 1 ? event.key.toUpperCase() : event.key;
   return modifier(event.key) ? '' : normalizeShortcut([...mods, key].join('+'));
 };
 
-export const shortcutMatches = (event: KeyboardEvent, shortcut: string): boolean => {
+const shortcutBindingMatches = (event: KeyboardEvent, shortcut: string): boolean => {
   const normalized = normalizeShortcut(shortcut);
   if (!normalized) return false;
   const parts = new Set(normalized.split('+'));
@@ -103,18 +127,42 @@ export const shortcutMatches = (event: KeyboardEvent, shortcut: string): boolean
   const requiresMeta = parts.has('Meta');
   const requiresControl = parts.has('Control');
   if (requiresMod) {
-    if (!(event.metaKey || event.ctrlKey)) return false;
+    if (event.metaKey === event.ctrlKey) return false;
   } else if (requiresMeta !== event.metaKey || requiresControl !== event.ctrlKey) return false;
   if (parts.has('Alt') !== event.altKey || parts.has('Shift') !== event.shiftKey) return false;
   const key = [...parts].find((part) => !['Mod', 'Meta', 'Control', 'Alt', 'Shift'].includes(part));
   return Boolean(key && key.toLowerCase() === event.key.toLowerCase());
 };
 
+export const shortcutMatches = (event: KeyboardEvent, shortcuts: string | readonly string[]): boolean => (Array.isArray(shortcuts) ? shortcuts : [shortcuts]).some((shortcut) => shortcutBindingMatches(event, shortcut));
+
+export const normalizeShortcutBindings = (value: unknown, fallback: readonly string[]): string[] => {
+  if (value === undefined) return [...fallback];
+  const candidates = typeof value === 'string' ? [value] : Array.isArray(value) ? value : undefined;
+  if (!candidates) return [...fallback];
+  return [...new Set(candidates
+    .filter((candidate): candidate is string => typeof candidate === 'string')
+    .map((candidate) => normalizeShortcut(candidate.slice(0, 64)))
+    .filter(Boolean))].slice(0, 8);
+};
+
+export const shortcutDisplayLabel = (shortcuts: readonly string[]) => shortcuts[0]?.replace('Mod', '⌘/Ctrl') ?? 'Unassigned';
+
+export const shortcutBindingOwner = (shortcuts: AppPreferences['shortcuts'], value: string): ShortcutAction | undefined => {
+  const normalized = normalizeShortcut(value);
+  if (!normalized) return undefined;
+  return (Object.entries(shortcuts) as Array<[ShortcutAction, string[]]>).find(([, bindings]) => bindings.some((binding) => normalizeShortcut(binding) === normalized))?.[0];
+};
+
+export const shortcutEventOwner = (shortcuts: AppPreferences['shortcuts'], event: KeyboardEvent): ShortcutAction | undefined => (Object.entries(shortcuts) as Array<[ShortcutAction, string[]]>).find(([, bindings]) => shortcutMatches(event, bindings))?.[0];
+
 export const duplicateShortcuts = (shortcuts: AppPreferences['shortcuts']): string[] => {
   const seen = new Map<string, ShortcutAction[]>();
-  (Object.entries(shortcuts) as Array<[ShortcutAction, string]>).forEach(([action, value]) => {
-    const normalized = normalizeShortcut(value);
-    if (normalized) seen.set(normalized, [...(seen.get(normalized) ?? []), action]);
+  (Object.entries(shortcuts) as Array<[ShortcutAction, string[]]>).forEach(([action, bindings]) => {
+    bindings.forEach((value) => {
+      const normalized = normalizeShortcut(value);
+      if (normalized) seen.set(normalized, [...(seen.get(normalized) ?? []), action]);
+    });
   });
   return [...seen.entries()].filter(([, actions]) => actions.length > 1).map(([shortcut]) => shortcut);
 };

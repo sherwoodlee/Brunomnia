@@ -52,11 +52,11 @@ describe('Runner request-plan selection', () => {
 
   it('uses the configured Send shortcut only for runnable non-repeat events', () => {
     const event = { key: 'Enter', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, repeat: false } as KeyboardEvent;
-    expect(runnerShortcutShouldStart(event, 'Mod+Enter', true)).toBe(true);
-    expect(runnerShortcutShouldStart(event, 'Mod+Enter', false)).toBe(false);
-    expect(runnerShortcutShouldStart({ ...event, repeat: true } as KeyboardEvent, 'Mod+Enter', true)).toBe(false);
-    expect(runnerShortcutShouldStart(event, 'Mod+Shift+Enter', true)).toBe(false);
-    expect(runnerShortcutLabel(' mod + Enter ')).toBe('⌘/Ctrl+Enter');
+    expect(runnerShortcutShouldStart(event, ['F5', 'Mod+Enter'], true)).toBe(true);
+    expect(runnerShortcutShouldStart(event, ['Mod+Enter'], false)).toBe(false);
+    expect(runnerShortcutShouldStart({ ...event, repeat: true } as KeyboardEvent, ['Mod+Enter'], true)).toBe(false);
+    expect(runnerShortcutShouldStart(event, ['Mod+Shift+Enter'], true)).toBe(false);
+    expect(runnerShortcutLabel([' mod + Enter ', 'F5'])).toBe('⌘/Ctrl+Enter');
   });
 
   it('maps the forced layout preference to the Runner pane direction', () => {

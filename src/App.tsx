@@ -16,7 +16,7 @@ import type { ArtifactImport } from './lib/interchange/types';
 import { applyContextualPluginActionResult, applyPluginTheme, contextualPluginActionsFor, createPluginRuntime, describePlugin, discoverContextualPluginActions, pluginActionAuthorityKey, resolveContextualPluginActionInvocation, runPluginAction, type ContextualPluginAction, type PluginActionTarget, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
 import { autoUnlockSavedVault, plaintextSecretCandidates, resolveAuthorizedExternalSecret, saveVault, saveVaultWithSavedKey, vaultVariables, type ExternalSecretInput, type VaultEntry, type VaultSession } from './lib/security';
 import { duplicateEnvironmentSecrets, environmentHasSecrets, environmentSecretValue, environmentSecretVariables, removeEnvironmentSecrets, upsertEnvironmentSecret } from './lib/environmentSecrets';
-import { defaultPreferences, shortcutMatches } from './lib/preferences';
+import { defaultPreferences, shortcutDisplayLabel, shortcutMatches } from './lib/preferences';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWorkspaceEnvironment, duplicateWorkspaceFolder, environmentAncestors, folderAncestors, folderPath, keyboardWorkspaceEnvironmentMove, keyboardWorkspaceResourceMove, moveWorkspaceEnvironment, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
 import type { WorkspaceEnvironmentMove, WorkspaceResourceKeyboardAction, WorkspaceResourceMove } from './lib/resources';
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
@@ -1535,7 +1535,7 @@ function FolderDocumentPanel({ documentTabStrip, onConfigure, onRun, ...editorPr
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 46, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], fileState: {}, responses: [], streamSessions: [], mcpSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+    format: 'brunomnia', version: 47, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], fileState: {}, responses: [], streamSessions: [], mcpSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -2317,24 +2317,6 @@ export default function App() {
         : { ...collection, folders: (collection.folders ?? []).map((folder) => folder.id === documentId ? { ...folder, name } : folder) }),
     }));
   };
-
-  useEffect(() => {
-    const handleDocumentTabShortcut = (event: KeyboardEvent) => {
-      if (workbenchSection !== 'requests' || (!event.metaKey && !event.ctrlKey) || event.altKey) return;
-      if (event.key === 'Tab') {
-        event.preventDefault();
-        cycleRequestDocument(event.shiftKey ? 'previous' : 'next');
-      } else if (event.key.toLowerCase() === 'w' && !event.shiftKey) {
-        event.preventDefault();
-        closeRequestDocument(activeRequestDocumentState.activeRequestId);
-      } else if (event.key.toLowerCase() === 't' && event.shiftKey) {
-        event.preventDefault();
-        reopenRequestDocument();
-      }
-    };
-    window.addEventListener('keydown', handleDocumentTabShortcut);
-    return () => window.removeEventListener('keydown', handleDocumentTabShortcut);
-  }, [activeRequestDocumentState, workbenchSection]);
 
   const updateActiveRequest = (patch: Partial<ApiRequest>) => {
     promoteRequestDocument(workspace.activeRequestId);
@@ -3314,6 +3296,11 @@ export default function App() {
       else if (shortcutMatches(event, shortcuts['generate-code']) && isRequestDocument) action(() => {
         if (active && (active.request.protocol === 'http' || active.request.protocol === 'graphql')) setShowCodeGeneration(true);
       });
+      else if (shortcutMatches(event, shortcuts['close-tab']) && workbenchSection === 'requests' && activeRequestDocumentState.activeRequestId) action(() => closeRequestDocument(activeRequestDocumentState.activeRequestId));
+      else if (shortcutMatches(event, shortcuts['next-tab']) && workbenchSection === 'requests') action(() => cycleRequestDocument('next'));
+      else if (shortcutMatches(event, shortcuts['previous-tab']) && workbenchSection === 'requests') action(() => cycleRequestDocument('previous'));
+      else if (shortcutMatches(event, shortcuts['reopen-closed-tab']) && workbenchSection === 'requests') action(reopenRequestDocument);
+      else if (shortcutMatches(event, shortcuts['open-request-new-tab']) && isRequestDocument && workspace.activeRequestId) action(() => promoteRequestDocument(workspace.activeRequestId));
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -3606,7 +3593,7 @@ export default function App() {
             onRestoreSnapshot={restoreLocalWorkspaceSnapshot}
           />
         </Suspense>
-        <button className="command-trigger" onClick={() => setShowPalette(true)} type="button"><Icon name="search" size={17} /><span>Search or run command…</span><kbd>{workspace.preferences.shortcuts.palette.replace('Mod', '⌘/Ctrl')}</kbd></button>
+        <button className="command-trigger" onClick={() => setShowPalette(true)} type="button"><Icon name="search" size={17} /><span>Search or run command…</span><kbd>{shortcutDisplayLabel(workspace.preferences.shortcuts.palette)}</kbd></button>
         <select aria-label="Environment" className="environment-switcher" onChange={(event) => setWorkspace((current) => ({ ...current, activeEnvironmentId: event.target.value }))} value={workspace.activeEnvironmentId}>
           {!workspace.environments.length ? <option value="">No environment</option> : null}
           {workspace.environments.map((environment) => <option key={environment.id} value={environment.id}>{`${'— '.repeat(environmentAncestors(workspace.environments, environment.id).length)}${environment.name}${environment.private ? ' · private' : ''}`}</option>)}

@@ -4,7 +4,7 @@ import type { AiSettings, ApiRequest, AppPreferences, AuditEvent, AuthConfig, Co
 import { normalizeGraphqlSchema } from './graphqlSchema';
 import { normalizeGrpcProtoTree } from './grpcProto';
 import { emptyWorkspaceCertificates, normalizeCertificatePassphrase, normalizeCertificatePfxBase64, normalizeWorkspaceCertificates } from './certificates';
-import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
+import { defaultPreferences, defaultShortcuts, normalizeShortcutBindings } from './preferences';
 import { normalizeHttpMethod } from './request';
 import { normalizeMcpHistorySessions } from './mcpHistory';
 import { isRegistryPluginName, normalizePluginModules, pluginDependencyPackageName, requestedPluginModules } from './pluginModules';
@@ -356,8 +356,7 @@ const normalizePreferences = (value: unknown): AppPreferences => {
   const source = record(value);
   const rawShortcuts = record(source?.shortcuts);
   const shortcuts = Object.fromEntries((Object.keys(defaultShortcuts) as ShortcutAction[]).map((action) => {
-    const candidate = typeof rawShortcuts?.[action] === 'string' ? normalizeShortcut(rawShortcuts[action].slice(0, 64)) : '';
-    return [action, candidate || defaultShortcuts[action]];
+    return [action, normalizeShortcutBindings(rawShortcuts?.[action], defaultShortcuts[action])];
   })) as AppPreferences['shortcuts'];
   return {
     theme: source?.theme === 'dark' || source?.theme === 'light' ? source.theme : 'system',
@@ -949,7 +948,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   }));
   return {
     ...workspace,
-    version: 46,
+    version: 47,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',

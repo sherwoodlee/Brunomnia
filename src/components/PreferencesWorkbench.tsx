@@ -1,7 +1,7 @@
 import { isTauri } from '@tauri-apps/api/core';
 import { useEffect, useMemo, useState } from 'react';
 import type { AppPreferences, ShortcutAction, Workspace } from '../types';
-import { defaultPreferences, defaultShortcuts, duplicateShortcuts, normalizeShortcut, shortcutFromEvent, shortcutLabels } from '../lib/preferences';
+import { cloneShortcuts, defaultPreferences, defaultShortcuts, duplicateShortcuts, normalizeShortcut, shortcutBindingOwner, shortcutFromEvent, shortcutLabels } from '../lib/preferences';
 import { Icon } from './Icon';
 
 type PreferencesWorkbenchProps = {
@@ -11,6 +11,23 @@ type PreferencesWorkbenchProps = {
 
 const shortcutActions = Object.keys(shortcutLabels) as ShortcutAction[];
 
+export function ShortcutBindingsEditor({ shortcuts, canEdit = true, onChange, onMessage }: { shortcuts: AppPreferences['shortcuts']; canEdit?: boolean; onChange: (shortcuts: AppPreferences['shortcuts']) => void; onMessage: (message: string) => void }) {
+  const duplicates = useMemo(() => duplicateShortcuts(shortcuts), [shortcuts]);
+  const updateShortcut = (action: ShortcutAction, bindings: string[]) => onChange({ ...shortcuts, [action]: bindings });
+  const addShortcut = (action: ShortcutAction, value: string) => {
+    const normalized = normalizeShortcut(value);
+    if (!normalized) return;
+    const owner = shortcutBindingOwner(shortcuts, normalized);
+    if (owner) {
+      onMessage(owner === action ? `${normalized} is already assigned to ${shortcutLabels[action]}.` : `${normalized} is already assigned to ${shortcutLabels[owner]}.`);
+      return;
+    }
+    updateShortcut(action, [...shortcuts[action], normalized].slice(0, 8));
+    onMessage(`${normalized} added to ${shortcutLabels[action]}.`);
+  };
+  return <>{duplicates.length ? <div className="policy-warning"><strong>Duplicate migrated bindings</strong><span>{duplicates.join(', ')} each trigger only the first matching action. Remove a duplicate before adding another binding.</span></div> : null}<div className="shortcut-list">{shortcutActions.map((action) => <div className="shortcut-row" key={action}><span><strong>{shortcutLabels[action]}</strong><small>{action}</small></span><div className="shortcut-bindings">{shortcuts[action].map((binding) => <code key={binding}>{binding.replace('Mod', '⌘/Ctrl')}<button aria-label={`Remove ${binding} from ${shortcutLabels[action]}`} disabled={!canEdit} onClick={() => { updateShortcut(action, shortcuts[action].filter((candidate) => candidate !== binding)); onMessage(`${binding} removed from ${shortcutLabels[action]}.`); }} type="button">×</button></code>)}<input aria-label={`Add ${shortcutLabels[action]} shortcut`} disabled={!canEdit || shortcuts[action].length >= 8} onChange={() => undefined} onKeyDown={(event) => { event.preventDefault(); event.stopPropagation(); const value = shortcutFromEvent(event.nativeEvent); if (value) addShortcut(action, value); }} placeholder={shortcuts[action].length >= 8 ? 'Binding limit reached' : 'Press shortcut'} value="" /></div><button aria-label={`Reset ${shortcutLabels[action]} shortcuts`} className="shortcut-reset" disabled={!canEdit} onClick={() => { updateShortcut(action, [...defaultShortcuts[action]]); onMessage(`${shortcutLabels[action]} restored to defaults.`); }} type="button">Reset</button></div>)}</div></>;
+}
+
 export function PreferencesWorkbench({ workspace, onChangeWorkspace }: PreferencesWorkbenchProps) {
   const [tab, setTab] = useState<'general' | 'keyboard' | 'data'>('general');
   const [message, setMessage] = useState('');
@@ -18,13 +35,11 @@ export function PreferencesWorkbench({ workspace, onChangeWorkspace }: Preferenc
   const dataFoldersValue = preferences.dataFolders.join('\n');
   const [dataFoldersDraft, setDataFoldersDraft] = useState(dataFoldersValue);
   useEffect(() => setDataFoldersDraft(dataFoldersValue), [dataFoldersValue]);
-  const duplicates = useMemo(() => duplicateShortcuts(preferences.shortcuts), [preferences.shortcuts]);
   const canEdit = true;
   const update = (patch: Partial<AppPreferences>) => {
     if (!canEdit) return;
     onChangeWorkspace((current) => ({ ...current, preferences: { ...current.preferences, ...patch } }));
   };
-  const updateShortcut = (action: ShortcutAction, value: string) => update({ shortcuts: { ...preferences.shortcuts, [action]: normalizeShortcut(value) } });
   const commitDataFolders = () => {
     const dataFolders = [...new Set(dataFoldersDraft
       .split(/\r?\n/)
@@ -89,7 +104,7 @@ export function PreferencesWorkbench({ workspace, onChangeWorkspace }: Preferenc
         </section>
       </div> : null}
 
-      {tab === 'keyboard' ? <section className="preferences-card keyboard-card"><header><div><small>Editable bindings</small><h2>Keyboard shortcuts</h2></div><button disabled={!canEdit} onClick={() => update({ shortcuts: { ...defaultShortcuts } })} type="button">Reset defaults</button></header>{duplicates.length ? <div className="policy-warning"><strong>Duplicate bindings</strong><span>{duplicates.join(', ')} each trigger only the first matching action. Choose a unique binding.</span></div> : null}<div className="shortcut-list">{shortcutActions.map((action) => <label key={action}><span><strong>{shortcutLabels[action]}</strong><small>{action}</small></span><input aria-label={`${shortcutLabels[action]} shortcut`} disabled={!canEdit} onChange={(event) => updateShortcut(action, event.target.value)} onKeyDown={(event) => { event.preventDefault(); if ((event.key === 'Backspace' || event.key === 'Delete') && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) { updateShortcut(action, ''); return; } const value = shortcutFromEvent(event.nativeEvent); if (value) updateShortcut(action, value); }} placeholder="Unassigned" value={preferences.shortcuts[action]} /></label>)}</div><p>Click a binding and press the desired key combination, or type a value such as <code>Mod+Shift+H</code>. Press Backspace to clear a binding. <code>Mod</code> maps to Command on macOS and Control elsewhere.</p></section> : null}
+      {tab === 'keyboard' ? <section className="preferences-card keyboard-card"><header><div><small>Editable multi-bindings</small><h2>Keyboard shortcuts</h2></div><button disabled={!canEdit} onClick={() => update({ shortcuts: cloneShortcuts(defaultShortcuts) })} type="button">Reset all</button></header><ShortcutBindingsEditor canEdit={canEdit} onChange={(shortcuts) => update({ shortcuts })} onMessage={setMessage} shortcuts={preferences.shortcuts} /><p>Each action accepts up to eight unique combinations. Focus <strong>Press shortcut</strong> and press a combination to add it; remove bindings individually or reset one action. <code>Mod</code> maps to Command on macOS and Control elsewhere.</p></section> : null}
 
       {tab === 'data' ? <div className="preferences-grid"><section className="preferences-card"><header><div><small>Project isolation</small><h2>Not shared</h2></div><Icon name="lock" size={22} /></header><ul><li>Preferences and script grants are omitted from managed folder/Git project files.</li><li>Encrypted-sync pulls preserve this device's preferences.</li><li>Workspace imports reset preferences and script grants to safe defaults.</li><li>No preference requires a Brunomnia account.</li></ul></section><section className="preferences-card"><header><div><small>Reset</small><h2>Restore local defaults</h2></div></header><p>This changes appearance, request defaults, script permissions, and shortcuts. It does not delete requests, history, secrets, or integration settings.</p><button disabled={!canEdit} onClick={() => { setDataFoldersDraft(''); update(structuredClone(defaultPreferences)); setMessage('Preferences restored to local defaults.'); }} type="button">Restore defaults</button></section></div> : null}
       {message ? <div className="automation-message">{message}</div> : null}
