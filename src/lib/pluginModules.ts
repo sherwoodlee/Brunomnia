@@ -4,6 +4,7 @@ import {
   UUID_PLUGIN_MODULE_FACTORY,
   UUID_PLUGIN_MODULE_VERSION,
 } from './pluginVendored.generated';
+import type { PluginRecord, Workspace } from '../types';
 
 export const pluginBaselineModules = ['buffer', 'path', 'crypto'] as const;
 export const pluginCuratedModules = ['events', 'uuid', 'ajv'] as const;
@@ -17,6 +18,28 @@ const aliases: Record<string, string> = {
 };
 
 export const canonicalPluginModule = (name: string) => aliases[name] ?? name;
+
+export const validateRegistryPluginName = (pluginName: string) => {
+  const suffix = pluginName.replace(/^insomnia-plugin-/, '');
+  if (!suffix.trim() || suffix.length > 214) throw new Error('Plugin name must not be empty or too long.');
+  if (suffix.includes('..') || suffix.includes('/') || suffix.includes('\\')) throw new Error('Plugin name must not contain path traversal characters.');
+  if (/[|;&$`\\]/.test(suffix)) throw new Error('Plugin name must not contain shell metacharacters.');
+  if (suffix.trim() === '-') throw new Error('Plugin name must not be a single dash.');
+  if (suffix.startsWith('-')) throw new Error('Plugin name must not start with a dash.');
+  if (suffix.endsWith('-')) throw new Error('Plugin name must not end with a dash.');
+  if (suffix.includes('--')) throw new Error('Plugin name must not contain consecutive dashes.');
+  if (suffix.startsWith('.')) throw new Error('Plugin name cannot start with a period.');
+  if (suffix.startsWith('_')) throw new Error('Plugin name cannot start with an underscore.');
+  if (suffix.trim() !== suffix) throw new Error('Plugin name cannot contain leading or trailing spaces.');
+  if (!/^[a-zA-Z0-9_.-]+$/.test(suffix)) throw new Error('Plugin name must be alphanumeric and dash-separated.');
+  if (['con', 'prn', 'aux', 'nul'].includes(suffix.toLowerCase())) throw new Error('Plugin name is not allowed.');
+  if (!pluginName.startsWith('insomnia-plugin-')) throw new Error('Plugin name must start with "insomnia-plugin-".');
+};
+
+export const isRegistryPluginName = (pluginName: string) => {
+  try { validateRegistryPluginName(pluginName); return true; }
+  catch { return false; }
+};
 
 export const normalizePluginModules = (...values: Array<Iterable<string> | undefined>) => {
   const modules = new Set<string>();
@@ -57,6 +80,50 @@ export const pluginPackageChanged = (previous: PluginPackageIdentity, next: Plug
 export const retainedPluginModuleGrants = (grantedModules: Iterable<string> = [], requestedModules: Iterable<string> = []) => {
   const requested = new Set(normalizePluginModules(requestedModules));
   return normalizePluginModules(grantedModules).filter((module) => requested.has(module));
+};
+
+export type ReviewedPluginInstallResult = {
+  workspace: Workspace;
+  plugin: PluginRecord;
+  replaced: boolean;
+  changed: boolean;
+};
+
+export const installReviewedPlugin = (workspace: Workspace, candidate: PluginRecord): ReviewedPluginInstallResult => {
+  const index = candidate.registryPackageName
+    ? workspace.plugins.findIndex((plugin) => plugin.registryPackageName === candidate.registryPackageName)
+    : -1;
+  if (index < 0) {
+    return { workspace: { ...workspace, plugins: [...workspace.plugins, candidate] }, plugin: candidate, replaced: false, changed: true };
+  }
+  const previous = workspace.plugins[index];
+  const changed = pluginPackageChanged(previous, candidate);
+  const plugin: PluginRecord = changed
+    ? { ...candidate, id: previous.id }
+    : {
+        ...candidate,
+        id: previous.id,
+        enabled: previous.enabled,
+        grantedModules: retainedPluginModuleGrants(previous.grantedModules, candidate.requestedModules),
+        grantedPermissions: [...previous.grantedPermissions],
+        installedAt: previous.installedAt,
+      };
+  const plugins = [...workspace.plugins];
+  plugins[index] = plugin;
+  if (!changed) return { workspace: { ...workspace, plugins }, plugin, replaced: true, changed: false };
+  const pluginData = { ...workspace.pluginData };
+  delete pluginData[previous.id];
+  return {
+    workspace: {
+      ...workspace,
+      plugins,
+      pluginData,
+      activePluginTheme: workspace.activePluginTheme.startsWith(`${previous.id}::`) ? '' : workspace.activePluginTheme,
+    },
+    plugin,
+    replaced: true,
+    changed: true,
+  };
 };
 
 const pathFactory = `function () {

@@ -2671,6 +2671,18 @@ Compatibility bounds remain explicit: remote/custom-registry installation, depen
 
 Compatibility bounds remain explicit: production dependencies are not downloaded, native dependency behavior for host-loaded hooks/actions is absent, and registry authentication, automatic updates, exact context-menu placement, broader ecosystem compatibility, plus CLI host RPC/user-invoked actions remain. `Plugins and extension API` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 266 — identity-aware remote plugin updates (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned reinstall audit | Complete | The settings install action installs by strict package name then explicitly reloads; plugin discovery is keyed by package name and pinned source has no automatic remote update checker or file watcher |
+| Persisted identity | Complete baseline | Valid strict registry package names survive bounded migration and safe import while filesystem linkage remains separate; malformed identities are discarded |
+| Reinstall/upsert | Complete baseline | A registry-installed plugin exposes an explicit current-registry fetch; applying the same package replaces its stable record instead of creating a duplicate |
+| Authority lifecycle | Complete baseline | Byte-identical source/map/entry/module requests preserve reviewed enablement/grants/data/theme while metadata updates; changed packages retain identity but disable and clear grants/data/theme. Manual source edits and local reload now use the same complete reset boundary |
+| Verification | Complete | Validator, migration/import, unchanged/changed upsert, TypeScript, full frontend, production/CLI build, native regression, formatting, and strict Clippy evidence is recorded in [Milestone 266 verification](QA_MILESTONE_266.md) |
+
+Compatibility bounds remain explicit: production dependencies are not downloaded, native dependency behavior for host-loaded hooks/actions is absent, and registry authentication, exact context-menu placement, broader ecosystem compatibility, plus CLI host RPC/user-invoked actions remain. `Plugins and extension API` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

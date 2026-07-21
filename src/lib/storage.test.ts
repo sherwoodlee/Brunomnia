@@ -755,6 +755,7 @@ describe('workspace migrations', () => {
     const exported = cloneSeedWorkspace();
     exported.plugins = [{
       id: 'plugin-one', name: 'Imported', version: '1.0.0', description: '', source: "require('events'); module.exports = {};", sourceFormat: 'insomnia-commonjs', enabled: true,
+      registryPackageName: 'insomnia-plugin-imported',
       requestedModules: ['node:events'], grantedModules: ['node:events'],
       requestedPermissions: ['network'], grantedPermissions: ['network'], installedAt: new Date().toISOString(),
     }];
@@ -768,7 +769,7 @@ describe('workspace migrations', () => {
     exported.preferences = { ...exported.preferences, theme: 'light', fontSize: 22, interfaceFontSize: 21, fontInterface: 'Imported UI', fontMonospace: 'Imported Mono', showPasswords: true, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: true, preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 99, maxHistoryResponses: -1, filterResponsesByEnv: true, requestTimeoutMs: 123_000, allowScriptRequests: true, allowScriptFileAccess: true, dataFolders: ['/private/imported-authority'], enableVaultInScripts: true, forceVerticalLayout: true, editorIndentWithTabs: false, editorIndentSize: 8, editorLineWrapping: false, fontVariantLigatures: true };
 
     const imported = parseWorkspaceImport(JSON.stringify(exported));
-    expect(imported.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [], requestedModules: ['events'], grantedModules: [] });
+    expect(imported.plugins[0]).toMatchObject({ registryPackageName: 'insomnia-plugin-imported', enabled: false, grantedPermissions: [], requestedModules: ['events'], grantedModules: [] });
     expect(imported.pluginData).toEqual({});
     expect(imported.activePluginTheme).toBe('');
     expect(imported.mcpClients[0]).toMatchObject({ enabled: false, token: '', password: '', oauthClientSecret: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none' });
@@ -785,13 +786,15 @@ describe('workspace migrations', () => {
   it('retains bounded multi-file plugin package maps', () => {
     const exported = cloneSeedWorkspace();
     exported.plugins = [{
-      id: 'plugin-package', name: 'Package', version: '1.0.0', description: '', source: `module.exports = require('./lib/value');`, sourcePath: '/plugins/package',
+      id: 'plugin-package', name: 'Package', version: '1.0.0', description: '', source: `module.exports = require('./lib/value');`, sourcePath: '/plugins/package', registryPackageName: 'insomnia-plugin-package',
       moduleFiles: { 'index.js': `module.exports = require('./lib/value');`, 'lib/value.js': 'module.exports = {};', '../escape.js': 'unsafe' }, entryModuleKey: 'index.js',
       sourceFormat: 'insomnia-commonjs', enabled: false, requestedPermissions: [], grantedPermissions: [], installedAt: '2026-07-20T00:00:00.000Z',
     }];
     const imported = migrateWorkspace(exported);
-    expect(imported.plugins[0]).toMatchObject({ entryModuleKey: 'index.js', moduleFiles: { 'index.js': expect.any(String), 'lib/value.js': 'module.exports = {};' } });
+    expect(imported.plugins[0]).toMatchObject({ registryPackageName: 'insomnia-plugin-package', entryModuleKey: 'index.js', moduleFiles: { 'index.js': expect.any(String), 'lib/value.js': 'module.exports = {};' } });
     expect(imported.plugins[0].moduleFiles).not.toHaveProperty('../escape.js');
+    exported.plugins[0].registryPackageName = '../unsafe';
+    expect(migrateWorkspace(exported).plugins[0].registryPackageName).toBeUndefined();
   });
 
   it('normalizes inferred and manifest module requests while constraining grants', () => {

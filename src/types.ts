@@ -707,6 +707,7 @@ export type PluginRecord = {
   description: string;
   source: string;
   sourcePath?: string;
+  registryPackageName?: string;
   moduleFiles?: Record<string, string>;
   entryModuleKey?: string;
   requestedModules?: string[];

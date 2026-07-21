@@ -7,7 +7,7 @@ import { emptyWorkspaceCertificates, normalizeCertificatePassphrase, normalizeCe
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 import { normalizeHttpMethod } from './request';
 import { normalizeMcpHistorySessions } from './mcpHistory';
-import { normalizePluginModules, requestedPluginModules } from './pluginModules';
+import { isRegistryPluginName, normalizePluginModules, requestedPluginModules } from './pluginModules';
 
 const storageKey = 'brunomnia.workspace.v1';
 
@@ -73,6 +73,7 @@ const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(valu
     return bytes <= 1_000_000 && moduleBytes <= 5_000_000;
   })) as Record<string, string>;
   const entryModuleKey = typeof plugin.entryModuleKey === 'string' && plugin.entryModuleKey in moduleFiles ? plugin.entryModuleKey : undefined;
+  const registryPackageName = stringValue(plugin.registryPackageName).trim();
   const moduleSource = Object.values({ ...(entryModuleKey ? moduleFiles : {}), [entryModuleKey ?? 'index.js']: plugin.source }).join('\n');
   const requestedModules = requestedPluginModules(moduleSource, modules(plugin.requestedModules));
   return [{
@@ -82,6 +83,7 @@ const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(valu
     description: typeof plugin.description === 'string' ? plugin.description : '',
     source: plugin.source,
     sourcePath: typeof plugin.sourcePath === 'string' ? plugin.sourcePath : undefined,
+    registryPackageName: isRegistryPluginName(registryPackageName) ? registryPackageName : undefined,
     moduleFiles: entryModuleKey ? moduleFiles : undefined,
     entryModuleKey,
     requestedModules,

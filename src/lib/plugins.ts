@@ -1,8 +1,8 @@
 import type { ApiRequest, HttpResponse, PluginPermission, PluginRecord, Workspace } from '../types';
 import { createBlankRequest } from '../data/seed';
-import { buildPluginModuleRegistrySource, inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginModuleVersions } from './pluginModules';
+import { buildPluginModuleRegistrySource, inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginModuleVersions, validateRegistryPluginName } from './pluginModules';
 
-export { inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginModuleVersions };
+export { inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginModuleVersions, validateRegistryPluginName };
 
 export type PluginTemplateDescriptor = { name: string; displayName: string; description: string };
 export type PluginActionDescriptor = { id: string; label: string; kind: 'request' | 'request-group' | 'workspace' | 'document' };
@@ -77,23 +77,6 @@ export const validatePluginSource = (source: string) => {
   if (source.length > 1_000_000) throw new Error('Plugin source exceeds the 1 MB local limit.');
   if (/\bimport\s*(?:\/\*[\s\S]*?\*\/\s*)?\(/.test(source) || /(^|[;\n])\s*import\s/m.test(source)) throw new Error('ES module imports are not available in the isolated plugin runtime.');
   if (/(^|[;\n])\s*export\s/m.test(source)) throw new Error('ES module exports are not available in the isolated plugin runtime.');
-};
-
-export const validateRegistryPluginName = (pluginName: string) => {
-  const suffix = pluginName.replace(/^insomnia-plugin-/, '');
-  if (!suffix.trim() || suffix.length > 214) throw new Error('Plugin name must not be empty or too long.');
-  if (suffix.includes('..') || suffix.includes('/') || suffix.includes('\\')) throw new Error('Plugin name must not contain path traversal characters.');
-  if (/[|;&$`\\]/.test(suffix)) throw new Error('Plugin name must not contain shell metacharacters.');
-  if (suffix.trim() === '-') throw new Error('Plugin name must not be a single dash.');
-  if (suffix.startsWith('-')) throw new Error('Plugin name must not start with a dash.');
-  if (suffix.endsWith('-')) throw new Error('Plugin name must not end with a dash.');
-  if (suffix.includes('--')) throw new Error('Plugin name must not contain consecutive dashes.');
-  if (suffix.startsWith('.')) throw new Error('Plugin name cannot start with a period.');
-  if (suffix.startsWith('_')) throw new Error('Plugin name cannot start with an underscore.');
-  if (suffix.trim() !== suffix) throw new Error('Plugin name cannot contain leading or trailing spaces.');
-  if (!/^[a-zA-Z0-9_.-]+$/.test(suffix)) throw new Error('Plugin name must be alphanumeric and dash-separated.');
-  if (['con', 'prn', 'aux', 'nul'].includes(suffix.toLowerCase())) throw new Error('Plugin name is not allowed.');
-  if (!pluginName.startsWith('insomnia-plugin-')) throw new Error('Plugin name must start with "insomnia-plugin-".');
 };
 
 const normalizePluginNetworkRequest = (value: unknown): ApiRequest => {

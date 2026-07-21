@@ -18,7 +18,7 @@ import {
   type PluginNotification,
 } from '../lib/plugins';
 import { discoverLocalPluginSources, readLocalPluginSource, readRegistryPluginSource, type LocalPluginSource } from '../lib/project';
-import { pluginBaselineModules, pluginCuratedModules, pluginModuleVersions, pluginPackageChanged, requestedPluginModules, retainedPluginModuleGrants } from '../lib/pluginModules';
+import { installReviewedPlugin, pluginBaselineModules, pluginCuratedModules, pluginModuleVersions, pluginPackageChanged, requestedPluginModules, retainedPluginModuleGrants } from '../lib/pluginModules';
 import { readDesktopTemplateFile } from '../lib/scriptFiles';
 import { applyCollectionConfiguration, requestAncestorNames, resolveEnvironment } from '../lib/resources';
 import { environmentMap } from '../lib/request';
@@ -75,6 +75,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
   const [installEntryModuleKey, setInstallEntryModuleKey] = useState<string | undefined>();
   const [installRequestedModules, setInstallRequestedModules] = useState<string[]>([]);
   const [installModuleWarnings, setInstallModuleWarnings] = useState<string[]>([]);
+  const [installRegistryPackageName, setInstallRegistryPackageName] = useState('');
   const [localPath, setLocalPath] = useState('');
   const [registryPackageName, setRegistryPackageName] = useState('');
   const [draftSource, setDraftSource] = useState('');
@@ -101,11 +102,20 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
   const reviewedModuleSource = selected && reviewModuleKey
     ? reviewModuleKey === selected.entryModuleKey ? selected.source : selected.moduleFiles?.[reviewModuleKey] ?? ''
     : '';
+  const updatingRegistryPlugin = installRegistryPackageName
+    ? workspace.plugins.find((plugin) => plugin.registryPackageName === installRegistryPackageName)
+    : undefined;
 
   const changeWorkspace = (updater: (current: Workspace) => Workspace) => onChangeWorkspace(updater);
   const updatePlugin = (id: string, patch: Partial<PluginRecord>) => changeWorkspace((current) => ({
     ...current,
     plugins: current.plugins.map((plugin) => plugin.id === id ? { ...plugin, ...patch } : plugin),
+  }));
+  const replacePluginAfterAuthorityChange = (plugin: PluginRecord) => changeWorkspace((current) => ({
+    ...current,
+    plugins: current.plugins.map((candidate) => candidate.id === plugin.id ? plugin : candidate),
+    pluginData: Object.fromEntries(Object.entries(current.pluginData).filter(([id]) => id !== plugin.id)),
+    activePluginTheme: current.activePluginTheme.startsWith(`${plugin.id}::`) ? '' : current.activePluginTheme,
   }));
   const run = async (label: string, operation: () => Promise<void>) => {
     if (busy) return;
@@ -198,6 +208,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
       description: installDescription.trim(),
       source: installSource,
       sourcePath: installSourcePath || undefined,
+      registryPackageName: installRegistryPackageName || undefined,
       moduleFiles: installModuleFiles,
       entryModuleKey: installEntryModuleKey,
       sourceFormat: 'insomnia-commonjs',
@@ -210,21 +221,26 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
       installedAt: new Date().toISOString(),
     };
     const found = await describePluginForReview(plugin);
-    changeWorkspace((current) => ({ ...current, plugins: [...current.plugins, plugin] }));
-    setSelectedId(id); setDescriptor(found); setInstallSource(''); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); setInstallRequestedModules([]); setInstallModuleWarnings([]);
-    setMessage('Plugin installed disabled. Review and grant only the capabilities it needs.');
+    const result = installReviewedPlugin(workspace, plugin);
+    changeWorkspace(() => result.workspace);
+    setSelectedId(result.plugin.id); setDescriptor(found); setInstallSource(''); setInstallSourcePath(''); setInstallRegistryPackageName(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); setInstallRequestedModules([]); setInstallModuleWarnings([]);
+    setMessage(!result.replaced
+      ? 'Plugin installed disabled. Review and grant only the capabilities it needs.'
+      : result.changed
+        ? 'Plugin package updated with changed code. It is disabled and its data and grants were cleared for review.'
+        : 'Plugin package metadata refreshed. Existing authority was preserved because its code and module requests are unchanged.');
   });
 
   const loadLocal = () => run('Reading local plugin', async () => {
     const output = await readLocalPluginSource(localPath);
     setInstallName(output.name); setInstallVersion(output.version); setInstallDescription(output.description); setInstallSource(output.source);
-    setInstallSourcePath(output.path); setInstallModuleFiles(output.moduleFiles); setInstallEntryModuleKey(output.entryModuleKey);
+    setInstallSourcePath(output.path); setInstallRegistryPackageName(''); setInstallModuleFiles(output.moduleFiles); setInstallEntryModuleKey(output.entryModuleKey);
     setInstallRequestedModules(output.requestedModules); setInstallModuleWarnings(output.moduleWarnings);
     setMessage(`Loaded ${output.path}. Review the source before installing.`);
   });
 
-  const loadRegistry = () => run('Fetching registry plugin', async () => {
-    const packageName = registryPackageName.trim();
+  const fetchRegistrySource = async (requestedPackageName: string) => {
+    const packageName = requestedPackageName.trim();
     validateRegistryPluginName(packageName);
     const output = await readRegistryPluginSource({
       packageName,
@@ -238,9 +254,17 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
     });
     validatePluginSource(output.source);
     setInstallName(output.name); setInstallVersion(output.version); setInstallDescription(output.description); setInstallSource(output.source);
-    setInstallSourcePath(''); setInstallModuleFiles(output.moduleFiles); setInstallEntryModuleKey(output.entryModuleKey);
+    setInstallSourcePath(''); setInstallRegistryPackageName(packageName); setInstallModuleFiles(output.moduleFiles); setInstallEntryModuleKey(output.entryModuleKey);
     setInstallRequestedModules(output.requestedModules); setInstallModuleWarnings(output.moduleWarnings);
-    setMessage(`Fetched ${output.path}. Review every module before installing it disabled.`);
+    setRegistryPackageName(packageName); setSelectedId('');
+    const existing = workspace.plugins.find((plugin) => plugin.registryPackageName === packageName);
+    setMessage(`Fetched ${output.path}. Review every module before ${existing ? `updating v${existing.version}` : 'installing it disabled'}.`);
+  };
+
+  const loadRegistry = () => run('Fetching registry plugin', () => fetchRegistrySource(registryPackageName));
+  const reloadRegistrySelected = () => run('Checking registry plugin', async () => {
+    if (!selected?.registryPackageName) throw new Error('This plugin has no linked registry package.');
+    await fetchRegistrySource(selected.registryPackageName);
   });
 
   const discoverLocal = () => run('Discovering plugin packages', async () => {
@@ -322,7 +346,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
     const sourceText = pluginSourceText(output);
     const next: PluginRecord = { ...selected, name: output.name, version: output.version, description: output.description, source: output.source, sourcePath: output.path, moduleFiles: output.moduleFiles, entryModuleKey: output.entryModuleKey, enabled: false, requestedModules: requestedPluginModules(sourceText, output.requestedModules), grantedModules: [], moduleWarnings: output.moduleWarnings, requestedPermissions: inferPluginPermissions(sourceText), grantedPermissions: [], error: undefined };
     const found = await describePluginForReview(next);
-    updatePlugin(selected.id, next);
+    replacePluginAfterAuthorityChange(next);
     setDescriptor(found); setDraftSource(output.source);
     setMessage('Local package reloaded. Review permissions before enabling it again.');
   });
@@ -420,14 +444,14 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
             {workspace.plugins.map((plugin) => <button className={plugin.id === selectedId ? 'active' : ''} key={plugin.id} onClick={() => setSelectedId(plugin.id)} type="button"><span className={plugin.enabled ? 'plugin-state enabled' : 'plugin-state'} /><span><strong>{plugin.name}</strong><small>v{plugin.version} · {plugin.enabled ? 'enabled' : 'disabled'}</small></span></button>)}
             {!workspace.plugins.length ? <p>No plugins installed.</p> : null}
           </div>
-          <button className="secondary-button" onClick={() => { setSelectedId(''); setInstallSource(''); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); setInstallRequestedModules([]); setInstallModuleWarnings([]); }} type="button"><Icon name="plus" size={15} /> Install plugin</button>
-          <button className="secondary-button quiet" onClick={() => { setSelectedId(''); setInstallSource(pluginStarterSource); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); setInstallRequestedModules([]); setInstallModuleWarnings([]); setInstallName('Brunomnia starter'); setInstallVersion('0.1.0'); setInstallDescription('Starter request hook, template tag, and action'); }} type="button"><Icon name="code" size={15} /> Use starter source</button>
+          <button className="secondary-button" onClick={() => { setSelectedId(''); setInstallSource(''); setInstallSourcePath(''); setInstallRegistryPackageName(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); setInstallRequestedModules([]); setInstallModuleWarnings([]); }} type="button"><Icon name="plus" size={15} /> Install plugin</button>
+          <button className="secondary-button quiet" onClick={() => { setSelectedId(''); setInstallSource(pluginStarterSource); setInstallSourcePath(''); setInstallRegistryPackageName(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); setInstallRequestedModules([]); setInstallModuleWarnings([]); setInstallName('Brunomnia starter'); setInstallVersion('0.1.0'); setInstallDescription('Starter request hook, template tag, and action'); }} type="button"><Icon name="code" size={15} /> Use starter source</button>
         </aside>
 
         <div className="plugin-main">
           {selected ? <>
             <section className="plugin-card plugin-summary">
-              <header><div><small>Installed plugin</small><h2>{selected.name}</h2><p>{selected.description || 'No description provided.'}</p></div><div className="plugin-summary-actions"><label className="switch-label"><input checked={selected.enabled} onChange={(event) => updatePlugin(selected.id, { enabled: event.target.checked, error: undefined })} type="checkbox" /> Enabled</label>{selected.sourcePath ? <button disabled={Boolean(busy)} onClick={reloadSelected} type="button"><Icon name="refresh" size={15} /> Reload source</button> : null}<button onClick={() => changeWorkspace((current) => ({ ...current, plugins: current.plugins.filter((plugin) => plugin.id !== selected.id), pluginData: Object.fromEntries(Object.entries(current.pluginData).filter(([id]) => id !== selected.id)), activePluginTheme: current.activePluginTheme.startsWith(`${selected.id}::`) ? '' : current.activePluginTheme }))} type="button"><Icon name="trash" size={15} /> Remove</button></div></header>
+              <header><div><small>Installed plugin</small><h2>{selected.name}</h2><p>{selected.description || 'No description provided.'}{selected.registryPackageName ? ` · ${selected.registryPackageName}` : ''}</p></div><div className="plugin-summary-actions"><label className="switch-label"><input checked={selected.enabled} onChange={(event) => updatePlugin(selected.id, { enabled: event.target.checked, error: undefined })} type="checkbox" /> Enabled</label>{selected.sourcePath ? <button disabled={Boolean(busy)} onClick={reloadSelected} type="button"><Icon name="refresh" size={15} /> Reload source</button> : null}{selected.registryPackageName ? <button disabled={Boolean(busy)} onClick={reloadRegistrySelected} type="button"><Icon name="refresh" size={15} /> Check registry</button> : null}<button onClick={() => changeWorkspace((current) => ({ ...current, plugins: current.plugins.filter((plugin) => plugin.id !== selected.id), pluginData: Object.fromEntries(Object.entries(current.pluginData).filter(([id]) => id !== selected.id)), activePluginTheme: current.activePluginTheme.startsWith(`${selected.id}::`) ? '' : current.activePluginTheme }))} type="button"><Icon name="trash" size={15} /> Remove</button></div></header>
               <div className="plugin-capability-summary"><span>{descriptor.templates.length} tags</span><span>{descriptor.actions.length} actions</span><span>{descriptor.themes.length} themes</span><span>{selected.sourceFormat}</span></div>
             </section>
 
@@ -441,7 +465,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
 
             <section className="plugin-card"><header><div><small>Exports</small><h2>Actions, tags, and theme</h2></div></header><div className="plugin-tools"><div><strong>Actions</strong>{descriptor.actions.map((action) => <button disabled={!selected.enabled || !selected.grantedPermissions.includes('action') || Boolean(busy) || (action.kind === 'request-group' && !request?.folderId) || (action.kind === 'document' && selectedDocumentType !== 'document' && !workspace.apiDesigns.length)} key={action.id} onClick={() => runAction(action.id)} type="button">{action.label}<small>{action.kind}</small></button>)}{!descriptor.actions.length ? <p>No actions exported.</p> : null}</div><div><strong>Template tags</strong>{descriptor.templates.map((tag) => <code key={tag.name}>{`{% ${tag.name} %}`}</code>)}{!descriptor.templates.length ? <p>No tags exported.</p> : null}</div><label><strong>Theme</strong><select disabled={!selected.enabled || !selected.grantedPermissions.includes('theme')} value={workspace.activePluginTheme.startsWith(`${selected.id}::`) ? workspace.activePluginTheme : ''} onChange={(event) => selectTheme(event.target.value)}><option value="">System theme</option>{descriptor.themes.map((theme) => <option key={theme.id} value={`${selected.id}::${theme.id}`}>{theme.displayName}</option>)}</select></label></div></section>
 
-            <section className="plugin-card plugin-source-card"><header><div><small>Source</small><h2>Review and update</h2><p>Updating only the entry source detaches the local package, disables the plugin, and clears grants so changed code cannot inherit old authority.</p></div><button disabled={draftSource === selected.source || Boolean(busy)} onClick={() => run('Updating source', async () => { validatePluginSource(draftSource); const next = { ...selected, source: draftSource, sourcePath: undefined, moduleFiles: undefined, entryModuleKey: undefined, enabled: false, requestedModules: requestedPluginModules(draftSource), grantedModules: [] as string[], moduleWarnings: [], requestedPermissions: inferPluginPermissions(draftSource), grantedPermissions: [] as PluginPermission[], error: undefined }; const found = await describePluginForReview(next); updatePlugin(selected.id, next); setDescriptor(found); setMessage('Source updated. Review permissions and modules before enabling it again.'); })} type="button">Apply source</button></header><textarea aria-label="Plugin source" spellCheck={false} value={draftSource} onChange={(event) => setDraftSource(event.target.value)} /></section>
+            <section className="plugin-card plugin-source-card"><header><div><small>Source</small><h2>Review and update</h2><p>Updating only the entry source detaches the linked local or registry package, disables the plugin, and clears data, theme, and grants so changed code cannot inherit old authority.</p></div><button disabled={draftSource === selected.source || Boolean(busy)} onClick={() => run('Updating source', async () => { validatePluginSource(draftSource); const next = { ...selected, source: draftSource, sourcePath: undefined, registryPackageName: undefined, moduleFiles: undefined, entryModuleKey: undefined, enabled: false, requestedModules: requestedPluginModules(draftSource), grantedModules: [] as string[], moduleWarnings: [], requestedPermissions: inferPluginPermissions(draftSource), grantedPermissions: [] as PluginPermission[], error: undefined }; const found = await describePluginForReview(next); replacePluginAfterAuthorityChange(next); setDescriptor(found); setMessage('Source updated. Review permissions and modules before enabling it again.'); })} type="button">Apply source</button></header><textarea aria-label="Plugin source" spellCheck={false} value={draftSource} onChange={(event) => setDraftSource(event.target.value)} /></section>
             {reviewModuleKeys.length > 1 ? <section className="plugin-card plugin-module-review"><header><div><small>Package map</small><h2>Review every module</h2><p>Only bounded JavaScript and JSON files inside the package are available. Dependency folders and hidden directories are excluded.</p></div></header><label><strong>Module</strong><select value={reviewModuleKey} onChange={(event) => setReviewModuleKey(event.target.value)}>{reviewModuleKeys.map((key) => <option key={key} value={key}>{key}{key === selected.entryModuleKey ? ' (entry)' : ''}</option>)}</select></label><textarea aria-label="Plugin package module source" readOnly spellCheck={false} value={reviewedModuleSource} /></section> : null}
           </> : <section className="plugin-card plugin-installer">
             <header><div><small>Install</small><h2>Fetch and review CommonJS source</h2><p>Fetch an unscoped `insomnia-plugin-*` package, read a local package, or paste source. Registry downloads verify the advertised SHA-1 and parse a bounded archive without running package scripts. Production dependencies and native modules are not downloaded.</p></div></header>
@@ -454,8 +478,8 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
               <div className="local-plugin-row"><input value={localPath} onChange={(event) => setLocalPath(event.target.value)} placeholder="/path/to/plugin, plugins folder, or node_modules" /><button disabled={!localPath || Boolean(busy)} onClick={loadLocal} type="button"><Icon name="folder" size={15} /> Read one</button><button disabled={!localPath || Boolean(busy)} onClick={discoverLocal} type="button"><Icon name="search" size={15} /> Discover</button></div>
             </> : null}
             <div className="plugin-metadata"><input value={installName} onChange={(event) => setInstallName(event.target.value)} placeholder="Plugin name" /><input value={installVersion} onChange={(event) => setInstallVersion(event.target.value)} placeholder="Version" /><input value={installDescription} onChange={(event) => setInstallDescription(event.target.value)} placeholder="Description" /></div>
-            <textarea aria-label="Plugin source to install" spellCheck={false} value={installSource} onChange={(event) => setInstallSource(event.target.value)} placeholder="module.exports.requestHooks = […]" />
-            <button disabled={!installSource.trim() || Boolean(busy)} onClick={install} type="button">Install disabled for review</button>
+            <textarea aria-label="Plugin source to install" spellCheck={false} value={installSource} onChange={(event) => { setInstallSource(event.target.value); setInstallRegistryPackageName(''); }} placeholder="module.exports.requestHooks = […]" />
+            <button disabled={!installSource.trim() || Boolean(busy)} onClick={install} type="button">{updatingRegistryPlugin ? `Apply update to ${updatingRegistryPlugin.name}` : 'Install disabled for review'}</button>
           </section>}
         </div>
       </div>
