@@ -31,6 +31,7 @@ const validateObject = (value: JsonValue, isRoot = true, depth = 0, count = { va
 };
 
 const rowValue = (row: KeyValue): { value?: JsonValue; error?: string } => {
+  if (row.valueType === 'secret') return { error: `Secret variable "${row.name || '(unnamed)'}" is available only in Table view under the reserved vault namespace.` };
   if (row.valueType !== 'json') return { value: row.value };
   try {
     return { value: JSON.parse(row.value) as JsonValue };
@@ -61,6 +62,10 @@ export const environmentRowsToObject = (rows: KeyValue[]): EnvironmentRowsObject
   const error = validateObject(object);
   return error ? { error, disabledNames, duplicateNames } : { object, disabledNames, duplicateNames };
 };
+
+export const validateEnvironmentJsonRow = (rows: KeyValue[], rowId: string, value: string) => environmentRowsToObject(rows
+  .map((row) => row.id === rowId ? { ...row, value, valueType: 'json' as const } : row)
+  .filter((row) => row.valueType !== 'secret')).error ?? '';
 
 const jsonRowValue = (value: JsonValue): Pick<KeyValue, 'value' | 'valueType'> => value !== null && typeof value === 'object'
   ? { value: JSON.stringify(value), valueType: 'json' }
@@ -103,7 +108,7 @@ const scalarText = (value: JsonValue) => value !== null && typeof value === 'obj
 
 export const environmentRowVariables = (row: KeyValue): Record<string, string> => {
   const name = row.name.trim();
-  if (!name || !row.enabled) return {};
+  if (!name || !row.enabled || row.valueType === 'secret') return {};
   const output: Record<string, string> = { [name]: row.value };
   if (row.valueType !== 'json') return output;
   let parsed: JsonValue;

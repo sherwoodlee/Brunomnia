@@ -14,13 +14,14 @@ import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import type { ArtifactImport } from './lib/interchange/types';
 import { applyContextualPluginActionResult, applyPluginTheme, contextualPluginActionsFor, createPluginRuntime, describePlugin, discoverContextualPluginActions, pluginActionAuthorityKey, resolveContextualPluginActionInvocation, runPluginAction, type ContextualPluginAction, type PluginActionTarget, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
-import { autoUnlockSavedVault, plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
+import { autoUnlockSavedVault, plaintextSecretCandidates, resolveAuthorizedExternalSecret, saveVault, saveVaultWithSavedKey, vaultVariables, type ExternalSecretInput, type VaultEntry, type VaultSession } from './lib/security';
+import { duplicateEnvironmentSecrets, environmentHasSecrets, environmentSecretValue, environmentSecretVariables, removeEnvironmentSecrets, upsertEnvironmentSecret } from './lib/environmentSecrets';
 import { defaultPreferences, shortcutMatches } from './lib/preferences';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWorkspaceEnvironment, duplicateWorkspaceFolder, environmentAncestors, folderAncestors, folderPath, keyboardWorkspaceEnvironmentMove, keyboardWorkspaceResourceMove, moveWorkspaceEnvironment, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
 import type { WorkspaceEnvironmentMove, WorkspaceResourceKeyboardAction, WorkspaceResourceMove } from './lib/resources';
 import { clearSavedResponseHistory, createRequestSnapshot, deleteSavedResponse, responseHistorySections, retainResponseHistory, visibleResponseHistory } from './lib/responseHistory';
 import { formatBulkKeyValues, parseBulkKeyValues } from './lib/bulkKeyValues';
-import { environmentRowsToObject, formatEnvironmentJson, parseEnvironmentJson } from './lib/environmentJson';
+import { formatEnvironmentJson, parseEnvironmentJson, validateEnvironmentJsonRow } from './lib/environmentJson';
 import { parsePinnedRequestIds, pinnedWorkspaceRequests, reconcilePinnedRequestIds, togglePinnedRequestId } from './lib/requestPins';
 import { closeAllRequestTabs, closeOtherRequestTabs, closeRequestTab, cycleRequestTab, emptyRequestTabState, moveRequestTab, openDocumentTab, openRequestTab, parseRequestTabState, promoteRequestTab, reconcileRequestTabState, reopenClosedDocumentTab } from './lib/requestTabs';
 import type { DocumentTabReference, DocumentTabType, RequestTabPlacement, RequestTabState } from './lib/requestTabs';
@@ -211,9 +212,13 @@ type KeyValueEditorProps = {
   valuePlaceholder?: string;
   detailed?: boolean;
   environmentValues?: boolean;
+  allowSecrets?: boolean;
+  secretAvailable?: boolean;
+  secretEntries?: VaultEntry[];
+  onSecretEntriesChange?: (entries: VaultEntry[]) => void;
 };
 
-function KeyValueEditor({
+export function KeyValueEditor({
   rows,
   onChange,
   readOnlyRows = [],
@@ -222,14 +227,46 @@ function KeyValueEditor({
   valuePlaceholder = 'Value',
   detailed = false,
   environmentValues = false,
+  allowSecrets = false,
+  secretAvailable = false,
+  secretEntries = [],
+  onSecretEntriesChange,
 }: KeyValueEditorProps) {
   const [editingJsonRowId, setEditingJsonRowId] = useState('');
   const [jsonDraft, setJsonDraft] = useState('');
   const [jsonError, setJsonError] = useState('');
+  const [revealedSecretIds, setRevealedSecretIds] = useState<Set<string>>(() => new Set());
   const update = (id: string, patch: Partial<KeyValue>) =>
     onChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
-  const validateJsonValue = (row: KeyValue, value: string) => environmentRowsToObject(rows.map((candidate) => candidate.id === row.id ? { ...candidate, value, valueType: 'json' } : candidate)).error ?? '';
+  const validateJsonValue = (row: KeyValue, value: string) => validateEnvironmentJsonRow(rows, row.id, value);
   const changeValueType = (row: KeyValue, valueType: NonNullable<KeyValue['valueType']>) => {
+    if (row.valueType === 'secret') {
+      if (!secretAvailable || !onSecretEntriesChange) {
+        window.alert('Unlock the local vault before changing this Secret variable.');
+        return;
+      }
+      if (!window.confirm(`Change ${row.name || 'this variable'} from Secret to ${valueType === 'json' ? 'JSON' : 'String'}? Its decrypted value will be stored in ordinary workspace data.`)) return;
+      const value = environmentSecretValue(secretEntries, row.id);
+      if (valueType === 'json') {
+        const error = validateJsonValue(row, value);
+        if (error) {
+          window.alert(error);
+          return;
+        }
+      }
+      onSecretEntriesChange(removeEnvironmentSecrets(secretEntries, [row.id]));
+      update(row.id, { value, valueType });
+      return;
+    }
+    if (valueType === 'secret') {
+      if (!allowSecrets || !secretAvailable || !onSecretEntriesChange) {
+        window.alert('Secret variables require a private environment and an unlocked local vault.');
+        return;
+      }
+      onSecretEntriesChange(upsertEnvironmentSecret(secretEntries, row.id, row.value));
+      update(row.id, { value: '', valueType });
+      return;
+    }
     if (valueType === 'string') {
       update(row.id, { valueType });
       return;
@@ -241,6 +278,16 @@ function KeyValueEditor({
       return;
     }
     update(row.id, { value, valueType });
+  };
+  const removeRow = (row: KeyValue) => {
+    if (row.valueType === 'secret') {
+      if (!secretAvailable || !onSecretEntriesChange) {
+        window.alert('Unlock the local vault before removing this Secret variable.');
+        return;
+      }
+      onSecretEntriesChange(removeEnvironmentSecrets(secretEntries, [row.id]));
+    }
+    onChange(rows.filter((candidate) => candidate.id !== row.id));
   };
   const editingJsonRow = rows.find((row) => row.id === editingJsonRowId);
 
@@ -288,7 +335,19 @@ function KeyValueEditor({
               setJsonError(validateJsonValue(row, row.value));
             }}
             type="button"
-          ><Icon name="code" size={13} /> Edit JSON</button> : detailed ? <textarea
+          ><Icon name="code" size={13} /> Edit JSON</button> : environmentValues && row.valueType === 'secret' ? <div className="kv-secret-value"><input
+            aria-label={`Secret value for ${row.name || 'row'}`}
+            disabled={!secretAvailable}
+            onChange={(event) => onSecretEntriesChange?.(upsertEnvironmentSecret(secretEntries, row.id, event.target.value))}
+            placeholder={secretAvailable ? 'Input Secret' : 'Unlock vault to edit'}
+            spellCheck={false}
+            type={revealedSecretIds.has(row.id) ? 'text' : 'password'}
+            value={environmentSecretValue(secretEntries, row.id)}
+          /><button aria-label={`${revealedSecretIds.has(row.id) ? 'Hide' : 'Reveal'} secret value for ${row.name || 'row'}`} disabled={!secretAvailable} onClick={() => setRevealedSecretIds((current) => {
+            const next = new Set(current);
+            if (next.has(row.id)) next.delete(row.id); else next.add(row.id);
+            return next;
+          })} type="button"><Icon name={revealedSecretIds.has(row.id) ? 'eye-off' : 'eye'} size={13} /></button></div> : detailed ? <textarea
             aria-label={valuePlaceholder}
             onChange={(event) => update(row.id, { value: event.target.value })}
             placeholder={valuePlaceholder}
@@ -302,12 +361,13 @@ function KeyValueEditor({
             spellCheck={false}
             value={row.value}
           />}
-          {environmentValues ? <select aria-label={`Type for ${row.name || 'row'}`} onChange={(event) => changeValueType(row, event.target.value as NonNullable<KeyValue['valueType']>)} value={row.valueType ?? 'string'}><option value="string">String</option><option value="json">JSON</option></select> : null}
+          {environmentValues ? <select aria-label={`Type for ${row.name || 'row'}`} disabled={row.valueType === 'secret' && !secretAvailable} onChange={(event) => changeValueType(row, event.target.value as NonNullable<KeyValue['valueType']>)} value={row.valueType ?? 'string'}><option value="string">String</option><option value="json">JSON</option>{allowSecrets && (secretAvailable || row.valueType === 'secret') ? <option value="secret">Secret</option> : null}</select> : null}
           {detailed ? <input aria-label="Description" onChange={(event) => update(row.id, { description: event.target.value })} placeholder="Description" value={row.description ?? ''} /> : null}
           <button
             aria-label="Remove row"
             className="icon-button subtle"
-            onClick={() => onChange(rows.filter((candidate) => candidate.id !== row.id))}
+            disabled={row.valueType === 'secret' && !secretAvailable}
+            onClick={() => removeRow(row)}
             type="button"
           >
             <Icon name="trash" size={15} />
@@ -330,10 +390,15 @@ type EnvironmentVariablesEditorProps = {
   rows: KeyValue[];
   mode?: 'table' | 'raw';
   onChange: (rows: KeyValue[], mode: 'table' | 'raw') => void;
+  allowSecrets?: boolean;
+  secretAvailable?: boolean;
+  secretEntries?: VaultEntry[];
+  onSecretEntriesChange?: (entries: VaultEntry[]) => void;
 };
 
-function EnvironmentVariablesEditor({ rows, mode = 'table', onChange }: EnvironmentVariablesEditorProps) {
-  const formatted = useMemo(() => formatEnvironmentJson(rows), [rows]);
+function EnvironmentVariablesEditor({ rows, mode = 'table', onChange, allowSecrets = false, secretAvailable = false, secretEntries = [], onSecretEntriesChange }: EnvironmentVariablesEditorProps) {
+  const hasSecrets = rows.some((row) => row.valueType === 'secret');
+  const formatted = useMemo(() => formatEnvironmentJson(rows.filter((row) => row.valueType !== 'secret')), [rows]);
   const [draft, setDraft] = useState(() => formatted.source ?? '{}');
   const [error, setError] = useState(() => formatted.error ?? '');
   const previousMode = useRef(mode);
@@ -347,6 +412,10 @@ function EnvironmentVariablesEditor({ rows, mode = 'table', onChange }: Environm
   const switchMode = (nextMode: 'table' | 'raw') => {
     if (nextMode === mode) return;
     if (nextMode === 'raw') {
+      if (hasSecrets) {
+        window.alert('Secret variables remain in Table view so encrypted values never enter raw workspace JSON.');
+        return;
+      }
       if (!formatted.source || formatted.error) {
         window.alert(formatted.error || 'The environment cannot be converted to raw JSON.');
         return;
@@ -375,7 +444,7 @@ function EnvironmentVariablesEditor({ rows, mode = 'table', onChange }: Environm
     setError('');
     onChange(parsed.rows, 'table');
   };
-  return <section className="environment-variable-editor"><div className="environment-editor-toolbar" role="tablist" aria-label="Environment editor mode"><button aria-selected={mode === 'table'} className={mode === 'table' ? 'active' : ''} onClick={() => switchMode('table')} role="tab" type="button">Table</button><button aria-selected={mode === 'raw'} className={mode === 'raw' ? 'active' : ''} onClick={() => switchMode('raw')} role="tab" type="button">Raw JSON</button></div>{mode === 'table' ? <><KeyValueEditor environmentValues namePlaceholder="Variable" onChange={(nextRows) => onChange(nextRows, 'table')} rows={rows} />{formatted.error ? <p className="environment-editor-error" role="alert">{formatted.error}</p> : null}</> : <div className="environment-raw-editor"><CodeEditor ariaLabel="Raw environment JSON" onChange={(value) => { setDraft(value); const parsed = parseEnvironmentJson(value, rows, () => uid('variable')); if (!parsed.rows) { setError(parsed.error || 'Invalid environment JSON.'); return; } setError(''); onChange(parsed.rows, 'raw'); }} value={draft} />{error ? <p className="environment-editor-error" role="alert">{error}</p> : null}</div>}</section>;
+  return <section className="environment-variable-editor"><div className="environment-editor-toolbar" role="tablist" aria-label="Environment editor mode"><button aria-selected={mode === 'table'} className={mode === 'table' ? 'active' : ''} onClick={() => switchMode('table')} role="tab" type="button">Table</button><button aria-selected={mode === 'raw'} className={mode === 'raw' ? 'active' : ''} onClick={() => switchMode('raw')} role="tab" type="button">Raw JSON</button></div>{mode === 'table' ? <><KeyValueEditor allowSecrets={allowSecrets} environmentValues namePlaceholder="Variable" onChange={(nextRows) => onChange(nextRows, 'table')} onSecretEntriesChange={onSecretEntriesChange} rows={rows} secretAvailable={secretAvailable} secretEntries={secretEntries} />{formatted.error ? <p className="environment-editor-error" role="alert">{formatted.error}</p> : null}</> : <div className="environment-raw-editor"><CodeEditor ariaLabel="Raw environment JSON" onChange={(value) => { setDraft(value); const parsed = parseEnvironmentJson(value, rows, () => uid('variable')); if (!parsed.rows) { setError(parsed.error || 'Invalid environment JSON.'); return; } setError(''); onChange(parsed.rows, 'raw'); }} value={draft} />{error ? <p className="environment-editor-error" role="alert">{error}</p> : null}</div>}</section>;
 }
 
 function BulkKeyValueEditor({ rows, onChange, ariaLabel }: { rows: KeyValue[]; onChange: (rows: KeyValue[]) => void; ariaLabel: string }) {
@@ -1280,9 +1349,12 @@ type EnvironmentDocumentPanelProps = {
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
   onMove: (move: WorkspaceEnvironmentMove) => void;
+  vaultSession: VaultSession;
+  onVaultEntriesChange: (entries: VaultEntry[]) => void;
+  vaultSaveError: string;
 };
 
-function EnvironmentDocumentPanel({ environments, activeId, documentTabStrip, onChange, onSelect, onAdd, onDelete, onDuplicate, onMove }: EnvironmentDocumentPanelProps) {
+function EnvironmentDocumentPanel({ environments, activeId, documentTabStrip, onChange, onSelect, onAdd, onDelete, onDuplicate, onMove, vaultSession, onVaultEntriesChange, vaultSaveError }: EnvironmentDocumentPanelProps) {
   const dragEnvironmentRef = useRef<string | undefined>(undefined);
   const [draggedEnvironmentId, setDraggedEnvironmentId] = useState('');
   const [environmentDrop, setEnvironmentDrop] = useState<{ id: string; placement: 'before' | 'after' }>();
@@ -1293,6 +1365,14 @@ function EnvironmentDocumentPanel({ environments, activeId, documentTabStrip, on
   const inherited = resolved.variables.filter((variable) => !ownNames.has(variable.name));
   const publicIds = new Set(publicEnvironments(environments).map((candidate) => candidate.id));
   const roots = environments.filter((candidate) => !candidate.parentId);
+  const hasSecrets = environmentHasSecrets(environment);
+  const updateIdentity = (next: Environment) => {
+    if (hasSecrets && !next.private) {
+      window.alert('Convert or remove this environment’s Secret variables before making it shared.');
+      return;
+    }
+    onChange(next);
+  };
   const clearEnvironmentDrag = () => {
     dragEnvironmentRef.current = undefined;
     setDraggedEnvironmentId('');
@@ -1342,12 +1422,14 @@ function EnvironmentDocumentPanel({ environments, activeId, documentTabStrip, on
       {documentTabStrip}
       <header><div><small>Project environments</small><h2 id="environment-title">{environment.name}</h2></div><span>{environment.private ? 'Private on this device' : 'Shared project data'}</span></header>
       <div className="environment-layout"><aside><div>{roots.map((candidate) => renderEnvironment(candidate, 0))}</div><button onClick={() => onAdd('')} type="button"><Icon name="plus" size={13} /> Base environment</button><button onClick={() => onAdd(environment.id)} type="button"><Icon name="plus" size={13} /> Sub-environment</button></aside><main>
-        <div className="environment-identity"><label>Name<input onChange={(event) => onChange({ ...environment, name: event.target.value })} value={environment.name} /></label><label>Parent<select onChange={(event) => { const parentId = event.target.value; onChange({ ...environment, parentId, private: parentId ? environment.private || !publicIds.has(parentId) : false }); }} value={environment.parentId ?? ''}><option value="">None (base)</option>{environments.filter((candidate) => candidate.id !== environment.id && !environmentAncestors(environments, candidate.id).some((ancestor) => ancestor.id === environment.id)).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label><label>Color<input onChange={(event) => onChange({ ...environment, color: event.target.value })} type="color" value={environment.color || '#7e8a91'} /></label><label className="private-environment"><input checked={environment.private === true} disabled={!environment.parentId || !publicIds.has(environment.parentId)} onChange={(event) => onChange({ ...environment, private: event.target.checked })} type="checkbox" /> Private on this device</label></div>
-        <p>Own values override inherited values immediately. Private sub-environments are omitted from project sync and exports; use vault references for encrypted secrets.</p>
-        {inherited.length ? <div className="inherited-variables"><strong>Inherited from parent</strong>{inherited.map((variable) => <span key={variable.name}><code>{variable.name}</code><em>{variable.value}</em></span>)}</div> : null}
-        <EnvironmentVariablesEditor key={environment.id} mode={environment.environmentEditorMode} onChange={(variables, environmentEditorMode) => onChange({ ...environment, variables, environmentEditorMode })} rows={environment.variables} />
+        <div className="environment-identity"><label>Name<input onChange={(event) => updateIdentity({ ...environment, name: event.target.value })} value={environment.name} /></label><label>Parent<select onChange={(event) => { const parentId = event.target.value; updateIdentity({ ...environment, parentId, private: parentId ? environment.private || !publicIds.has(parentId) : false }); }} value={environment.parentId ?? ''}><option value="">None (base)</option>{environments.filter((candidate) => candidate.id !== environment.id && !environmentAncestors(environments, candidate.id).some((ancestor) => ancestor.id === environment.id)).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label><label>Color<input onChange={(event) => updateIdentity({ ...environment, color: event.target.value })} type="color" value={environment.color || '#7e8a91'} /></label><label className="private-environment"><input checked={environment.private === true} disabled={!environment.parentId || !publicIds.has(environment.parentId)} onChange={(event) => updateIdentity({ ...environment, private: event.target.checked })} type="checkbox" /> Private on this device</label></div>
+        <p>Own values override inherited values immediately. Private environments can store encrypted Secret rows under <code>vault.*</code> while the local vault is unlocked; their plaintext never enters workspace JSON, sync, Git, or exports.</p>
+        {inherited.length ? <div className="inherited-variables"><strong>Inherited from parent</strong>{inherited.map((variable) => <span key={variable.name}><code>{variable.valueType === 'secret' ? `vault.${variable.name}` : variable.name}</code><em>{variable.valueType === 'secret' ? '••••••' : variable.value}</em></span>)}</div> : null}
+        <EnvironmentVariablesEditor allowSecrets={environment.private === true} key={environment.id} mode={environment.environmentEditorMode} onChange={(variables, environmentEditorMode) => onChange({ ...environment, variables, environmentEditorMode })} onSecretEntriesChange={onVaultEntriesChange} rows={environment.variables} secretAvailable={environment.private === true && vaultSession.unlocked} secretEntries={vaultSession.entries} />
+        {environment.private && !vaultSession.unlocked ? <p className="environment-editor-error">Unlock the local vault in Security &amp; Sync to create or edit Secret variables.</p> : null}
+        {vaultSaveError ? <p className="environment-editor-error" role="alert">{vaultSaveError}</p> : null}
       </main></div>
-      <footer><button className="danger-action" disabled={environments.length <= 1} onClick={() => onDelete(environment.id)} type="button">Delete</button><button className="secondary-button" disabled={!environment.parentId} onClick={() => onDuplicate(environment.id)} type="button"><Icon name="copy" size={13} /> Duplicate</button><span className="footer-spacer" /><span>{environments.length} environment{environments.length === 1 ? '' : 's'}</span></footer>
+      <footer><button className="danger-action" disabled={environments.length <= 1 || hasSecrets && !vaultSession.unlocked} onClick={() => onDelete(environment.id)} type="button">Delete</button><button className="secondary-button" disabled={!environment.parentId || hasSecrets && !vaultSession.unlocked} onClick={() => onDuplicate(environment.id)} type="button"><Icon name="copy" size={13} /> Duplicate</button><span className="footer-spacer" /><span>{environments.length} environment{environments.length === 1 ? '' : 's'}</span></footer>
     </section>
   );
 }
@@ -1453,7 +1535,7 @@ function FolderDocumentPanel({ documentTabStrip, onConfigure, onRun, ...editorPr
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 45, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], fileState: {}, responses: [], streamSessions: [], mcpSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+    format: 'brunomnia', version: 46, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], fileState: {}, responses: [], streamSessions: [], mcpSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0 }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
@@ -1503,6 +1585,7 @@ export default function App() {
   const [contextualPluginActionFeedback, setContextualPluginActionFeedback] = useState<{ error: boolean; message: string }>();
   const [templatePrompt, setTemplatePrompt] = useState<PendingTemplatePrompt>();
   const [vaultSession, setVaultSession] = useState<VaultSession>({ unlocked: false, passphrase: '', entries: [] });
+  const [environmentVaultSaveError, setEnvironmentVaultSaveError] = useState('');
   const streamSession = useRef<string | undefined>(undefined);
   const streamProtocol = useRef<Protocol | undefined>(undefined);
   const selectedStreamSessionIdRef = useRef('');
@@ -1515,6 +1598,10 @@ export default function App() {
   const scheduledTimer = useRef<number | undefined>(undefined);
   const scheduledResolve = useRef<(() => void) | undefined>(undefined);
   const workspaceSaveGeneration = useRef(0);
+  const vaultSessionRef = useRef(vaultSession);
+  const environmentVaultSaveTimer = useRef<number | undefined>(undefined);
+  const environmentVaultSaveGeneration = useRef(0);
+  const environmentVaultSavePending = useRef(false);
   const oauthFlowId = useRef('');
   const contextualPluginActionBusyRef = useRef('');
   const templateResponseResolver = useRef<SendRequestContext['resolveResponse']>(undefined);
@@ -1582,6 +1669,15 @@ export default function App() {
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [activeWorkspaceId, hydrated]);
+
+  useEffect(() => {
+    vaultSessionRef.current = vaultSession;
+  }, [vaultSession]);
+
+  useEffect(() => () => {
+    if (environmentVaultSaveTimer.current !== undefined) window.clearTimeout(environmentVaultSaveTimer.current);
+    environmentVaultSaveTimer.current = undefined;
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspaceId || requestPinState.workspaceId !== activeWorkspaceId) return;
@@ -1943,7 +2039,64 @@ export default function App() {
       return { ...current, responseFilters: { ...current.responseFilters, [requestId]: { ...previous, previewMode } } };
     });
   };
-  const unlockedVault = useMemo(() => vaultVariables(vaultSession), [vaultSession]);
+  const unlockedVault = useMemo(() => ({
+    ...environmentSecretVariables(activeEnvironment?.variables ?? [], vaultSession),
+    ...vaultVariables(vaultSession),
+  }), [activeEnvironment?.variables, vaultSession]);
+  const persistEnvironmentVaultSession = useCallback(async (workspaceId: string, session: VaultSession, generation: number) => {
+    try {
+      if (session.passphrase) await saveVault(workspaceId, session.passphrase, session.entries);
+      else await saveVaultWithSavedKey(workspaceId, session.entries);
+      if (environmentVaultSaveGeneration.current === generation) {
+        environmentVaultSavePending.current = false;
+        setEnvironmentVaultSaveError('');
+      }
+      return true;
+    } catch (caught) {
+      if (environmentVaultSaveGeneration.current === generation) {
+        environmentVaultSavePending.current = true;
+        setEnvironmentVaultSaveError(caught instanceof Error ? caught.message : String(caught));
+      }
+      return false;
+    }
+  }, []);
+  const updateEnvironmentVaultEntries = useCallback((entries: VaultEntry[]) => {
+    const current = vaultSessionRef.current;
+    if (!current.unlocked) {
+      setEnvironmentVaultSaveError('Unlock the local vault before editing Secret variables.');
+      return;
+    }
+    const next = { ...current, entries };
+    vaultSessionRef.current = next;
+    setVaultSession(next);
+    setEnvironmentVaultSaveError('');
+    environmentVaultSavePending.current = true;
+    const generation = ++environmentVaultSaveGeneration.current;
+    if (environmentVaultSaveTimer.current !== undefined) window.clearTimeout(environmentVaultSaveTimer.current);
+    const workspaceId = activeWorkspaceId;
+    environmentVaultSaveTimer.current = window.setTimeout(() => {
+      environmentVaultSaveTimer.current = undefined;
+      if (activeWorkspaceIdRef.current !== workspaceId) return;
+      const session = vaultSessionRef.current;
+      if (!session.unlocked) return;
+      void persistEnvironmentVaultSession(workspaceId, session, generation);
+    }, 300);
+  }, [activeWorkspaceId, persistEnvironmentVaultSession]);
+  const updateVaultSession = useCallback((session: VaultSession) => {
+    const current = vaultSessionRef.current;
+    if (current.unlocked && !session.unlocked && environmentVaultSavePending.current && activeWorkspaceId) {
+      if (environmentVaultSaveTimer.current !== undefined) window.clearTimeout(environmentVaultSaveTimer.current);
+      environmentVaultSaveTimer.current = undefined;
+      void persistEnvironmentVaultSession(activeWorkspaceId, current, environmentVaultSaveGeneration.current).then((persisted) => {
+        if (!persisted) return;
+        vaultSessionRef.current = session;
+        setVaultSession(session);
+      });
+      return;
+    }
+    vaultSessionRef.current = session;
+    setVaultSession(session);
+  }, [activeWorkspaceId, persistEnvironmentVaultSession]);
   const externalSecretResolver = useCallback((input: ExternalSecretInput) => resolveAuthorizedExternalSecret(workspace, input), [workspace]);
   templateResponseResolver.current = async ({ requestId, requestChain, cookies, responses }) => {
     if (!activeEnvironment) throw new Error('Select an environment before resending a dependent request.');
@@ -2890,6 +3043,12 @@ export default function App() {
     activeTemplatePrompt.current = undefined;
     templatePromptQueue.current = [];
     setTemplatePrompt(undefined);
+    if (environmentVaultSaveTimer.current !== undefined) window.clearTimeout(environmentVaultSaveTimer.current);
+    environmentVaultSaveTimer.current = undefined;
+    if (environmentVaultSavePending.current && vaultSessionRef.current.unlocked && activeWorkspaceIdRef.current) {
+      const persisted = await persistEnvironmentVaultSession(activeWorkspaceIdRef.current, vaultSessionRef.current, environmentVaultSaveGeneration.current);
+      if (!persisted) throw new Error('Save private-environment Secret values before changing projects.');
+    }
     const sessionId = streamSession.current;
     const protocol = streamProtocol.current;
     const activeOAuthFlowId = oauthFlowId.current;
@@ -2910,6 +3069,8 @@ export default function App() {
     setScriptTests([]);
     setScriptLogs([]);
     setOAuthAuthorization(undefined);
+    environmentVaultSavePending.current = false;
+    setEnvironmentVaultSaveError('');
     setVaultSession({ unlocked: false, passphrase: '', entries: [] });
   };
 
@@ -3195,7 +3356,22 @@ export default function App() {
   }, []);
 
   const duplicateEnvironment = (id: string) => {
-    setWorkspace((current) => duplicateWorkspaceEnvironment(current, id, uid));
+    const source = workspace.environments.find((environment) => environment.id === id);
+    if (!source?.parentId) return;
+    if (environmentHasSecrets(source) && !vaultSession.unlocked) {
+      window.alert('Unlock the local vault before duplicating an environment with Secret variables.');
+      return;
+    }
+    const copyId = uid('environment');
+    const variableIds = source.variables.map(() => uid('variable'));
+    let variableIndex = 0;
+    const next = duplicateWorkspaceEnvironment(workspace, id, (kind) => kind === 'environment' ? copyId : variableIds[variableIndex++]);
+    const copy = next.environments.find((environment) => environment.id === copyId);
+    if (!copy) return;
+    setWorkspace(next);
+    if (environmentHasSecrets(source)) {
+      updateEnvironmentVaultEntries(duplicateEnvironmentSecrets(source.variables, copy.variables, vaultSession.entries));
+    }
   };
 
   const addEnvironment = (parentId: string) => {
@@ -3208,7 +3384,14 @@ export default function App() {
 
   const deleteEnvironment = (id: string) => {
     if (workspace.environments.length <= 1) return;
+    const target = workspace.environments.find((environment) => environment.id === id);
+    if (!target) return;
+    if (environmentHasSecrets(target) && !vaultSession.unlocked) {
+      window.alert('Unlock the local vault before deleting an environment with Secret variables.');
+      return;
+    }
     if (workspace.preferences.confirmDestructive && !window.confirm('Delete this environment? Child environments will move to its parent.')) return;
+    if (environmentHasSecrets(target)) updateEnvironmentVaultEntries(removeEnvironmentSecrets(vaultSession.entries, target.variables.map((row) => row.id)));
     setWorkspace((current) => {
       const deleted = current.environments.find((environment) => environment.id === id);
       if (!deleted) return current;
@@ -3502,6 +3685,9 @@ export default function App() {
           onDuplicate={(environmentId) => { promoteRequestDocument(environmentDocumentId(activeWorkspaceId)); duplicateEnvironment(environmentId); }}
           onMove={(move) => { promoteRequestDocument(environmentDocumentId(activeWorkspaceId)); moveEnvironment(move); }}
           onSelect={(activeEnvironmentId) => setWorkspace((current) => ({ ...current, activeEnvironmentId }))}
+          onVaultEntriesChange={updateEnvironmentVaultEntries}
+          vaultSaveError={environmentVaultSaveError}
+          vaultSession={vaultSession}
         /> : activeCollectionDocument ? <CollectionDocumentPanel collection={activeCollectionDocument} documentTabStrip={renderDocumentTabStrip()} onChange={(collection) => { promoteRequestDocument(collection.id); updateCollection(collection); }} /> : activeDesignDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('design')}</section> : activeMockDocument ? <section className="document-automation-panel">{renderDocumentTabStrip()}{renderAutomationWorkbench('mocks')}</section> : activeTestSuiteDocument ? <Suspense fallback={<div className="dialog-loading">Loading unit tests…</div>}><UnitTestWorkbench activeEnvironment={runtimeEnvironment} documentTabStrip={renderDocumentTabStrip()} key={activeTestSuiteDocument.id} onChangeWorkspace={(updater) => setWorkspace(updater)} onDeleteSuite={deleteTestSuite} onOpenSuite={openTestSuiteDocument} onPromote={() => promoteRequestDocument(activeTestSuiteDocument.id)} suite={activeTestSuiteDocument} templatePrompt={requestTemplatePrompt} vault={unlockedVault} workspace={workspace} /></Suspense> : activeFolderDocument ? <FolderDocumentPanel
           collection={activeFolderDocument.collection}
           cookies={activeWorkspaceFileState.cookies}
@@ -3597,7 +3783,7 @@ export default function App() {
             streamSession={streamSessionView}
             streamStatus={streamStatus}
           />
-        </div>) : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ cookies: [...activeWorkspaceFileState.cookies], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeWorkspaceFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} selectedDocumentId={activeDocumentTab?.requestId} selectedDocumentType={activeDocumentTab?.type} templatePrompt={requestTemplatePrompt} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} workspaceFileId={activeWorkspaceFileId} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} onRefreshWorkspaceCatalog={(snapshot) => { setWorkspaceEntries(snapshot.entries); setWorkspaceRecovery(snapshot.recovery); }} onWorkspaceCatalogMutationEnd={() => setWorkspaceStoreBusy(false)} onWorkspaceCatalogMutationStart={() => { workspaceSaveGeneration.current += 1; setWorkspaceStoreBusy(true); setWorkspaceStoreError(''); }} requestContext={{ cookies: [...activeWorkspaceFileState.cookies], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeWorkspaceFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} workspaceCatalogBusy={workspaceStoreBusy} workspaceFileId={activeWorkspaceFileId} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : renderAutomationWorkbench(workbenchSection)}
+        </div>) : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ cookies: [...activeWorkspaceFileState.cookies], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeWorkspaceFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} selectedDocumentId={activeDocumentTab?.requestId} selectedDocumentType={activeDocumentTab?.type} templatePrompt={requestTemplatePrompt} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={updateVaultSession} vaultSession={vaultSession} workspace={workspace} workspaceFileId={activeWorkspaceFileId} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} onRefreshWorkspaceCatalog={(snapshot) => { setWorkspaceEntries(snapshot.entries); setWorkspaceRecovery(snapshot.recovery); }} onWorkspaceCatalogMutationEnd={() => setWorkspaceStoreBusy(false)} onWorkspaceCatalogMutationStart={() => { workspaceSaveGeneration.current += 1; setWorkspaceStoreBusy(true); setWorkspaceStoreError(''); }} requestContext={{ cookies: [...activeWorkspaceFileState.cookies], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeWorkspaceFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} workspaceCatalogBusy={workspaceStoreBusy} workspaceFileId={activeWorkspaceFileId} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : renderAutomationWorkbench(workbenchSection)}
       </div>
 
       <footer className="statusbar">
@@ -3605,6 +3791,7 @@ export default function App() {
         <span className="status-spacer" />
         <span><i /> Environment: {runtimeEnvironment.name}</span>
         {projectSyncError ? <span className="bad">Project save failed: {projectSyncError}</span> : null}
+        {environmentVaultSaveError ? <span className="bad">Secret vault save failed: {environmentVaultSaveError}</span> : null}
         {contextualPluginActionBusyKey ? <span>Plugin action running…</span> : null}
         {contextualPluginActionErrors.length ? <span className="bad" title={contextualPluginActionErrors.join('\n')}>Plugin actions unavailable: {contextualPluginActionErrors.length}</span> : null}
         <span>{vaultSession.unlocked ? `Vault: ${vaultSession.entries.length} unlocked` : 'Vault: locked'}</span>

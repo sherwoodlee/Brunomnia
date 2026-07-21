@@ -27,6 +27,10 @@ Formats are Brunomnia JSON, Insomnia v4 JSON, Insomnia v5 YAML, HAR 1.2, and raw
 
 Effectively private environment trees are excluded by default. A separate checkbox is required to include them, and the resulting artifact carries a warning because downloaded files can contain secrets. Runtime OAuth registration state and other device-local integration credentials remain outside compatibility exports.
 
+Private-environment **Secret** rows are different from ordinary private values: every export format omits both the row and its owner-bound encrypted vault entry, even after private-environment consent, and reports `environment-secrets-omitted`. Their plaintext exists only in the local encrypted vault and never enters an export document.
+
+Insomnia v4/v5 imports likewise omit `kvPairData` Secret ciphertext and `__insomnia_vault` data with the same explicit warning. Those blobs require the source account vault key and are not portable. Recreate each value as a Secret row in an unlocked private Brunomnia environment after import. Brunomnia workspace imports do not accept Secret metadata as authority from an external file.
+
 ## Compatibility boundaries
 
 Insomnia v5 database-only proto references cannot carry missing database blobs. Deprecated scripts can be translated only where their operation has a safe local equivalent. External local-file paths and WSDL sample placeholders remain source metadata or warnings, and formats without binary embedding cannot preserve payload bytes. These are explicit representation boundaries; the original workspace is not silently mutated.

@@ -17,13 +17,16 @@ export type ExportOptions = {
 
 const safeName = (value: string) => value.trim().replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'brunomnia-export';
 
-const environmentData = (rows: Workspace['environments'][number]['variables']) => environmentRowsToObject(rows).object
-  ?? Object.fromEntries(rows.filter((row) => row.enabled && row.name.trim()).map((row) => [row.name.trim(), row.value]));
+const environmentData = (rows: Workspace['environments'][number]['variables']) => {
+  const exportable = rows.filter((row) => row.valueType !== 'secret');
+  return environmentRowsToObject(exportable).object
+    ?? Object.fromEntries(exportable.filter((row) => row.enabled && row.name.trim()).map((row) => [row.name.trim(), row.value]));
+};
 
 const insomniaV4EnvironmentFields = (rows: Workspace['environments'][number]['variables'], mode: 'table' | 'raw' | undefined, dataKey: 'data' | 'environment' = 'data') => ({
   [dataKey]: environmentData(rows),
   environmentType: mode === 'raw' ? 'json' : 'kv',
-  kvPairData: mode === 'raw' ? [] : rows.map((row) => ({ id: row.id, name: row.name, value: row.value, type: row.valueType === 'json' ? 'json' : 'str', enabled: row.enabled })),
+  kvPairData: mode === 'raw' ? [] : rows.filter((row) => row.valueType !== 'secret').map((row) => ({ id: row.id, name: row.name, value: row.value, type: row.valueType === 'json' ? 'json' : 'str', enabled: row.enabled })),
 });
 
 const selectCollectionRequests = (collection: Collection, requestIds: string[] | undefined): Collection => {
@@ -56,9 +59,12 @@ const selectedCollections = (workspace: Workspace, options: ExportOptions) => op
     ? workspace.collections.filter((collection) => collection.id === workspace.apiDesigns.find((design) => design.id === options.designId)?.generatedCollectionId)
     : workspace.collections;
 
-const exportEnvironments = (workspace: Workspace, options: ExportOptions) => options.includePrivateEnvironments
+const exportEnvironments = (workspace: Workspace, options: ExportOptions) => (options.includePrivateEnvironments
   ? workspace.environments
-  : publicEnvironments(workspace.environments);
+  : publicEnvironments(workspace.environments)).map((environment) => ({
+    ...environment,
+    variables: environment.variables.filter((row) => row.valueType !== 'secret'),
+  }));
 
 const selectedDesigns = (workspace: Workspace, options: ExportOptions) => options.scope === 'design'
   ? workspace.apiDesigns.filter((design) => design.id === options.designId)
@@ -538,6 +544,9 @@ export const exportArtifact = (workspace: Workspace, options: ExportOptions): Ar
   }
   if (options.format !== 'openapi' && options.includePrivateEnvironments && publicEnvironments(workspace.environments).length < workspace.environments.length) {
     artifact.warnings.unshift({ code: 'private-environment-export', message: 'This export intentionally includes device-private environment values. Review and protect the downloaded file.' });
+  }
+  if (options.format !== 'openapi' && workspace.environments.some((environment) => environment.variables.some((row) => row.valueType === 'secret'))) {
+    artifact.warnings.unshift({ code: 'environment-secrets-omitted', message: 'Private-environment Secret rows and values were omitted because their plaintext exists only in the local encrypted vault.' });
   }
   return artifact;
 };

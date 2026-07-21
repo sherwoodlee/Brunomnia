@@ -21,6 +21,7 @@ const MIN_PASSPHRASE_BYTES: usize = 12;
 const MAX_ENVELOPE_BYTES: u64 = 50_000_000;
 const VAULT_AAD: &[u8] = b"brunomnia.local-vault.v1";
 const SYNC_AAD: &[u8] = b"brunomnia.encrypted-sync.v1";
+const ENVIRONMENT_SECRET_NAME_PREFIX: &str = "__brunomnia_environment__:";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +30,10 @@ pub struct VaultEntry {
     pub name: String,
     pub value: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub owner_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -291,6 +296,24 @@ pub fn vault_unlock(path: &Path, passphrase: String) -> Result<Vec<VaultEntry>, 
 }
 
 pub fn vault_save(path: &Path, input: VaultSaveInput) -> Result<SecureFileStatus, String> {
+    for entry in &input.entries {
+        match entry.kind.as_str() {
+            "" if entry.owner_id.is_empty()
+                && !entry.name.starts_with(ENVIRONMENT_SECRET_NAME_PREFIX) => {}
+            "environment"
+                if !entry.owner_id.is_empty()
+                    && entry.owner_id.len() <= 500
+                    && entry.name
+                        == format!("{ENVIRONMENT_SECRET_NAME_PREFIX}{}", entry.owner_id) => {}
+            "" => return Err("Ordinary vault entries cannot carry an owner ID.".into()),
+            "environment" => {
+                return Err(
+                    "Environment vault entries require a bounded owner and canonical name.".into(),
+                )
+            }
+            _ => return Err("The vault entry kind is unsupported.".into()),
+        }
+    }
     let mut names = input
         .entries
         .iter()
@@ -393,6 +416,8 @@ mod tests {
             name: "api_token".into(),
             value: "never-write-this-plaintext".into(),
             updated_at: Utc::now().to_rfc3339(),
+            kind: String::new(),
+            owner_id: String::new(),
         }];
         vault_save(
             &path,
@@ -409,6 +434,46 @@ mod tests {
             entries
         );
         assert!(vault_unlock(&path, "this is the wrong passphrase".into()).is_err());
+    }
+
+    #[test]
+    fn validates_and_encrypts_environment_owned_vault_entries() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("environment-vault.json");
+        let entry = VaultEntry {
+            id: "environment-secret-one".into(),
+            name: "__brunomnia_environment__:private-row".into(),
+            value: "never-write-environment-plaintext".into(),
+            updated_at: Utc::now().to_rfc3339(),
+            kind: "environment".into(),
+            owner_id: "private-row".into(),
+        };
+        vault_save(
+            &path,
+            VaultSaveInput {
+                passphrase: "correct horse battery staple".into(),
+                entries: vec![entry.clone()],
+            },
+        )
+        .unwrap();
+        assert!(!fs::read_to_string(&path)
+            .unwrap()
+            .contains("never-write-environment-plaintext"));
+        assert_eq!(
+            vault_unlock(&path, "correct horse battery staple".into()).unwrap(),
+            vec![entry.clone()]
+        );
+        let mut invalid = entry;
+        invalid.name = "not-canonical".into();
+        assert!(vault_save(
+            &path,
+            VaultSaveInput {
+                passphrase: "correct horse battery staple".into(),
+                entries: vec![invalid],
+            },
+        )
+        .unwrap_err()
+        .contains("canonical"));
     }
 
     #[test]

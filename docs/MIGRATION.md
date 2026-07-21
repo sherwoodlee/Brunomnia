@@ -2743,6 +2743,18 @@ Compatibility bounds remain explicit: the protected profile store is macOS-only,
 
 Compatibility bounds remain explicit: the protected profile store remains macOS-only, renewal is explicit rather than silent/background, and script-facing external-provider APIs plus broader secret-field UX remain. `Secrets and external vaults` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 272 — private-environment Secret variables (complete baseline increment)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned model audit | Complete | Pinned Insomnia limits Secret rows to private key/value environments with a vault key, masks/reveals values, wraps runtime names beneath `vault`, and confirms Secret-to-plaintext conversion |
+| Encrypted ownership | Complete baseline | Workspace v46 stores only empty Secret row values; owner-bound entries use canonical hidden names inside the existing AES-256-GCM vault and remain absent from direct vault CRUD |
+| Runtime and lifecycle | Complete | Resolved enabled rows become `vault.<name>`, direct entries win collisions, duplication clones independent owners, deletion/reset removes hidden entries, and pending debounced saves flush before project switching or vault locking |
+| Boundary safety | Complete | Public/collection/folder rows fail closed, Secret environments stay in Table/private scope, exports omit rows with warnings, and non-portable Insomnia encrypted Secret data is warned and omitted |
+| Verification | Complete | Helper/UI/migration/interchange/native encryption regressions, TypeScript, full frontend, production/CLI build, native regression, formatting, and strict Clippy evidence is recorded in [Milestone 272 verification](QA_MILESTONE_272.md) |
+
+Compatibility bounds remain explicit: local Secret rows require the encrypted local vault and are limited to private global environments like the pinned source. Insomnia account-vault ciphertext cannot be decrypted without its non-portable key. Silent Azure background renewal, non-macOS protected profile stores, and script access to external providers remain. `Secrets and external vaults` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

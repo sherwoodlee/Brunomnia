@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KeyValue } from '../types';
-import { environmentRowVariables, environmentRowsToObject, environmentVariables, formatEnvironmentJson, parseEnvironmentJson } from './environmentJson';
+import { environmentRowVariables, environmentRowsToObject, environmentVariables, formatEnvironmentJson, parseEnvironmentJson, validateEnvironmentJsonRow } from './environmentJson';
 
 const row = (id: string, name: string, value: string, enabled = true, valueType: KeyValue['valueType'] = 'string'): KeyValue => ({ id, name, value, enabled, valueType });
 
@@ -21,6 +21,12 @@ describe('raw JSON environments', () => {
     expect(environmentRowsToObject(rows)).toEqual({ object: { name: { ok: true } }, disabledNames: ['hidden'], duplicateNames: ['name'] });
     expect(formatEnvironmentJson(rows).source).toBe('{\n  "name": {\n    "ok": true\n  }\n}');
     expect(environmentRowsToObject([row('bad', 'bad', '{', true, 'json')]).error).toContain('invalid JSON');
+  });
+
+  it('validates JSON rows without decrypting or parsing sibling Secret rows', () => {
+    const rows = [row('json', 'payload', '{}', true, 'json'), row('secret', 'token', '', true, 'secret')];
+    expect(validateEnvironmentJsonRow(rows, 'json', '{"enabled":true}')).toBe('');
+    expect(validateEnvironmentJsonRow(rows, 'json', '{')).toContain('invalid JSON');
   });
 
   it('rejects non-object roots, unsafe keys, excessive depth, and oversized input', () => {

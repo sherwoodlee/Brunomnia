@@ -650,6 +650,10 @@ kbd {
 .kv-row select { font-size: 9px; }
 .kv-json-value { align-items: center; display: flex; gap: 6px; text-align: left; }
 .kv-json-value:hover { color: var(--accent); }
+.kv-secret-value { align-items: stretch; display: flex; min-width: 0; }
+.kv-secret-value input { flex: 1; }
+.kv-secret-value button { background: transparent; border: 0; border-left: 1px solid var(--border-soft); color: var(--muted); padding: 0 9px; }
+.kv-secret-value button:hover:not(:disabled) { color: var(--accent); }
 .kv-row.read-only { background: color-mix(in srgb, var(--surface) 80%, var(--accent) 20%); }
 .kv-row.read-only input:not(.kv-check), .kv-row.read-only textarea { color: var(--muted); cursor: default; }
 .kv-read-only { align-items: center; color: var(--faint); display: flex; justify-content: center; }

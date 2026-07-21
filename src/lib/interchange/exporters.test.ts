@@ -266,7 +266,7 @@ describe('artifact export adapters', () => {
     const parsed = JSON.parse(scoped.contents);
     expect(parsed.collections).toHaveLength(1);
     expect(parsed.collections[0].name).toBe(collection.name);
-    expect(parsed.version).toBe(45);
+    expect(parsed.version).toBe(46);
     expect(parsed.testSuites).toEqual([expect.objectContaining({ id: 'suite', tests: [expect.objectContaining({ id: 'included' })] }), expect.objectContaining({ id: 'empty-suite', tests: [] })]);
     expect(parsed.unitTestResults).toEqual([expect.objectContaining({ id: 'run', suiteId: 'suite', tests: [expect.objectContaining({ testId: 'included' })] })]);
     expect(parsed.certificates).toEqual({ ca: { enabled: false, pem: '' }, clients: [] });
@@ -315,7 +315,7 @@ describe('artifact export adapters', () => {
   it('omits private environments by default and includes them only with explicit consent', () => {
     const workspace = cloneSeedWorkspace();
     workspace.environments.push(
-      { id: 'private-root', name: 'Private', private: true, variables: [{ id: 'private-token', name: 'token', value: 'device-secret', enabled: true }] },
+      { id: 'private-root', name: 'Private', private: true, variables: [{ id: 'private-token', name: 'token', value: 'device-secret', enabled: true }, { id: 'private-secret-row', name: 'vaultToken', value: '', valueType: 'secret', enabled: true }] },
       { id: 'private-child', parentId: 'private-root', name: 'Private child', variables: [{ id: 'private-child-token', name: 'childToken', value: 'child-secret', enabled: true }] },
     );
 
@@ -327,6 +327,7 @@ describe('artifact export adapters', () => {
     const consented = exportArtifact(workspace, { format: 'brunomnia', scope: 'all', includePrivateEnvironments: true });
     expect(consented.contents).toContain('device-secret');
     expect(consented.contents).toContain('child-secret');
-    expect(consented.warnings[0]).toMatchObject({ code: 'private-environment-export' });
+    expect(consented.contents).not.toContain('private-secret-row');
+    expect(consented.warnings).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'private-environment-export' }), expect.objectContaining({ code: 'environment-secrets-omitted' })]));
   });
 });

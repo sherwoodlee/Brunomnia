@@ -16,7 +16,7 @@ export type KeyValue = {
   enabled: boolean;
   description?: string;
   multiline?: boolean;
-  valueType?: 'string' | 'json';
+  valueType?: 'string' | 'json' | 'secret';
 };
 
 export type AuthConfig = {
@@ -439,7 +439,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 45;
+  version: 46;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;

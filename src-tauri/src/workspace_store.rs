@@ -2031,6 +2031,8 @@ mod tests {
                     name: "token".into(),
                     value: "secret".into(),
                     updated_at: Utc::now().to_rfc3339(),
+                    kind: String::new(),
+                    owner_id: String::new(),
                 }],
             },
         )

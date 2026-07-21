@@ -25,11 +25,12 @@ const storageModes: GovernancePolicy['allowedStorage'] = ['local', 'folder', 'gi
 const record = (value: unknown) => value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
 const stringValue = (value: unknown, fallback = '') => typeof value === 'string' ? value : fallback;
 const environmentEditorMode = (value: unknown) => value === 'raw' ? 'raw' as const : 'table' as const;
-const normalizeRows = (value: unknown, prefix: string): KeyValue[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
+const normalizeRows = (value: unknown, prefix: string, allowSecrets = false): KeyValue[] => !Array.isArray(value) ? [] : value.flatMap((item, index) => {
   const row = record(item);
   if (!row) return [];
-  const valueType = row.valueType === 'json' ? 'json' as const : 'string' as const;
-  return [{ id: stringValue(row.id, `${prefix}-${index}`), name: stringValue(row.name), value: stringValue(row.value), enabled: row.enabled !== false, description: stringValue(row.description).slice(0, 20_000), ...(row.multiline === true ? { multiline: true } : {}), ...(valueType === 'json' ? { valueType } : {}) }];
+  if (row.valueType === 'secret' && !allowSecrets) return [];
+  const valueType = row.valueType === 'json' ? 'json' as const : allowSecrets && row.valueType === 'secret' ? 'secret' as const : 'string' as const;
+  return [{ id: stringValue(row.id, `${prefix}-${index}`), name: stringValue(row.name), value: valueType === 'secret' ? '' : stringValue(row.value), enabled: row.enabled !== false, description: stringValue(row.description).slice(0, 20_000), ...(row.multiline === true ? { multiline: true } : {}), ...(valueType !== 'string' ? { valueType } : {}) }];
 }).slice(0, 1_000);
 
 const normalizeCookies = (value: unknown): Workspace['cookies'] => !Array.isArray(value) ? [] : value.flatMap((item, index): Workspace['cookies'] => {
@@ -622,7 +623,8 @@ const normalizeEnvironments = (value: unknown, fallback: Environment[]): Environ
     if (!environment) return [];
     const id = stringValue(environment.id, `migrated-environment-${index}`);
     const color = stringValue(environment.color);
-    return [{ id, name: stringValue(environment.name, `Environment ${index + 1}`), variables: normalizeRows(environment.variables, `${id}-variable`), environmentEditorMode: environmentEditorMode(environment.environmentEditorMode), parentId: stringValue(environment.parentId), private: environment.private === true, color: /^#[0-9a-f]{6}$/i.test(color) ? color : '', source: environment.source as Environment['source'] }];
+    const variables = normalizeRows(environment.variables, `${id}-variable`, true);
+    return [{ id, name: stringValue(environment.name, `Environment ${index + 1}`), variables, environmentEditorMode: variables.some((row) => row.valueType === 'secret') ? 'table' : environmentEditorMode(environment.environmentEditorMode), parentId: stringValue(environment.parentId), private: environment.private === true, color: /^#[0-9a-f]{6}$/i.test(color) ? color : '', source: environment.source as Environment['source'] }];
   });
   if (!environments.length) return fallback;
   const ids = new Set(environments.map((environment) => environment.id));
@@ -653,6 +655,9 @@ const normalizeEnvironments = (value: unknown, fallback: Environment[]): Environ
     });
     if (!changed) break;
   }
+  normalized.forEach((environment) => {
+    if (!environment.private) environment.variables = environment.variables.filter((row) => row.valueType !== 'secret');
+  });
   return normalized;
 };
 
@@ -944,7 +949,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   }));
   return {
     ...workspace,
-    version: 45,
+    version: 46,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',
@@ -985,6 +990,7 @@ export const secureImportedWorkspace = (value: unknown): Workspace => {
   const workspace = migrateWorkspace(value);
   return {
     ...workspace,
+    environments: workspace.environments.map((environment) => ({ ...environment, variables: environment.variables.filter((row) => row.valueType !== 'secret') })),
     plugins: workspace.plugins.map((plugin) => ({ ...plugin, enabled: false, grantedPermissions: [], grantedModules: [] })),
     pluginData: {},
     activePluginTheme: '',

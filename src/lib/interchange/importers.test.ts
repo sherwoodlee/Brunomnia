@@ -362,12 +362,29 @@ mcpRequest:
     expect(result.warnings).toContainEqual(expect.objectContaining({ code: 'mcp-command', resource: 'Unsafe local tools' }));
   });
 
+  it('omits non-portable Insomnia Secret environment ciphertext with an explicit warning', () => {
+    const result = importArtifact(`type: environment.insomnia.rest/5.0
+schema_version: "5.1"
+name: Private values
+meta: { id: global-private }
+environments:
+  name: Base Environment
+  meta: { id: global-base }
+  data:
+    region: us-west-2
+    __insomnia_vault: { token: encrypted-account-ciphertext }
+`, 'private.insomnia.yaml');
+    expect(result.environments[0].variables).toEqual([expect.objectContaining({ name: 'region', value: 'us-west-2' })]);
+    expect(result.warnings).toContainEqual(expect.objectContaining({ code: 'environment-secrets-omitted' }));
+    expect(JSON.stringify(result)).not.toContain('encrypted-account-ciphertext');
+  });
+
   it('imports Postman environments and applies resources with collision-safe IDs', () => {
     const result = importArtifact(JSON.stringify({ id: 'environment', name: 'Staging', _postman_variable_scope: 'environment', _postman_exported_at: '2026-01-01', values: [{ key: 'host', value: 'https://staging.example.com', enabled: true }] }), 'staging.postman_environment.json');
     expect(result.format).toBe('postman-environment');
     const first = applyArtifactImport(cloneSeedWorkspace(), result);
     const second = applyArtifactImport(first, result);
-    expect(second.version).toBe(45);
+    expect(second.version).toBe(46);
     expect(new Set(second.environments.map((environment) => environment.id)).size).toBe(second.environments.length);
     expect(second.imports).toHaveLength(2);
   });

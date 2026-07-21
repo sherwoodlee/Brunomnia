@@ -9,10 +9,21 @@ const joinScripts = (...scripts: unknown[]) => scripts.map((script) => asString(
 
 const insomniaEnvironmentMode = (raw: UnknownRecord): 'table' | 'raw' => raw.environmentType === 'kv' ? 'table' : 'raw';
 
+const withoutInsomniaVaultData = (value: unknown) => {
+  const data = asRecord(value);
+  if (!data) return value;
+  const { __insomnia_vault: _encryptedSecrets, ...publicData } = data;
+  return publicData;
+};
+
+const hasInsomniaEnvironmentSecrets = (raw: UnknownRecord) => asArray(raw.kvPairData).some((value) => asRecord(value)?.type === 'secret')
+  || Boolean(asRecord(raw.data)?.__insomnia_vault)
+  || Boolean(asRecord(raw.environment)?.__insomnia_vault);
+
 const insomniaEnvironmentRows = (raw: UnknownRecord, dataKey: 'data' | 'environment', prefix: string): KeyValue[] => {
   const pairs = asArray(raw.kvPairData).flatMap((value, index): KeyValue[] => {
     const pair = asRecord(value);
-    if (!pair) return [];
+    if (!pair || pair.type === 'secret') return [];
     return [{
       id: asString(pair.id, `${prefix}-${index}`),
       name: asString(pair.name),
@@ -21,7 +32,7 @@ const insomniaEnvironmentRows = (raw: UnknownRecord, dataKey: 'data' | 'environm
       valueType: pair.type === 'json' ? 'json' : 'string',
     }];
   });
-  return raw.environmentType === 'kv' && pairs.length ? pairs : objectVariables(raw[dataKey], prefix);
+  return raw.environmentType === 'kv' && pairs.length ? pairs : objectVariables(withoutInsomniaVaultData(raw[dataKey]), prefix);
 };
 
 const isInsomniaMcpRequest = (raw: UnknownRecord) => asString(raw._type) === 'mcp_request' || asString(asRecord(raw.meta)?.id).startsWith('mcp-req');
@@ -626,6 +637,7 @@ export const importInsomniaLegacy = (sourceName: string, document: UnknownRecord
 export const importInsomniaV4 = (sourceName: string, document: UnknownRecord): ArtifactImport => {
   const warnings: ImportWarning[] = [];
   const resources = asArray(document.resources).map(asRecord).filter((resource): resource is UnknownRecord => Boolean(resource));
+  if (resources.some(hasInsomniaEnvironmentSecrets)) warnings.push({ code: 'environment-secrets-omitted', message: 'Encrypted Insomnia Secret environment rows were omitted because their account vault key is not portable. Recreate them in an unlocked private Brunomnia environment.' });
   const workspaces = resources.filter((resource) => resource._type === 'workspace');
   const folders = new Map(resources.filter((resource) => resource._type === 'request_group').map((folder) => [asString(folder._id), folder]));
   const protoFiles = new Map(resources.filter((resource) => resource._type === 'proto_file').map((file) => [asString(file._id), file]));
@@ -796,11 +808,11 @@ const v5Environments = (document: UnknownRecord, prefix: string): Environment[] 
   if (!root) return [];
   const environments: Environment[] = [{
     id: sourceId('environment', 'insomnia-v5', asString(asRecord(root.meta)?.id, `${prefix}-base`)),
-    name: asString(root.name, 'Base Environment'), variables: objectVariables(root.data, `${prefix}-base`), environmentEditorMode: 'raw', source: sourceMetadata('insomnia-v5', asRecord(root.meta)?.id),
+    name: asString(root.name, 'Base Environment'), variables: objectVariables(withoutInsomniaVaultData(root.data), `${prefix}-base`), environmentEditorMode: 'raw', source: sourceMetadata('insomnia-v5', asRecord(root.meta)?.id),
   }];
   const baseId = environments[0].id;
   asArray(root.subEnvironments).map(asRecord).filter((environment): environment is UnknownRecord => Boolean(environment)).forEach((environment, index) => {
-    environments.push({ id: sourceId('environment', 'insomnia-v5', asString(asRecord(environment.meta)?.id, `${prefix}-${index}`)), name: asString(environment.name, `Environment ${index + 1}`), variables: objectVariables(environment.data, `${prefix}-${index}`), environmentEditorMode: 'raw', parentId: baseId, source: sourceMetadata('insomnia-v5', asRecord(environment.meta)?.id) });
+    environments.push({ id: sourceId('environment', 'insomnia-v5', asString(asRecord(environment.meta)?.id, `${prefix}-${index}`)), name: asString(environment.name, `Environment ${index + 1}`), variables: objectVariables(withoutInsomniaVaultData(environment.data), `${prefix}-${index}`), environmentEditorMode: 'raw', parentId: baseId, source: sourceMetadata('insomnia-v5', asRecord(environment.meta)?.id) });
   });
   return environments;
 };
@@ -821,6 +833,10 @@ export const importInsomniaV5 = (sourceName: string, documents: UnknownRecord[])
     const type = asString(document.type);
     const meta = asRecord(document.meta);
     const identity = asString(meta?.id, `${sourceName}-${documentIndex}`);
+    const environmentRoot = asRecord(document.environments);
+    if (environmentRoot && [environmentRoot, ...asArray(environmentRoot.subEnvironments).map(asRecord).filter((environment): environment is UnknownRecord => Boolean(environment))].some(hasInsomniaEnvironmentSecrets) && !warnings.some((warning) => warning.code === 'environment-secrets-omitted')) {
+      warnings.push({ code: 'environment-secrets-omitted', message: 'Encrypted Insomnia Secret environment rows were omitted because their account vault key is not portable. Recreate them in an unlocked private Brunomnia environment.' });
+    }
     if (type.startsWith('collection.') || type.startsWith('spec.')) {
       asArray(asRecord(document.cookieJar)?.cookies).forEach((cookie, index) => {
         const mapped = insomniaCookie(cookie, 'insomnia-v5', cookies.length + index);

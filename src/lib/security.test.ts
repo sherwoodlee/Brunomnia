@@ -79,7 +79,7 @@ describe('encrypted collaboration boundaries', () => {
 
   it('exposes vault-prefixed variables only while the vault is unlocked and bounds audit retention', () => {
     expect(vaultVariables({ unlocked: false, passphrase: '', entries: [{ id: 'one', name: 'token', value: 'secret', updatedAt: '' }] })).toEqual({});
-    expect(vaultVariables({ unlocked: true, passphrase: '', entries: [{ id: 'one', name: 'token', value: 'secret', updatedAt: '' }] })).toEqual({ 'vault.token': 'secret' });
+    expect(vaultVariables({ unlocked: true, passphrase: '', entries: [{ id: 'one', name: 'token', value: 'secret', updatedAt: '' }, { id: 'hidden', name: '__brunomnia_environment__:row', value: 'environment-secret', updatedAt: '', kind: 'environment', ownerId: 'row' }] })).toEqual({ 'vault.token': 'secret' });
     let workspace = cloneSeedWorkspace();
     workspace.governance.policy.auditRetention = 2;
     workspace = appendAudit(workspace, 'one', 'first');

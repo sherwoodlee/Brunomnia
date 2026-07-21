@@ -18,6 +18,14 @@ Use a secret in any normal request field with:
 
 Local vault variables resolve in HTTP, GraphQL, gRPC, WebSocket/SSE connection fields, OAuth token requests, and non-streaming collection runs. Pre-request and after-response scripts receive no vault data by default. A device-local Preferences grant can expose the currently unlocked entries through `insomnia.vault.get`; imports and shared-project/sync reads reset or preserve local grants instead of accepting them from shared data.
 
+### Private-environment Secret variables
+
+Private global environments can mark a Table row as **Secret** while the local vault is unlocked. The row keeps only its stable ID, name, enabled state, description, and Secret type in workspace data; its `value` is always empty. Plaintext is stored as an owner-bound encrypted vault entry and resolves at runtime as `vault.<row-name>`, including inherited private-environment rows. A direct vault entry with the same runtime name wins deliberately.
+
+Secret inputs are masked by default and can be revealed per row. Creating, editing, deleting, or duplicating one requires the decrypted vault. Changes are encrypted after a 300 ms debounce; a pending save is flushed before project switching or vault locking, and a failed flush leaves the vault unlocked with a visible error. Changing Secret to String or JSON requires confirmation because the decrypted value will enter ordinary workspace data. Raw JSON mode stays unavailable while Secret rows exist, and making that environment shared is blocked until those rows are converted or removed.
+
+Secret rows are accepted only in private global environments. Workspace v46 normalization clears any embedded Secret plaintext, removes Secret rows from public, collection, and folder environments, and forces a private environment containing one back to Table mode. Resetting the encrypted vault also removes its Secret row metadata. Private trees remain omitted from Git/folder projects and encrypted sync; all compatibility exports omit Secret rows even when the user explicitly includes other private values. Insomnia encrypted Secret blobs are non-portable without their account vault key, so imports omit them with an explicit warning rather than preserving unusable ciphertext.
+
 ## External vault providers
 
 Brunomnia supports four providers through ambient official command-line logins or protected device profiles:
@@ -45,7 +53,7 @@ Before request rendering can resolve a reference, an owner or admin must approve
 
 External tags cover HTTP, GraphQL, OAuth/schema requests, non-streaming collection runs, plugin-mediated HTTP, integrations, generated client code, direct and interactive gRPC, and WebSocket/GraphQL-subscription/SSE/Socket.IO connection and outbound rendering. Portable CLI HTTP/GraphQL runs require `--allow-external-vaults`; they retain ambient official-CLI behavior with the same exact unprofiled allowlist and process/cache bounds. Device-profile or HCP-app arguments are rejected explicitly in the portable CLI rather than falling back to another credential authority. Workspace files cannot grant either process authority to themselves.
 
-The profile CRUD, runtime adapters, and Azure lifecycle are implemented without an entitlement check or Brunomnia account. **Authenticate with Azure** runs official `az login` for the Key Vault scope, **Use device code** exposes its live URL/code instructions, expired profiles show **Renew**, and successful renewal preserves the device-record ID. Brunomnia supplies no borrowed public client ID or hidden app registration. It requests the Key Vault token and active account only after login succeeds, validates the numeric future expiry, and stores the resulting exact `azureOauth` record in the existing macOS Keychain profile list. Silent background renewal, non-macOS protected profile stores, script-facing external-provider APIs, and broader secret-field UX are not claimed.
+The profile CRUD, runtime adapters, and Azure lifecycle are implemented without an entitlement check or Brunomnia account. **Authenticate with Azure** runs official `az login` for the Key Vault scope, **Use device code** exposes its live URL/code instructions, expired profiles show **Renew**, and successful renewal preserves the device-record ID. Brunomnia supplies no borrowed public client ID or hidden app registration. It requests the Key Vault token and active account only after login succeeds, validates the numeric future expiry, and stores the resulting exact `azureOauth` record in the existing macOS Keychain profile list. Silent background renewal, non-macOS protected profile stores, script-facing external-provider APIs, and Secret types outside private global environments are not claimed.
 
 ## Local File template tags
 

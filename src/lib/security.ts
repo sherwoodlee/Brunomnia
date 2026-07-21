@@ -6,7 +6,7 @@ import { emptyWorkspaceCertificates } from './certificates';
 import { mergeLocalOAuth2RuntimeCredentials, withoutOAuth2RuntimeCredentials } from './oauth2Tokens';
 import { publicEnvironments } from './resources';
 
-export type VaultEntry = { id: string; name: string; value: string; updatedAt: string };
+export type VaultEntry = { id: string; name: string; value: string; updatedAt: string; kind?: 'environment'; ownerId?: string };
 export type VaultSession = { unlocked: boolean; passphrase: string; entries: VaultEntry[] };
 export type SecureFileStatus = { exists: boolean; updatedAt: string };
 export type VaultKeyStatus = { supported: boolean; retained: boolean };
@@ -137,7 +137,7 @@ export const authenticateAzureExternalCredential = async (useDeviceCode = false,
 };
 
 export const vaultVariables = (session: VaultSession) => session.unlocked
-  ? Object.fromEntries(session.entries.map((entry) => [`vault.${entry.name}`, entry.value]))
+  ? Object.fromEntries(session.entries.filter((entry) => entry.kind !== 'environment').map((entry) => [`vault.${entry.name}`, entry.value]))
   : {};
 
 export const isProtectedSecretReference = (value: string) => /^\s*\{\{\s*vault\.[^{}]+\s*\}\}\s*$/.test(value)
