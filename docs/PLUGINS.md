@@ -36,7 +36,7 @@ The context exposes these compatibility APIs:
 - `context.app`: alerts, dialogs, prompts, clipboard read/write/clear, desktop-path lookup, save-path prompting, and application information
 - `context.data`: raw/URI import plus Insomnia/HAR export; private environments require a separate explicit grant
 
-Request actions receive the selected request and parent group. Request-group actions receive the selected group plus every descendant request. Workspace actions receive the selected collection or API design and its request/group models. Document actions receive parsed and raw API-design contents. Action placement is exposed in the plugin workbench rather than injected into every upstream context menu.
+Request actions receive the selected request and parent group. Request-group actions receive the selected group plus every descendant request. Workspace actions receive the selected collection or API design and its request/group models. Document actions receive parsed and raw API-design contents. Enabled plugins with the explicit `action` grant place request actions on ordinary and pinned request rows, request-group actions on folder rows, and document actions on API Design project cards. The same exports remain callable from the review workbench. Workspace actions remain workbench-only because the pinned renderer exposes `getWorkspaceActions()` through its bridge but does not mount it on a renderer menu; its workspace-card menu mounts document actions only for design scope.
 
 ## Permissions
 
@@ -64,7 +64,7 @@ Each operation receives a cloned input in a new Blob Worker and has a two-second
 
 The baseline `crypto` shim preserves pinned synchronous `createHash` for MD5/SHA-1/SHA-256/SHA-384/SHA-512, chained hex/base64 digests, algorithm-aware HMAC, bounded random bytes, and random UUIDs. `events` provides the common EventEmitter on/add/once/emit/remove/listener surface. Vendored UUID and AJV bundles are generated deterministically from an isolated exact-version lockfile and are included only after their grant. Reproduce them with `npm ci --prefix scripts/plugin-vendored && npm run generate:plugin-vendored`.
 
-This boundary reduces plugin authority; it is not a claim that arbitrary third-party JavaScript is harmless. Read every retained module before granting access, especially network, clipboard, data, actions, and request/response mutations. Native addons/install scripts, ESM/export-map and conflicting multi-version graphs, ambient Node/process compatibility, CLI host RPC/user-invoked actions, exact upstream context-menu placement, registry authentication, and integrity algorithms beyond the pinned SHA-1 contract remain unsupported in this baseline.
+This boundary reduces plugin authority; it is not a claim that arbitrary third-party JavaScript is harmless. Read every retained module before granting access, especially network, clipboard, data, actions, and request/response mutations. Native addons/install scripts, ESM/export-map and conflicting multi-version graphs, ambient Node/process compatibility, CLI host RPC/user-invoked actions, and integrity algorithms beyond the pinned SHA-1 contract remain unsupported in this baseline. Pinned production settings expose only a registry URL; development-only `NODE_AUTH_TOKEN` injection is not a production registry-authentication feature.
 
 ## CLI hooks and template tags
 

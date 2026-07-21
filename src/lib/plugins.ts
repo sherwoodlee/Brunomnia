@@ -10,6 +10,18 @@ export type PluginThemeDescriptor = { id: string; pluginId: string; name: string
 export type PluginDescriptor = { templates: PluginTemplateDescriptor[]; actions: PluginActionDescriptor[]; themes: PluginThemeDescriptor[] };
 export type PluginNotification = { type: 'log' | 'alert'; title: string; message: string };
 export type PluginActionTarget = { requestId?: string; collectionId?: string; folderId?: string; designId?: string };
+export type ContextualPluginActionKind = Exclude<PluginActionDescriptor['kind'], 'workspace'>;
+export type ContextualPluginAction = {
+  key: string;
+  pluginId: string;
+  pluginName: string;
+  descriptor: PluginActionDescriptor & { kind: ContextualPluginActionKind };
+  authorityKey: string;
+};
+export type ContextualPluginActionDiscovery = {
+  actions: ContextualPluginAction[];
+  errors: Array<{ pluginId: string; pluginName: string; message: string }>;
+};
 
 export type PluginHostCallbacks = {
   network?: (request: ApiRequest) => Promise<HttpResponse>;
@@ -43,6 +55,8 @@ type PluginWorkerResult = {
   store: Record<string, string>;
   notifications: PluginNotification[];
 };
+
+export type PluginActionResult = Pick<PluginWorkerResult, 'request' | 'store' | 'notifications'>;
 
 const permissionList: PluginPermission[] = ['request:read', 'request:write', 'response:read', 'response:write', 'store', 'network', 'app:prompt', 'app:clipboard', 'app:file', 'data:read', 'data:write', 'data:private', 'template', 'action', 'theme'];
 export const pluginPermissions = [...permissionList];
@@ -581,6 +595,94 @@ export const runPluginTemplateTag = async (plugins: PluginRecord[], name: string
 };
 
 export const runPluginAction = async (plugin: PluginRecord, descriptor: PluginActionDescriptor, request: ApiRequest, workspace: Workspace, store: Record<string, string>, callbacks: PluginHostCallbacks = {}, target?: PluginActionTarget) => executePlugin(plugin, { kind: 'action', id: descriptor.id, actionKind: descriptor.kind, request, workspace, target }, store, callbacks);
+
+export const pluginActionAuthorityKey = (plugin: PluginRecord) => JSON.stringify({
+  source: plugin.source,
+  moduleFiles: plugin.moduleFiles,
+  entryModuleKey: plugin.entryModuleKey,
+  dependencyModuleFiles: plugin.dependencyModuleFiles,
+  dependencyPackages: plugin.dependencyPackages,
+  enabled: plugin.enabled,
+  error: plugin.error,
+  grantedModules: plugin.grantedModules,
+  grantedPermissions: plugin.grantedPermissions,
+});
+
+export const discoverContextualPluginActions = async (
+  plugins: PluginRecord[],
+  describe: (plugin: PluginRecord) => Promise<PluginDescriptor> = describePlugin,
+): Promise<ContextualPluginActionDiscovery> => {
+  const candidates = plugins.filter((plugin) => plugin.enabled && !plugin.error && plugin.grantedPermissions.includes('action'));
+  const discovered = await Promise.all(candidates.map(async (plugin) => {
+    try {
+      const descriptor = await describe(plugin);
+      const authorityKey = pluginActionAuthorityKey(plugin);
+      const actions = descriptor.actions.flatMap((action): ContextualPluginAction[] => {
+        if (action.kind === 'workspace') return [];
+        return [{ key: `${plugin.id}:${action.id}`, pluginId: plugin.id, pluginName: plugin.name, descriptor: action as PluginActionDescriptor & { kind: ContextualPluginActionKind }, authorityKey }];
+      });
+      return { actions, error: undefined };
+    } catch (caught) {
+      return {
+        actions: [],
+        error: { pluginId: plugin.id, pluginName: plugin.name, message: caught instanceof Error ? caught.message : String(caught) },
+      };
+    }
+  }));
+  return {
+    actions: discovered.flatMap((result) => result.actions),
+    errors: discovered.flatMap((result) => result.error ? [result.error] : []),
+  };
+};
+
+export const contextualPluginActionsFor = (actions: ContextualPluginAction[], kind: ContextualPluginActionKind) => actions.filter((action) => action.descriptor.kind === kind);
+
+export const resolveContextualPluginActionInvocation = (
+  workspace: Workspace,
+  action: ContextualPluginAction,
+  requestedTarget: PluginActionTarget,
+): { request: ApiRequest; target: PluginActionTarget } => {
+  if (!action.descriptor.id.startsWith(`${action.descriptor.kind}:`)) throw new Error('Plugin action identity does not match its placement.');
+  if (action.descriptor.kind === 'request') {
+    if (!requestedTarget.requestId) throw new Error('Request actions require a request target.');
+    const collection = workspace.collections.find((candidate) => candidate.requests.some((request) => request.id === requestedTarget.requestId));
+    const request = collection?.requests.find((candidate) => candidate.id === requestedTarget.requestId);
+    if (!collection || !request || (requestedTarget.collectionId && requestedTarget.collectionId !== collection.id)) throw new Error('The request action target is no longer available.');
+    return { request, target: { requestId: request.id, collectionId: collection.id, folderId: request.folderId || undefined } };
+  }
+  if (action.descriptor.kind === 'request-group') {
+    if (!requestedTarget.collectionId || !requestedTarget.folderId) throw new Error('Folder actions require a collection and folder target.');
+    const collection = workspace.collections.find((candidate) => candidate.id === requestedTarget.collectionId);
+    const folder = collection?.folders?.find((candidate) => candidate.id === requestedTarget.folderId);
+    if (!collection || !folder) throw new Error('The folder action target is no longer available.');
+    const request = collection.requests.find((candidate) => candidate.folderId === folder.id)
+      ?? collection.requests[0]
+      ?? { ...createBlankRequest(`plugin-folder-${folder.id}`), folderId: folder.id };
+    return { request, target: { collectionId: collection.id, folderId: folder.id } };
+  }
+  if (!requestedTarget.designId || !workspace.apiDesigns.some((design) => design.id === requestedTarget.designId)) throw new Error('The document action target is no longer available.');
+  const request = workspace.collections.flatMap((collection) => collection.requests).find((candidate) => candidate.id === workspace.activeRequestId)
+    ?? workspace.collections.flatMap((collection) => collection.requests)[0]
+    ?? createBlankRequest(`plugin-document-${requestedTarget.designId}`);
+  return { request, target: { designId: requestedTarget.designId } };
+};
+
+export const applyContextualPluginActionResult = (
+  workspace: Workspace,
+  action: ContextualPluginAction,
+  output: PluginActionResult,
+): Workspace => {
+  const plugin = workspace.plugins.find((candidate) => candidate.id === action.pluginId);
+  if (!plugin || !plugin.enabled || plugin.error || !plugin.grantedPermissions.includes('action') || pluginActionAuthorityKey(plugin) !== action.authorityKey) return workspace;
+  return {
+    ...workspace,
+    collections: output.request ? workspace.collections.map((collection) => ({
+      ...collection,
+      requests: collection.requests.map((request) => request.id === output.request?.id ? output.request : request),
+    })) : workspace.collections,
+    pluginData: { ...workspace.pluginData, [plugin.id]: { ...output.store } },
+  };
+};
 
 export const createPluginRuntime = (plugins: PluginRecord[], state: PluginRunState, callbacks: PluginHostCallbacks = {}) => ({
   beforeRequest: (request: ApiRequest) => runPluginRequestHooks(plugins, request, state, callbacks),

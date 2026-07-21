@@ -2695,6 +2695,18 @@ Compatibility bounds remain explicit: production dependencies are not downloaded
 
 Compatibility bounds remain explicit: lifecycle/install scripts, native addons, ESM/export maps, conflicting multi-version graphs, peer/alias/Git/HTTP/file/workspace specifications, ambient Node/process compatibility, registry authentication, exact context-menu placement, broader ecosystem compatibility, and CLI host RPC/user-invoked actions remain. `Plugins and extension API` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 268 — contextual plugin action placement (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned placement audit | Complete | Pinned request and request-group dropdowns mount matching plugin exports; the workspace-card dropdown mounts document actions only for design scope. `getWorkspaceActions()` exists in the bridge/runtime but has no renderer consumer, and production settings expose a registry URL rather than a registry-token feature |
+| Authority-safe catalog | Complete baseline | Only enabled, error-free plugins with the explicit `action` grant are described. Request, request-group, and document exports retain plugin order and identity; one invalid package is isolated without hiding healthy actions, and stale catalogs clear immediately after plugin authority changes |
+| Contextual menus | Complete baseline | Ordinary and pinned request rows expose request actions, folder rows expose request-group actions, and API Design project cards expose document actions through fixed non-clipping keyboard-dismissable menus. Workspace actions remain callable from the plugin workbench rather than inventing an upstream renderer placement |
+| Target and result integrity | Complete baseline | Invocations revalidate exact live request/folder/design targets, preserve descendant folder models and target-owned network cookies/certificates, persist request/store output only while the reviewed source/module/grant authority remains current, discard stale completions, and surface bounded success/error notifications |
+| Verification | Complete | Catalog filtering, placement rendering, target binding, stale-authority rejection, focused/full frontend, production/CLI build, native regression, formatting, and strict Clippy evidence is recorded in [Milestone 268 verification](QA_MILESTONE_268.md) |
+
+Compatibility bounds remain explicit: native addons/install scripts, ESM/export maps, conflicting multi-version graphs, peer/alias/Git/HTTP/file/workspace specifications, ambient Node/process compatibility, broader plugin-ecosystem compatibility, and CLI host RPC/user-invoked actions remain. Pinned production settings expose no registry-token field, so registry authentication is not carried as a parity gap. `Plugins and extension API` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

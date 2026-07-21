@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from './data/seed';
@@ -13,7 +13,7 @@ import { applyScriptSubresponse, runBrowserScript, type ScriptRunOptions } from 
 import type { RunningMock } from './lib/mock';
 import { Icon } from './components/Icon';
 import type { ArtifactImport } from './lib/interchange/types';
-import { applyPluginTheme, createPluginRuntime, describePlugin, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
+import { applyContextualPluginActionResult, applyPluginTheme, contextualPluginActionsFor, createPluginRuntime, describePlugin, discoverContextualPluginActions, pluginActionAuthorityKey, resolveContextualPluginActionInvocation, runPluginAction, type ContextualPluginAction, type PluginActionTarget, type PluginHostCallbacks, type PluginRunState } from './lib/plugins';
 import { plaintextSecretCandidates, resolveAuthorizedExternalSecret, vaultVariables, type ExternalSecretInput, type VaultSession } from './lib/security';
 import { defaultPreferences, shortcutMatches } from './lib/preferences';
 import { applyCollectionConfiguration, collectionEnvironmentScopes, duplicateWorkspaceEnvironment, duplicateWorkspaceFolder, environmentAncestors, folderAncestors, folderPath, keyboardWorkspaceEnvironmentMove, keyboardWorkspaceResourceMove, moveWorkspaceEnvironment, moveWorkspaceResource, orderedCollectionChildren, persistEffectiveAuthentication, publicEnvironments, requestAncestorNames, resolveEnvironment, scriptEnvironmentScopes, variableScope } from './lib/resources';
@@ -395,6 +395,56 @@ function BulkKeyValueEditor({ rows, onChange, ariaLabel }: { rows: KeyValue[]; o
   }} />;
 }
 
+type ContextualPluginActionMenuProps = {
+  actions: ContextualPluginAction[];
+  ariaLabel: string;
+  busyKey?: string;
+  target: PluginActionTarget;
+  onRun: (action: ContextualPluginAction, target: PluginActionTarget) => void;
+};
+
+function ContextualPluginActionMenu({ actions, ariaLabel, busyKey, target, onRun }: ContextualPluginActionMenuProps) {
+  const menuId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ left: number; top: number }>();
+  useEffect(() => {
+    if (!position) return;
+    menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    const close = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || (!menuRef.current?.contains(event.target) && !triggerRef.current?.contains(event.target))) setPosition(undefined);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setPosition(undefined);
+      triggerRef.current?.focus();
+    };
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [position]);
+  if (!actions.length) return null;
+  const toggle = () => {
+    if (position) { setPosition(undefined); return; }
+    const bounds = triggerRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const width = 238;
+    const height = Math.min(292, 36 + actions.length * 42);
+    const below = bounds.bottom + 4;
+    setPosition({
+      left: Math.max(4, Math.min(bounds.right - width, window.innerWidth - width - 4)),
+      top: below + height <= window.innerHeight - 4 ? below : Math.max(4, bounds.top - height - 4),
+    });
+  };
+  return <div className="contextual-plugin-actions" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+    <button aria-controls={position ? menuId : undefined} aria-expanded={Boolean(position)} aria-haspopup="menu" aria-label={ariaLabel} className="contextual-plugin-trigger" disabled={Boolean(busyKey)} draggable={false} onClick={toggle} onDragStart={(event) => event.preventDefault()} ref={triggerRef} title="Plugin actions" type="button"><Icon name="ellipsis" size={14} /></button>
+    {position ? <div className="contextual-plugin-menu" id={menuId} ref={menuRef} role="menu" style={position}><header><Icon name="braces" size={12} /><span>Plugins</span></header>{actions.map((action) => <button disabled={Boolean(busyKey)} key={action.key} onClick={() => { setPosition(undefined); onRun(action, target); }} role="menuitem" type="button"><span>{busyKey === action.key ? 'Running…' : action.descriptor.label}</span><small>{action.pluginName}</small></button>)}</div> : null}
+  </div>;
+}
+
 type CollectionSidebarProps = {
   workspace: Workspace;
   selectedDocumentId: string;
@@ -414,13 +464,16 @@ type CollectionSidebarProps = {
   onEditFolder: (collectionId: string, folderId: string) => void;
   onToggleFolder: (collectionId: string, folderId: string) => void;
   onMoveResource: (move: WorkspaceResourceMove) => void;
+  pluginActions: ContextualPluginAction[];
+  pluginActionBusyKey?: string;
+  onRunPluginAction: (action: ContextualPluginAction, target: PluginActionTarget) => void;
 };
 
 type SidebarDragSource =
   | { kind: 'collection'; collectionId: string }
   | { kind: 'folder' | 'request'; collectionId: string; resourceId: string };
 
-function CollectionSidebar({
+export function CollectionSidebar({
   workspace,
   selectedDocumentId,
   selectedDocumentType,
@@ -439,6 +492,9 @@ function CollectionSidebar({
   onEditFolder,
   onToggleFolder,
   onMoveResource,
+  pluginActions,
+  pluginActionBusyKey,
+  onRunPluginAction,
 }: CollectionSidebarProps) {
   const dragSourceRef = useRef<SidebarDragSource | undefined>(undefined);
   const [dragSource, setDragSource] = useState<SidebarDragSource>();
@@ -446,6 +502,8 @@ function CollectionSidebar({
   const normalizedSearch = search.trim().toLowerCase();
   const pinnedIds = new Set(pinnedRequestIds);
   const pinnedRequests = pinnedWorkspaceRequests(workspace, pinnedRequestIds, search);
+  const requestPluginActions = contextualPluginActionsFor(pluginActions, 'request');
+  const folderPluginActions = contextualPluginActionsFor(pluginActions, 'request-group');
   const history = workspace.history.filter((entry) =>
     `${entry.name} ${entry.url} ${entry.method}`.toLowerCase().includes(normalizedSearch),
   );
@@ -584,7 +642,7 @@ function CollectionSidebar({
 
       <div className="collection-scroll">
         {mode === 'collections' ? <>
-          {pinnedRequests.length ? <section className="pinned-requests"><header><Icon name="pin" size={12} /><span>Pinned requests</span><small>{pinnedRequests.length}</small></header>{pinnedRequests.map(({ collectionId, request }) => <div className="pinned-request-row" key={request.id}><button onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); onSelectRequest(request.id, true); } }} onClick={(event) => onSelectRequest(request.id, event.metaKey || event.ctrlKey)} onDoubleClick={() => onSelectRequest(request.id, true)} type="button"><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span><strong>{request.name}</strong><small>{workspace.collections.find((collection) => collection.id === collectionId)?.name}</small></span></button><button aria-label={`Unpin ${request.name}`} onClick={() => onToggleRequestPin(request.id)} title="Unpin request" type="button"><Icon name="pin" size={12} /></button></div>)}</section> : null}
+          {pinnedRequests.length ? <section className="pinned-requests"><header><Icon name="pin" size={12} /><span>Pinned requests</span><small>{pinnedRequests.length}</small></header>{pinnedRequests.map(({ collectionId, request }) => <div className={`pinned-request-row${requestPluginActions.length ? ' has-plugin-actions' : ''}`} key={request.id}><button onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); onSelectRequest(request.id, true); } }} onClick={(event) => onSelectRequest(request.id, event.metaKey || event.ctrlKey)} onDoubleClick={() => onSelectRequest(request.id, true)} type="button"><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span><strong>{request.name}</strong><small>{workspace.collections.find((collection) => collection.id === collectionId)?.name}</small></span></button><button aria-label={`Unpin ${request.name}`} onClick={() => onToggleRequestPin(request.id)} title="Unpin request" type="button"><Icon name="pin" size={12} /></button><ContextualPluginActionMenu actions={requestPluginActions} ariaLabel={`Plugin actions for ${request.name}`} busyKey={pluginActionBusyKey} onRun={onRunPluginAction} target={{ requestId: request.id, collectionId }} /></div>)}</section> : null}
           {workspace.collections.map((collection) => {
           const visibleRequests = collection.requests.filter((request) =>
             `${request.name} ${request.method} ${request.protocol} ${request.url}`.toLowerCase().includes(normalizedSearch),
@@ -601,24 +659,18 @@ function CollectionSidebar({
           }
           function renderRequest(request: ApiRequest, depth: number): ReactNode {
             const source: SidebarDragSource = { kind: 'request', collectionId: collection.id, resourceId: request.id };
-            return <button
+            return <div
             aria-grabbed={dragSource?.kind === 'request' && dragSource.resourceId === request.id}
-            className={`request-row${selectedDocumentType === 'request' && selectedDocumentId === request.id ? ' selected' : ''}${sourceClass(source)}${indicatorClass('resource', request.id)}`}
+            className={`request-row${requestPluginActions.length ? ' has-plugin-actions' : ''}${selectedDocumentType === 'request' && selectedDocumentId === request.id ? ' selected' : ''}${sourceClass(source)}${indicatorClass('resource', request.id)}`}
             draggable={!normalizedSearch}
             key={request.id}
             onDragEnd={clearDrag}
             onDragOver={(event) => dropOnRequest(event, collection.id, request, false)}
             onDragStart={(event) => beginDrag(event, source)}
             onDrop={(event) => dropOnRequest(event, collection.id, request, true)}
-            onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); onSelectRequest(request.id, true); } }}
-            onClick={(event) => onSelectRequest(request.id, event.metaKey || event.ctrlKey)}
-            onDoubleClick={() => onSelectRequest(request.id, true)}
-            onKeyDown={(event) => keyboardMove(event, source)}
             style={{ '--resource-depth': depth } as CSSProperties}
             title={normalizedSearch ? 'Clear search to reorder' : 'Drag to move · Option/Alt+Arrows reorder, indent, or outdent · Option/Alt+Home/End moves first or last · Command/Ctrl-click or middle-click opens a permanent tab'}
-            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight Alt+Home Alt+End"
-            type="button"
-          ><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span>{request.name}</span>{pinnedIds.has(request.id) ? <Icon name="pin" size={12} /> : null}</button>;
+          ><button aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight Alt+Home Alt+End" className="request-row-main" onAuxClick={(event) => { if (event.button === 1) { event.preventDefault(); onSelectRequest(request.id, true); } }} onClick={(event) => onSelectRequest(request.id, event.metaKey || event.ctrlKey)} onDoubleClick={() => onSelectRequest(request.id, true)} onKeyDown={(event) => keyboardMove(event, source)} type="button"><span className={`method method-${methodClass(request.method)} protocol-${request.protocol}`}>{protocolLabel(request)}</span><span>{request.name}</span>{pinnedIds.has(request.id) ? <Icon name="pin" size={12} /> : null}</button><ContextualPluginActionMenu actions={requestPluginActions} ariaLabel={`Plugin actions for ${request.name}`} busyKey={pluginActionBusyKey} onRun={onRunPluginAction} target={{ requestId: request.id, collectionId: collection.id, folderId: request.folderId || undefined }} /></div>;
           }
           function renderResources(parentId: string, depth: number): ReactNode[] {
             return orderedCollectionChildren(collection, parentId).flatMap((resource): ReactNode[] => {
@@ -636,7 +688,7 @@ function CollectionSidebar({
             return <div className="request-folder" key={folder.id}>
               <div
                 aria-grabbed={dragSource?.kind === 'folder' && dragSource.resourceId === folder.id}
-                className={`request-folder-title${selectedDocumentType === 'folder' && selectedDocumentId === folder.id ? ' selected' : ''}${sourceClass(source)}${indicatorClass('resource', folder.id)}`}
+                className={`request-folder-title${folderPluginActions.length ? ' has-plugin-actions' : ''}${selectedDocumentType === 'folder' && selectedDocumentId === folder.id ? ' selected' : ''}${sourceClass(source)}${indicatorClass('resource', folder.id)}`}
                 draggable={!normalizedSearch}
                 onDragEnd={clearDrag}
                 onDragOver={(event) => dropOnFolder(event, collection.id, folder, false)}
@@ -650,6 +702,7 @@ function CollectionSidebar({
                 <small>{collection.requests.filter((request) => folderAncestors(collection, request.folderId).some((ancestor) => ancestor.id === folder.id)).length}</small>
                 <button aria-label={`Add subfolder to ${folder.name}`} onClick={() => onAddFolder(collection.id, folder.id)} type="button"><Icon name="plus" size={12} /></button>
                 <button aria-label={`Configure ${folder.name}`} onClick={() => onEditFolder(collection.id, folder.id)} type="button"><Icon name="settings" size={12} /></button>
+                <ContextualPluginActionMenu actions={folderPluginActions} ariaLabel={`Plugin actions for ${folder.name}`} busyKey={pluginActionBusyKey} onRun={onRunPluginAction} target={{ collectionId: collection.id, folderId: folder.id }} />
               </div>
               {folder.expanded || normalizedSearch ? <div>{renderResources(folder.id, depth + 1)}</div> : null}
             </div>;
@@ -691,6 +744,8 @@ function CollectionSidebar({
 type ProjectDashboardProps = {
   workspace: Workspace;
   canReopenRequest: boolean;
+  pluginActions?: ContextualPluginAction[];
+  pluginActionBusyKey?: string;
   onAddRequest: () => void;
   onOpenDesign: (designId?: string) => void;
   onOpenEnvironment: () => void;
@@ -700,10 +755,13 @@ type ProjectDashboardProps = {
   onOpenTestSuite: (suiteId?: string) => void;
   onImport: () => void;
   onReopenRequest: () => void;
+  onRunPluginAction?: (action: ContextualPluginAction, target: PluginActionTarget) => void;
 };
 
-export function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, onImport, onOpenCollection, onOpenDesign, onOpenEnvironment, onOpenMcp, onOpenMockServer, onOpenTestSuite, onReopenRequest }: ProjectDashboardProps) {
+export function ProjectDashboard({ workspace, canReopenRequest, pluginActions = [], pluginActionBusyKey, onAddRequest, onImport, onOpenCollection, onOpenDesign, onOpenEnvironment, onOpenMcp, onOpenMockServer, onOpenTestSuite, onReopenRequest, onRunPluginAction }: ProjectDashboardProps) {
   const projectFiles = listProjectWorkspaces(workspace);
+  const documentPluginActions = contextualPluginActionsFor(pluginActions, 'document');
+  const runPluginActionFromDashboard = onRunPluginAction ?? (() => undefined);
   if (isProjectWorkspaceEmpty(workspace)) {
     return <section aria-labelledby="project-dashboard-title" className="project-dashboard project-dashboard-empty">
       <div>
@@ -745,7 +803,7 @@ export function ProjectDashboard({ workspace, canReopenRequest, onAddRequest, on
             <Icon name="chevron-right" size={14} />
           </button>
         ))}
-        {workspace.apiDesigns.map((design) => <button key={design.id} onClick={() => onOpenDesign(design.id)} type="button"><Icon name="grid" size={19} /><span><strong>{design.name}</strong><small>API design</small></span><Icon name="chevron-right" size={14} /></button>)}
+        {workspace.apiDesigns.map((design) => <div className={`project-dashboard-resource-card${documentPluginActions.length ? ' has-plugin-actions' : ''}`} key={design.id}><button className="project-dashboard-resource-open" onClick={() => onOpenDesign(design.id)} type="button"><Icon name="grid" size={19} /><span><strong>{design.name}</strong><small>API design</small></span><Icon name="chevron-right" size={14} /></button><ContextualPluginActionMenu actions={documentPluginActions} ariaLabel={`Plugin actions for ${design.name}`} busyKey={pluginActionBusyKey} onRun={runPluginActionFromDashboard} target={{ designId: design.id }} /></div>)}
         {workspace.mockServers.map((server) => <button key={server.id} onClick={() => onOpenMockServer(server.id)} type="button"><Icon name="spark" size={19} /><span><strong>{server.name}</strong><small>{server.routes.length} route{server.routes.length === 1 ? '' : 's'} · 127.0.0.1:{server.port}</small></span><Icon name="chevron-right" size={14} /></button>)}
         {workspace.mcpClients.map((client) => <button key={client.id} onClick={onOpenMcp} type="button"><Icon name="globe" size={19} /><span><strong>{client.name}</strong><small>MCP Client · {client.transport === 'stdio' ? 'STDIO' : 'Streamable HTTP'}</small></span><Icon name="chevron-right" size={14} /></button>)}
         {workspace.testSuites.map((suite) => <button key={suite.id} onClick={() => onOpenTestSuite(suite.id)} type="button"><Icon name="check" size={19} /><span><strong>{suite.name}</strong><small>{suite.tests.length} standalone test{suite.tests.length === 1 ? '' : 's'}</small></span><Icon name="chevron-right" size={14} /></button>)}
@@ -1439,6 +1497,10 @@ export default function App() {
   const [scriptLogs, setScriptLogs] = useState<string[]>([]);
   const [runningMocks, setRunningMocks] = useState<Record<string, RunningMock>>({});
   const [projectSyncError, setProjectSyncError] = useState('');
+  const [contextualPluginActions, setContextualPluginActions] = useState<ContextualPluginAction[]>([]);
+  const [contextualPluginActionErrors, setContextualPluginActionErrors] = useState<string[]>([]);
+  const [contextualPluginActionBusyKey, setContextualPluginActionBusyKey] = useState('');
+  const [contextualPluginActionFeedback, setContextualPluginActionFeedback] = useState<{ error: boolean; message: string }>();
   const [templatePrompt, setTemplatePrompt] = useState<PendingTemplatePrompt>();
   const [vaultSession, setVaultSession] = useState<VaultSession>({ unlocked: false, passphrase: '', entries: [] });
   const streamSession = useRef<string | undefined>(undefined);
@@ -1446,12 +1508,15 @@ export default function App() {
   const selectedStreamSessionIdRef = useRef('');
   const streamViewScopeRef = useRef('');
   const activeRequestIdRef = useRef('');
+  const activeWorkspaceIdRef = useRef('');
+  const workspaceRef = useRef(workspace);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const scheduledCancelled = useRef(false);
   const scheduledTimer = useRef<number | undefined>(undefined);
   const scheduledResolve = useRef<(() => void) | undefined>(undefined);
   const workspaceSaveGeneration = useRef(0);
   const oauthFlowId = useRef('');
+  const contextualPluginActionBusyRef = useRef('');
   const templateResponseResolver = useRef<SendRequestContext['resolveResponse']>(undefined);
   const templatePromptQueue = useRef<PendingTemplatePrompt[]>([]);
   const activeTemplatePrompt = useRef<PendingTemplatePrompt | undefined>(undefined);
@@ -1570,6 +1635,19 @@ export default function App() {
   }, [workspace.activePluginTheme, workspace.plugins]);
 
   useEffect(() => {
+    let cancelled = false;
+    setContextualPluginActions([]);
+    setContextualPluginActionErrors([]);
+    if (!hydrated) return;
+    void discoverContextualPluginActions(workspace.plugins).then((result) => {
+      if (cancelled) return;
+      setContextualPluginActions(result.actions);
+      setContextualPluginActionErrors(result.errors.map((error) => `${error.pluginName}: ${error.message}`));
+    });
+    return () => { cancelled = true; };
+  }, [hydrated, workspace.plugins]);
+
+  useEffect(() => {
     if (!hydrated || !isTauri() || workspace.project.mode === 'local' || !workspace.project.path || !workspace.project.autoSave) return;
     const plaintext = workspace.governance.policy.requireVaultForSecrets ? plaintextSecretCandidates(withoutOAuth2RuntimeCredentials(workspace)) : [];
     if (plaintext.length) { setProjectSyncError(`Vault policy blocked ${plaintext.length} plaintext secret candidate${plaintext.length === 1 ? '' : 's'}.`); return; }
@@ -1656,6 +1734,8 @@ export default function App() {
   const activeStreaming = active ? isStreamingRequest(active.request) : false;
   const activeCollection = workspace.collections.find((collection) => collection.id === active?.collectionId);
   activeRequestIdRef.current = workspace.activeRequestId;
+  activeWorkspaceIdRef.current = activeWorkspaceId;
+  workspaceRef.current = workspace;
   const selectedEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
   const activeEnvironment = useMemo(() => resolveEnvironment(workspace.environments, workspace.activeEnvironmentId), [workspace.activeEnvironmentId, workspace.environments]);
   const activeRequestFileId = active ? workspaceFileIdForCollection(workspace, active.collectionId) : '';
@@ -3143,6 +3223,52 @@ export default function App() {
   const runtimeCollection: Collection = activeCollection ?? { id: 'empty-runtime-collection', name: 'Requests', expanded: true, requests: [runtimeRequest], folders: [], resourceOrder: [runtimeRequest.id], environment: [], environmentEditorMode: 'table', subEnvironments: [], activeSubEnvironmentId: '', documentation: '' };
   const runtimeActive = active ?? { collectionId: runtimeCollection.id, request: runtimeRequest };
   const runtimeEnvironment: Environment = activeEnvironment ?? { id: '', name: 'No Environment', variables: [], environmentEditorMode: 'table', parentId: '', private: false };
+  const runContextualPluginAction = async (action: ContextualPluginAction, requestedTarget: PluginActionTarget) => {
+    if (contextualPluginActionBusyRef.current) return;
+    const plugin = workspace.plugins.find((candidate) => candidate.id === action.pluginId);
+    if (!plugin || !plugin.enabled || plugin.error || !plugin.grantedPermissions.includes('action') || pluginActionAuthorityKey(plugin) !== action.authorityKey) {
+      setContextualPluginActionFeedback({ error: true, message: `${action.pluginName}: action authority changed. Reopen the menu and try again.` });
+      return;
+    }
+    const invocationWorkspaceId = activeWorkspaceId;
+    contextualPluginActionBusyRef.current = action.key;
+    setContextualPluginActionBusyKey(action.key);
+    setContextualPluginActionFeedback(undefined);
+    try {
+      const invocation = resolveContextualPluginActionInvocation(workspace, action, requestedTarget);
+      const actionFileId = workspaceFileIdForRequest(workspace, invocation.request.id) || activeWorkspaceFileId;
+      const actionFileState = getWorkspaceFileState(workspace, actionFileId);
+      const callbacks: PluginHostCallbacks = {
+        network: (pluginRequest) => sendHttpRequest(pluginRequest, runtimeEnvironment, {
+          ...oauthRequestContext(invocation.request),
+          cookies: [...actionFileState.cookies],
+          certificates: actionFileState.certificates,
+          requestAncestors: requestAncestorNames(workspace.collections, invocation.request),
+          authorizeOAuth2: authorizeOAuth2WithStatus,
+        }),
+        prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
+        readClipboard: () => navigator.clipboard.readText(),
+        writeClipboard: (value) => navigator.clipboard.writeText(value),
+        ...pluginHostCapabilities(runtimeEnvironment),
+      };
+      const output = await runPluginAction(plugin, action.descriptor, invocation.request, workspace, workspace.pluginData[plugin.id] ?? {}, callbacks, invocation.target);
+      if (activeWorkspaceIdRef.current !== invocationWorkspaceId) return;
+      const currentPlugin = workspaceRef.current.plugins.find((candidate) => candidate.id === action.pluginId);
+      if (!currentPlugin || pluginActionAuthorityKey(currentPlugin) !== action.authorityKey) {
+        setContextualPluginActionFeedback({ error: true, message: `${action.pluginName}: authority changed while the action ran, so its result was discarded.` });
+        return;
+      }
+      setWorkspace((current) => applyContextualPluginActionResult(current, action, output));
+      const notificationText = output.notifications.slice(0, 3).map((notification) => `${notification.title}: ${notification.message}`).join(' · ');
+      const remainingNotifications = Math.max(0, output.notifications.length - 3);
+      setContextualPluginActionFeedback({ error: false, message: `${action.pluginName}: ${action.descriptor.label} completed.${notificationText ? ` ${notificationText}` : ''}${remainingNotifications ? ` · ${remainingNotifications} more` : ''}` });
+    } catch (caught) {
+      setContextualPluginActionFeedback({ error: true, message: `${action.pluginName}: ${caught instanceof Error ? caught.message : String(caught)}` });
+    } finally {
+      if (contextualPluginActionBusyRef.current === action.key) contextualPluginActionBusyRef.current = '';
+      setContextualPluginActionBusyKey((current) => current === action.key ? '' : current);
+    }
+  };
   const codegenConfiguration = applyCollectionConfiguration(runtimeCollection, runtimeRequest, runtimeEnvironment);
   const renderDocumentTabStrip = (trailing?: ReactNode) => <DocumentTabStrip
     activeDocumentId={activeRequestDocumentState.activeRequestId}
@@ -3324,6 +3450,7 @@ export default function App() {
           onEditCollection={openCollectionDocument}
           onEditFolder={(collectionId, folderId) => setFolderEditor({ collectionId, folderId })}
           onMoveResource={moveResource}
+          onRunPluginAction={(action, target) => void runContextualPluginAction(action, target)}
           onAddRequest={addRequest}
           onSearch={setSearch}
           onSelectFolder={openFolderDocument}
@@ -3335,6 +3462,8 @@ export default function App() {
           selectedDocumentId={isRequestDashboard ? '' : activeRequestDocumentState.activeRequestId}
           selectedDocumentType={activeDocumentTab?.type}
           pinnedRequestIds={activePinnedRequestIds}
+          pluginActionBusyKey={contextualPluginActionBusyKey}
+          pluginActions={contextualPluginActions}
           workspace={workspace}
         /> : null}
 
@@ -3349,6 +3478,9 @@ export default function App() {
           onOpenMockServer={(serverId) => openMockDocument(serverId)}
           onOpenTestSuite={(suiteId) => openTestSuiteDocument(suiteId)}
           onReopenRequest={reopenRequestDocument}
+          onRunPluginAction={(action, target) => void runContextualPluginAction(action, target)}
+          pluginActionBusyKey={contextualPluginActionBusyKey}
+          pluginActions={contextualPluginActions}
           workspace={workspace}
         /> : isEnvironmentDocument ? <EnvironmentDocumentPanel
           activeId={workspace.activeEnvironmentId}
@@ -3463,11 +3595,15 @@ export default function App() {
         <span className="status-spacer" />
         <span><i /> Environment: {runtimeEnvironment.name}</span>
         {projectSyncError ? <span className="bad">Project save failed: {projectSyncError}</span> : null}
+        {contextualPluginActionBusyKey ? <span>Plugin action running…</span> : null}
+        {contextualPluginActionErrors.length ? <span className="bad" title={contextualPluginActionErrors.join('\n')}>Plugin actions unavailable: {contextualPluginActionErrors.length}</span> : null}
         <span>{vaultSession.unlocked ? `Vault: ${vaultSession.entries.length} unlocked` : 'Vault: locked'}</span>
         <span>Local-only</span>
         <span>UTF-8</span>
         <span>{workbenchSection === 'requests' ? isRequestDashboard ? 'Project' : activeCollectionDocument ? 'Collection' : activeDesignDocument ? 'API Design' : activeMockDocument?.route ? 'Mock Route' : activeMockDocument ? 'Mock Server' : activeTestSuiteDocument ? 'Test Suite' : isEnvironmentDocument ? 'Environment' : activeFolderDocument ? 'Folder' : isRunnerDocument ? 'Runner' : protocolLabel(runtimeActive.request) : titleCase(workbenchSection)}</span>
       </footer>
+
+      {contextualPluginActionFeedback ? <div className={`contextual-plugin-feedback${contextualPluginActionFeedback.error ? ' error' : ''}`} role={contextualPluginActionFeedback.error ? 'alert' : 'status'}><span>{contextualPluginActionFeedback.message}</span><button aria-label="Dismiss plugin action result" onClick={() => setContextualPluginActionFeedback(undefined)} type="button"><Icon name="x" size={12} /></button></div> : null}
 
       {editingCollection && editingFolder ? <FolderDialog collection={editingCollection} cookies={getWorkspaceFileState(workspace, workspaceFileIdForCollection(workspace, editingCollection.id)).cookies} environment={runtimeEnvironment} folder={editingFolder} onChange={(folder) => updateFolder(editingCollection.id, folder)} onClose={() => setFolderEditor(undefined)} onDelete={() => deleteFolder(editingCollection.id, editingFolder.id)} onDuplicate={() => duplicateFolder(editingCollection.id, editingFolder.id)} requestContext={{ preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} responses={workspace.responses} showPasswords={workspace.preferences.showPasswords} /> : null}
       {showSendOptions ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowSendOptions(false)}>
