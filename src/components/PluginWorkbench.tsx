@@ -1,6 +1,7 @@
-import { isTauri } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { useEffect, useMemo, useState } from 'react';
 import { sendRequest as sendHttpRequest, type SendRequestContext } from '../lib/http';
+import { createBlankRequest } from '../data/seed';
 import {
   applyPluginTheme,
   describePlugin,
@@ -17,15 +18,19 @@ import {
 import { readLocalPluginSource } from '../lib/project';
 import { readDesktopTemplateFile } from '../lib/scriptFiles';
 import { applyCollectionConfiguration, requestAncestorNames, resolveEnvironment } from '../lib/resources';
+import { environmentMap } from '../lib/request';
 import { storeResponseCookies } from '../lib/cookies';
 import { createRequestSnapshot, retainResponseHistory } from '../lib/responseHistory';
 import { getWorkspaceFileState, setWorkspaceFileCookies, workspaceFileIdForCollection, workspaceFileIdForRequest } from '../lib/workspaceFileState';
+import type { DocumentTabType } from '../lib/requestTabs';
 import type { PluginPermission, PluginRecord, Workspace } from '../types';
 import { Icon } from './Icon';
 
 type PluginWorkbenchProps = {
   workspace: Workspace;
   onChangeWorkspace: (updater: (workspace: Workspace) => Workspace) => void;
+  selectedDocumentId?: string;
+  selectedDocumentType?: DocumentTabType;
   templatePrompt: SendRequestContext['prompt'];
 };
 
@@ -36,7 +41,7 @@ const activeRequest = (workspace: Workspace) => workspace.collections
   .flatMap((collection) => collection.requests)
   .find((request) => request.id === workspace.activeRequestId);
 
-export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }: PluginWorkbenchProps) {
+export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocumentId, selectedDocumentType, templatePrompt }: PluginWorkbenchProps) {
   const activeFileId = workspaceFileIdForRequest(workspace, workspace.activeRequestId);
   const activeFileState = getWorkspaceFileState(workspace, activeFileId);
   const sendRequest = (...[request, environment, context]: Parameters<typeof sendHttpRequest>) => sendHttpRequest(request, environment, {
@@ -53,6 +58,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }
   const [installVersion, setInstallVersion] = useState('0.0.0-local');
   const [installDescription, setInstallDescription] = useState('Local CommonJS plugin');
   const [installSource, setInstallSource] = useState('');
+  const [installSourcePath, setInstallSourcePath] = useState('');
   const [localPath, setLocalPath] = useState('');
   const [draftSource, setDraftSource] = useState('');
   const [descriptor, setDescriptor] = useState<PluginDescriptor>(blankDescriptor);
@@ -62,6 +68,9 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }
   const [message, setMessage] = useState('');
   const selected = workspace.plugins.find((plugin) => plugin.id === selectedId);
   const request = activeRequest(workspace);
+  const selectedEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
+  const effectiveEnvironment = selectedEnvironment ? resolveEnvironment(workspace.environments, selectedEnvironment.id) ?? selectedEnvironment : undefined;
+  const actionCollection = workspace.collections.find((collection) => collection.requests.some((candidate) => candidate.id === request?.id));
   const proxyPreferences = {
     enabled: workspace.preferences.proxyEnabled,
     httpProxy: workspace.preferences.httpProxy,
@@ -163,6 +172,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }
       version: installVersion.trim() || '0.0.0-local',
       description: installDescription.trim(),
       source: installSource,
+      sourcePath: installSourcePath || undefined,
       sourceFormat: 'insomnia-commonjs',
       enabled: false,
       requestedPermissions: inferPluginPermissions(installSource),
@@ -171,41 +181,89 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }
     };
     const found = await describePlugin(plugin);
     changeWorkspace((current) => ({ ...current, plugins: [...current.plugins, plugin] }));
-    setSelectedId(id); setDescriptor(found); setInstallSource('');
+    setSelectedId(id); setDescriptor(found); setInstallSource(''); setInstallSourcePath('');
     setMessage('Plugin installed disabled. Review and grant only the capabilities it needs.');
   });
 
   const loadLocal = () => run('Reading local plugin', async () => {
     const output = await readLocalPluginSource(localPath);
     setInstallName(output.name); setInstallVersion(output.version); setInstallDescription(output.description); setInstallSource(output.source);
+    setInstallSourcePath(output.path);
     setMessage(`Loaded ${output.path}. Review the source before installing.`);
   });
 
+  const reloadSelected = () => run('Reloading local plugin', async () => {
+    if (!selected?.sourcePath) throw new Error('This plugin has no linked local source path.');
+    const output = await readLocalPluginSource(selected.sourcePath);
+    validatePluginSource(output.source);
+    const next: PluginRecord = { ...selected, name: output.name, version: output.version, description: output.description, source: output.source, sourcePath: output.path, enabled: false, requestedPermissions: inferPluginPermissions(output.source), grantedPermissions: [], error: undefined };
+    const found = await describePlugin(next);
+    updatePlugin(selected.id, next);
+    setDescriptor(found); setDraftSource(output.source);
+    setMessage('Local source reloaded. Review permissions before enabling it again.');
+  });
+
+  const sendPluginNetwork = async (pluginRequest: Parameters<NonNullable<PluginHostCallbacks['network']>>[0]) => sendRequest(pluginRequest, effectiveEnvironment, {
+    cookies: [...activeFileState.cookies],
+    responses: [...workspace.responses],
+    preferredHttpVersion: workspace.preferences.preferredHttpVersion,
+    maxRedirects: workspace.preferences.maxRedirects,
+    followRedirects: workspace.preferences.followRedirects,
+    requestTimeoutMs: workspace.preferences.requestTimeoutMs,
+    validateCertificates: workspace.preferences.validateCertificates,
+    validateAuthCertificates: workspace.preferences.validateAuthCertificates,
+    proxy: proxyPreferences,
+    maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
+    filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
+    resolveResponse,
+  });
   const callbacks: PluginHostCallbacks = {
-    network: async (pluginRequest) => sendRequest(pluginRequest, workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId), {
-      cookies: [...activeFileState.cookies],
-      responses: [...workspace.responses],
-      preferredHttpVersion: workspace.preferences.preferredHttpVersion,
-      maxRedirects: workspace.preferences.maxRedirects,
-      followRedirects: workspace.preferences.followRedirects,
-      requestTimeoutMs: workspace.preferences.requestTimeoutMs,
-      validateCertificates: workspace.preferences.validateCertificates,
-      validateAuthCertificates: workspace.preferences.validateAuthCertificates,
-      proxy: proxyPreferences,
-      maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB,
-      filterResponsesByEnv: workspace.preferences.filterResponsesByEnv,
-      resolveResponse,
-    }),
+    network: sendPluginNetwork,
     prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
+    dialog: async (title, message) => { window.alert(`${title}${message ? `\n\n${message}` : ''}`); },
     readClipboard: async () => navigator.clipboard.readText(),
     writeClipboard: async (value) => navigator.clipboard.writeText(value),
+    clearClipboard: async () => navigator.clipboard.writeText(''),
+    getPath: async (name) => {
+      if (name.toLowerCase() !== 'desktop') throw new Error(`Unknown plugin path '${name}'.`);
+      if (!isTauri()) throw new Error('Plugin desktop paths are available only in the Tauri app.');
+      return invoke<string>('plugin_desktop_path');
+    },
+    showSaveDialog: async (defaultPath) => isTauri() ? window.prompt('Choose a save path', defaultPath) : null,
+    importData: async (source, value) => {
+      let contents = value;
+      if (source === 'uri') {
+        const importRequest = createBlankRequest(`plugin-import-${crypto.randomUUID()}`);
+        importRequest.name = 'Plugin import'; importRequest.url = value; importRequest.method = 'GET'; importRequest.bodyMode = 'none';
+        const response = await sendPluginNetwork(importRequest);
+        if (response.status < 200 || response.status >= 300) throw new Error(`Plugin import URL returned ${response.status} ${response.statusText}.`);
+        contents = response.body;
+      }
+      const [{ importArtifact }, { applyArtifactImport }] = await Promise.all([import('../lib/interchange'), import('../lib/interchange/apply')]);
+      const result = importArtifact(contents, source === 'uri' ? value : `${selected?.name ?? 'Plugin'} import`);
+      changeWorkspace((current) => applyArtifactImport(current, result));
+    },
+    exportData: async (format, options) => {
+      const { exportArtifact } = await import('../lib/interchange/exporters');
+      const target = options.workspace as { id?: string } | undefined;
+      const collection = target?.id ? workspace.collections.find((candidate) => candidate.id === target.id) : undefined;
+      const design = target?.id ? workspace.apiDesigns.find((candidate) => candidate.id === target.id) : undefined;
+      const scope = collection ? 'collection' : design ? 'design' : 'all';
+      return exportArtifact(workspace, { format: format === 'har' ? 'har' : options.format === 'json' ? 'insomnia-v4' : 'insomnia-v5', scope, collectionId: collection?.id, designId: design?.id, includePrivateEnvironments: options.includePrivate === true }).contents;
+    },
+    environment: environmentMap(effectiveEnvironment),
   };
 
   const runAction = (actionId: string) => run('Running plugin action', async () => {
     if (!selected || !request) throw new Error('Choose a plugin and active request first.');
     const action = descriptor.actions.find((candidate) => candidate.id === actionId);
     if (!action) throw new Error('The plugin action was not found.');
-    const output = await runPluginAction(selected, action, request, workspace, workspace.pluginData[selected.id] ?? {}, callbacks);
+    const output = await runPluginAction(selected, action, request, workspace, workspace.pluginData[selected.id] ?? {}, callbacks, {
+      requestId: request.id,
+      collectionId: actionCollection?.id,
+      folderId: request.folderId || undefined,
+      designId: selectedDocumentType === 'document' ? selectedDocumentId : undefined,
+    });
     changeWorkspace((current) => ({
       ...current,
       collections: output.request ? current.collections.map((collection) => ({
@@ -245,15 +303,15 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, templatePrompt }
         <div className="plugin-main">
           {selected ? <>
             <section className="plugin-card plugin-summary">
-              <header><div><small>Installed plugin</small><h2>{selected.name}</h2><p>{selected.description || 'No description provided.'}</p></div><div className="plugin-summary-actions"><label className="switch-label"><input checked={selected.enabled} onChange={(event) => updatePlugin(selected.id, { enabled: event.target.checked, error: undefined })} type="checkbox" /> Enabled</label><button onClick={() => changeWorkspace((current) => ({ ...current, plugins: current.plugins.filter((plugin) => plugin.id !== selected.id), pluginData: Object.fromEntries(Object.entries(current.pluginData).filter(([id]) => id !== selected.id)), activePluginTheme: current.activePluginTheme.startsWith(`${selected.id}::`) ? '' : current.activePluginTheme }))} type="button"><Icon name="trash" size={15} /> Remove</button></div></header>
+              <header><div><small>Installed plugin</small><h2>{selected.name}</h2><p>{selected.description || 'No description provided.'}</p></div><div className="plugin-summary-actions"><label className="switch-label"><input checked={selected.enabled} onChange={(event) => updatePlugin(selected.id, { enabled: event.target.checked, error: undefined })} type="checkbox" /> Enabled</label>{selected.sourcePath ? <button disabled={Boolean(busy)} onClick={reloadSelected} type="button"><Icon name="refresh" size={15} /> Reload source</button> : null}<button onClick={() => changeWorkspace((current) => ({ ...current, plugins: current.plugins.filter((plugin) => plugin.id !== selected.id), pluginData: Object.fromEntries(Object.entries(current.pluginData).filter(([id]) => id !== selected.id)), activePluginTheme: current.activePluginTheme.startsWith(`${selected.id}::`) ? '' : current.activePluginTheme }))} type="button"><Icon name="trash" size={15} /> Remove</button></div></header>
               <div className="plugin-capability-summary"><span>{descriptor.templates.length} tags</span><span>{descriptor.actions.length} actions</span><span>{descriptor.themes.length} themes</span><span>{selected.sourceFormat}</span></div>
             </section>
 
             <section className="plugin-card"><header><div><small>Capability boundary</small><h2>Permissions</h2><p>Detected permissions are marked “requested.” Nothing is available until you grant it.</p></div></header><div className="permission-grid">{pluginPermissions.map((permission) => <label key={permission}><input checked={selected.grantedPermissions.includes(permission)} onChange={(event) => updatePlugin(selected.id, { grantedPermissions: event.target.checked ? [...selected.grantedPermissions, permission] : selected.grantedPermissions.filter((candidate) => candidate !== permission) })} type="checkbox" /><span><strong>{pluginPermissionLabels[permission]}</strong><small>{requested.has(permission) ? 'Requested by source' : 'Not detected'}</small></span></label>)}</div></section>
 
-            <section className="plugin-card"><header><div><small>Exports</small><h2>Actions, tags, and theme</h2></div></header><div className="plugin-tools"><div><strong>Actions</strong>{descriptor.actions.map((action) => <button disabled={!selected.enabled || !selected.grantedPermissions.includes('action') || Boolean(busy)} key={action.id} onClick={() => runAction(action.id)} type="button">{action.label}<small>{action.kind}</small></button>)}{!descriptor.actions.length ? <p>No actions exported.</p> : null}</div><div><strong>Template tags</strong>{descriptor.templates.map((tag) => <code key={tag.name}>{`{% ${tag.name} %}`}</code>)}{!descriptor.templates.length ? <p>No tags exported.</p> : null}</div><label><strong>Theme</strong><select disabled={!selected.enabled || !selected.grantedPermissions.includes('theme')} value={workspace.activePluginTheme.startsWith(`${selected.id}::`) ? workspace.activePluginTheme : ''} onChange={(event) => selectTheme(event.target.value)}><option value="">System theme</option>{descriptor.themes.map((theme) => <option key={theme.id} value={`${selected.id}::${theme.id}`}>{theme.displayName}</option>)}</select></label></div></section>
+            <section className="plugin-card"><header><div><small>Exports</small><h2>Actions, tags, and theme</h2></div></header><div className="plugin-tools"><div><strong>Actions</strong>{descriptor.actions.map((action) => <button disabled={!selected.enabled || !selected.grantedPermissions.includes('action') || Boolean(busy) || (action.kind === 'request-group' && !request?.folderId) || (action.kind === 'document' && selectedDocumentType !== 'document' && !workspace.apiDesigns.length)} key={action.id} onClick={() => runAction(action.id)} type="button">{action.label}<small>{action.kind}</small></button>)}{!descriptor.actions.length ? <p>No actions exported.</p> : null}</div><div><strong>Template tags</strong>{descriptor.templates.map((tag) => <code key={tag.name}>{`{% ${tag.name} %}`}</code>)}{!descriptor.templates.length ? <p>No tags exported.</p> : null}</div><label><strong>Theme</strong><select disabled={!selected.enabled || !selected.grantedPermissions.includes('theme')} value={workspace.activePluginTheme.startsWith(`${selected.id}::`) ? workspace.activePluginTheme : ''} onChange={(event) => selectTheme(event.target.value)}><option value="">System theme</option>{descriptor.themes.map((theme) => <option key={theme.id} value={`${selected.id}::${theme.id}`}>{theme.displayName}</option>)}</select></label></div></section>
 
-            <section className="plugin-card plugin-source-card"><header><div><small>Source</small><h2>Review and update</h2><p>Updating source disables the plugin and clears grants so changed code cannot inherit old authority.</p></div><button disabled={draftSource === selected.source || Boolean(busy)} onClick={() => run('Updating source', async () => { validatePluginSource(draftSource); const next = { ...selected, source: draftSource, enabled: false, requestedPermissions: inferPluginPermissions(draftSource), grantedPermissions: [] as PluginPermission[], error: undefined }; const found = await describePlugin(next); updatePlugin(selected.id, next); setDescriptor(found); setMessage('Source updated. Review permissions before enabling it again.'); })} type="button">Apply source</button></header><textarea aria-label="Plugin source" spellCheck={false} value={draftSource} onChange={(event) => setDraftSource(event.target.value)} /></section>
+            <section className="plugin-card plugin-source-card"><header><div><small>Source</small><h2>Review and update</h2><p>Updating source disables the plugin and clears grants so changed code cannot inherit old authority.</p></div><button disabled={draftSource === selected.source || Boolean(busy)} onClick={() => run('Updating source', async () => { validatePluginSource(draftSource); const next = { ...selected, source: draftSource, sourcePath: undefined, enabled: false, requestedPermissions: inferPluginPermissions(draftSource), grantedPermissions: [] as PluginPermission[], error: undefined }; const found = await describePlugin(next); updatePlugin(selected.id, next); setDescriptor(found); setMessage('Source updated. Review permissions before enabling it again.'); })} type="button">Apply source</button></header><textarea aria-label="Plugin source" spellCheck={false} value={draftSource} onChange={(event) => setDraftSource(event.target.value)} /></section>
           </> : <section className="plugin-card plugin-installer"><header><div><small>Install</small><h2>Review local CommonJS source</h2><p>Package dependencies and remote installs are intentionally not loaded. Bundle a plugin to one file or paste dependency-free source.</p></div></header>{isTauri() ? <div className="local-plugin-row"><input value={localPath} onChange={(event) => setLocalPath(event.target.value)} placeholder="/path/to/plugin folder or main.js" /><button disabled={!localPath || Boolean(busy)} onClick={loadLocal} type="button"><Icon name="folder" size={15} /> Read local</button></div> : null}<div className="plugin-metadata"><input value={installName} onChange={(event) => setInstallName(event.target.value)} placeholder="Plugin name" /><input value={installVersion} onChange={(event) => setInstallVersion(event.target.value)} placeholder="Version" /><input value={installDescription} onChange={(event) => setInstallDescription(event.target.value)} placeholder="Description" /></div><textarea aria-label="Plugin source to install" spellCheck={false} value={installSource} onChange={(event) => setInstallSource(event.target.value)} placeholder="module.exports.requestHooks = […]" /><button disabled={!installSource.trim() || Boolean(busy)} onClick={install} type="button">Install disabled for review</button></section>}
         </div>
       </div>

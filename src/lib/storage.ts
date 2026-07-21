@@ -18,7 +18,7 @@ const isWorkspaceEnvelope = (value: unknown): value is Record<string, unknown> =
 
 const requestDefaults = () => cloneSeedWorkspace().collections[0].requests[0];
 
-const knownPluginPermissions: PluginPermission[] = ['request:read', 'request:write', 'response:read', 'response:write', 'store', 'network', 'app:prompt', 'app:clipboard', 'template', 'action', 'theme'];
+const knownPluginPermissions: PluginPermission[] = ['request:read', 'request:write', 'response:read', 'response:write', 'store', 'network', 'app:prompt', 'app:clipboard', 'app:file', 'data:read', 'data:write', 'data:private', 'template', 'action', 'theme'];
 const governanceRoles: GovernanceRole[] = ['owner', 'admin', 'editor', 'viewer'];
 const storageModes: GovernancePolicy['allowedStorage'] = ['local', 'folder', 'git', 'encrypted-file'];
 const record = (value: unknown) => value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
@@ -764,6 +764,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
         disableUserAgentHeader: typeof request.disableUserAgentHeader === 'boolean'
           ? request.disableUserAgentHeader
           : legacyDisableUserAgentHeader === true,
+        encodeUrl: request.encodeUrl !== false,
         bodyMode: request.bodyMode ?? (method === 'GET' || method === 'HEAD' ? 'none' : 'json'),
         renderBodyTemplates: request.renderBodyTemplates !== false,
         auth: {

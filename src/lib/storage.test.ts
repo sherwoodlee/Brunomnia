@@ -375,6 +375,7 @@ describe('workspace migrations', () => {
     const migrated = migrateWorkspace(legacy);
     expect(migrated.version).toBe(45);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
+    expect(migrated.collections[0].requests[0].encodeUrl).toBe(true);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
     expect(migrated.collections[0].requests[0].pathParams).toEqual([]);
     expect(migrated.collections[0].requests[0].graphql).toMatchObject({ schemaSource: 'remote', schemaFileName: '', includeInputValueDeprecation: false, schemaIncludesInputValueDeprecation: false });

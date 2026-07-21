@@ -357,6 +357,7 @@ export type ApiRequest = {
   params: KeyValue[];
   headers: KeyValue[];
   disableUserAgentHeader: boolean;
+  encodeUrl: boolean;
   bodyMode: BodyMode;
   renderBodyTemplates: boolean;
   body: string;
@@ -690,6 +691,10 @@ export type PluginPermission =
   | 'network'
   | 'app:prompt'
   | 'app:clipboard'
+  | 'app:file'
+  | 'data:read'
+  | 'data:write'
+  | 'data:private'
   | 'template'
   | 'action'
   | 'theme';
@@ -713,6 +718,7 @@ export type HttpResponse = {
   status: number;
   statusText: string;
   headers: Record<string, string>;
+  headerLines?: Array<{ name: string; value: string }>;
   body: string;
   bodyBase64?: string;
   durationMs: number;

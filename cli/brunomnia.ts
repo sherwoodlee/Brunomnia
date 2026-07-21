@@ -27,7 +27,7 @@ import { createRequestSnapshot, retainResponseHistory } from '../src/lib/respons
 import { generateUnitTestCliArtifact, orderedTestSuites, orderedUnitTests, selectUnitTestSuites, unitTestScript } from '../src/lib/unitTests';
 import { createCliExternalSecretResolver } from './externalVault';
 import { evaluateRunnerConfigCode } from './configCode';
-import { createCliPluginTemplateRuntime } from './pluginRuntime';
+import { createCliPluginRuntime } from './pluginRuntime';
 import { collectCliApiDesignSources, fetchPublicSpecificationSourceNode } from './apiSpecSources';
 import { applyRunnerEnvironmentOverrides, loadRunnerIterationData, normalizeRunnerInsoConfig, parseRunnerInsoScript, parseRunnerRequestTimeout, resolveRunnerItemRequestIds, runnerCliPositionalArguments, runnerCliVariadicOptionValues, runnerRequestIdsMatchingPattern, selectRunnerCollectionEnvironment, selectRunnerGlobalEnvironment, selectRunnerResource, type RunnerInsoConfig } from '../src/lib/runnerCli';
 import { getWorkspaceFileState, workspaceFileIdForCollection, workspaceFileIdForRequest } from '../src/lib/workspaceFileState';
@@ -302,7 +302,7 @@ type CliRequestContext = {
   resolveResponse?: Parameters<typeof renderApiRequest>[2]['resolveResponse'];
   requestAncestors?: string[];
   requestChain?: string[];
-  pluginTemplate?: (name: string, args: string[], request: ApiRequest) => Promise<string | undefined>;
+  pluginRuntime?: ReturnType<typeof createCliPluginRuntime>;
 };
 
 type CliFullExecution = {
@@ -448,8 +448,9 @@ const executeHttp = async (
     resolveResponse: context?.resolveResponse,
     requestChain: context?.requestChain,
     osInfo: async () => ({ arch: arch(), cpus: cpus(), freemem: freemem(), hostname: hostname(), platform: platform(), release: release(), userInfo: userInfo() }),
-    customTag: context?.pluginTemplate ? (name, args) => context.pluginTemplate!(name, args, request) : undefined,
+    customTag: context?.pluginRuntime ? (name, args) => context.pluginRuntime!.render(name, args, request, variables) : undefined,
   });
+  if (context?.pluginRuntime) request = await context.pluginRuntime.beforeRequest(request, variables);
   let url = buildRequestUrl(request, {});
   request = { ...request, transport: applyWorkspaceCertificates(request.transport, url, context?.certificates) };
   let headers = buildHeaders(request, {});
@@ -504,7 +505,9 @@ const executeHttp = async (
     });
     const responseBody = await response.text();
     const getSetCookie = response.headers.getSetCookie;
-    return { request, result: { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url, setCookies: getSetCookie.call(response.headers) } };
+    let result: HttpResponse = { status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), headerLines: [...response.headers.entries()].map(([name, value]) => ({ name, value })), body: responseBody, durationMs: Math.round(performance.now() - started), sizeBytes: Buffer.byteLength(responseBody), requestUrl: url, setCookies: getSetCookie.call(response.headers) };
+    if (context?.pluginRuntime) result = await context.pluginRuntime.afterResponse(request, result, variables);
+    return { request, result };
   } finally {
     await dispatcher.close();
   }
@@ -764,8 +767,8 @@ const main = async () => {
     const externalSecret = hasFlag('--allow-external-vaults')
       ? createCliExternalSecretResolver(workspace.governance.policy.externalVaultAllowlist)
       : async () => { throw new Error('External vault access is disabled. Re-run trusted workspaces with --allow-external-vaults.'); };
-    const pluginTemplateRuntime = hasFlag('--allow-plugins')
-      ? createCliPluginTemplateRuntime(workspace.plugins, workspace.pluginData)
+    const pluginRuntime = hasFlag('--allow-plugins')
+      ? createCliPluginRuntime(workspace.plugins, workspace.pluginData)
       : undefined;
     const httpProxy = firstFlag('--httpProxy', '--http-proxy') ?? process.env.HTTP_PROXY ?? process.env.http_proxy ?? '';
     const httpsProxy = firstFlag('--httpsProxy', '--https-proxy') ?? process.env.HTTPS_PROXY ?? process.env.https_proxy ?? '';
@@ -804,7 +807,7 @@ const main = async () => {
         resolveResponse,
         requestAncestors: requestAncestorNames(workspace.collections, request),
         requestChain,
-        pluginTemplate: pluginTemplateRuntime?.render,
+        pluginRuntime,
       });
       const { result } = executed;
       request = executed.request;

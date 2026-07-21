@@ -337,6 +337,7 @@ const mapInsomniaRequest = (
   const settings = asRecord(raw.settings);
   if (raw.settingDisableRenderRequestBody !== undefined) request.renderBodyTemplates = !asBoolean(raw.settingDisableRenderRequestBody);
   else if (settings?.renderRequestBody !== undefined) request.renderBodyTemplates = asBoolean(settings.renderRequestBody, true);
+  request.encodeUrl = asBoolean(raw.settingEncodeUrl ?? settings?.encodeUrl, true);
   const cookieSettings = asRecord(settings?.cookies);
   if (raw.settingSendCookies !== undefined || cookieSettings?.send !== undefined) request.transport.sendCookies = asBoolean(raw.settingSendCookies ?? cookieSettings?.send, true);
   if (raw.settingStoreCookies !== undefined || cookieSettings?.store !== undefined) request.transport.storeCookies = asBoolean(raw.settingStoreCookies ?? cookieSettings?.store, true);

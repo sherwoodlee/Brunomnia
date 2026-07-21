@@ -36,6 +36,15 @@ describe('request templates', () => {
     expect(buildRequestUrl(request, {})).toBe('https://api.example.com/teams/Core%20API/items/one%2Ftwo?tag=first&tag=second');
   });
 
+  it('preserves authored path and query text when URL encoding is disabled', () => {
+    const request = createBlankRequest('raw-url');
+    request.encodeUrl = false;
+    request.url = 'https://api.example.com/teams/{team}?existing=yes#section';
+    request.pathParams = [{ id: 'team', name: 'team', value: 'Core/API', enabled: true }];
+    request.params = [{ id: 'filter', name: 'filter[]', value: 'one two', enabled: true }];
+    expect(buildRequestUrl(request, {})).toBe('https://api.example.com/teams/Core/API?existing=yes&filter[]=one two#section');
+  });
+
   it('normalizes valid custom methods and rejects invalid tokens', () => {
     expect(normalizeHttpMethod(' propfind ')).toBe('PROPFIND');
     expect(normalizeHttpMethod('bad method')).toBe('GET');

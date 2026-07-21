@@ -18,11 +18,21 @@ export const buildRequestUrl = (request: ApiRequest, variables: Record<string, s
   let rawUrl = resolveTemplate(request.url, variables);
   (request.pathParams ?? []).filter((parameter) => parameter.enabled && parameter.name.trim()).forEach((parameter) => {
     const name = resolveTemplate(parameter.name, variables).trim();
-    const value = encodeURIComponent(resolveTemplate(parameter.value, variables));
+    const rawValue = resolveTemplate(parameter.value, variables);
+    const value = request.encodeUrl === false ? rawValue : encodeURIComponent(rawValue);
     rawUrl = rawUrl.split(`{${name}}`).join(value);
   });
   const enabledParams = request.params.filter((param) => param.enabled && param.name.trim());
   if (enabledParams.length === 0) return rawUrl;
+
+  if (request.encodeUrl === false) {
+    const hashIndex = rawUrl.indexOf('#');
+    const base = hashIndex < 0 ? rawUrl : rawUrl.slice(0, hashIndex);
+    const hash = hashIndex < 0 ? '' : rawUrl.slice(hashIndex);
+    const separator = base.includes('?') ? base.endsWith('?') || base.endsWith('&') ? '' : '&' : '?';
+    const query = enabledParams.map((param) => `${resolveTemplate(param.name, variables)}=${resolveTemplate(param.value, variables)}`).join('&');
+    return `${base}${separator}${query}${hash}`;
+  }
 
   const url = new URL(rawUrl);
   for (const param of enabledParams) {

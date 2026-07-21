@@ -89,13 +89,13 @@ Compatibility bounds at Milestone 5 were explicit: OAuth 2 authorization used a 
 | Filesystem projects | Complete baseline | Stable split YAML for project metadata, collections, environments, designs, and mocks; a manifest limits cleanup to Brunomnia-owned paths and leaves unrelated repository files untouched |
 | Git workflow | Complete baseline | Standard `.git` repositories with init/clone/status, staged and working diffs, stage/unstage, commit author overrides, local branch create/switch, remotes, pull, push, and merge |
 | Conflict resolution | Complete baseline | Base/ours/theirs text views, editable resolutions, binary ours/theirs selection, deleted-side handling, staging, and explicit merge abort |
-| Plugin installation | Complete baseline | Pasted JavaScript or a local dependency-free CommonJS file/package; every install starts disabled and changing source clears grants |
-| Extension API | Complete baseline | Request/response hooks, custom template tags, request/workspace/document actions, themes, local storage, notifications, and mediated network/prompt/clipboard calls |
+| Plugin installation | Complete baseline | Pasted JavaScript or a local dependency-free CommonJS file/package; every install starts disabled, and source edit or explicit linked-source reload clears grants |
+| Extension API | Complete baseline | Request/response hooks, custom template tags, request/folder/workspace/document actions, style-aware themes, local storage, notifications, documented request/response helpers, and mediated network/app/data calls |
 | Extension isolation | Complete baseline | Two-second disposable Worker, one-megabyte source limit, blocked ambient network/DOM/module loading, explicit per-capability grants, sanitized theme colors, and import-time authority removal |
 | Workspace migration | Complete | Versions 1–5 migrate to workspace v6 project, plugin, plugin-data, and theme fields; imported plugins are disabled and stripped of grants/data |
 | Documentation and evidence | Complete | [Git project guide](GIT_PROJECTS.md), [plugin guide](PLUGINS.md), and [Milestone 6 verification](QA_MILESTONE_6.md) |
 
-Compatibility bounds remain explicit: Git credential setup uses the user's installed Git and credential helper. Milestone 61 later adds bounded current-branch commit-history browsing; provider-specific authentication, guided repository onboarding, credential validation, and automatic repository discovery remain later work. Milestone 221 confirms that force push, forced or remote branch deletion, rebase, cherry-pick, and arbitrary un-checked-out remote-history browsing are not user-facing standard Insomnia Git requirements. The plugin adapter intentionally does not install remote packages or arbitrary npm dependencies, and it implements a focused Insomnia-style CommonJS/context subset rather than the entire plugin ecosystem. Streaming request hooks, file watching/hot reload, plugin dependency resolution, and complete hook/context/template-argument compatibility remain in the parity ledger.
+Compatibility bounds remain explicit: Git credential setup uses the user's installed Git and credential helper. Milestone 61 later adds bounded current-branch commit-history browsing; provider-specific authentication, guided repository onboarding, credential validation, and automatic repository discovery remain later work. Milestone 221 confirms that force push, forced or remote branch deletion, rebase, cherry-pick, and arbitrary un-checked-out remote-history browsing are not user-facing standard Insomnia Git requirements. Milestone 262 later closes the finite documented request/response context, request-group/action-model, host data/app helper, style-aware theme, linked-source reload, and CLI hook slice. Remote package/dependency installation, external directory discovery/watch, exact context-menu placement, broad Node/plugin-ecosystem compatibility, and CLI host RPC/user-invoked actions remain in the parity ledger. Pinned realtime routes bypass hooks, so streaming hooks are not a parity requirement.
 
 ## Milestone 7 — collaboration, secrets, and governance (complete baseline)
 
@@ -2619,6 +2619,19 @@ Compatibility bounds do not claim a Brunomnia-operated hosting service; public D
 | Verification | Complete | Legacy, batch/ZIP, MCP, selection, and consent regressions plus TypeScript, full frontend, and production-build gates are recorded in [Milestone 261 verification](QA_MILESTONE_261.md) |
 
 Compatibility bounds remain explicit for database-only v5 proto references, partially translatable deprecated scripts, external local-file paths, WSDL sample placeholders, and formats without binary embedding. `Import and export formats` is now `Complete`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
+## Milestone 262 — documented plugin context and CLI hooks (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Request/response context | Complete baseline | Documented body/header/parameter/auth/environment/cookie/settings methods, URL-encoding persistence, exact response bytes, duplicate headers, and bounded body streams work behind read/write grants |
+| Host context | Complete baseline | Normalized secondary requests, dialogs/prompts, clipboard clear/read/write, desktop paths, save-path prompting, and raw/URI import plus Insomnia/HAR export use explicit host RPC and separate app/data/private grants |
+| Actions and themes | Complete baseline | Request-group actions receive the selected group and descendant requests; request/workspace/document models remain available; style targets and bounded sanitized raw CSS augment parsed theme colors |
+| Local source lifecycle | Complete baseline | Nested Insomnia package display metadata is recognized, package roots remain linked, and explicit reload disables changed code and removes every prior grant |
+| CLI execution | Complete baseline | `--allow-plugins` runs granted request hooks, response hooks, and template tags for collection/suite HTTP/GraphQL sends in disposable resource-limited workers without host RPC or persistent writes |
+| Verification | Complete | Context/action/runtime, request/storage/interchange, full frontend, production build, native package-reader, aggregate Rust, format, and strict clippy evidence is recorded in [Milestone 262 verification](QA_MILESTONE_262.md) |
+
+Compatibility bounds remain explicit: remote/npm installation, dependency resolution, external plugin-directory discovery/watch, exact upstream context-menu placement, broad Node/native-module/plugin-ecosystem compatibility, and CLI host RPC/user-invoked actions remain. Pinned realtime routes bypass hooks. `Plugins and extension API` therefore remains `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
 ## Architectural boundaries
 

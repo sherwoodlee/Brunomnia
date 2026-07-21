@@ -2381,6 +2381,32 @@ export default function App() {
     return { ...request, auth };
   };
 
+  const pluginHostCapabilities = (environment: Environment): Partial<PluginHostCallbacks> => ({
+    dialog: async (title, message) => { window.alert(`${title}${message ? `\n\n${message}` : ''}`); },
+    clearClipboard: async () => navigator.clipboard.writeText(''),
+    getPath: async (name) => {
+      if (name.toLowerCase() !== 'desktop') throw new Error(`Unknown plugin path '${name}'.`);
+      if (!isTauri()) throw new Error('Plugin desktop paths are available only in the Tauri app.');
+      return invoke<string>('plugin_desktop_path');
+    },
+    showSaveDialog: async (defaultPath) => isTauri() ? window.prompt('Choose a save path', defaultPath) : null,
+    importData: async (source, value) => {
+      const contents = source === 'uri' ? await fetchImportUrl(value) : value;
+      const [{ importArtifact }, { applyArtifactImport }] = await Promise.all([import('./lib/interchange'), import('./lib/interchange/apply')]);
+      const result = importArtifact(contents, source === 'uri' ? value : 'Plugin import');
+      setWorkspace((current) => applyArtifactImport(current, result));
+    },
+    exportData: async (format, options) => {
+      const { exportArtifact } = await import('./lib/interchange/exporters');
+      const target = options.workspace as { id?: string } | undefined;
+      const collection = target?.id ? workspace.collections.find((candidate) => candidate.id === target.id) : undefined;
+      const design = target?.id ? workspace.apiDesigns.find((candidate) => candidate.id === target.id) : undefined;
+      const scope = collection ? 'collection' : design ? 'design' : 'all';
+      return exportArtifact(workspace, { format: format === 'har' ? 'har' : options.format === 'json' ? 'insomnia-v4' : 'insomnia-v5', scope, collectionId: collection?.id, designId: design?.id, includePrivateEnvironments: options.includePrivate === true }).contents;
+    },
+    environment: environmentMap(environment),
+  });
+
   const createRealtimePluginContext = (environment: Environment) => {
     const state: PluginRunState = { data: structuredClone(workspace.pluginData), notifications: [] };
     const callbacks: PluginHostCallbacks = {
@@ -2388,6 +2414,7 @@ export default function App() {
       prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
       readClipboard: () => navigator.clipboard.readText(),
       writeClipboard: (value) => navigator.clipboard.writeText(value),
+      ...pluginHostCapabilities(environment),
     };
     const runtime = createPluginRuntime(workspace.plugins, state, callbacks);
     const flush = () => {
@@ -2404,6 +2431,7 @@ export default function App() {
       prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
       readClipboard: () => navigator.clipboard.readText(),
       writeClipboard: (value) => navigator.clipboard.writeText(value),
+      ...pluginHostCapabilities(environment),
     };
     const runtime = createPluginRuntime(workspace.plugins, state, callbacks);
     let notificationIndex = 0;
@@ -2557,6 +2585,7 @@ export default function App() {
       prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
       readClipboard: () => navigator.clipboard.readText(),
       writeClipboard: (value) => navigator.clipboard.writeText(value),
+      ...pluginHostCapabilities(executionEnvironment),
     };
     const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
     try {
@@ -3198,6 +3227,7 @@ export default function App() {
       prompt: async (title, defaultValue) => window.prompt(title, defaultValue) ?? '',
       readClipboard: () => navigator.clipboard.readText(),
       writeClipboard: (value) => navigator.clipboard.writeText(value),
+      ...pluginHostCapabilities(codegenConfiguration.environment),
     };
     const pluginRuntime = createPluginRuntime(workspace.plugins, pluginState, pluginCallbacks);
     try {
@@ -3425,7 +3455,7 @@ export default function App() {
             streamSession={streamSessionView}
             streamStatus={streamStatus}
           />
-        </div>) : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ cookies: [...activeWorkspaceFileState.cookies], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeWorkspaceFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} templatePrompt={requestTemplatePrompt} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} workspaceFileId={activeWorkspaceFileId} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} onRefreshWorkspaceCatalog={(snapshot) => { setWorkspaceEntries(snapshot.entries); setWorkspaceRecovery(snapshot.recovery); }} onWorkspaceCatalogMutationEnd={() => setWorkspaceStoreBusy(false)} onWorkspaceCatalogMutationStart={() => { workspaceSaveGeneration.current += 1; setWorkspaceStoreBusy(true); setWorkspaceStoreError(''); }} requestContext={{ cookies: [...activeWorkspaceFileState.cookies], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeWorkspaceFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} workspaceCatalogBusy={workspaceStoreBusy} workspaceFileId={activeWorkspaceFileId} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : renderAutomationWorkbench(workbenchSection)}
+        </div>) : workbenchSection === 'git' ? <Suspense fallback={<div className="dialog-loading">Loading Git project…</div>}><ProjectWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} requestContext={{ cookies: [...activeWorkspaceFileState.cookies], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeWorkspaceFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} /></Suspense> : workbenchSection === 'plugins' ? <Suspense fallback={<div className="dialog-loading">Loading plugins…</div>}><PluginWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} selectedDocumentId={activeDocumentTab?.requestId} selectedDocumentType={activeDocumentTab?.type} templatePrompt={requestTemplatePrompt} workspace={workspace} /></Suspense> : workbenchSection === 'security' ? <Suspense fallback={<div className="dialog-loading">Loading security…</div>}><SecurityWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} onVaultSession={setVaultSession} vaultSession={vaultSession} workspace={workspace} workspaceFileId={activeWorkspaceFileId} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'integrations' ? <Suspense fallback={<div className="dialog-loading">Loading integrations…</div>}><IntegrationWorkbench environment={runtimeEnvironment} onChangeWorkspace={(updater) => setWorkspace(updater)} onRefreshWorkspaceCatalog={(snapshot) => { setWorkspaceEntries(snapshot.entries); setWorkspaceRecovery(snapshot.recovery); }} onWorkspaceCatalogMutationEnd={() => setWorkspaceStoreBusy(false)} onWorkspaceCatalogMutationStart={() => { workspaceSaveGeneration.current += 1; setWorkspaceStoreBusy(true); setWorkspaceStoreError(''); }} requestContext={{ cookies: [...activeWorkspaceFileState.cookies], preferredHttpVersion: workspace.preferences.preferredHttpVersion, maxRedirects: workspace.preferences.maxRedirects, followRedirects: workspace.preferences.followRedirects, requestTimeoutMs: workspace.preferences.requestTimeoutMs, validateCertificates: workspace.preferences.validateCertificates, validateAuthCertificates: workspace.preferences.validateAuthCertificates, proxy: proxyPreferences, certificates: activeWorkspaceFileState.certificates, maxTimelineDataSizeKB: workspace.preferences.maxTimelineDataSizeKB, filterResponsesByEnv: workspace.preferences.filterResponsesByEnv, vault: unlockedVault, externalSecret: externalSecretResolver, readFile: templateFileReader, prompt: requestTemplatePrompt, authorizeOAuth2: authorizeOAuth2WithStatus }} workspace={workspace} workspaceCatalogBusy={workspaceStoreBusy} workspaceFileId={activeWorkspaceFileId} workspaceId={activeWorkspaceId} /></Suspense> : workbenchSection === 'preferences' ? <Suspense fallback={<div className="dialog-loading">Loading preferences…</div>}><PreferencesWorkbench onChangeWorkspace={(updater) => setWorkspace(updater)} workspace={workspace} /></Suspense> : renderAutomationWorkbench(workbenchSection)}
       </div>
 
       <footer className="statusbar">

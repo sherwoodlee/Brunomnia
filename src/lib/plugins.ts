@@ -1,16 +1,25 @@
 import type { ApiRequest, HttpResponse, PluginPermission, PluginRecord, Workspace } from '../types';
+import { createBlankRequest } from '../data/seed';
 
 export type PluginTemplateDescriptor = { name: string; displayName: string; description: string };
-export type PluginActionDescriptor = { id: string; label: string; kind: 'request' | 'workspace' | 'document' };
-export type PluginThemeDescriptor = { id: string; pluginId: string; name: string; displayName: string; colors: Record<string, string> };
+export type PluginActionDescriptor = { id: string; label: string; kind: 'request' | 'request-group' | 'workspace' | 'document' };
+export type PluginThemeDescriptor = { id: string; pluginId: string; name: string; displayName: string; colors: Record<string, string>; rawCss: string };
 export type PluginDescriptor = { templates: PluginTemplateDescriptor[]; actions: PluginActionDescriptor[]; themes: PluginThemeDescriptor[] };
 export type PluginNotification = { type: 'log' | 'alert'; title: string; message: string };
+export type PluginActionTarget = { requestId?: string; collectionId?: string; folderId?: string; designId?: string };
 
 export type PluginHostCallbacks = {
   network?: (request: ApiRequest) => Promise<HttpResponse>;
   prompt?: (title: string, defaultValue: string) => Promise<string>;
+  dialog?: (title: string, message: string) => Promise<void>;
   readClipboard?: () => Promise<string>;
   writeClipboard?: (value: string) => Promise<void>;
+  clearClipboard?: () => Promise<void>;
+  getPath?: (name: string) => Promise<string>;
+  showSaveDialog?: (defaultPath: string) => Promise<string | null>;
+  importData?: (source: 'raw' | 'uri', value: string) => Promise<void>;
+  exportData?: (format: 'insomnia' | 'har', options: Record<string, unknown>) => Promise<string>;
+  environment?: Record<string, unknown>;
 };
 
 type PluginOperation =
@@ -18,7 +27,7 @@ type PluginOperation =
   | { kind: 'request'; request: ApiRequest }
   | { kind: 'response'; request: ApiRequest; response: HttpResponse }
   | { kind: 'template'; name: string; args: string[]; request: ApiRequest }
-  | { kind: 'action'; id: string; actionKind: PluginActionDescriptor['kind']; request: ApiRequest; workspace?: Workspace };
+  | { kind: 'action'; id: string; actionKind: PluginActionDescriptor['kind']; request: ApiRequest; workspace: Workspace; target?: PluginActionTarget };
 
 type PluginWorkerResult = {
   ok: boolean;
@@ -32,23 +41,31 @@ type PluginWorkerResult = {
   notifications: PluginNotification[];
 };
 
-const permissionList: PluginPermission[] = ['request:read', 'request:write', 'response:read', 'response:write', 'store', 'network', 'app:prompt', 'app:clipboard', 'template', 'action', 'theme'];
+const permissionList: PluginPermission[] = ['request:read', 'request:write', 'response:read', 'response:write', 'store', 'network', 'app:prompt', 'app:clipboard', 'app:file', 'data:read', 'data:write', 'data:private', 'template', 'action', 'theme'];
 export const pluginPermissions = [...permissionList];
 export const pluginPermissionLabels: Record<PluginPermission, string> = {
-  'request:read': 'Read requests', 'request:write': 'Modify requests', 'response:read': 'Read responses', 'response:write': 'Modify responses', store: 'Plugin-local storage', network: 'Send network requests', 'app:prompt': 'Show prompts', 'app:clipboard': 'Read/write clipboard', template: 'Custom template tags', action: 'Request/workspace actions', theme: 'Theme colors',
+  'request:read': 'Read requests', 'request:write': 'Modify requests', 'response:read': 'Read responses', 'response:write': 'Modify responses', store: 'Plugin-local storage', network: 'Send network requests', 'app:prompt': 'Show prompts', 'app:clipboard': 'Read/write clipboard', 'app:file': 'Choose local paths', 'data:read': 'Export project data', 'data:write': 'Import project data', 'data:private': 'Include private environments', template: 'Custom template tags', action: 'Request/folder/workspace actions', theme: 'Theme colors and CSS',
 };
 
 export const inferPluginPermissions = (source: string): PluginPermission[] => {
   const permissions = new Set<PluginPermission>();
   if (/\brequestHooks\b/.test(source)) { permissions.add('request:read'); permissions.add('request:write'); }
   if (/\bresponseHooks\b/.test(source)) { permissions.add('response:read'); permissions.add('response:write'); }
+  if (/\b(?:context\.)?request\.(?:get|has)[A-Z]/.test(source)) permissions.add('request:read');
+  if (/\b(?:context\.)?request\.(?:set|add|remove|setting)[A-Z]/.test(source)) permissions.add('request:write');
+  if (/\b(?:context\.)?response\.(?:get|has)[A-Z]/.test(source)) permissions.add('response:read');
+  if (/\b(?:context\.)?response\.setBody\b/.test(source)) permissions.add('response:write');
   if (/\btemplateTags\b/.test(source)) permissions.add('template');
-  if (/\b(?:request|workspace|document)Actions\b/.test(source)) permissions.add('action');
+  if (/\b(?:request|requestGroup|workspace|document)Actions\b/.test(source)) permissions.add('action');
   if (/\bthemes\b/.test(source)) permissions.add('theme');
   if (/\bcontext\.store\b|\bstore\.(?:get|set|remove|clear|all|has)Item\b/.test(source)) permissions.add('store');
   if (/\bcontext\.network\b|\bnetwork\.sendRequest\b/.test(source)) permissions.add('network');
-  if (/\bcontext\.app\.prompt\b|\bapp\.prompt\b/.test(source)) permissions.add('app:prompt');
+  if (/\bcontext\.app\.(?:prompt|dialog)\b|\bapp\.(?:prompt|dialog)\b/.test(source)) permissions.add('app:prompt');
   if (/\bcontext\.app\.clipboard\b|\bapp\.clipboard\b/.test(source)) permissions.add('app:clipboard');
+  if (/\bcontext\.app\.(?:getPath|showSaveDialog)\b|\bapp\.(?:getPath|showSaveDialog)\b/.test(source)) permissions.add('app:file');
+  if (/\bcontext\.data\.export\b|\bdata\.export\b/.test(source)) permissions.add('data:read');
+  if (/\bcontext\.data\.import\b|\bdata\.import\b/.test(source)) permissions.add('data:write');
+  if (/\bincludePrivate\s*:\s*true\b/.test(source)) permissions.add('data:private');
   return permissionList.filter((permission) => permissions.has(permission));
 };
 
@@ -57,6 +74,31 @@ export const validatePluginSource = (source: string) => {
   if (source.length > 1_000_000) throw new Error('Plugin source exceeds the 1 MB local limit.');
   if (/\bimport\s*(?:\/\*[\s\S]*?\*\/\s*)?\(/.test(source) || /(^|[;\n])\s*import\s/m.test(source)) throw new Error('ES module imports are not available in the isolated plugin runtime.');
   if (/(^|[;\n])\s*export\s/m.test(source)) throw new Error('ES module exports are not available in the isolated plugin runtime.');
+};
+
+const normalizePluginNetworkRequest = (value: unknown): ApiRequest => {
+  const raw = value && typeof value === 'object' ? value as Partial<ApiRequest> & { _id?: string; parameters?: Array<{ name?: unknown; value?: unknown; disabled?: unknown }> } : {};
+  const request = createBlankRequest(typeof raw.id === 'string' ? raw.id : typeof raw._id === 'string' ? raw._id : `plugin-network-${crypto.randomUUID()}`);
+  if (typeof raw.name === 'string') request.name = raw.name;
+  if (typeof raw.url === 'string') request.url = raw.url;
+  if (typeof raw.method === 'string') request.method = raw.method.toUpperCase();
+  if (typeof raw.protocol === 'string' && ['http', 'graphql'].includes(raw.protocol)) request.protocol = raw.protocol as ApiRequest['protocol'];
+  const rows = (entries: unknown, prefix: string) => Array.isArray(entries) ? entries.flatMap((entry, index) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const row = entry as { id?: unknown; name?: unknown; value?: unknown; enabled?: unknown; disabled?: unknown; description?: unknown };
+    return [{ id: typeof row.id === 'string' ? row.id : `${request.id}-${prefix}-${index}`, name: String(row.name ?? ''), value: String(row.value ?? ''), enabled: row.enabled !== false && row.disabled !== true, description: String(row.description ?? '') }];
+  }) : [];
+  if (Array.isArray(raw.headers)) request.headers = rows(raw.headers, 'header');
+  if (Array.isArray(raw.params) || Array.isArray(raw.parameters)) request.params = rows(raw.params ?? raw.parameters, 'parameter');
+  if (raw.auth && typeof raw.auth === 'object') request.auth = { ...request.auth, ...structuredClone(raw.auth) };
+  if (raw.transport && typeof raw.transport === 'object') request.transport = { ...request.transport, ...structuredClone(raw.transport) };
+  if (typeof raw.body === 'string') { request.body = raw.body; request.bodyMode = raw.body ? 'text' : 'none'; }
+  else if (raw.body && typeof raw.body === 'object') {
+    const body = raw.body as { mimeType?: unknown; text?: unknown };
+    request.body = String(body.text ?? '');
+    request.bodyMode = String(body.mimeType ?? '').includes('json') ? 'json' : request.body ? 'text' : 'none';
+  }
+  return request;
 };
 
 const safeIdentifier = () => `__br_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -133,44 +175,116 @@ ${source}
     };
     const app = {
       alert: async (title, message = '') => { ${notifications}.push({ type: 'alert', title: String(title), message: String(message) }); },
+      dialog: async (title, body) => { requirePermission('app:prompt'); return ${rpc}('dialog', { title: String(title), message: String(body?.outerHTML ?? body ?? '') }); },
       prompt: async (title, options = {}) => { requirePermission('app:prompt'); return ${rpc}('prompt', { title: String(title), defaultValue: String(options.defaultValue ?? '') }); },
+      getPath: async name => { requirePermission('app:file'); return ${rpc}('path', { name: String(name) }); },
+      showSaveDialog: async (options = {}) => { requirePermission('app:file'); return ${rpc}('save-dialog', { defaultPath: String(options.defaultPath ?? '') }); },
       clipboard: {
         readText: async () => { requirePermission('app:clipboard'); return ${rpc}('clipboard-read', {}); },
         writeText: async value => { requirePermission('app:clipboard'); return ${rpc}('clipboard-write', { value: String(value) }); },
+        clear: async () => { requirePermission('app:clipboard'); return ${rpc}('clipboard-clear', {}); },
       },
-      getInfo: () => ({ name: 'Brunomnia', version: '0.1.0' }),
+      getInfo: () => ({ name: 'Brunomnia', version: '0.1.0', platform: String(${state}.platform || 'unknown') }),
     };
-    const network = { sendRequest: async request => { requirePermission('network'); return ${rpc}('network', { request }); } };
+    const data = {
+      import: {
+        uri: async uri => { requirePermission('data:write'); return ${rpc}('data-import', { source: 'uri', value: String(uri) }); },
+        raw: async value => { requirePermission('data:write'); return ${rpc}('data-import', { source: 'raw', value: String(value) }); },
+      },
+      export: {
+        insomnia: async (options = {}) => { requirePermission('data:read'); if (options.includePrivate) requirePermission('data:private'); return ${rpc}('data-export', { format: 'insomnia', options }); },
+        har: async (options = {}) => { requirePermission('data:read'); if (options.includePrivate) requirePermission('data:private'); return ${rpc}('data-export', { format: 'har', options }); },
+      },
+    };
+    const network = { sendRequest: async request => { requirePermission('network'); const response = await ${rpc}('network', { request }); return { ...response, statusCode: response.status, statusMessage: response.statusText, elapsedTime: response.durationMs, bytesRead: response.wireSizeBytes ?? response.sizeBytes }; } };
+    const nextRow = (prefix, rows, name, value) => ({ id: 'plugin-' + prefix + '-' + Date.now() + '-' + rows.length, name: String(name), value: String(value), enabled: true });
+    const requestBody = request => {
+      if (request.protocol === 'graphql') return { mimeType: 'application/graphql', text: request.graphql?.query || '' };
+      if (request.bodyMode === 'form-urlencoded') return { mimeType: 'application/x-www-form-urlencoded', params: (request.formBody || []).map(row => ({ name: row.name, value: row.value, description: row.description, disabled: !row.enabled, multiline: row.multiline, id: row.id })) };
+      if (request.bodyMode === 'multipart') return { mimeType: 'multipart/form-data', params: (request.multipartBody || []).map(row => ({ name: row.name, value: row.value, description: row.description, disabled: !row.enabled, multiline: row.multiline, id: row.id, fileName: row.fileName || row.file?.fileName, type: row.kind === 'file' ? 'file' : 'text' })) };
+      if (request.bodyMode === 'binary') return { mimeType: request.binaryBody?.mimeType || 'application/octet-stream', fileName: request.binaryBody?.fileName || '' };
+      const mimeType = (request.headers || []).find(header => header.enabled && String(header.name).toLowerCase() === 'content-type')?.value || (request.bodyMode === 'json' ? 'application/json' : 'text/plain');
+      return request.bodyMode === 'none' ? {} : { mimeType, text: request.body || '' };
+    };
+    const setRequestBody = (request, value) => {
+      const body = typeof value === 'string' ? { text: value } : value && typeof value === 'object' ? value : {};
+      const mimeType = String(body.mimeType || '').toLowerCase();
+      if (request.protocol === 'graphql' && mimeType === 'application/graphql') { request.graphql.query = String(body.text || ''); return; }
+      if (mimeType === 'application/x-www-form-urlencoded') {
+        request.bodyMode = 'form-urlencoded'; request.formBody = (Array.isArray(body.params) ? body.params : []).map((row, index) => ({ id: String(row.id || 'plugin-form-' + index), name: String(row.name || ''), value: String(row.value || ''), enabled: row.disabled !== true, description: String(row.description || ''), multiline: Boolean(row.multiline) })); return;
+      }
+      if (mimeType === 'multipart/form-data') {
+        request.bodyMode = 'multipart'; request.multipartBody = (Array.isArray(body.params) ? body.params : []).map((row, index) => ({ id: String(row.id || 'plugin-part-' + index), name: String(row.name || ''), value: String(row.value || ''), enabled: row.disabled !== true, description: String(row.description || ''), multiline: Boolean(row.multiline), kind: row.type === 'file' || row.fileName ? 'file' : 'text', fileName: String(row.fileName || ''), contentType: String(row.contentType || '') })); return;
+      }
+      request.bodyMode = mimeType.includes('json') ? 'json' : body.text === undefined && !mimeType ? 'none' : 'text'; request.body = String(body.text || '');
+      if (mimeType) {
+        const existing = request.headers.find(header => String(header.name).toLowerCase() === 'content-type');
+        if (existing) { existing.value = String(body.mimeType); existing.enabled = true; } else request.headers.push(nextRow('header', request.headers, 'Content-Type', body.mimeType));
+      }
+    };
+    const read = value => { requirePermission('request:read'); return value; };
     const ${requestApi} = request => ({
-      getId: () => request.id, getName: () => request.name, setName: value => { requirePermission('request:write'); request.name = String(value); },
-      getUrl: () => request.url, setUrl: value => { requirePermission('request:write'); request.url = String(value); },
-      getMethod: () => request.method, setMethod: value => { requirePermission('request:write'); request.method = String(value).toUpperCase(); },
-      getBody: () => request.body, setBody: value => { requirePermission('request:write'); request.body = typeof value === 'string' ? value : String(value?.toString?.() ?? value); },
-      getHeader: name => request.headers.find(header => header.enabled && header.name.toLowerCase() === String(name).toLowerCase())?.value ?? null,
-      getHeaders: () => request.headers.filter(header => header.enabled).map(header => ({ name: header.name, value: header.value })),
-      hasHeader: name => request.headers.some(header => header.enabled && header.name.toLowerCase() === String(name).toLowerCase()),
-      setHeader: (name, value) => { requirePermission('request:write'); const existing = request.headers.find(header => header.name.toLowerCase() === String(name).toLowerCase()); if (existing) { existing.value = String(value); existing.enabled = true; } else request.headers.push({ id: 'plugin-' + Date.now() + '-' + request.headers.length, name: String(name), value: String(value), enabled: true }); },
+      getId: () => read(request.id), getName: () => read(request.name), setName: value => { requirePermission('request:write'); request.name = String(value); },
+      getUrl: () => read(request.url), setUrl: value => { requirePermission('request:write'); request.url = String(value); },
+      getMethod: () => read(request.method), setMethod: value => { requirePermission('request:write'); request.method = String(value).toUpperCase(); },
+      getBody: () => read(structuredClone(requestBody(request))), setBody: value => { requirePermission('request:write'); setRequestBody(request, value); },
+      getBodyText: () => read(String(requestBody(request).text || '')), setBodyText: value => { requirePermission('request:write'); const body = requestBody(request); setRequestBody(request, { ...body, text: String(value) }); },
+      getHeader: name => read(request.headers.filter(header => header.enabled && header.name.toLowerCase() === String(name).toLowerCase()).at(-1)?.value ?? null),
+      getHeaders: () => read(request.headers.filter(header => header.enabled).map(header => ({ name: header.name, value: header.value }))),
+      hasHeader: name => read(request.headers.some(header => header.enabled && header.name.toLowerCase() === String(name).toLowerCase())),
+      setHeader: (name, value) => { requirePermission('request:write'); const existing = request.headers.find(header => header.name.toLowerCase() === String(name).toLowerCase()); if (existing) { existing.value = String(value); existing.enabled = true; } else request.headers.push(nextRow('header', request.headers, name, value)); },
+      addHeader: (name, value) => { requirePermission('request:write'); if (!request.headers.some(header => header.name.toLowerCase() === String(name).toLowerCase())) request.headers.push(nextRow('header', request.headers, name, value)); },
       removeHeader: name => { requirePermission('request:write'); request.headers = request.headers.filter(header => header.name.toLowerCase() !== String(name).toLowerCase()); },
+      getParameter: name => read(request.params.filter(parameter => parameter.enabled && parameter.name === String(name)).at(-1)?.value ?? null),
+      getParameters: () => read(request.params.filter(parameter => parameter.enabled).map(parameter => ({ name: parameter.name, value: parameter.value }))),
+      hasParameter: name => read(request.params.some(parameter => parameter.enabled && parameter.name === String(name))),
+      setParameter: (name, value) => { requirePermission('request:write'); const existing = request.params.find(parameter => parameter.name === String(name)); if (existing) { existing.value = String(value); existing.enabled = true; } else request.params.push(nextRow('parameter', request.params, name, value)); },
+      addParameter: (name, value) => { requirePermission('request:write'); if (!request.params.some(parameter => parameter.name === String(name))) request.params.push(nextRow('parameter', request.params, name, value)); },
+      removeParameter: name => { requirePermission('request:write'); request.params = request.params.filter(parameter => parameter.name !== String(name)); },
+      getEnvironmentVariable: name => read(structuredClone(${state}.environment?.[String(name)] ?? null)),
+      getEnvironment: () => read(structuredClone(${state}.environment || {})),
+      setAuthenticationParameter: (name, value) => { requirePermission('request:write'); const key = String(name); if (['__proto__', 'prototype', 'constructor'].includes(key)) throw new Error('Unsafe authentication property.'); request.auth[key] = value; },
+      getAuthentication: () => read(structuredClone(request.auth || {})),
+      setCookie: (name, value) => { requirePermission('request:write'); const cookies = Object.fromEntries(String(request.headers.find(header => header.enabled && header.name.toLowerCase() === 'cookie')?.value || '').split(';').map(part => part.trim()).filter(Boolean).map(part => { const index = part.indexOf('='); return [index < 0 ? part : part.slice(0, index), index < 0 ? '' : part.slice(index + 1)]; })); cookies[String(name)] = String(value); const serialized = Object.entries(cookies).map(([key, entry]) => key + '=' + entry).join('; '); const existing = request.headers.find(header => header.name.toLowerCase() === 'cookie'); if (existing) { existing.value = serialized; existing.enabled = true; } else request.headers.push(nextRow('header', request.headers, 'Cookie', serialized)); },
+      settingSendCookies: enabled => { requirePermission('request:write'); request.transport.sendCookies = Boolean(enabled); },
+      settingStoreCookies: enabled => { requirePermission('request:write'); request.transport.storeCookies = Boolean(enabled); },
+      settingEncodeUrl: enabled => { requirePermission('request:write'); request.encodeUrl = Boolean(enabled); },
+      settingDisableRenderRequestBody: enabled => { requirePermission('request:write'); request.renderBodyTemplates = !Boolean(enabled); },
+      settingFollowRedirects: enabled => { requirePermission('request:write'); const mode = enabled === 'global' || enabled === 'on' || enabled === 'off' ? enabled : enabled ? 'on' : 'off'; request.transport.followRedirectsMode = mode; request.transport.followRedirects = mode !== 'off'; },
     });
+    const responseBytes = response => response.bodyBase64 === undefined ? SafeBuffer.from(response.body) : SafeBuffer.from(response.bodyBase64, 'base64');
+    const responseLines = response => Array.isArray(response.headerLines) && response.headerLines.length ? response.headerLines : Object.entries(response.headers || {}).map(([name, value]) => ({ name, value }));
+    const bodyStream = bytes => {
+      const listeners = { data: [], end: [] };
+      const stream = {
+        pipe(destination) { destination?.write?.(bytes); destination?.end?.(); return destination; },
+        on(event, listener) { if (listeners[event]) listeners[event].push(listener); queueMicrotask(() => { if (event === 'data') listener(bytes); if (event === 'end') listener(); }); return stream; },
+        async *[Symbol.asyncIterator]() { yield bytes; },
+      };
+      return stream;
+    };
+    const responseRead = value => { requirePermission('response:read'); return value; };
     const ${responseApi} = response => ({
-      getRequestId: () => ${state}.request?.id ?? '', getStatusCode: () => response.status, getStatusMessage: () => response.statusText,
-      getBytesRead: () => response.wireSizeBytes ?? response.sizeBytes, getTime: () => response.durationMs, getBody: () => response.bodyBase64 === undefined ? SafeBuffer.from(response.body) : SafeBuffer.from(response.bodyBase64, 'base64'),
-      setBody: body => { requirePermission('response:write'); if (body instanceof Uint8Array) { response.body = new TextDecoder().decode(body); const chunks = []; for (let offset = 0; offset < body.byteLength; offset += 8192) chunks.push(String.fromCharCode(...body.subarray(offset, offset + 8192))); response.bodyBase64 = btoa(chunks.join('')); response.sizeBytes = body.byteLength; } else { response.body = String(body); delete response.bodyBase64; response.sizeBytes = new TextEncoder().encode(response.body).length; } },
-      getHeader: name => Object.entries(response.headers).find(([key]) => key.toLowerCase() === String(name).toLowerCase())?.[1] ?? null,
-      getHeaders: () => Object.entries(response.headers).map(([name, value]) => ({ name, value })),
-      hasHeader: name => Object.keys(response.headers).some(key => key.toLowerCase() === String(name).toLowerCase()),
+      getRequestId: () => responseRead(${state}.request?.id ?? ''), getStatusCode: () => responseRead(response.status), getStatusMessage: () => responseRead(response.statusText),
+      getBytesRead: () => responseRead(response.wireSizeBytes ?? response.sizeBytes), getTime: () => responseRead(response.durationMs), getBody: () => responseRead(responseBytes(response)), getBodyStream: () => responseRead(bodyStream(responseBytes(response))),
+      setBody: body => { requirePermission('response:write'); const bytes = body instanceof Uint8Array ? body : SafeBuffer.from(String(body)); response.body = new TextDecoder().decode(bytes); const chunks = []; for (let offset = 0; offset < bytes.byteLength; offset += 8192) chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 8192))); response.bodyBase64 = btoa(chunks.join('')); response.sizeBytes = bytes.byteLength; },
+      getHeader: name => responseRead((() => { const values = responseLines(response).filter(header => header.name.toLowerCase() === String(name).toLowerCase()).map(header => header.value); return values.length > 1 ? values : values[0] ?? null; })()),
+      getHeaders: () => responseRead(responseLines(response).map(({ name, value }) => ({ name, value }))),
+      hasHeader: name => responseRead(responseLines(response).some(header => header.name.toLowerCase() === String(name).toLowerCase())),
     });
-    const ${contextApi} = (request, response) => ({ app, store, network, request: request ? ${requestApi}(request) : undefined, response: response ? ${responseApi}(response) : undefined });
+    const ${contextApi} = (request, response) => ({ app, data, store, network, request: request ? ${requestApi}(request) : undefined, response: response ? ${responseApi}(response) : undefined });
     const descriptor = () => ({
       templates: Array.isArray(${exportsValue}.templateTags) ? ${exportsValue}.templateTags.map(tag => ({ name: String(tag.name || ''), displayName: String(tag.displayName || tag.name || ''), description: String(tag.description || '') })).filter(tag => tag.name) : [],
       actions: [
         ...(Array.isArray(${exportsValue}.requestActions) ? ${exportsValue}.requestActions.map((action, index) => ({ id: 'request:' + index, label: String(action.label || 'Request action'), kind: 'request' })) : []),
+        ...(Array.isArray(${exportsValue}.requestGroupActions) ? ${exportsValue}.requestGroupActions.map((action, index) => ({ id: 'request-group:' + index, label: String(action.label || 'Folder action'), kind: 'request-group' })) : []),
         ...(Array.isArray(${exportsValue}.workspaceActions) ? ${exportsValue}.workspaceActions.map((action, index) => ({ id: 'workspace:' + index, label: String(action.label || 'Workspace action'), kind: 'workspace' })) : []),
         ...(Array.isArray(${exportsValue}.documentActions) ? ${exportsValue}.documentActions.map((action, index) => ({ id: 'document:' + index, label: String(action.label || 'Document action'), kind: 'document' })) : []),
       ],
       themes: Array.isArray(${exportsValue}.themes) ? ${exportsValue}.themes.map((theme, index) => ({ id: 'theme:' + index, pluginId: ${input}.pluginId, name: String(theme.name || index), displayName: String(theme.displayName || theme.name || 'Plugin theme'), colors: {
         background: String(theme.theme?.background?.default || ''), foreground: String(theme.theme?.foreground?.default || ''), highlight: String(theme.theme?.highlight?.default || ''), success: String(theme.theme?.background?.success || ''), danger: String(theme.theme?.background?.danger || ''),
-      } })) : [],
+        ...Object.fromEntries(Object.entries(theme.theme?.styles || {}).flatMap(([target, values]) => ['background', 'foreground', 'highlight'].flatMap(kind => values?.[kind]?.default ? [[target + '-' + kind, String(values[kind].default)]] : []))),
+      }, rawCss: String(theme.theme?.rawCss || '').slice(0, 100000) })) : [],
     });
     let result = { ok: true, store: ${state}.store, notifications: ${notifications} };
     if (${input}.operation.kind === 'describe') result.descriptor = descriptor();
@@ -187,9 +301,17 @@ ${source}
       result.handled = Boolean(tag); if (tag) result.value = String(await tag.run(${contextApi}(${state}.request), ...(${input}.operation.args || [])) ?? '');
     } else if (${input}.operation.kind === 'action') {
       requirePermission('action'); const [kind, rawIndex] = ${input}.operation.id.split(':'); const index = Number(rawIndex);
-      const actions = kind === 'request' ? ${exportsValue}.requestActions : kind === 'workspace' ? ${exportsValue}.workspaceActions : ${exportsValue}.documentActions;
+      const actions = kind === 'request' ? ${exportsValue}.requestActions : kind === 'request-group' ? ${exportsValue}.requestGroupActions : kind === 'workspace' ? ${exportsValue}.workspaceActions : ${exportsValue}.documentActions;
       const action = Array.isArray(actions) ? actions[index] : undefined; if (!action) throw new Error('Plugin action was not found.');
-      const request = ${state}.request; const originalRequest = structuredClone(request); await action.action(${contextApi}(request), kind === 'request' ? { request } : kind === 'workspace' ? { workspace: ${state}.workspace, requests: ${state}.workspace?.collections?.flatMap(collection => collection.requests) || [] } : ${state}.workspace?.apiDesigns?.[0]); result.request = ${permissions}.has('request:write') ? request : originalRequest;
+      const request = ${state}.request; const originalRequest = structuredClone(request); const workspace = ${state}.workspace || {}; const target = ${input}.operation.target || {};
+      const collection = (workspace.collections || []).find(candidate => candidate.id === target.collectionId || candidate.requests?.some(candidateRequest => candidateRequest.id === request?.id));
+      const requestGroup = (collection?.folders || []).find(folder => folder.id === target.folderId || folder.id === request?.folderId);
+      const folderIds = new Set(requestGroup ? [requestGroup.id] : []); let changed = true; while (changed) { changed = false; for (const folder of collection?.folders || []) if (folderIds.has(folder.parentId) && !folderIds.has(folder.id)) { folderIds.add(folder.id); changed = true; } }
+      const folderRequests = (collection?.requests || []).filter(candidate => folderIds.has(candidate.folderId));
+      const design = (workspace.apiDesigns || []).find(candidate => candidate.id === target.designId) || workspace.apiDesigns?.[0];
+      let parsedContents = {}; try { parsedContents = JSON.parse(design?.contents || '{}'); } catch {}
+      const models = kind === 'request' ? { requestGroup, request } : kind === 'request-group' ? { requestGroup, requests: folderRequests } : kind === 'workspace' ? { workspace: target.designId ? design : collection || workspace, requestGroups: collection?.folders || [], requests: collection?.requests || [] } : { contents: parsedContents, rawContents: design?.contents || '', format: 'openapi', formatVersion: String(parsedContents.openapi || parsedContents.swagger || '') };
+      await action.action(${contextApi}(request), models); result.request = ${permissions}.has('request:write') ? request : originalRequest;
     }
     ${post}(result);
   } catch (error) {
@@ -222,16 +344,34 @@ const executePlugin = async (
               let value: unknown;
               if (data.type === 'network') {
                 if (!callbacks.network) throw new Error('The host did not provide plugin network access.');
-                value = await callbacks.network(data.payload.request as ApiRequest);
+                value = await callbacks.network(normalizePluginNetworkRequest(data.payload.request));
               } else if (data.type === 'prompt') {
                 if (!callbacks.prompt) throw new Error('The host did not provide plugin prompt access.');
                 value = await callbacks.prompt(String(data.payload.title ?? ''), String(data.payload.defaultValue ?? ''));
+              } else if (data.type === 'dialog') {
+                if (!callbacks.dialog) throw new Error('The host did not provide plugin dialog access.');
+                value = await callbacks.dialog(String(data.payload.title ?? ''), String(data.payload.message ?? ''));
               } else if (data.type === 'clipboard-read') {
                 if (!callbacks.readClipboard) throw new Error('The host did not provide clipboard access.');
                 value = await callbacks.readClipboard();
               } else if (data.type === 'clipboard-write') {
                 if (!callbacks.writeClipboard) throw new Error('The host did not provide clipboard access.');
                 value = await callbacks.writeClipboard(String(data.payload.value ?? ''));
+              } else if (data.type === 'clipboard-clear') {
+                if (!callbacks.clearClipboard) throw new Error('The host did not provide clipboard access.');
+                value = await callbacks.clearClipboard();
+              } else if (data.type === 'path') {
+                if (!callbacks.getPath) throw new Error('The host did not provide plugin path access.');
+                value = await callbacks.getPath(String(data.payload.name ?? ''));
+              } else if (data.type === 'save-dialog') {
+                if (!callbacks.showSaveDialog) throw new Error('The host did not provide plugin save-dialog access.');
+                value = await callbacks.showSaveDialog(String(data.payload.defaultPath ?? ''));
+              } else if (data.type === 'data-import') {
+                if (!callbacks.importData) throw new Error('The host did not provide plugin import access.');
+                value = await callbacks.importData(data.payload.source === 'uri' ? 'uri' : 'raw', String(data.payload.value ?? ''));
+              } else if (data.type === 'data-export') {
+                if (!callbacks.exportData) throw new Error('The host did not provide plugin export access.');
+                value = await callbacks.exportData(data.payload.format === 'har' ? 'har' : 'insomnia', data.payload.options && typeof data.payload.options === 'object' ? data.payload.options as Record<string, unknown> : {});
               } else throw new Error(`Unknown plugin host call '${data.type}'.`);
               worker.postMessage({ __pluginRpcResponse: true, id: data.id, ok: true, value });
             } catch (caught) {
@@ -243,7 +383,7 @@ const executePlugin = async (
         window.clearTimeout(timeout);
         resolve(data as PluginWorkerResult);
       };
-      worker.postMessage({ pluginId: plugin.id, permissions: plugin.grantedPermissions, operation, state: { request: 'request' in operation ? structuredClone(operation.request) : undefined, response: 'response' in operation ? structuredClone(operation.response) : undefined, workspace: 'workspace' in operation ? structuredClone(operation.workspace) : undefined, store: { ...store } } });
+      worker.postMessage({ pluginId: plugin.id, permissions: plugin.grantedPermissions, operation, state: { request: 'request' in operation ? structuredClone(operation.request) : undefined, response: 'response' in operation ? structuredClone(operation.response) : undefined, workspace: 'workspace' in operation ? structuredClone(operation.workspace) : undefined, environment: structuredClone(callbacks.environment ?? {}), platform: navigator.platform, store: { ...store } } });
     }).then((result) => {
       if (!result.ok) throw new Error(result.error || `Plugin '${plugin.name}' failed.`);
       return result;
@@ -295,7 +435,7 @@ export const runPluginTemplateTag = async (plugins: PluginRecord[], name: string
   return undefined;
 };
 
-export const runPluginAction = async (plugin: PluginRecord, descriptor: PluginActionDescriptor, request: ApiRequest, workspace: Workspace, store: Record<string, string>, callbacks: PluginHostCallbacks = {}) => executePlugin(plugin, { kind: 'action', id: descriptor.id, actionKind: descriptor.kind, request, workspace }, store, callbacks);
+export const runPluginAction = async (plugin: PluginRecord, descriptor: PluginActionDescriptor, request: ApiRequest, workspace: Workspace, store: Record<string, string>, callbacks: PluginHostCallbacks = {}, target?: PluginActionTarget) => executePlugin(plugin, { kind: 'action', id: descriptor.id, actionKind: descriptor.kind, request, workspace, target }, store, callbacks);
 
 export const createPluginRuntime = (plugins: PluginRecord[], state: PluginRunState, callbacks: PluginHostCallbacks = {}) => ({
   beforeRequest: (request: ApiRequest) => runPluginRequestHooks(plugins, request, state, callbacks),
@@ -304,6 +444,7 @@ export const createPluginRuntime = (plugins: PluginRecord[], state: PluginRunSta
 });
 
 const colorValue = (value: string) => value && typeof CSS !== 'undefined' && CSS.supports('color', value) ? value : '';
+const safeThemeCss = (value: string) => /@import|url\s*\(|expression\s*\(|javascript\s*:|behavior\s*:/i.test(value) ? '' : value.slice(0, 100_000);
 export const applyPluginTheme = (theme?: PluginThemeDescriptor) => {
   const root = document.documentElement;
   const mappings: Array<[string, string]> = [['--bg', theme?.colors.background ?? ''], ['--text', theme?.colors.foreground ?? ''], ['--accent', theme?.colors.highlight ?? ''], ['--mint', theme?.colors.success ?? ''], ['--red', theme?.colors.danger ?? '']];
@@ -311,6 +452,15 @@ export const applyPluginTheme = (theme?: PluginThemeDescriptor) => {
     const safe = colorValue(value);
     if (safe) root.style.setProperty(property, safe); else root.style.removeProperty(property);
   });
+  const styleId = 'brunomnia-plugin-theme-css';
+  document.getElementById(styleId)?.remove();
+  const css = safeThemeCss(theme?.rawCss ?? '');
+  if (css) {
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = css;
+    document.head.append(style);
+  }
 };
 
 export const pluginStarterSource = `module.exports.requestHooks = [context => {

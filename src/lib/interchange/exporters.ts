@@ -186,6 +186,7 @@ const v4Request = (request: ApiRequest, parentId: string, index: number, sortKey
     headers: request.headers.map((header) => ({ name: header.name, value: header.value, disabled: !header.enabled, description: header.description })),
     disableUserAgentHeader: request.disableUserAgentHeader,
     authentication: insomniaAuth(request.auth), preRequestScript: request.preRequestScript, afterResponseScript: request.tests, description: request.documentation ?? '',
+    settingEncodeUrl: request.encodeUrl,
     settingFollowRedirects: request.transport.followRedirectsMode,
     settingDisableRenderRequestBody: !request.renderBodyTemplates,
   };
@@ -365,10 +366,10 @@ const v5Request = (request: ApiRequest, index: number, sortKey: number, warnings
     parameters: request.params.map((parameter) => ({ name: parameter.name, value: parameter.value, disabled: !parameter.enabled, description: parameter.description })),
     authentication: insomniaAuth(request.auth),
   };
-  if (request.protocol === 'websocket') return { ...common, settings: { encodeUrl: true, followRedirects: request.transport.followRedirectsMode, cookies: { send: true, store: true } } };
+  if (request.protocol === 'websocket') return { ...common, settings: { encodeUrl: request.encodeUrl, followRedirects: request.transport.followRedirectsMode, cookies: { send: true, store: true } } };
   if (request.protocol === 'socketio') return {
     ...common,
-    settings: { encodeUrl: true, path: request.socketIo.path, cookies: { send: request.transport.sendCookies, store: request.transport.storeCookies } },
+    settings: { encodeUrl: request.encodeUrl, path: request.socketIo.path, cookies: { send: request.transport.sendCookies, store: request.transport.storeCookies } },
     eventListeners: request.socketIo.eventListeners.map((listener) => ({ id: listener.id, eventName: listener.eventName, desc: listener.description, isOpen: listener.enabled })),
     payload: { eventName: request.socketIo.eventName, ack: request.socketIo.ack, args: request.socketIo.args },
   };
@@ -381,7 +382,7 @@ const v5Request = (request: ApiRequest, index: number, sortKey: number, warnings
     method: request.method,
     body: insomniaBody(request, warnings),
     scripts: { preRequest: request.preRequestScript, afterResponse: request.tests },
-    settings: { renderRequestBody: request.renderBodyTemplates, encodeUrl: true, followRedirects: request.transport.followRedirectsMode, cookies: { send: true, store: true }, rebuildPath: true },
+    settings: { renderRequestBody: request.renderBodyTemplates, encodeUrl: request.encodeUrl, followRedirects: request.transport.followRedirectsMode, cookies: { send: true, store: true }, rebuildPath: true },
   };
 };
 

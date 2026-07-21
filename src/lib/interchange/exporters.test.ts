@@ -10,6 +10,7 @@ describe('artifact export adapters', () => {
     const workspace = cloneSeedWorkspace();
     workspace.collections[0].requests[0].auth = { ...workspace.collections[0].requests[0].auth, type: 'hawk', hawkId: 'client', hawkKey: 'secret', hawkAlgorithm: 'sha256' };
     workspace.collections[0].requests[0].documentation = 'Request docs';
+    workspace.collections[0].requests[0].encodeUrl = false;
     workspace.collections[0].requests[0].transport = { ...workspace.collections[0].requests[0].transport, followRedirects: false, followRedirectsMode: 'off' };
     workspace.collections[0].requests[0].method = 'PROPFIND';
     workspace.collections[0].requests[0].url = 'https://api.acme.dev/v1/orders/{orderId}';
@@ -75,6 +76,7 @@ describe('artifact export adapters', () => {
     expect(v4Import.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'orderId', value: 'ord/one', description: 'Order identifier' });
     expect(v4Import.collections[0].requests[0].headers[0].description).toBe('Payload type');
     expect(v4Import.collections[0].requests[0].renderBodyTemplates).toBe(false);
+    expect(v4Import.collections[0].requests[0].encodeUrl).toBe(false);
     expect(v4Import.collections[0].requests[0].disableUserAgentHeader).toBe(true);
     expect(v4Import.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ name: 'payload', multiline: true, contentType: 'application/json', description: 'JSON document', enabled: true }),
@@ -118,6 +120,7 @@ describe('artifact export adapters', () => {
     expect(v5Import.collections[0].requests[0].transport.followRedirectsMode).toBe('off');
     expect(v5Import.collections[0].requests[0].pathParams[0]).toMatchObject({ name: 'orderId', value: 'ord/one', description: 'Order identifier' });
     expect(v5Import.collections[0].requests[0].renderBodyTemplates).toBe(false);
+    expect(v5Import.collections[0].requests[0].encodeUrl).toBe(false);
     expect(v5Import.collections[0].requests[0].disableUserAgentHeader).toBe(true);
     expect(v5Import.collections[0].requests[0].multipartBody[0]).toMatchObject({ multiline: true, contentType: 'application/json', description: 'JSON document' });
     expect(v5Import.collections.flatMap((collection) => collection.requests).find((request) => request.name === 'Form controls')?.formBody[0]).toMatchObject({ enabled: false, description: 'Multiline notes', multiline: true });

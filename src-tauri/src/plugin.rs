@@ -17,17 +17,22 @@ pub struct PluginSourceOutput {
     pub path: String,
 }
 
-fn source_file(path: &Path) -> Result<(PathBuf, Option<Value>), String> {
+fn source_file(path: &Path) -> Result<(PathBuf, Option<Value>, PathBuf), String> {
     let canonical = path
         .canonicalize()
         .map_err(|error| format!("Unable to open plugin path: {error}"))?;
     if canonical.is_file() {
-        return Ok((canonical, None));
+        return Ok((canonical.clone(), None, canonical));
     }
     if !canonical.is_dir() {
         return Err("The plugin path must be a JavaScript file or package folder.".into());
     }
     let package_path = canonical.join("package.json");
+    let package_metadata = fs::metadata(&package_path)
+        .map_err(|error| format!("Unable to inspect plugin package.json: {error}"))?;
+    if !package_metadata.is_file() || package_metadata.len() > MAX_PLUGIN_BYTES {
+        return Err("The plugin package.json must be a regular file no larger than 1 MB.".into());
+    }
     let package: Value = serde_json::from_str(
         &fs::read_to_string(&package_path)
             .map_err(|error| format!("Unable to read plugin package.json: {error}"))?,
@@ -44,14 +49,14 @@ fn source_file(path: &Path) -> Result<(PathBuf, Option<Value>), String> {
     if !entry.starts_with(&canonical) {
         return Err("The plugin entry must stay inside its package folder.".into());
     }
-    Ok((entry, Some(package)))
+    Ok((entry, Some(package), canonical))
 }
 
 pub fn read_plugin_source(path: String) -> Result<PluginSourceOutput, String> {
     if path.trim().is_empty() {
         return Err("Choose a plugin JavaScript file or package folder.".into());
     }
-    let (entry, package) = source_file(&PathBuf::from(path.trim()))?;
+    let (entry, package, source_path) = source_file(&PathBuf::from(path.trim()))?;
     let metadata =
         fs::metadata(&entry).map_err(|error| format!("Unable to inspect plugin entry: {error}"))?;
     if !metadata.is_file() {
@@ -71,15 +76,30 @@ pub fn read_plugin_source(path: String) -> Result<PluginSourceOutput, String> {
             .as_ref()
             .and_then(|value| value.get(name))
             .and_then(Value::as_str)
+            .or_else(|| {
+                package
+                    .as_ref()
+                    .and_then(|value| value.get("insomnia"))
+                    .and_then(|value| value.get(name))
+                    .and_then(Value::as_str)
+            })
             .unwrap_or(default)
             .to_string()
     };
+    let package_name = field("name", fallback);
+    let display_name = package
+        .as_ref()
+        .and_then(|value| value.get("insomnia"))
+        .and_then(|value| value.get("displayName"))
+        .and_then(Value::as_str)
+        .unwrap_or(&package_name)
+        .to_string();
     Ok(PluginSourceOutput {
         source,
-        name: field("name", fallback),
+        name: display_name,
         version: field("version", "0.0.0-local"),
         description: field("description", "Local CommonJS plugin"),
-        path: entry.to_string_lossy().into_owned(),
+        path: source_path.to_string_lossy().into_owned(),
     })
 }
 
@@ -92,13 +112,18 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         fs::write(
             temporary.path().join("package.json"),
-            r#"{"name":"example-plugin","version":"1.2.3","main":"index.js"}"#,
+            r#"{"name":"example-plugin","version":"1.2.3","main":"index.js","insomnia":{"displayName":"Example display","description":"Package description"}}"#,
         )
         .unwrap();
         fs::write(temporary.path().join("index.js"), "module.exports = {};").unwrap();
         let output = read_plugin_source(temporary.path().to_string_lossy().into_owned()).unwrap();
-        assert_eq!(output.name, "example-plugin");
+        assert_eq!(output.name, "Example display");
         assert_eq!(output.version, "1.2.3");
+        assert_eq!(output.description, "Package description");
+        assert_eq!(
+            PathBuf::from(output.path),
+            temporary.path().canonicalize().unwrap()
+        );
         assert!(output.source.contains("module.exports"));
     }
 }

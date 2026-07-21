@@ -289,7 +289,7 @@ export const sendRequest = async (request: ApiRequest, environment: Environment 
         : await invoke<NativeHttpResponse>('send_http_request', { cancellationId, input });
       const decoded = decodeHttpResponseBody(output);
       const { headerLines, redirects, redirectsTruncated, effectiveUrl, ...response } = decoded;
-      return finish(withTimeline(response, {
+      return finish(withTimeline({ ...response, headerLines }, {
         requestHeaders: headers.filter((header) => header.enabled).map((header) => ({ name: header.name, value: header.value })),
         responseHeaders: headerLines,
         redirects,

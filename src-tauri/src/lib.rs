@@ -740,6 +740,14 @@ async fn plugin_read_source(path: String) -> Result<plugin::PluginSourceOutput, 
 }
 
 #[tauri::command]
+fn plugin_desktop_path(app: AppHandle) -> Result<String, String> {
+    app.path()
+        .desktop_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn secure_vault_status(
     app: AppHandle,
     workspace_id: String,
@@ -1108,6 +1116,7 @@ pub fn run() {
             project_git_resolve_conflict,
             project_git_resolve_conflict_side,
             plugin_read_source,
+            plugin_desktop_path,
             secure_vault_status,
             secure_vault_unlock,
             secure_vault_save,
