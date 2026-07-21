@@ -50,7 +50,17 @@ No real Azure tenant was used. M271 proves official CLI argument construction, b
 
 ## Remote gate
 
-Pending implementation publication and immutable workflow/signing evidence.
+Implementation commit `dd46243ec546956085cec854f928ce26ad04ed88` completed both verify and publish jobs in [CLI container workflow 29815520658](https://github.com/sherwoodlee/Brunomnia/actions/runs/29815520658). The verify job rebuilt the generated CLI under Node 22 without a diff, built the verification image, matched package version, and passed the pinned-image, non-root, no-network, read-only, local-reference lint, standalone-suite, config, and plugin-tag smoke matrix.
+
+The publish job emitted AMD64/ARM64 SBOM and provenance attestations and keylessly signed:
+
+```text
+ghcr.io/sherwoodlee/brunomnia-cli@sha256:7014f772832ed366b08634d9fc9a69066acd5419179924417e0fd2f07ec7d199
+```
+
+Independent manifest inspection resolved AMD64 `sha256:30aacc9c4995c28e102b7d40a3a32965999c50e467a4b4a01b0e3503996f7d27`, ARM64 `sha256:44b8c72715fb39cc224aadd9be4c25eca1e03e5c5c29453cc38d32c3d5f723db`, and attached attestation manifests `sha256:8385f44d490f2cf2d3098f322832f8023e37d41de4daa4bd2f7e0f0faa111032` plus `sha256:3df88986adf02b85fc087b62c174278c7b8c4893f7b94365cf6e4899c60b39fb`. Both platform attestations expose SPDX and SLSA provenance predicates.
+
+Independent Cosign verification passed digest claims, trusted certificate-chain validation, exact issuer `https://token.actions.githubusercontent.com`, exact subject `https://github.com/sherwoodlee/Brunomnia/.github/workflows/cli-container.yml@refs/heads/main`, `push` trigger, `refs/heads/main`, repository `sherwoodlee/Brunomnia`, workflow `CLI container`, exact implementation commit SHA, and offline transparency-log inclusion at Rekor index `2211330739`.
 
 ## Acceptance boundary
 
