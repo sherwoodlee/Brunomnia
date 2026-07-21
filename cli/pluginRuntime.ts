@@ -53,7 +53,7 @@ globalThis.postMessage = value => parentPort.postMessage(value);
 Object.defineProperty(globalThis, 'process', { value: undefined, writable: false, configurable: false });
 Object.defineProperty(globalThis, 'global', { value: undefined, writable: false, configurable: false });
 parentPort.on('message', data => globalThis.onmessage?.({ data }));
-${buildPluginWorkerSource(plugin.source, undefined, plugin.moduleFiles, plugin.entryModuleKey)}
+${buildPluginWorkerSource(plugin.source, undefined, plugin.moduleFiles, plugin.entryModuleKey, plugin.grantedModules ?? [])}
 `;
   const workerUrl = new URL(`data:text/javascript;base64,${Buffer.from(bootstrap).toString('base64')}`);
   const worker = new Worker(workerUrl, {

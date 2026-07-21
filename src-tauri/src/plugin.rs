@@ -25,6 +25,8 @@ pub struct PluginSourceOutput {
     pub path: String,
     pub module_files: BTreeMap<String, String>,
     pub entry_module_key: String,
+    pub requested_modules: Vec<String>,
+    pub module_warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -185,6 +187,51 @@ fn package_modules(
     Ok((module_files, entry_module_key))
 }
 
+fn package_requested_modules(package: Option<&Value>) -> (Vec<String>, Vec<String>) {
+    let Some(insomnia) = package.and_then(|value| value.get("insomnia")) else {
+        return (vec![], vec![]);
+    };
+    let Some(permissions) = insomnia.get("permissions") else {
+        return (vec![], vec![]);
+    };
+    let Some(permissions) = permissions.as_object() else {
+        return (
+            vec![],
+            vec!["insomnia.permissions must be an object; ignoring module grants.".into()],
+        );
+    };
+    let Some(modules) = permissions.get("modules") else {
+        return (vec![], vec![]);
+    };
+    let Some(modules) = modules.as_array() else {
+        return (
+            vec![],
+            vec!["insomnia.permissions.modules must be an array of strings; ignoring it.".into()],
+        );
+    };
+    let mut requested = Vec::new();
+    let mut warnings = Vec::new();
+    for module in modules.iter().take(100) {
+        let Some(module) = module.as_str().map(str::trim) else {
+            warnings.push(format!(
+                "Ignoring non-string insomnia.permissions.modules entry {module}."
+            ));
+            continue;
+        };
+        if module.is_empty() || module.len() > 200 || module.contains('\0') {
+            warnings.push("Ignoring an empty or oversized plugin module permission.".into());
+            continue;
+        }
+        if !requested.iter().any(|candidate| candidate == module) {
+            requested.push(module.to_string());
+        }
+    }
+    if modules.len() > 100 {
+        warnings.push("Only the first 100 plugin module permissions were inspected.".into());
+    }
+    (requested, warnings)
+}
+
 pub fn read_plugin_source(path: String) -> Result<PluginSourceOutput, String> {
     if path.trim().is_empty() {
         return Err("Choose a plugin JavaScript file or package folder.".into());
@@ -205,6 +252,7 @@ pub fn read_plugin_source(path: String) -> Result<PluginSourceOutput, String> {
         package.as_ref().map(|_| source_path.as_path()),
         &source,
     )?;
+    let (requested_modules, module_warnings) = package_requested_modules(package.as_ref());
     let fallback = entry
         .file_stem()
         .and_then(|value| value.to_str())
@@ -240,6 +288,8 @@ pub fn read_plugin_source(path: String) -> Result<PluginSourceOutput, String> {
         path: source_path.to_string_lossy().into_owned(),
         module_files,
         entry_module_key,
+        requested_modules,
+        module_warnings,
     })
 }
 
@@ -368,7 +418,7 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         fs::write(
             temporary.path().join("package.json"),
-            r#"{"name":"example-plugin","version":"1.2.3","main":"index.js","insomnia":{"displayName":"Example display","description":"Package description"}}"#,
+            r#"{"name":"example-plugin","version":"1.2.3","main":"index.js","insomnia":{"displayName":"Example display","description":"Package description","permissions":{"modules":["events","uuid",42]}}}"#,
         )
         .unwrap();
         fs::create_dir(temporary.path().join("lib")).unwrap();
@@ -400,6 +450,28 @@ mod tests {
         assert_eq!(output.entry_module_key, "index.js");
         assert!(output.module_files.contains_key("lib/value.js"));
         assert!(!output.module_files.contains_key("node_modules/ignored.js"));
+        assert_eq!(output.requested_modules, vec!["events", "uuid"]);
+        assert_eq!(output.module_warnings.len(), 1);
+    }
+
+    #[test]
+    fn validates_module_permission_manifest_shapes() {
+        let invalid_permissions = serde_json::json!({ "insomnia": { "permissions": [] } });
+        let (requested, warnings) = package_requested_modules(Some(&invalid_permissions));
+        assert!(requested.is_empty());
+        assert_eq!(
+            warnings,
+            vec!["insomnia.permissions must be an object; ignoring module grants."]
+        );
+
+        let invalid_modules =
+            serde_json::json!({ "insomnia": { "permissions": { "modules": "events" } } });
+        let (requested, warnings) = package_requested_modules(Some(&invalid_modules));
+        assert!(requested.is_empty());
+        assert_eq!(
+            warnings,
+            vec!["insomnia.permissions.modules must be an array of strings; ignoring it."]
+        );
     }
 
     #[test]

@@ -708,6 +708,9 @@ export type PluginRecord = {
   sourcePath?: string;
   moduleFiles?: Record<string, string>;
   entryModuleKey?: string;
+  requestedModules?: string[];
+  grantedModules?: string[];
+  moduleWarnings?: string[];
   sourceFormat: 'brunomnia' | 'insomnia-commonjs';
   enabled: boolean;
   requestedPermissions: PluginPermission[];

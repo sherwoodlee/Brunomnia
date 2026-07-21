@@ -2646,6 +2646,19 @@ Compatibility bounds at M262 remained explicit: remote/npm installation, depende
 
 Compatibility bounds remain explicit: remote npm/custom-registry installation, dependency download, the pinned curated bare-module registry (`path`, `crypto`, `events`, `uuid`, and `ajv`), Node/native dependency behavior for host hooks/actions, exact context-menu placement, broader ecosystem compatibility, and CLI host RPC/user-invoked actions remain. `Plugins and extension API` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 264 — pinned curated plugin modules (complete baseline)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Registry contract | Complete baseline | Baseline `buffer`/`path`/`crypto`, grantable `events`, exact manifest and unavailable denials, aliases, operation-local caching, and heavy-library lazy inclusion match the pinned registry boundary |
+| Crypto compatibility | Complete baseline | Synchronous MD5/SHA-1/SHA-256/SHA-384/SHA-512 chained digests, hex/base64 output, algorithm-aware HMAC, 64 KiB-clamped random bytes, and random UUIDs pass host-reference vectors |
+| Vendored libraries | Complete baseline | Deterministically generated exact `uuid` 11.1.1 and `ajv` 8.18.0 bundles pass pinned version, v1/v3/v4/v5/namespace, nested/schema/error/reuse, and heavy-grant regressions |
+| Review and authority | Complete baseline | Native manifests parse bounded `insomnia.permissions.modules`; complete package inference merges requests, unavailable names stay visible, and edit/reload/changed discovery/import clears module grants while unchanged rediscovery preserves reviewed authority |
+| Portable execution | Complete baseline | Desktop and opt-in CLI workers share the same curated registry without exposing Node process/global authority or adding host RPC/persistent writes |
+| Verification | Complete | Vendored freshness, focused/full frontend, production/CLI build, focused/aggregate native, formatting, and strict clippy evidence is recorded in [Milestone 264 verification](QA_MILESTONE_264.md) |
+
+Compatibility bounds remain explicit: remote/custom-registry installation, dependency download and native dependency behavior for host-loaded hooks/actions, exact context-menu placement, broader ecosystem compatibility, and CLI host RPC/user-invoked actions remain. `Plugins and extension API` stays `Baseline`; exactly five parity rows remain incomplete, so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

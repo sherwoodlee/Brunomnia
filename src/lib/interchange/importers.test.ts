@@ -7,7 +7,8 @@ describe('artifact import adapters', () => {
   it('warns and removes inherited authority from Brunomnia plugins and integrations', () => {
     const workspace = cloneSeedWorkspace();
     workspace.plugins = [{
-      id: 'plugin-one', name: 'Imported', version: '1.0.0', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true,
+      id: 'plugin-one', name: 'Imported', version: '1.0.0', description: '', source: "require('events'); module.exports = {};", sourceFormat: 'insomnia-commonjs', enabled: true,
+      requestedModules: ['events'], grantedModules: ['events'],
       requestedPermissions: ['network'], grantedPermissions: ['network'], installedAt: new Date().toISOString(),
     }];
     workspace.mcpClients = [{ id: 'mcp-one', name: 'Imported MCP', enabled: true, transport: 'http', url: 'https://mcp.example', command: '', args: [], env: [], headers: [], authType: 'oauth2', token: 'secret', username: '', password: '', oauthAuthorizationUrl: 'https://identity.example/authorize', oauthAccessTokenUrl: 'https://identity.example/token', oauthClientId: 'client', oauthClientSecret: 'client-secret', oauthScope: 'mcp', oauthState: '', oauthRefreshToken: 'refresh', oauthIdentityToken: 'identity', oauthExpiresAt: 123, oauthTokenPrefix: 'Bearer', oauthRegisteredClientId: 'registered-client', oauthRegisteredClientSecret: 'registered-secret', oauthRegisteredClientIdIssuedAt: 1, oauthRegisteredClientSecretExpiresAt: 2, oauthRegisteredTokenEndpointAuthMethod: 'client_secret_post', roots: [], tools: [], prompts: [], resources: [], resourceTemplates: [] }];
@@ -15,7 +16,7 @@ describe('artifact import adapters', () => {
     const result = importArtifact(JSON.stringify(workspace), 'workspace.brunomnia.json');
     expect(result.warnings[0].message).toContain('capability grants were cleared');
     expect(result.warnings.some((warning) => warning.code === 'integrations-disabled')).toBe(true);
-    expect(result.replacement?.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
+    expect(result.replacement?.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [], requestedModules: ['events'], grantedModules: [] });
     expect(result.replacement?.mcpClients[0]).toMatchObject({ enabled: false, token: '', oauthClientSecret: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none' });
     expect(result.replacement?.ai).toMatchObject({ enabled: false, apiKey: '' });
   });

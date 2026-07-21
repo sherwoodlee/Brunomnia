@@ -754,7 +754,8 @@ describe('workspace migrations', () => {
   it('disables imported plugin code and clears inherited authority', () => {
     const exported = cloneSeedWorkspace();
     exported.plugins = [{
-      id: 'plugin-one', name: 'Imported', version: '1.0.0', description: '', source: 'module.exports = {};', sourceFormat: 'insomnia-commonjs', enabled: true,
+      id: 'plugin-one', name: 'Imported', version: '1.0.0', description: '', source: "require('events'); module.exports = {};", sourceFormat: 'insomnia-commonjs', enabled: true,
+      requestedModules: ['node:events'], grantedModules: ['node:events'],
       requestedPermissions: ['network'], grantedPermissions: ['network'], installedAt: new Date().toISOString(),
     }];
     exported.pluginData = { 'plugin-one': { token: 'secret' } };
@@ -767,7 +768,7 @@ describe('workspace migrations', () => {
     exported.preferences = { ...exported.preferences, theme: 'light', fontSize: 22, interfaceFontSize: 21, fontInterface: 'Imported UI', fontMonospace: 'Imported Mono', showPasswords: true, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: true, preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 99, maxHistoryResponses: -1, filterResponsesByEnv: true, requestTimeoutMs: 123_000, allowScriptRequests: true, allowScriptFileAccess: true, dataFolders: ['/private/imported-authority'], enableVaultInScripts: true, forceVerticalLayout: true, editorIndentWithTabs: false, editorIndentSize: 8, editorLineWrapping: false, fontVariantLigatures: true };
 
     const imported = parseWorkspaceImport(JSON.stringify(exported));
-    expect(imported.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [] });
+    expect(imported.plugins[0]).toMatchObject({ enabled: false, grantedPermissions: [], requestedModules: ['events'], grantedModules: [] });
     expect(imported.pluginData).toEqual({});
     expect(imported.activePluginTheme).toBe('');
     expect(imported.mcpClients[0]).toMatchObject({ enabled: false, token: '', password: '', oauthClientSecret: '', oauthRefreshToken: '', oauthIdentityToken: '', oauthExpiresAt: 0, oauthRegisteredClientId: '', oauthRegisteredClientSecret: '', oauthRegisteredClientIdIssuedAt: 0, oauthRegisteredClientSecretExpiresAt: 0, oauthRegisteredTokenEndpointAuthMethod: 'none' });
@@ -791,6 +792,17 @@ describe('workspace migrations', () => {
     const imported = migrateWorkspace(exported);
     expect(imported.plugins[0]).toMatchObject({ entryModuleKey: 'index.js', moduleFiles: { 'index.js': expect.any(String), 'lib/value.js': 'module.exports = {};' } });
     expect(imported.plugins[0].moduleFiles).not.toHaveProperty('../escape.js');
+  });
+
+  it('normalizes inferred and manifest module requests while constraining grants', () => {
+    const exported = cloneSeedWorkspace();
+    exported.plugins = [{
+      id: 'plugin-modules', name: 'Modules', version: '1.0.0', description: '', source: "require('node:events'); require('uuid'); module.exports = {};",
+      requestedModules: ['node:events', 'ajv', 'uuid'], grantedModules: ['node:events', 'uuid', 'fs'], moduleWarnings: ['', 'manifest warning'],
+      sourceFormat: 'insomnia-commonjs', enabled: false, requestedPermissions: [], grantedPermissions: [], installedAt: '2026-07-20T00:00:00.000Z',
+    }];
+    const imported = migrateWorkspace(exported);
+    expect(imported.plugins[0]).toMatchObject({ requestedModules: ['events', 'ajv', 'uuid'], grantedModules: ['events', 'uuid'], moduleWarnings: ['manifest warning'] });
   });
 
   it('normalizes preference bounds and shortcut values', () => {

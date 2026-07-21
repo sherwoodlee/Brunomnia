@@ -30,7 +30,7 @@ export type GitCredentialInput = { provider: GitProvider; username: string; toke
 export type GitProviderValidation = { provider: GitProvider; accountLogin: string; accountName: string; emails: string[]; canDiscoverRepositories: boolean };
 export type GitProviderRepository = { id: string; name: string; fullName: string; cloneUrl: string; webUrl: string; defaultBranch: string; private: boolean; canPush: boolean };
 export type GitRepositoryProbe = { defaultBranch: string; branches: string[]; totalFiles: number; brunomniaFiles: number; insomniaFiles: number; specificationFiles: number; truncated: boolean };
-export type LocalPluginSource = { source: string; name: string; version: string; description: string; path: string; moduleFiles: Record<string, string>; entryModuleKey: string };
+export type LocalPluginSource = { source: string; name: string; version: string; description: string; path: string; moduleFiles: Record<string, string>; entryModuleKey: string; requestedModules: string[]; moduleWarnings: string[] };
 export type LocalPluginDiscovery = { plugins: LocalPluginSource[]; warnings: string[] };
 
 const nativeOnly = () => {

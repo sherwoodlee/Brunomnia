@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import nodeCrypto from 'node:crypto';
 import { cloneSeedWorkspace, createBlankRequest } from '../src/data/seed';
 import type { PluginRecord } from '../src/types';
 import { createCliPluginRuntime, createCliPluginTemplateRuntime } from './pluginRuntime';
 
-const plugin = (source: string, grantedPermissions: PluginRecord['grantedPermissions'] = ['template', 'store']): PluginRecord => ({
+const plugin = (source: string, grantedPermissions: PluginRecord['grantedPermissions'] = ['template', 'store'], grantedModules: string[] = []): PluginRecord => ({
   id: 'plugin-cli',
   name: 'CLI plugin',
   version: '1.0.0',
@@ -11,12 +12,114 @@ const plugin = (source: string, grantedPermissions: PluginRecord['grantedPermiss
   source,
   sourceFormat: 'insomnia-commonjs',
   enabled: true,
+  requestedModules: grantedModules,
+  grantedModules,
   requestedPermissions: grantedPermissions,
   grantedPermissions,
   installedAt: '2026-07-19T00:00:00.000Z',
 });
 
 describe('CLI plugin template runtime', () => {
+  it('provides baseline buffer, path, and crypto modules without a manifest grant', async () => {
+    const runtime = createCliPluginTemplateRuntime([plugin(`
+      const path = require('node:path');
+      const crypto = require('crypto');
+      const { Buffer: ModuleBuffer } = require('buffer');
+      module.exports.templateTags = [{ name: 'baseline', run() {
+        const hashes = ['md5', 'sha1', 'sha256', 'sha384', 'sha512'].map(algorithm => crypto.createHash(algorithm).update('hello ').update('world').digest('hex'));
+        return JSON.stringify({
+          path: path.join('/plugins', 'one', '..', 'two'),
+          hashes,
+          base64: crypto.createHash('sha256').update('foo').update('bar').digest('base64'),
+          hmac: crypto.createHmac('sha256', 'parity-test-key').update('payload').digest('hex'),
+          randomLength: crypto.randomBytes(2147483648).toString('hex').length,
+          uuid: crypto.randomUUID(),
+          buffer: ModuleBuffer.from('ok').toString('hex'),
+        });
+      } }];
+    `)], {});
+    const raw = await runtime.render('baseline', [], createBlankRequest('plugin-request'));
+    expect(JSON.parse(raw ?? '{}')).toEqual({
+      path: '/plugins/one/../two',
+      hashes: ['md5', 'sha1', 'sha256', 'sha384', 'sha512'].map(algorithm => nodeCrypto.createHash(algorithm).update('hello ').update('world').digest('hex')),
+      base64: nodeCrypto.createHash('sha256').update('foo').update('bar').digest('base64'),
+      hmac: nodeCrypto.createHmac('sha256', 'parity-test-key').update('payload').digest('hex'),
+      randomLength: 65_536 * 2,
+      uuid: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+      buffer: '6f6b',
+    });
+  });
+
+  it('enforces exact curated-module grant and availability denials', async () => {
+    const request = createBlankRequest('plugin-request');
+    const denied = createCliPluginTemplateRuntime([plugin(`require('events'); module.exports.templateTags = [{ name: 'value', run() { return 'unsafe'; } }];`)], {});
+    await expect(denied.render('value', [], request)).rejects.toThrow("Module 'events' not permitted by manifest");
+
+    const unavailable = createCliPluginTemplateRuntime([plugin(`require('fs'); module.exports.templateTags = [{ name: 'value', run() { return 'unsafe'; } }];`, ['template'], ['fs'])], {});
+    await expect(unavailable.render('value', [], request)).rejects.toThrow("Module 'fs' not available in sandbox");
+
+    const granted = createCliPluginTemplateRuntime([plugin(`
+      const EventEmitter = require('node:events').EventEmitter;
+      module.exports.templateTags = [{ name: 'value', run() { const emitter = new EventEmitter(); let value = ''; emitter.once('ready', next => { value = next; }); emitter.emit('ready', 'granted'); emitter.emit('ready', 'ignored'); return value; } }];
+    `, ['template'], ['events'])], {});
+    await expect(granted.render('value', [], request)).resolves.toBe('granted');
+  });
+
+  it('matches pinned uuid v1/v3/v4/v5, validation, version, and namespace contracts', async () => {
+    const runtime = createCliPluginTemplateRuntime([plugin(`
+      const uuid = require('uuid');
+      module.exports.templateTags = [{ name: 'uuid_contract', run() {
+        const one = uuid.v1({ msecs: 0, nsecs: 0, clockseq: 0, node: new Uint8Array(6) });
+        const three = uuid.v3('hello.example.com', uuid.v3.DNS);
+        const four = uuid.v4({ random: new Uint8Array(16) });
+        const five = uuid.v5('hello.example.com', uuid.v5.DNS);
+        return JSON.stringify({ one, three, four, five, nil: uuid.NIL, dns: uuid.v3.DNS, url: uuid.v5.URL, valid: [one, three, four, five, uuid.NIL].map(uuid.validate), versions: [one, three, four, five].map(uuid.version) });
+      } }];
+    `, ['template'], ['uuid'])], {});
+    const raw = await runtime.render('uuid_contract', [], createBlankRequest('plugin-request'));
+    const value = JSON.parse(raw ?? '{}');
+    expect(value).toMatchObject({
+      one: '13814000-1dd2-11b2-8000-000000000000',
+      three: '9125a8dc-52ee-365b-a5aa-81b0b3681cf6',
+      four: '00000000-0000-4000-8000-000000000000',
+      five: 'fdda765f-fc57-5604-a269-52a7df8164ec',
+      nil: '00000000-0000-0000-0000-000000000000',
+      dns: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      url: '6ba7b811-9dad-11d1-80b4-00c04fd430c8',
+      valid: [true, true, true, true, true],
+      versions: [1, 3, 4, 5],
+    });
+  });
+
+  it('matches pinned AJV nested, array, enum, additional-property, error, and reuse behavior', async () => {
+    const runtime = createCliPluginTemplateRuntime([plugin(`
+      const Ajv = require('ajv');
+      const ajv = new Ajv({ allErrors: true });
+      const validate = ajv.compile({
+        type: 'object', required: ['user'], additionalProperties: false,
+        properties: { user: { type: 'object', required: ['roles'], properties: { roles: { type: 'array', minItems: 1, items: { enum: ['admin', 'user'] } } }, additionalProperties: false } },
+      });
+      module.exports.templateTags = [{ name: 'ajv_contract', run() {
+        const missing = validate({}); const missingErrors = validate.errors.map(error => error.keyword);
+        const invalid = validate({ user: { roles: ['owner'] }, extra: true }); const invalidErrors = validate.errors.map(error => error.keyword);
+        const valid = validate({ user: { roles: ['admin', 'user'] } }); const validErrors = validate.errors;
+        const reused = validate({ user: { roles: [] } }); const reusedErrors = validate.errors.map(error => error.keyword);
+        return JSON.stringify({ missing, missingErrors, invalid, invalidErrors, valid, validErrors, reused, reusedErrors });
+      } }];
+    `, ['template'], ['ajv'])], {});
+    const raw = await runtime.render('ajv_contract', [], createBlankRequest('plugin-request'));
+    expect(JSON.parse(raw ?? '{}')).toEqual({
+      missing: false,
+      missingErrors: ['required'],
+      invalid: false,
+      invalidErrors: ['additionalProperties', 'enum'],
+      valid: true,
+      validErrors: null,
+      reused: false,
+      reusedErrors: ['minItems'],
+    });
+  });
+
   it('runs granted tags with bounded in-memory store continuity', async () => {
     const runtime = createCliPluginTemplateRuntime([plugin(`
       module.exports.templateTags = [{
@@ -58,7 +161,7 @@ describe('CLI plugin template runtime', () => {
     for (const dependency of ['./missing', '../outside', 'uuid']) {
       const entry = `require(${JSON.stringify(dependency)}); module.exports.templateTags = [{ name: 'value', run() { return 'unsafe'; } }];`;
       const runtime = createCliPluginRuntime([{ ...plugin(entry), moduleFiles: { 'index.js': entry }, entryModuleKey: 'index.js' }], {});
-      await expect(runtime.render('value', [], request)).rejects.toThrow(/Cannot find|not available/);
+      await expect(runtime.render('value', [], request)).rejects.toThrow(/Cannot find|not available|not permitted/);
     }
   });
 

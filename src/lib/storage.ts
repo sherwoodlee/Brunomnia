@@ -7,6 +7,7 @@ import { emptyWorkspaceCertificates, normalizeCertificatePassphrase, normalizeCe
 import { defaultPreferences, defaultShortcuts, normalizeShortcut } from './preferences';
 import { normalizeHttpMethod } from './request';
 import { normalizeMcpHistorySessions } from './mcpHistory';
+import { normalizePluginModules, requestedPluginModules } from './pluginModules';
 
 const storageKey = 'brunomnia.workspace.v1';
 
@@ -58,6 +59,7 @@ const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(valu
   const permissions = (candidate: unknown) => Array.isArray(candidate)
     ? knownPluginPermissions.filter((permission) => candidate.includes(permission))
     : [];
+  const modules = (candidate: unknown) => !Array.isArray(candidate) ? [] : normalizePluginModules(candidate.flatMap((entry) => typeof entry === 'string' ? [entry] : []));
   const safeModuleKey = (key: string) => !key.startsWith('/') && !key.includes('\\') && !key.includes('\0') && /\.(?:js|json)$/.test(key) && key.split('/').every((part) => Boolean(part) && part !== '.' && part !== '..');
   const rawModuleFiles = plugin.moduleFiles && typeof plugin.moduleFiles === 'object' && !Array.isArray(plugin.moduleFiles)
     ? Object.entries(plugin.moduleFiles as Record<string, unknown>)
@@ -71,6 +73,8 @@ const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(valu
     return bytes <= 1_000_000 && moduleBytes <= 5_000_000;
   })) as Record<string, string>;
   const entryModuleKey = typeof plugin.entryModuleKey === 'string' && plugin.entryModuleKey in moduleFiles ? plugin.entryModuleKey : undefined;
+  const moduleSource = Object.values({ ...(entryModuleKey ? moduleFiles : {}), [entryModuleKey ?? 'index.js']: plugin.source }).join('\n');
+  const requestedModules = requestedPluginModules(moduleSource, modules(plugin.requestedModules));
   return [{
     id: typeof plugin.id === 'string' && plugin.id ? plugin.id : `migrated-plugin-${index}`,
     name: typeof plugin.name === 'string' && plugin.name ? plugin.name : 'Local plugin',
@@ -80,6 +84,9 @@ const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(valu
     sourcePath: typeof plugin.sourcePath === 'string' ? plugin.sourcePath : undefined,
     moduleFiles: entryModuleKey ? moduleFiles : undefined,
     entryModuleKey,
+    requestedModules,
+    grantedModules: modules(plugin.grantedModules).filter((module) => requestedModules.includes(module)),
+    moduleWarnings: Array.isArray(plugin.moduleWarnings) ? plugin.moduleWarnings.flatMap((warning) => typeof warning === 'string' && warning.trim() ? [warning.slice(0, 1_000)] : []).slice(0, 100) : [],
     sourceFormat: plugin.sourceFormat === 'brunomnia' ? 'brunomnia' : 'insomnia-commonjs',
     enabled: plugin.enabled === true,
     requestedPermissions: permissions(plugin.requestedPermissions),
@@ -950,7 +957,7 @@ export const secureImportedWorkspace = (value: unknown): Workspace => {
   const workspace = migrateWorkspace(value);
   return {
     ...workspace,
-    plugins: workspace.plugins.map((plugin) => ({ ...plugin, enabled: false, grantedPermissions: [] })),
+    plugins: workspace.plugins.map((plugin) => ({ ...plugin, enabled: false, grantedPermissions: [], grantedModules: [] })),
     pluginData: {},
     activePluginTheme: '',
     project: structuredClone(cloneSeedWorkspace().project),

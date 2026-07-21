@@ -1,5 +1,8 @@
 import type { ApiRequest, HttpResponse, PluginPermission, PluginRecord, Workspace } from '../types';
 import { createBlankRequest } from '../data/seed';
+import { buildPluginModuleRegistrySource, inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginModuleVersions } from './pluginModules';
+
+export { inferPluginModules, pluginBaselineModules, pluginCuratedModules, pluginModuleVersions };
 
 export type PluginTemplateDescriptor = { name: string; displayName: string; description: string };
 export type PluginActionDescriptor = { id: string; label: string; kind: 'request' | 'request-group' | 'workspace' | 'document' };
@@ -133,8 +136,9 @@ export const pluginSourceText = (plugin: Pick<PluginRecord, 'source' | 'moduleFi
   return Object.values(files).join('\n');
 };
 
-export const buildPluginWorkerSource = (source: string, nonce = safeIdentifier(), moduleFiles?: Record<string, string>, entryModuleKey?: string) => {
+export const buildPluginWorkerSource = (source: string, nonce = safeIdentifier(), moduleFiles?: Record<string, string>, entryModuleKey?: string, grantedModules: string[] = []) => {
   const packageModules = normalizedPluginModules(source, moduleFiles, entryModuleKey);
+  const moduleRegistry = buildPluginModuleRegistrySource(grantedModules, nonce);
   const host = `${nonce}_host`;
   const pending = `${nonce}_pending`;
   const state = `${nonce}_state`;
@@ -178,19 +182,21 @@ ${host}.onmessage = async ({ data: ${input} }) => {
     static from(value, encoding = 'utf8') {
       if (value instanceof Uint8Array) return new SafeBuffer(value);
       if (encoding === 'base64') return new SafeBuffer(Uint8Array.from(atob(String(value)), character => character.charCodeAt(0)));
+      if (encoding === 'hex') return new SafeBuffer(Uint8Array.from((String(value).match(/.{1,2}/g) || []).map(part => parseInt(part, 16))));
+      if (encoding === 'latin1' || encoding === 'binary') return new SafeBuffer(Uint8Array.from(String(value), character => character.charCodeAt(0) & 255));
       return new SafeBuffer(new TextEncoder().encode(typeof value === 'string' ? value : JSON.stringify(value)));
     }
-    toString(encoding = 'utf8') { return encoding === 'base64' ? btoa(String.fromCharCode(...this)) : new TextDecoder().decode(this); }
+    static alloc(size, fill = 0) { const value = new SafeBuffer(Math.max(0, Math.min(1000000, Number(size) || 0))); value.fill(typeof fill === 'number' ? fill : 0); return value; }
+    static isBuffer(value) { return value instanceof SafeBuffer; }
+    static concat(values) { const length = values.reduce((sum, value) => sum + value.length, 0); const output = new SafeBuffer(length); let offset = 0; values.forEach(value => { output.set(value, offset); offset += value.length; }); return output; }
+    toString(encoding = 'utf8') { if (encoding === 'base64') return btoa(String.fromCharCode(...this)); if (encoding === 'hex') return Array.from(this, value => value.toString(16).padStart(2, '0')).join(''); if (encoding === 'latin1' || encoding === 'binary') return String.fromCharCode(...this); return new TextDecoder().decode(this); }
   }
+${moduleRegistry.source}
   const safeConsole = {
     log: (...values) => ${notifications}.push({ type: 'log', title: 'Plugin log', message: values.map(String).join(' ') }),
     info: (...values) => ${notifications}.push({ type: 'log', title: 'Plugin info', message: values.map(String).join(' ') }),
     warn: (...values) => ${notifications}.push({ type: 'log', title: 'Plugin warning', message: values.map(String).join(' ') }),
     error: (...values) => ${notifications}.push({ type: 'log', title: 'Plugin error', message: values.map(String).join(' ') }),
-  };
-  const safeRequire = name => {
-    if (name === 'buffer') return { Buffer: SafeBuffer };
-    throw new Error("Module '" + name + "' is not available in the isolated plugin runtime.");
   };
   const ${packageFiles} = JSON.parse(${JSON.stringify(JSON.stringify(packageModules.files))});
   const ${packageCache} = Object.create(null);
@@ -222,11 +228,11 @@ ${host}.onmessage = async ({ data: ${input} }) => {
         if (!resolved) throw new Error("Cannot find module '" + specifier + "' from '" + key + "'.");
         return loadPluginModule(resolved);
       }
-      return safeRequire(specifier);
+      return ${moduleRegistry.safeRequire}(specifier);
     };
     const directory = key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : '.';
-    const compiled = ${nativeFunction}('module', 'exports', 'require', '__dirname', '__filename', 'Buffer', 'console', 'crypto', 'TextEncoder', 'TextDecoder', 'URL', 'setTimeout', 'clearTimeout', 'globalThis', 'self', 'window', 'document', 'navigator', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'importScripts', 'indexedDB', 'caches', 'postMessage', 'Function', 'WebAssembly', "'use strict';\\n" + ${packageFiles}[key]);
-    compiled(module, module.exports, localRequire, directory, key, SafeBuffer, safeConsole, crypto, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined);
+    const compiled = ${nativeFunction}('module', 'exports', 'require', '__dirname', '__filename', 'Buffer', 'console', 'TextEncoder', 'TextDecoder', 'URL', 'setTimeout', 'clearTimeout', 'globalThis', 'self', 'window', 'document', 'navigator', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'importScripts', 'indexedDB', 'caches', 'postMessage', 'Function', 'WebAssembly', "'use strict';\\n" + ${packageFiles}[key]);
+    compiled(module, module.exports, localRequire, directory, key, SafeBuffer, safeConsole, TextEncoder, TextDecoder, URL, setTimeout, clearTimeout, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined);
     return module.exports;
   };
   try {
@@ -394,7 +400,7 @@ const executePlugin = async (
   callbacks: PluginHostCallbacks = {},
   timeoutMs = 2000,
 ): Promise<PluginWorkerResult> => {
-  const source = buildPluginWorkerSource(plugin.source, safeIdentifier(), plugin.moduleFiles, plugin.entryModuleKey);
+  const source = buildPluginWorkerSource(plugin.source, safeIdentifier(), plugin.moduleFiles, plugin.entryModuleKey, plugin.grantedModules ?? []);
   const blob = new Blob([source], { type: 'text/javascript' });
   const workerUrl = URL.createObjectURL(blob);
   const worker = new Worker(workerUrl);

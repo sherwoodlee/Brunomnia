@@ -17,6 +17,7 @@ import {
   type PluginNotification,
 } from '../lib/plugins';
 import { discoverLocalPluginSources, readLocalPluginSource, type LocalPluginSource } from '../lib/project';
+import { pluginBaselineModules, pluginCuratedModules, pluginModuleVersions, pluginPackageChanged, requestedPluginModules, retainedPluginModuleGrants } from '../lib/pluginModules';
 import { readDesktopTemplateFile } from '../lib/scriptFiles';
 import { applyCollectionConfiguration, requestAncestorNames, resolveEnvironment } from '../lib/resources';
 import { environmentMap } from '../lib/request';
@@ -37,6 +38,15 @@ type PluginWorkbenchProps = {
 
 const blankDescriptor: PluginDescriptor = { templates: [], actions: [], themes: [] };
 const uid = () => `plugin-${crypto.randomUUID()}`;
+const moduleGrantError = /^Module '.*' not permitted by manifest$/;
+
+const describePluginForReview = async (plugin: PluginRecord) => {
+  try { return await describePlugin(plugin); }
+  catch (caught) {
+    if (moduleGrantError.test(caught instanceof Error ? caught.message : String(caught))) return blankDescriptor;
+    throw caught;
+  }
+};
 
 const activeRequest = (workspace: Workspace) => workspace.collections
   .flatMap((collection) => collection.requests)
@@ -62,6 +72,8 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
   const [installSourcePath, setInstallSourcePath] = useState('');
   const [installModuleFiles, setInstallModuleFiles] = useState<Record<string, string> | undefined>();
   const [installEntryModuleKey, setInstallEntryModuleKey] = useState<string | undefined>();
+  const [installRequestedModules, setInstallRequestedModules] = useState<string[]>([]);
+  const [installModuleWarnings, setInstallModuleWarnings] = useState<string[]>([]);
   const [localPath, setLocalPath] = useState('');
   const [draftSource, setDraftSource] = useState('');
   const [reviewModuleKey, setReviewModuleKey] = useState('');
@@ -82,6 +94,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
     noProxy: workspace.preferences.noProxy,
   };
   const requested = useMemo(() => new Set(selected?.requestedPermissions ?? []), [selected?.requestedPermissions]);
+  const requestedModules = useMemo(() => new Set(selected?.requestedModules ?? []), [selected?.requestedModules]);
   const reviewModuleKeys = useMemo(() => Object.keys(selected?.moduleFiles ?? {}).sort(), [selected?.moduleFiles]);
   const reviewedModuleSource = selected && reviewModuleKey
     ? reviewModuleKey === selected.entryModuleKey ? selected.source : selected.moduleFiles?.[reviewModuleKey] ?? ''
@@ -110,7 +123,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
     setDescriptor(blankDescriptor);
     if (!selected) return;
     let cancelled = false;
-    void describePlugin(selected).then((value) => { if (!cancelled) setDescriptor(value); }).catch((caught) => {
+    void describePluginForReview(selected).then((value) => { if (!cancelled) setDescriptor(value); }).catch((caught) => {
       if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
     });
     return () => { cancelled = true; };
@@ -175,6 +188,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
   const install = () => run('Reviewing plugin', async () => {
     validatePluginSource(installSource);
     const id = uid();
+    const sourceText = pluginSourceText({ source: installSource, moduleFiles: installModuleFiles, entryModuleKey: installEntryModuleKey });
     const plugin: PluginRecord = {
       id,
       name: installName.trim() || 'Local plugin',
@@ -186,13 +200,16 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
       entryModuleKey: installEntryModuleKey,
       sourceFormat: 'insomnia-commonjs',
       enabled: false,
-      requestedPermissions: inferPluginPermissions(pluginSourceText({ source: installSource, moduleFiles: installModuleFiles, entryModuleKey: installEntryModuleKey })),
+      requestedModules: requestedPluginModules(sourceText, installRequestedModules),
+      grantedModules: [],
+      moduleWarnings: installModuleWarnings,
+      requestedPermissions: inferPluginPermissions(sourceText),
       grantedPermissions: [],
       installedAt: new Date().toISOString(),
     };
-    const found = await describePlugin(plugin);
+    const found = await describePluginForReview(plugin);
     changeWorkspace((current) => ({ ...current, plugins: [...current.plugins, plugin] }));
-    setSelectedId(id); setDescriptor(found); setInstallSource(''); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined);
+    setSelectedId(id); setDescriptor(found); setInstallSource(''); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); setInstallRequestedModules([]); setInstallModuleWarnings([]);
     setMessage('Plugin installed disabled. Review and grant only the capabilities it needs.');
   });
 
@@ -200,6 +217,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
     const output = await readLocalPluginSource(localPath);
     setInstallName(output.name); setInstallVersion(output.version); setInstallDescription(output.description); setInstallSource(output.source);
     setInstallSourcePath(output.path); setInstallModuleFiles(output.moduleFiles); setInstallEntryModuleKey(output.entryModuleKey);
+    setInstallRequestedModules(output.requestedModules); setInstallModuleWarnings(output.moduleWarnings);
     setMessage(`Loaded ${output.path}. Review the source before installing.`);
   });
 
@@ -211,6 +229,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
       try {
         validatePluginSource(discovered.source);
         const existing = workspace.plugins.find((plugin) => plugin.sourcePath === discovered.path);
+        const sourceText = pluginSourceText({ source: discovered.source, moduleFiles: discovered.moduleFiles, entryModuleKey: discovered.entryModuleKey });
         const plugin: PluginRecord = {
           id: existing?.id ?? uid(),
           name: discovered.name,
@@ -222,11 +241,14 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
           entryModuleKey: discovered.entryModuleKey,
           sourceFormat: 'insomnia-commonjs',
           enabled: false,
-          requestedPermissions: inferPluginPermissions(pluginSourceText({ source: discovered.source, moduleFiles: discovered.moduleFiles, entryModuleKey: discovered.entryModuleKey })),
+          requestedModules: requestedPluginModules(sourceText, discovered.requestedModules),
+          grantedModules: [],
+          moduleWarnings: discovered.moduleWarnings,
+          requestedPermissions: inferPluginPermissions(sourceText),
           grantedPermissions: [],
           installedAt: existing?.installedAt ?? new Date().toISOString(),
         };
-        await describePlugin(plugin);
+        await describePluginForReview(plugin);
         candidates.push({ output: discovered, plugin });
       } catch (caught) {
         warnings.push(`${discovered.path}: ${caught instanceof Error ? caught.message : String(caught)}`);
@@ -245,9 +267,7 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
           continue;
         }
         const previous = plugins[index];
-        const changed = previous.source !== candidate.plugin.source
-          || previous.entryModuleKey !== candidate.plugin.entryModuleKey
-          || JSON.stringify(previous.moduleFiles ?? {}) !== JSON.stringify(candidate.plugin.moduleFiles ?? {});
+        const changed = pluginPackageChanged(previous, candidate.plugin);
         plugins[index] = changed ? candidate.plugin : {
           ...previous,
           name: candidate.plugin.name,
@@ -256,6 +276,9 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
           sourcePath: candidate.plugin.sourcePath,
           moduleFiles: candidate.plugin.moduleFiles,
           entryModuleKey: candidate.plugin.entryModuleKey,
+          requestedModules: candidate.plugin.requestedModules,
+          grantedModules: retainedPluginModuleGrants(previous.grantedModules, candidate.plugin.requestedModules),
+          moduleWarnings: candidate.plugin.moduleWarnings,
           requestedPermissions: candidate.plugin.requestedPermissions,
           error: undefined,
         };
@@ -274,8 +297,9 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
     if (!selected?.sourcePath) throw new Error('This plugin has no linked local source path.');
     const output = await readLocalPluginSource(selected.sourcePath);
     validatePluginSource(output.source);
-    const next: PluginRecord = { ...selected, name: output.name, version: output.version, description: output.description, source: output.source, sourcePath: output.path, moduleFiles: output.moduleFiles, entryModuleKey: output.entryModuleKey, enabled: false, requestedPermissions: inferPluginPermissions(pluginSourceText(output)), grantedPermissions: [], error: undefined };
-    const found = await describePlugin(next);
+    const sourceText = pluginSourceText(output);
+    const next: PluginRecord = { ...selected, name: output.name, version: output.version, description: output.description, source: output.source, sourcePath: output.path, moduleFiles: output.moduleFiles, entryModuleKey: output.entryModuleKey, enabled: false, requestedModules: requestedPluginModules(sourceText, output.requestedModules), grantedModules: [], moduleWarnings: output.moduleWarnings, requestedPermissions: inferPluginPermissions(sourceText), grantedPermissions: [], error: undefined };
+    const found = await describePluginForReview(next);
     updatePlugin(selected.id, next);
     setDescriptor(found); setDraftSource(output.source);
     setMessage('Local package reloaded. Review permissions before enabling it again.');
@@ -374,8 +398,8 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
             {workspace.plugins.map((plugin) => <button className={plugin.id === selectedId ? 'active' : ''} key={plugin.id} onClick={() => setSelectedId(plugin.id)} type="button"><span className={plugin.enabled ? 'plugin-state enabled' : 'plugin-state'} /><span><strong>{plugin.name}</strong><small>v{plugin.version} · {plugin.enabled ? 'enabled' : 'disabled'}</small></span></button>)}
             {!workspace.plugins.length ? <p>No plugins installed.</p> : null}
           </div>
-          <button className="secondary-button" onClick={() => { setSelectedId(''); setInstallSource(''); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); }} type="button"><Icon name="plus" size={15} /> Install plugin</button>
-          <button className="secondary-button quiet" onClick={() => { setSelectedId(''); setInstallSource(pluginStarterSource); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); setInstallName('Brunomnia starter'); setInstallVersion('0.1.0'); setInstallDescription('Starter request hook, template tag, and action'); }} type="button"><Icon name="code" size={15} /> Use starter source</button>
+          <button className="secondary-button" onClick={() => { setSelectedId(''); setInstallSource(''); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); setInstallRequestedModules([]); setInstallModuleWarnings([]); }} type="button"><Icon name="plus" size={15} /> Install plugin</button>
+          <button className="secondary-button quiet" onClick={() => { setSelectedId(''); setInstallSource(pluginStarterSource); setInstallSourcePath(''); setInstallModuleFiles(undefined); setInstallEntryModuleKey(undefined); setInstallRequestedModules([]); setInstallModuleWarnings([]); setInstallName('Brunomnia starter'); setInstallVersion('0.1.0'); setInstallDescription('Starter request hook, template tag, and action'); }} type="button"><Icon name="code" size={15} /> Use starter source</button>
         </aside>
 
         <div className="plugin-main">
@@ -387,9 +411,15 @@ export function PluginWorkbench({ workspace, onChangeWorkspace, selectedDocument
 
             <section className="plugin-card"><header><div><small>Capability boundary</small><h2>Permissions</h2><p>Detected permissions are marked “requested.” Nothing is available until you grant it.</p></div></header><div className="permission-grid">{pluginPermissions.map((permission) => <label key={permission}><input checked={selected.grantedPermissions.includes(permission)} onChange={(event) => updatePlugin(selected.id, { grantedPermissions: event.target.checked ? [...selected.grantedPermissions, permission] : selected.grantedPermissions.filter((candidate) => candidate !== permission) })} type="checkbox" /><span><strong>{pluginPermissionLabels[permission]}</strong><small>{requested.has(permission) ? 'Requested by source' : 'Not detected'}</small></span></label>)}</div></section>
 
+            <section className="plugin-card"><header><div><small>Curated CommonJS</small><h2>Module grants</h2><p>`{pluginBaselineModules.join('`, `')}` are always available. Every other bare module must be requested and explicitly granted.</p></div></header><div className="permission-grid">{[...requestedModules].map((module) => {
+              const available = (pluginCuratedModules as readonly string[]).includes(module);
+              const version = module in pluginModuleVersions ? pluginModuleVersions[module as keyof typeof pluginModuleVersions] : '';
+              return <label key={module}><input checked={(selected.grantedModules ?? []).includes(module)} disabled={!available} onChange={(event) => updatePlugin(selected.id, { grantedModules: event.target.checked ? [...(selected.grantedModules ?? []), module] : (selected.grantedModules ?? []).filter((candidate) => candidate !== module) })} type="checkbox" /><span><strong>{module}</strong><small>{available ? `Requested · curated${version ? ` v${version}` : ''}` : 'Requested · unavailable in sandbox'}</small></span></label>;
+            })}{!requestedModules.size ? <p>No grantable bare modules detected.</p> : null}</div>{selected.moduleWarnings?.map((warning) => <p key={warning}>{warning}</p>)}</section>
+
             <section className="plugin-card"><header><div><small>Exports</small><h2>Actions, tags, and theme</h2></div></header><div className="plugin-tools"><div><strong>Actions</strong>{descriptor.actions.map((action) => <button disabled={!selected.enabled || !selected.grantedPermissions.includes('action') || Boolean(busy) || (action.kind === 'request-group' && !request?.folderId) || (action.kind === 'document' && selectedDocumentType !== 'document' && !workspace.apiDesigns.length)} key={action.id} onClick={() => runAction(action.id)} type="button">{action.label}<small>{action.kind}</small></button>)}{!descriptor.actions.length ? <p>No actions exported.</p> : null}</div><div><strong>Template tags</strong>{descriptor.templates.map((tag) => <code key={tag.name}>{`{% ${tag.name} %}`}</code>)}{!descriptor.templates.length ? <p>No tags exported.</p> : null}</div><label><strong>Theme</strong><select disabled={!selected.enabled || !selected.grantedPermissions.includes('theme')} value={workspace.activePluginTheme.startsWith(`${selected.id}::`) ? workspace.activePluginTheme : ''} onChange={(event) => selectTheme(event.target.value)}><option value="">System theme</option>{descriptor.themes.map((theme) => <option key={theme.id} value={`${selected.id}::${theme.id}`}>{theme.displayName}</option>)}</select></label></div></section>
 
-            <section className="plugin-card plugin-source-card"><header><div><small>Source</small><h2>Review and update</h2><p>Updating only the entry source detaches the local package, disables the plugin, and clears grants so changed code cannot inherit old authority.</p></div><button disabled={draftSource === selected.source || Boolean(busy)} onClick={() => run('Updating source', async () => { validatePluginSource(draftSource); const next = { ...selected, source: draftSource, sourcePath: undefined, moduleFiles: undefined, entryModuleKey: undefined, enabled: false, requestedPermissions: inferPluginPermissions(draftSource), grantedPermissions: [] as PluginPermission[], error: undefined }; const found = await describePlugin(next); updatePlugin(selected.id, next); setDescriptor(found); setMessage('Source updated. Review permissions before enabling it again.'); })} type="button">Apply source</button></header><textarea aria-label="Plugin source" spellCheck={false} value={draftSource} onChange={(event) => setDraftSource(event.target.value)} /></section>
+            <section className="plugin-card plugin-source-card"><header><div><small>Source</small><h2>Review and update</h2><p>Updating only the entry source detaches the local package, disables the plugin, and clears grants so changed code cannot inherit old authority.</p></div><button disabled={draftSource === selected.source || Boolean(busy)} onClick={() => run('Updating source', async () => { validatePluginSource(draftSource); const next = { ...selected, source: draftSource, sourcePath: undefined, moduleFiles: undefined, entryModuleKey: undefined, enabled: false, requestedModules: requestedPluginModules(draftSource), grantedModules: [] as string[], moduleWarnings: [], requestedPermissions: inferPluginPermissions(draftSource), grantedPermissions: [] as PluginPermission[], error: undefined }; const found = await describePluginForReview(next); updatePlugin(selected.id, next); setDescriptor(found); setMessage('Source updated. Review permissions and modules before enabling it again.'); })} type="button">Apply source</button></header><textarea aria-label="Plugin source" spellCheck={false} value={draftSource} onChange={(event) => setDraftSource(event.target.value)} /></section>
             {reviewModuleKeys.length > 1 ? <section className="plugin-card plugin-module-review"><header><div><small>Package map</small><h2>Review every module</h2><p>Only bounded JavaScript and JSON files inside the package are available. Dependency folders and hidden directories are excluded.</p></div></header><label><strong>Module</strong><select value={reviewModuleKey} onChange={(event) => setReviewModuleKey(event.target.value)}>{reviewModuleKeys.map((key) => <option key={key} value={key}>{key}{key === selected.entryModuleKey ? ' (entry)' : ''}</option>)}</select></label><textarea aria-label="Plugin package module source" readOnly spellCheck={false} value={reviewedModuleSource} /></section> : null}
           </> : <section className="plugin-card plugin-installer"><header><div><small>Install</small><h2>Review local CommonJS source</h2><p>Read one JavaScript file/package or discover bounded Insomnia packages in a directory. Relative JavaScript/JSON modules load locally; `node_modules`, remote installs, and native dependencies remain excluded.</p></div></header>{isTauri() ? <div className="local-plugin-row"><input value={localPath} onChange={(event) => setLocalPath(event.target.value)} placeholder="/path/to/plugin, plugins folder, or node_modules" /><button disabled={!localPath || Boolean(busy)} onClick={loadLocal} type="button"><Icon name="folder" size={15} /> Read one</button><button disabled={!localPath || Boolean(busy)} onClick={discoverLocal} type="button"><Icon name="search" size={15} /> Discover</button></div> : null}<div className="plugin-metadata"><input value={installName} onChange={(event) => setInstallName(event.target.value)} placeholder="Plugin name" /><input value={installVersion} onChange={(event) => setInstallVersion(event.target.value)} placeholder="Version" /><input value={installDescription} onChange={(event) => setInstallDescription(event.target.value)} placeholder="Description" /></div><textarea aria-label="Plugin source to install" spellCheck={false} value={installSource} onChange={(event) => setInstallSource(event.target.value)} placeholder="module.exports.requestHooks = […]" /><button disabled={!installSource.trim() || Boolean(busy)} onClick={install} type="button">Install disabled for review</button></section>}
         </div>
