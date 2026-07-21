@@ -61,20 +61,21 @@ describe('desktop artifact manifest', () => {
   });
 
   it('pins actions and preserves unsigned cross-platform release provenance', async () => {
-    const workflow = parse(await readFile('.github/workflows/desktop-release.yml', 'utf8')) as { jobs: { build: { env: Record<string, unknown>; strategy: { matrix: { include: Array<{ platform: string; runner: string; bundles: string }> } }; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, string | number> }> }; release: { steps: Array<{ name?: string; run?: string; uses?: string }> } } };
+    const workflow = parse(await readFile('.github/workflows/desktop-release.yml', 'utf8')) as { jobs: { build: { env: Record<string, unknown>; strategy: { matrix: { include: Array<{ platform: string; runner: string; bundles: string; attestationPaths: string }> } }; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, string | number> }> }; release: { steps: Array<{ name?: string; run?: string; uses?: string }> } } };
     const tauriConfig = JSON.parse(await readFile('src-tauri/tauri.conf.json', 'utf8')) as { bundle: { icon: string[] } };
     const icon = await readFile('src-tauri/icons/icon.png');
     const windowsIcon = await readFile('src-tauri/icons/icon.ico');
     expect(workflow.jobs.build.strategy.matrix.include.map(item => item.platform)).toEqual(['macos-arm64', 'windows-x64', 'linux-x64']);
     expect(workflow.jobs.build.strategy.matrix.include.map(item => item.runner)).toEqual(['macos-15', 'windows-2022', 'ubuntu-22.04']);
     expect(workflow.jobs.build.strategy.matrix.include.map(item => item.bundles)).toEqual(['app,dmg', 'nsis,msi', 'appimage,deb,rpm']);
+    expect(workflow.jobs.build.strategy.matrix.include.map(item => item.attestationPaths.trim().split('\n').length)).toEqual([1, 2, 3]);
     const actions = [...workflow.jobs.build.steps, ...workflow.jobs.release.steps].flatMap(step => step.uses ? [step.uses] : []);
     expect(actions.length).toBeGreaterThan(0);
     expect(actions.every(action => /@[0-9a-f]{40}$/.test(action))).toBe(true);
     expect(workflow.jobs.build.env.CI).toBe(true);
     expect(workflow.jobs.build.steps.find(step => step.name === 'Build desktop installers')?.run).toContain('--no-sign');
     expect(workflow.jobs.build.steps.find(step => step.name === 'Attest desktop installers')?.with).toEqual({
-      'subject-checksums': 'src-tauri/target/release/bundle/SHA256SUMS-${{ matrix.platform }}.txt',
+      'subject-path': '${{ matrix.attestationPaths }}',
     });
     const upload = workflow.jobs.build.steps.find(step => step.name === 'Upload desktop installers')?.with;
     expect(upload?.['retention-days']).toBe(30);
