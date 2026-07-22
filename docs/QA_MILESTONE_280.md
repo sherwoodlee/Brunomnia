@@ -44,7 +44,13 @@ General Preferences displayed one **Desktop updates** region and the browser-app
 
 ## Remote gate
 
-The implementation is ready for the `main` desktop and CLI workflows. Exact run IDs, platform results, and artifact evidence are recorded after the implementation commit reaches `origin/main`.
+The complete source commit `7500ff48043b8d3a90c8d38f1abc4dba5f5104ba` passed all three jobs in [Desktop bundles workflow 29893279935](https://github.com/sherwoodlee/Brunomnia/actions/runs/29893279935): macOS ARM64 in 7m45s, Linux x64 in 12m45s, and Windows x64 in 16m53s. Every job built the production renderer and native app, created the platform manifest/checksums, attached direct GitHub build provenance, and uploaded the installer set. The tag-only trusted-build and release jobs correctly remained skipped for the `main` push.
+
+The retained artifacts are `brunomnia-macos-arm64` ID `8519130261` (15,326,484 uploaded bytes), `brunomnia-linux-x64` ID `8519217887` (126,956,862 bytes), and `brunomnia-windows-x64` ID `8519288520` (25,816,001 bytes); none was expired when recorded.
+
+The generated-bundle commit `3d542ffa4e100702662829be56437d48dc66d418` passed both verify and publish jobs in [CLI container workflow 29893528774](https://github.com/sherwoodlee/Brunomnia/actions/runs/29893528774). Verify rebuilt the checked-in bundle without a diff and passed the pinned non-root, no-network, read-only, local-reference lint, standalone-suite, config, and plugin-tag container matrix; publish completed the multi-architecture SBOM/provenance and keyless-signing path.
+
+The first remote attempt exposed that five already-tested v52 propagation files had been omitted by the inherited stale Git index; the corrected source commit fixed that selection. The next CLI run then correctly rejected its stale generated bundle; the final bundle-only commit rebuilt it. These failures were repository-handoff defects caught by the required remote gates, not waived. Only the updater signing secrets are configured remotely; Apple/DigiCert identities are not, so no credential-backed tag was created and no notarized or Authenticode artifact is claimed.
 
 ## Acceptance boundary
 
