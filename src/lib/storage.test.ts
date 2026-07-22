@@ -28,7 +28,7 @@ describe('local project catalog', () => {
 
   it('creates initial and named local projects with no typed files', async () => {
     const initial = await loadWorkspaceCatalog();
-    expect(initial.workspace).toMatchObject({ name: 'Local Workspace', version: 50, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
+    expect(initial.workspace).toMatchObject({ name: 'Local Workspace', version: 51, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
     expect(await listCatalogProjectWorkspaces(initial.activeWorkspaceId)).toEqual([]);
     expect(JSON.parse(localStorage.getItem(`brunomnia.project.${initial.activeWorkspaceId}.v1`)!)).toMatchObject({ format: 'brunomnia-project-store', version: 1, records: [] });
 
@@ -293,7 +293,7 @@ describe('local project catalog', () => {
       ];
       workspace.collections[0].environment = [{ id: 'collection-secret', name: 'token', value: 'must-drop', valueType: 'secret', enabled: true }];
       const migrated = migrateWorkspace(workspace);
-      expect(migrated.version).toBe(50);
+      expect(migrated.version).toBe(51);
       expect(migrated.environments[0].variables).toEqual([]);
       expect(migrated.environments[1]).toMatchObject({ environmentEditorMode: 'table', variables: [{ id: 'private-secret', name: 'token', value: '', valueType: 'secret', enabled: true }] });
       expect(migrated.collections[0].environment).toEqual([]);
@@ -302,7 +302,7 @@ describe('local project catalog', () => {
 
   it('preserves explicit v42 empty projects while repairing legacy empty documents', () => {
     const empty = createBlankWorkspace('Empty', cloneSeedWorkspace().preferences);
-    expect(migrateWorkspace(empty)).toMatchObject({ version: 50, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
+    expect(migrateWorkspace(empty)).toMatchObject({ version: 51, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
 
     const legacy = { ...empty, version: 41 };
     const migratedLegacy = migrateWorkspace(legacy);
@@ -418,7 +418,7 @@ describe('local project catalog', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(50);
+    expect(migrated.version).toBe(51);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].encodeUrl).toBe(true);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
@@ -471,7 +471,7 @@ describe('local project catalog', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(50);
+    expect(migrated.version).toBe(51);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
@@ -495,7 +495,7 @@ describe('local project catalog', () => {
     }, { id: 'orphan', suiteId: 'missing', tests: [] }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(50);
+    expect(migrated.version).toBe(51);
     expect(migrated.testSuites).toHaveLength(1);
     expect(migrated.testSuites[0].collectionId).toBe(migrated.collections[0].id);
     expect(migrated.testSuites[0].tests.map((test) => [test.id, test.requestId])).toEqual([['test-two', null], ['test-one', requestId]]);
@@ -549,7 +549,7 @@ describe('local project catalog', () => {
     };
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(50);
+    expect(migrated.version).toBe(51);
     expect(migrated.collections[0].requests[0].grpc).toMatchObject({
       protoText: 'syntax = "proto3"; service Legacy {}',
       protoEntryPath: 'schema.proto',
@@ -574,7 +574,7 @@ describe('local project catalog', () => {
 
     const migrated = migrateWorkspace(workspace);
     const grpc = migrated.collections[0].requests[0].grpc;
-    expect(migrated.version).toBe(50);
+    expect(migrated.version).toBe(51);
     expect(grpc.descriptorSource).toBe('buf');
     expect(grpc.reflectionApiUrl).toHaveLength(8_192);
     expect(grpc.reflectionApiKey).toHaveLength(65_536);
@@ -592,7 +592,7 @@ describe('local project catalog', () => {
     };
     workspace.cookies = [{ id: 'legacy-cookie', name: 'sid', value: 'legacy', domain: 'api.example.test', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-20T00:00:00.000Z' }];
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(50);
+    expect(migrated.version).toBe(51);
     expect(migrated.certificates).toEqual({ ca: { enabled: false, pem: '' }, clients: [] });
     expect(Object.values(migrated.fileState)).not.toHaveLength(0);
     expect(Object.values(migrated.fileState)).toEqual(expect.arrayContaining([{
@@ -707,7 +707,7 @@ describe('local project catalog', () => {
     environments[0].environmentEditorMode = 'raw';
     (environments[0].variables as Array<Record<string, unknown>>).push({ id: 'global-config', name: 'globalConfig', value: '{"enabled":true}', valueType: 'json', enabled: true });
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(50);
+    expect(migrated.version).toBe(51);
     expect(migrated.collections[0]).toMatchObject({ environmentEditorMode: 'raw', environment: [expect.objectContaining({ name: 'config', valueType: 'json' })] });
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', environmentEditorMode: 'raw', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
@@ -800,7 +800,7 @@ describe('local project catalog', () => {
     }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(50);
+    expect(migrated.version).toBe(51);
     expect(migrated.mcpClients[0].env).toEqual([{ id: 'stdio-env', name: 'MODE', value: 'review', enabled: false, description: '' }]);
     expect(migrated.mcpClients[0].resourceTemplates[0]).toMatchObject({
       uri: 'files://{/path}{?query,limit}',
@@ -904,7 +904,7 @@ describe('local project catalog', () => {
     workspace.preferences.shortcuts['new-request'] = ['Mod+N'];
     delete workspace.preferences.shortcuts['create-menu'];
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(50);
+    expect(migrated.version).toBe(51);
     expect(migrated.preferences.shortcuts['create-menu']).toEqual(['Mod+N']);
     expect(migrated.preferences.shortcuts['new-request']).toEqual(['Mod+Alt+N']);
   });

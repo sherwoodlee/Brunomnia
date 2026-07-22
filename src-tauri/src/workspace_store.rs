@@ -412,7 +412,7 @@ fn workspace_file_count(workspace: &Value) -> usize {
             collection
                 .get("id")
                 .and_then(Value::as_str)
-                .map_or(true, |id| !design_collection_ids.contains(id))
+                .is_none_or(|id| !design_collection_ids.contains(id))
         })
         .count();
     let designs = workspace
@@ -432,7 +432,7 @@ fn workspace_file_count(workspace: &Value) -> usize {
             environment
                 .get("parentId")
                 .and_then(Value::as_str)
-                .map_or(true, str::is_empty)
+                .is_none_or(str::is_empty)
         })
         .count();
     let mcp_clients = workspace

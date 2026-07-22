@@ -2830,6 +2830,20 @@ Compatibility bounds remain explicit: Insomnia account-vault ciphertext cannot b
 
 Compatibility bounds remain explicit: recipient removal rotates future revisions but cannot erase older ciphertext retained by an external filesystem or synchronization service. Public recipient labels/keys and envelope timestamps are metadata; workspace contents and private/content keys remain encrypted. A reviewed user-selected path replaces hosted account/project discovery without adding a commercial dependency. `Cloud sync and collaboration` is now `Complete`; exactly two parity rows remain incomplete—one `Baseline` and one `Early baseline`—so Brunomnia is not declared feature-complete. Rendered interaction and assistive-technology QA remain omitted by standing direction.
 
+## Milestone 279 — self-hosted identity governance (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned identity audit | Complete | Pinned documentation requires SAML 2.0/OIDC, verified domains, SSO-exclusive login, one-way SCIM user/team management, email matching, one-time connector tokens, token status/refresh, SCIM logs, collection/design RBAC, invitations/roles/ownership transfer, and exact storage rules; no separate general remote audit export is documented |
+| Workspace v51 organization model | Complete | Normalized organization identity, manual/SCIM member source, teams, 30-day invitations, exact desktop permission IDs, ownership transfer guards, verified domains, SSO/SCIM configuration, resource grants, storage rules, bounded audit, and SCIM diagnostics migrate from every prior workspace |
+| Validated SSO | Complete | Native OIDC performs HTTPS discovery, authorization code with PKCE, state/nonce, token exchange, ID-token issuer/audience/signature validation, and optional `at_hash`; SAML pins the configured certificate and validates signed assertion/response placement, issuer, status, audience, destination/recipient, bearer confirmation, request/RelayState correlation, time windows, and replay |
+| SCIM 2.0 | Complete | A bearer-authenticated self-hosted connector implements discovery, schemas, Users, Groups, filter/pagination, create/read/replace/patch/deactivate/delete, email matching, non-destructive manual records, bidirectional in-record group membership, last-owner refusal, one-time OS-protected token verifiers, expiry/automatic renewal, and bounded request logs |
+| RBAC and organization controls | Complete | Owners/admins manage invitations, members, teams, exact storage controls, and direct/team grants for request collections and API designs; inaccessible resources are filtered from active document, dashboard, sidebar, pin, tab, and Runner surfaces without deleting hidden data |
+| Free/self-hosted boundary | Complete | No account, plan, seat, or entitlement check exists. OIDC client secrets and SCIM verifiers stay in platform credential stores; operators provide their own IdP, TLS reverse proxy, and synchronization infrastructure |
+| Verification | Complete | Focused governance/migration/sync and native provisioning tests, strict TypeScript, production/CLI build, native formatting/check/Clippy, dependency audit, and remote desktop/CLI evidence are recorded in [Milestone 279 verification](QA_MILESTONE_279.md) |
+
+Compatibility bounds remain explicit: fixed loopback SSO callback ports must be registered with the IdP, public SCIM use requires a user-controlled HTTPS reverse proxy, and direct workspace-file editors remain inside the local policy trust boundary. Current Insomnia documentation defines SCIM request logs but not a separate general signed audit export. `SSO, RBAC, SCIM, audit, and organization controls` is now `Complete`; `Preferences, shortcuts, themes, accessibility, and packaging` is the only incomplete parity row, so Brunomnia is not yet declared feature-complete.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

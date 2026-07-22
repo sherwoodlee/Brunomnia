@@ -7,6 +7,7 @@ mod git_credential_store;
 mod git_provider;
 mod grpc_client;
 mod http_client;
+mod identity_control_plane;
 mod mcp_http;
 mod mcp_stdio;
 mod mock_deployment;
@@ -373,6 +374,89 @@ async fn oauth2_configure_session(
     state: State<'_, oauth2_callback::OAuthCallbackState>,
 ) -> Result<(), String> {
     oauth2_callback::configure_session(app, clear_on_restart, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn identity_control_plane_sync(
+    input: identity_control_plane::ControlPlaneSyncInput,
+    state: State<'_, identity_control_plane::IdentityControlPlaneState>,
+) -> Result<(), String> {
+    identity_control_plane::sync(input, state.inner().clone()).await
+}
+
+#[tauri::command]
+fn identity_scim_issue_token(
+    input: identity_control_plane::ScimTokenIssueInput,
+) -> Result<identity_control_plane::ScimTokenIssue, String> {
+    identity_control_plane::issue_scim_token(input)
+}
+
+#[tauri::command]
+fn identity_scim_token_status(
+    workspace_id: String,
+) -> Result<identity_control_plane::CredentialStatus, String> {
+    identity_control_plane::scim_token_status(workspace_id)
+}
+
+#[tauri::command]
+fn identity_scim_clear_token(workspace_id: String) -> Result<(), String> {
+    identity_control_plane::clear_scim_token(workspace_id)
+}
+
+#[tauri::command]
+async fn identity_scim_start(
+    app: AppHandle,
+    state: State<'_, identity_control_plane::IdentityControlPlaneState>,
+) -> Result<identity_control_plane::ScimServerStatus, String> {
+    identity_control_plane::start_scim_server(app, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn identity_scim_stop(
+    state: State<'_, identity_control_plane::IdentityControlPlaneState>,
+) -> Result<identity_control_plane::ScimServerStatus, String> {
+    identity_control_plane::stop_scim_server(state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn identity_scim_status(
+    state: State<'_, identity_control_plane::IdentityControlPlaneState>,
+) -> Result<identity_control_plane::ScimServerStatus, String> {
+    Ok(identity_control_plane::scim_server_status(state.inner().clone()).await)
+}
+
+#[tauri::command]
+fn identity_oidc_save_client_secret(workspace_id: String, secret: String) -> Result<(), String> {
+    identity_control_plane::save_oidc_client_secret(workspace_id, secret)
+}
+
+#[tauri::command]
+fn identity_oidc_client_secret_status(
+    workspace_id: String,
+) -> Result<identity_control_plane::CredentialStatus, String> {
+    identity_control_plane::oidc_client_secret_status(workspace_id)
+}
+
+#[tauri::command]
+async fn identity_oidc_login(
+    input: identity_control_plane::OidcLoginInput,
+) -> Result<identity_control_plane::AuthenticatedIdentity, String> {
+    identity_control_plane::oidc_login(input).await
+}
+
+#[tauri::command]
+async fn identity_saml_login(
+    input: identity_control_plane::SamlLoginInput,
+    state: State<'_, identity_control_plane::IdentityControlPlaneState>,
+) -> Result<identity_control_plane::AuthenticatedIdentity, String> {
+    identity_control_plane::saml_login(input, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn identity_verify_domain(
+    input: identity_control_plane::VerifyDomainInput,
+) -> Result<String, String> {
+    identity_control_plane::verify_domain(input).await
 }
 
 #[tauri::command]
@@ -1138,6 +1222,7 @@ pub fn run() {
         .manage(grpc_client::GrpcSessionState::default())
         .manage(mock_server::MockServerState::default())
         .manage(oauth2_callback::OAuthCallbackState::default())
+        .manage(identity_control_plane::IdentityControlPlaneState::default())
         .manage(external_vault::ExternalSecretCache::default())
         .invoke_handler(tauri::generate_handler![
             load_workspace,
@@ -1173,6 +1258,18 @@ pub fn run() {
             oauth2_cancel,
             oauth2_clear_session,
             oauth2_configure_session,
+            identity_control_plane_sync,
+            identity_scim_issue_token,
+            identity_scim_token_status,
+            identity_scim_clear_token,
+            identity_scim_start,
+            identity_scim_stop,
+            identity_scim_status,
+            identity_oidc_save_client_secret,
+            identity_oidc_client_secret_status,
+            identity_oidc_login,
+            identity_saml_login,
+            identity_verify_domain,
             open_external_url,
             script_read_file,
             project_write,

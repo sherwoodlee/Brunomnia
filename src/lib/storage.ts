@@ -127,20 +127,68 @@ const normalizePlugins = (value: unknown): PluginRecord[] => !Array.isArray(valu
 const normalizeGovernance = (value: unknown, defaults: Workspace['governance']): Workspace['governance'] => {
   const source = record(value);
   const rawMembers = Array.isArray(source?.members) ? source.members : [];
+  const seenMemberIds = new Set<string>();
   const members = rawMembers.flatMap((value, index): GovernanceMember[] => {
     const member = record(value);
     if (!member) return [];
     const role = governanceRoles.includes(member.role as GovernanceRole) ? member.role as GovernanceRole : 'viewer';
+    const id = stringValue(member.id, `migrated-member-${index}`).slice(0, 500);
+    if (!id || seenMemberIds.has(id)) return [];
+    seenMemberIds.add(id);
     return [{
-      id: typeof member.id === 'string' && member.id ? member.id : `migrated-member-${index}`,
-      name: typeof member.name === 'string' && member.name ? member.name : 'Imported member',
-      email: typeof member.email === 'string' ? member.email : '',
+      id,
+      name: stringValue(member.name, 'Imported member').slice(0, 500),
+      email: stringValue(member.email).trim().toLowerCase().slice(0, 1_000),
       role,
       active: member.active !== false,
+      source: member.source === 'scim' ? 'scim' : 'manual',
+      externalId: stringValue(member.externalId).slice(0, 1_000),
+      teamIds: (Array.isArray(member.teamIds) ? member.teamIds : []).flatMap((teamId): string[] => typeof teamId === 'string' && teamId ? [teamId.slice(0, 500)] : []).slice(0, 1_000),
+      lastAuthenticatedAt: stringValue(member.lastAuthenticatedAt).slice(0, 128),
     }];
-  });
-  const safeMembers = members.length ? members : defaults.members;
+  }).slice(0, 10_000);
+  const safeMembers = structuredClone(members.length ? members : defaults.members);
   if (!safeMembers.some((member) => member.active && member.role === 'owner')) safeMembers[0] = { ...safeMembers[0], role: 'owner', active: true };
+  const memberIds = new Set(safeMembers.map((member) => member.id));
+  const rawTeams = Array.isArray(source?.teams) ? source.teams : [];
+  const seenTeamIds = new Set<string>();
+  const teams: Workspace['governance']['teams'] = rawTeams.flatMap((value, index) => {
+    const team = record(value);
+    if (!team) return [];
+    const id = stringValue(team.id, `migrated-team-${index}`).slice(0, 500);
+    if (!id || seenTeamIds.has(id)) return [];
+    seenTeamIds.add(id);
+    return [{
+      id,
+      name: stringValue(team.name, 'Imported team').slice(0, 500),
+      externalId: stringValue(team.externalId).slice(0, 1_000),
+      source: team.source === 'scim' ? 'scim' as const : 'manual' as const,
+      memberIds: [...new Set((Array.isArray(team.memberIds) ? team.memberIds : []).flatMap((memberId): string[] => typeof memberId === 'string' && memberIds.has(memberId) ? [memberId] : []))].slice(0, 10_000),
+    }];
+  }).slice(0, 10_000);
+  const teamIds = new Set(teams.map((team) => team.id));
+  for (const member of safeMembers) member.teamIds = [...new Set(member.teamIds.filter((teamId) => teamIds.has(teamId)))];
+  for (const team of teams) {
+    for (const memberId of team.memberIds) {
+      const member = safeMembers.find((candidate) => candidate.id === memberId);
+      if (member && !member.teamIds.includes(team.id)) member.teamIds.push(team.id);
+    }
+  }
+  const rawGrants = Array.isArray(source?.resourceGrants) ? source.resourceGrants : [];
+  const seenGrantIds = new Set<string>();
+  const resourceGrants: Workspace['governance']['resourceGrants'] = rawGrants.flatMap((value, index) => {
+    const grant = record(value);
+    if (!grant) return [];
+    const id = stringValue(grant.id, `migrated-grant-${index}`).slice(0, 500);
+    const resourceType = grant.resourceType === 'api-design' ? 'api-design' as const : grant.resourceType === 'collection' ? 'collection' as const : undefined;
+    const subjectType = grant.subjectType === 'team' ? 'team' as const : grant.subjectType === 'member' ? 'member' as const : undefined;
+    const resourceId = stringValue(grant.resourceId).slice(0, 500);
+    const subjectId = stringValue(grant.subjectId).slice(0, 500);
+    const validSubject = subjectType === 'team' ? teamIds.has(subjectId) : subjectType === 'member' ? memberIds.has(subjectId) : false;
+    if (!id || seenGrantIds.has(id) || !resourceType || !resourceId || !subjectType || !validSubject) return [];
+    seenGrantIds.add(id);
+    return [{ id, resourceType, resourceId, subjectType, subjectId, access: grant.access === 'editor' ? 'editor' as const : 'viewer' as const }];
+  }).slice(0, 10_000);
   const rawPolicy = record(source?.policy);
   const requestedStorage = Array.isArray(rawPolicy?.allowedStorage) ? rawPolicy.allowedStorage : [];
   const externalVaultAllowlist = Array.isArray(rawPolicy?.externalVaultAllowlist) ? rawPolicy.externalVaultAllowlist : [];
@@ -148,8 +196,15 @@ const normalizeGovernance = (value: unknown, defaults: Workspace['governance']):
     ? storageModes.filter((mode) => requestedStorage.includes(mode))
     : defaults.policy.allowedStorage;
   const auditRetention = Math.min(10_000, Math.max(1, Number(rawPolicy?.auditRetention) || defaults.policy.auditRetention));
+  const rawStorageRules = record(rawPolicy?.storageRules);
   const policy: GovernancePolicy = {
     allowedStorage: allowedStorage.length ? allowedStorage : defaults.policy.allowedStorage,
+    storageRules: {
+      enableCloudSync: rawStorageRules?.enableCloudSync !== false,
+      enableLocalVault: rawStorageRules?.enableLocalVault !== false,
+      enableGitSync: rawStorageRules?.enableGitSync !== false,
+      isOverridden: rawStorageRules?.isOverridden === true,
+    },
     requireEncryptedSync: rawPolicy?.requireEncryptedSync !== false,
     requireVaultForSecrets: rawPolicy?.requireVaultForSecrets !== false,
     externalVaultAllowlist: externalVaultAllowlist.filter((value): value is string => typeof value === 'string').slice(0, 1_000),
@@ -162,7 +217,85 @@ const normalizeGovernance = (value: unknown, defaults: Workspace['governance']):
   }).slice(0, auditRetention);
   const requestedCurrent = typeof source?.currentMemberId === 'string' ? source.currentMemberId : '';
   const currentMemberId = safeMembers.some((member) => member.id === requestedCurrent && member.active) ? requestedCurrent : safeMembers.find((member) => member.active)?.id ?? safeMembers[0].id;
-  return { currentMemberId, members: safeMembers, policy, audit };
+  const ownerId = safeMembers.some((member) => member.id === record(source?.organization)?.ownerId && member.active && member.role === 'owner')
+    ? stringValue(record(source?.organization)?.ownerId)
+    : safeMembers.find((member) => member.active && member.role === 'owner')?.id ?? safeMembers[0].id;
+  const rawOrganization = record(source?.organization);
+  const seenDomains = new Set<string>();
+  const domains: Workspace['governance']['organization']['domains'] = (Array.isArray(rawOrganization?.domains) ? rawOrganization.domains : []).flatMap((value, index) => {
+    const domainRecord = record(value);
+    const domain = stringValue(domainRecord?.domain).trim().toLowerCase().replace(/\.$/, '').slice(0, 253);
+    if (!domain || seenDomains.has(domain)) return [];
+    seenDomains.add(domain);
+    return [{ id: stringValue(domainRecord?.id, `domain-${index}`).slice(0, 500), domain, challenge: stringValue(domainRecord?.challenge).slice(0, 500), verifiedAt: stringValue(domainRecord?.verifiedAt).slice(0, 128) }];
+  }).slice(0, 100);
+  const invitationStatuses = ['pending', 'accepted', 'revoked', 'expired'] as const;
+  const invitations: Workspace['governance']['organization']['invitations'] = (Array.isArray(rawOrganization?.invitations) ? rawOrganization.invitations : []).flatMap((value, index) => {
+    const invitation = record(value);
+    if (!invitation) return [];
+    const email = stringValue(invitation.email).trim().toLowerCase().slice(0, 1_000);
+    if (!email) return [];
+    return [{
+      id: stringValue(invitation.id, `invitation-${index}`).slice(0, 500),
+      email,
+      role: governanceRoles.includes(invitation.role as GovernanceRole) ? invitation.role as GovernanceRole : 'editor',
+      status: invitationStatuses.includes(invitation.status as typeof invitationStatuses[number]) ? invitation.status as typeof invitationStatuses[number] : 'pending',
+      createdAt: stringValue(invitation.createdAt).slice(0, 128),
+      expiresAt: stringValue(invitation.expiresAt).slice(0, 128),
+      lastSentAt: stringValue(invitation.lastSentAt).slice(0, 128),
+    }];
+  }).slice(0, 10_000);
+  const organization: Workspace['governance']['organization'] = {
+    id: stringValue(rawOrganization?.id, defaults.organization.id).slice(0, 500),
+    name: stringValue(rawOrganization?.name, defaults.organization.name).slice(0, 500),
+    createdAt: stringValue(rawOrganization?.createdAt, defaults.organization.createdAt).slice(0, 128),
+    ownerId,
+    domains,
+    invitations,
+  };
+  const boundedPort = (candidate: unknown, fallback: number) => {
+    const port = Number(candidate);
+    return Number.isInteger(port) && port >= 1_024 && port <= 65_535 ? port : fallback;
+  };
+  const rawSso = record(source?.sso);
+  const rawOidc = record(rawSso?.oidc);
+  const rawSaml = record(rawSso?.saml);
+  const sso: Workspace['governance']['sso'] = {
+    enabled: rawSso?.enabled === true,
+    protocol: rawSso?.protocol === 'saml' ? 'saml' : 'oidc',
+    oidc: {
+      issuer: stringValue(rawOidc?.issuer).trim().slice(0, 4_096),
+      clientId: stringValue(rawOidc?.clientId).slice(0, 4_096),
+      scopes: stringValue(rawOidc?.scopes, defaults.sso.oidc.scopes).slice(0, 4_096),
+      callbackPort: boundedPort(rawOidc?.callbackPort, defaults.sso.oidc.callbackPort),
+    },
+    saml: {
+      idpEntityId: stringValue(rawSaml?.idpEntityId).trim().slice(0, 4_096),
+      signInUrl: stringValue(rawSaml?.signInUrl).trim().slice(0, 4_096),
+      certificatePem: stringValue(rawSaml?.certificatePem).slice(0, 100_000),
+      signatureMode: rawSaml?.signatureMode === 'response' || rawSaml?.signatureMode === 'both' ? rawSaml.signatureMode : 'assertion',
+      callbackPort: boundedPort(rawSaml?.callbackPort, defaults.sso.saml.callbackPort),
+    },
+  };
+  const rawScim = record(source?.scim);
+  const bindHost = rawScim?.bindHost === '0.0.0.0' || rawScim?.bindHost === '::1' || rawScim?.bindHost === '::' ? rawScim.bindHost : '127.0.0.1';
+  const scimLogs: Workspace['governance']['scim']['logs'] = (Array.isArray(rawScim?.logs) ? rawScim.logs : []).flatMap((value, index) => {
+    const log = record(value);
+    if (!log || typeof log.timestamp !== 'string' || typeof log.method !== 'string' || typeof log.path !== 'string') return [];
+    return [{ id: stringValue(log.id, `scim-log-${index}`).slice(0, 500), timestamp: log.timestamp.slice(0, 128), method: log.method.slice(0, 32), path: log.path.slice(0, 4_096), status: Math.min(599, Math.max(100, Number(log.status) || 500)), detail: stringValue(log.detail).slice(0, 2_000) }];
+  }).slice(0, auditRetention);
+  const scim: Workspace['governance']['scim'] = {
+    enabled: rawScim?.enabled === true,
+    bindHost,
+    port: boundedPort(rawScim?.port, defaults.scim.port),
+    publicBaseUrl: stringValue(rawScim?.publicBaseUrl).trim().slice(0, 4_096),
+    tokenId: stringValue(rawScim?.tokenId).slice(0, 500),
+    issuedAt: stringValue(rawScim?.issuedAt).slice(0, 128),
+    expiresAt: stringValue(rawScim?.expiresAt).slice(0, 128),
+    refreshMode: rawScim?.refreshMode === 'oauth2' ? 'oauth2' : 'manual',
+    logs: scimLogs,
+  };
+  return { currentMemberId, members: safeMembers, teams, resourceGrants, organization, sso, scim, policy, audit };
 };
 
 const normalizeCollaboration = (value: unknown, defaults: CollaborationConfig): CollaborationConfig => {
@@ -999,7 +1132,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   }));
   return {
     ...workspace,
-    version: 50,
+    version: 51,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',

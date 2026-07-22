@@ -76,7 +76,7 @@ describe('encrypted collaboration boundaries', () => {
     remote.collections[0].requests[0].auth = { ...remote.collections[0].requests[0].auth, type: 'oauth2', clientId: 'remote-client' };
     remote.collections[0].subEnvironments = [{ id: 'remote-shared', name: 'Remote shared', variables: [] }];
     remote.collections[0].activeSubEnvironmentId = 'remote-shared';
-    remote.governance.members.push({ id: 'remote-editor', name: 'Remote editor', email: '', role: 'editor', active: true });
+    remote.governance.members.push({ id: 'remote-editor', name: 'Remote editor', email: '', role: 'editor', active: true, source: 'manual', externalId: '', teamIds: [], lastAuthenticatedAt: '' });
     remote.governance.currentMemberId = 'remote-editor';
 
     const merged = mergeSyncedWorkspace(current, { revision: 4, actor: 'Remote editor', savedAt: new Date().toISOString(), workspace: remote, repository: { version: 1, activeBranches: {}, branches: [], commits: [] } });

@@ -35,13 +35,14 @@ import {
   type VaultSession,
 } from '../lib/security';
 import { directVaultEntries, ENVIRONMENT_SECRET_NAME_PREFIX, isEnvironmentSecretEntry, withoutEnvironmentSecrets } from '../lib/environmentSecrets';
-import type { GovernanceMember, GovernanceRole, Workspace } from '../types';
+import type { Workspace } from '../types';
 import { CertificateManager } from './CertificateManager';
 import { Icon } from './Icon';
 import { ExternalCredentialManager } from './ExternalCredentialManager';
 import { CollaborationRepositoryPanel } from './CollaborationRepositoryPanel';
 import { getWorkspaceFileState, updateWorkspaceFileState } from '../lib/workspaceFileState';
 import { dirtyCollaborationResources } from '../lib/collaboration';
+import { IdentityGovernancePanel } from './IdentityGovernancePanel';
 
 type SecurityWorkbenchProps = {
   workspaceId: string;
@@ -55,9 +56,7 @@ type SecurityWorkbenchProps = {
 const blankStatus: SecureFileStatus = { exists: false, updatedAt: '' };
 const blankSyncStatus: SyncFileStatus = { exists: false, updatedAt: '', encryptionMode: 'none', recipients: [] };
 const blankKeyStatus: VaultKeyStatus = { supported: false, retained: false };
-const roles: GovernanceRole[] = ['owner', 'admin', 'editor', 'viewer'];
 const secretId = () => `secret-${crypto.randomUUID()}`;
-const memberId = () => `member-${crypto.randomUUID()}`;
 
 type VaultKeyRetentionControlProps = {
   supported: boolean;
@@ -115,8 +114,6 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
   const [revealed, setRevealed] = useState(false);
   const [newSecretName, setNewSecretName] = useState('');
   const [newSecretValue, setNewSecretValue] = useState('');
-  const [newMemberName, setNewMemberName] = useState('');
-  const [newMemberEmail, setNewMemberEmail] = useState('');
   const [external, setExternal] = useState<ExternalSecretInput>({ provider: 'aws', reference: '', scope: '', field: '', version: '', credentialId: '', appName: '', cacheSeconds: 1800 });
   const [externalCredentials, setExternalCredentials] = useState<ExternalCredentialRecord[]>([]);
   const [busy, setBusy] = useState('');
@@ -145,13 +142,6 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
   };
   const audit = (action: string, detail: string) => onChangeWorkspace((current) => appendAudit(current, action, detail));
   const updateCollaboration = (patch: Partial<Workspace['collaboration']>) => onChangeWorkspace((current) => ({ ...current, collaboration: { ...current.collaboration, ...patch } }));
-  const updateStoragePolicy = (mode: Workspace['governance']['policy']['allowedStorage'][number], enabled: boolean) => onChangeWorkspace((current) => {
-    const allowedStorage = enabled
-      ? [...new Set([...current.governance.policy.allowedStorage, mode])]
-      : current.governance.policy.allowedStorage.filter((candidate) => candidate !== mode);
-    if (!allowedStorage.length) return current;
-    return appendAudit({ ...current, governance: { ...current.governance, policy: { ...current.governance.policy, allowedStorage } } }, 'governance.policy.update', `${enabled ? 'Allowed' : 'Blocked'} ${mode} storage.`);
-  });
   const toggleExternalApproval = () => {
     if (!canGovern || !external.reference.trim()) return;
     onChangeWorkspace((current) => {
@@ -374,21 +364,6 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
     return () => { cancelled = true; window.clearInterval(interval); };
   }, [busy, native, onChangeWorkspace, syncCredentialReady, syncPassphrase, syncStatus.updatedAt, tab, workspace]);
 
-  const addMember = () => {
-    if (!canGovern) { setError('Only an owner or admin can add local governance actors.'); return; }
-    if (!newMemberName.trim()) { setError('Enter a member name.'); return; }
-    const member: GovernanceMember = { id: memberId(), name: newMemberName.trim(), email: newMemberEmail.trim(), role: 'editor', active: true };
-    onChangeWorkspace((current) => appendAudit({ ...current, governance: { ...current.governance, members: [...current.governance.members, member] } }, 'governance.member.add', `Added ${member.name} as editor.`));
-    setNewMemberName(''); setNewMemberEmail(''); setError('');
-  };
-
-  const updateMember = (id: string, patch: Partial<GovernanceMember>) => {
-    if (!canGovern) { setError('Only an owner or admin can change governance actors.'); return; }
-    const nextMembers = workspace.governance.members.map((member) => member.id === id ? { ...member, ...patch } : member);
-    if (!nextMembers.some((member) => member.active && member.role === 'owner')) { setError('At least one active owner is required.'); return; }
-    onChangeWorkspace((current) => appendAudit({ ...current, governance: { ...current.governance, members: nextMembers } }, 'governance.member.update', `Updated governance actor ${id}.`));
-  };
-
   return (
     <section className="security-workbench">
       <header className="security-header"><div><small>Security & collaboration</small><h1>Encrypted local control plane</h1><p>Keep secrets out of workspace files, exchange end-to-end encrypted revisions, and record local governance decisions without a paid service.</p></div><span className="local-only-badge">Free · self-hostable files</span></header>
@@ -409,7 +384,7 @@ export function SecurityWorkbench({ workspaceId, workspaceFileId, workspace, vau
         <CollaborationRepositoryPanel actor={syncActorLabel} disabled={!canEdit || Boolean(busy)} onChangeWorkspace={onChangeWorkspace} workspace={workspace} />
       </div> : null}
 
-      {tab === 'governance' ? <div className="security-grid governance-grid"><section className="security-card"><header><div><small>Local actor model</small><h2>Members and roles</h2></div><select aria-label="Current governance actor" value={workspace.governance.currentMemberId} onChange={(event) => onChangeWorkspace((current) => ({ ...current, governance: { ...current.governance, currentMemberId: event.target.value } }))}>{workspace.governance.members.filter((member) => member.active).map((member) => <option key={member.id} value={member.id}>{member.name} · {member.role}</option>)}</select></header><div className="member-list">{workspace.governance.members.map((member) => <article key={member.id}><span><strong>{member.name}</strong><small>{member.email || 'No email'} · {member.active ? 'active' : 'inactive'}</small></span><select disabled={!canGovern} value={member.role} onChange={(event) => updateMember(member.id, { role: event.target.value as GovernanceRole })}>{roles.map((role) => <option key={role}>{role}</option>)}</select><label><input checked={member.active} disabled={!canGovern} onChange={(event) => updateMember(member.id, { active: event.target.checked })} type="checkbox" /> Active</label></article>)}</div><div className="member-new"><input placeholder="Member name" value={newMemberName} onChange={(event) => setNewMemberName(event.target.value)} /><input placeholder="Email (optional)" value={newMemberEmail} onChange={(event) => setNewMemberEmail(event.target.value)} /><button disabled={!canGovern} onClick={addMember} type="button">Add editor</button></div><p>These roles protect local sync/governance actions; they are not authentication. SSO and SCIM adapters require a self-hosted identity service in the next closure step.</p></section><section className="security-card"><header><div><small>Workspace policy</small><h2>Guardrails</h2></div></header><div className="policy-list"><div className="storage-policy">{(['local', 'folder', 'git', 'encrypted-file'] as const).map((mode) => <label key={mode}><input checked={workspace.governance.policy.allowedStorage.includes(mode)} disabled={!canGovern} onChange={(event) => updateStoragePolicy(mode, event.target.checked)} type="checkbox" /> {mode}</label>)}</div><label><input checked={workspace.governance.policy.requireEncryptedSync} disabled={!canGovern} onChange={(event) => onChangeWorkspace((current) => appendAudit({ ...current, governance: { ...current.governance, policy: { ...current.governance.policy, requireEncryptedSync: event.target.checked } } }, 'governance.policy.update', 'Changed encrypted-sync requirement.'))} type="checkbox" /> Require encrypted collaboration files</label><label><input checked={workspace.governance.policy.requireVaultForSecrets} disabled={!canGovern} onChange={(event) => onChangeWorkspace((current) => appendAudit({ ...current, governance: { ...current.governance, policy: { ...current.governance.policy, requireVaultForSecrets: event.target.checked } } }, 'governance.policy.update', 'Changed local-vault secret policy.'))} type="checkbox" /> Require the encrypted vault for secret values</label><label>Audit retention<input disabled={!canGovern} min="1" max="10000" type="number" value={workspace.governance.policy.auditRetention} onChange={(event) => onChangeWorkspace((current) => ({ ...current, governance: { ...current.governance, policy: { ...current.governance.policy, auditRetention: Math.min(10000, Math.max(1, Number(event.target.value))) } } }))} /></label></div></section><section className="security-card audit-card"><header><div><small>Append-only in UI</small><h2>Audit trail</h2></div><span>{workspace.governance.audit.length}</span></header><div>{workspace.governance.audit.map((event) => <article key={event.id}><time>{new Date(event.timestamp).toLocaleString()}</time><strong>{event.action}</strong><span>{event.detail}</span><small>{workspace.governance.members.find((member) => member.id === event.actorId)?.name ?? event.actorId}</small></article>)}{!workspace.governance.audit.length ? <p>No governance events recorded yet.</p> : null}</div></section></div> : null}
+      {tab === 'governance' ? <IdentityGovernancePanel onChangeWorkspace={onChangeWorkspace} workspace={workspace} workspaceId={workspaceId} /> : null}
       {busy ? <div className="automation-message">{busy}…</div> : null}{error ? <div className="automation-message error">{error}</div> : null}{message ? <div className="automation-message">{message}</div> : null}
     </section>
   );

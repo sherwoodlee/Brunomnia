@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from 'react';
+import type { CSSProperties, Dispatch, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject, SetStateAction } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { createBlankRequest } from './data/seed';
 import { HttpTransportError, sendRequest as sendHttpRequest, type SendRequestContext } from './lib/http';
@@ -31,6 +31,8 @@ import { discardRunnerDraftEntries, runnerDraftKey, type RunnerWorkbenchDraft } 
 import { clearDeletedUnitTestRequest, createUnitTestSuite } from './lib/unitTests';
 import { withoutOAuth2RuntimeCredentials } from './lib/oauth2Tokens';
 import { userAgentDisabledAfterHeaderChange } from './lib/userAgent';
+import { listenForGovernanceUpdates, syncIdentityControlPlane } from './lib/identityControlPlane';
+import { enforceWorkspaceMutationAuthority, resourceAccess, workspaceForCurrentMember } from './lib/identityGovernance';
 import { calculatedRequestHeaders, type CalculatedHeader } from './lib/calculatedHeaders';
 import { filterScriptTests, scriptTestCategoryLabel, scriptTestDurationLabel, scriptTestPassed, scriptTestStatus, type ScriptTestFilter } from './lib/scriptTests';
 import { isProjectWorkspaceEmpty, listProjectWorkspaces } from './lib/projectWorkspaces';
@@ -999,6 +1001,7 @@ type RequestPanelProps = {
   useBulkParametersEditor: boolean;
   activeTab: RequestTab;
   isSending: boolean;
+  readOnly: boolean;
   streamStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
   grpcSchema?: GrpcSchema;
   grpcSchemaLoading: boolean;
@@ -1027,6 +1030,7 @@ function RequestPanel({
   collection,
   activeTab,
   isSending,
+  readOnly,
   streamStatus,
   grpcSchema,
   grpcSchemaLoading,
@@ -1076,6 +1080,7 @@ function RequestPanel({
         <select
           aria-label="Request protocol"
           className={`protocol-select protocol-${request.protocol}`}
+          disabled={readOnly}
           onChange={(event) => {
             const protocol = event.target.value as Protocol;
             onChange({
@@ -1091,7 +1096,7 @@ function RequestPanel({
         <input
           aria-label="HTTP method"
           className={`method-select method-${methodClass(request.method)}`}
-          disabled={request.protocol !== 'http'}
+          disabled={readOnly || request.protocol !== 'http'}
           list="http-methods"
           maxLength={32}
           onBlur={(event) => onChange({ method: normalizeHttpMethod(event.target.value, 'GET') as HttpMethod })}
@@ -1107,6 +1112,7 @@ function RequestPanel({
         <input
           aria-label="Request URL"
           className="url-input"
+          disabled={readOnly}
           onChange={(event) => onChange({ url: event.target.value })}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) onSend();
@@ -1115,8 +1121,8 @@ function RequestPanel({
           ref={urlInputRef}
           value={request.url}
         />
-        <button aria-label="Insert template tag" className="codegen-trigger" onClick={() => setShowTemplateTags(true)} type="button"><Icon name="plus" size={15} /><span>Tags</span></button>
-        <button aria-label="Generate client code" className="codegen-trigger" disabled={request.protocol !== 'http' && request.protocol !== 'graphql'} onClick={onGenerateCode} type="button"><Icon name="code" size={15} /><span>Code</span></button>
+        <button aria-label="Insert template tag" className="codegen-trigger" disabled={readOnly} onClick={() => setShowTemplateTags(true)} type="button"><Icon name="plus" size={15} /><span>Tags</span></button>
+        <button aria-label="Generate client code" className="codegen-trigger" disabled={readOnly || (request.protocol !== 'http' && request.protocol !== 'graphql')} onClick={onGenerateCode} type="button"><Icon name="code" size={15} /><span>Code</span></button>
         <div className="send-actions"><button className="send-button" disabled={isSending && !scheduledSendLabel} onClick={scheduledSendLabel ? onCancelScheduled : onSend} type="button">{isSending ? <span className="sending-spinner" /> : null}{scheduledSendLabel ? `Stop · ${scheduledSendLabel}` : isSending && !streamProtocol ? 'Working' : actionLabel}</button><button aria-label="Send options" disabled={streamProtocol || request.protocol === 'grpc'} onClick={onOpenSendOptions} type="button"><Icon name="chevron-down" size={13} /></button></div>
       </div>
 
@@ -1132,7 +1138,7 @@ function RequestPanel({
         })}
       </nav>
 
-      <div className="request-editor">
+      <fieldset className="request-editor request-authoring-boundary" disabled={readOnly}>
         {activeTab === 'params' ? (
           <div className="parameter-editors">
             <section><header><strong>Path parameters</strong><small>Replace matching {'{name}'} segments in the URL.</small></header><KeyValueEditor detailed rows={request.pathParams} onChange={(pathParams) => onChange({ pathParams })} namePlaceholder="Path parameter" /></section>
@@ -1165,7 +1171,7 @@ function RequestPanel({
           </div>
         ) : null}
         {activeTab === 'docs' ? <div className="request-docs-editor"><header><strong>Request documentation</strong><small>Markdown source</small></header><textarea aria-label="Request documentation" onChange={(event) => onChange({ documentation: event.target.value })} placeholder="Describe this request, its inputs, and expected behavior…" value={request.documentation ?? ''} /><section><small>Preview</small><pre>{request.documentation || 'No documentation yet.'}</pre></section></div> : null}
-      </div>
+      </fieldset>
       <div className="panel-footer"><span>{activeTab === 'body' ? 'Body' : titleCase(activeTab)}</span><span>UTF-8 · LF</span></div>
       {showTemplateTags ? <Suspense fallback={<div className="modal-backdrop"><div className="dialog-loading">Loading template tags…</div></div>}><TemplateTagDialog cookies={workspaceCookies} onApply={(updated) => onChange(updated)} onClose={() => setShowTemplateTags(false)} request={request} responses={requestContext.filterResponsesByEnv ? storedResponses.filter((response) => response.environmentId === environment.id) : storedResponses} showVariableSourceAndValue={showVariableSourceAndValue} variableNames={templateVariableNames} variableValues={templateVariableValues} /></Suspense> : null}
     </section>
@@ -1565,9 +1571,15 @@ function FolderDocumentPanel({ documentTabStrip, onConfigure, onRun, ...editorPr
 }
 
 export default function App() {
-  const [workspace, setWorkspace] = useState<Workspace>(() => ({
-    format: 'brunomnia', version: 50, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], fileState: {}, responses: [], streamSessions: [], mcpSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0, autoSync: false, stagedResourceKeys: [], repository: { version: 1, activeBranches: {}, branches: [], commits: [] } }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }], policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
+  const [workspace, setWorkspaceState] = useState<Workspace>(() => ({
+    format: 'brunomnia', version: 51, name: 'Loading…', activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], history: [], apiDesigns: [], mockServers: [], testSuites: [], unitTestResults: [], runnerReports: [], imports: [], cookies: [], fileState: {}, responses: [], streamSessions: [], mcpSessions: [], responseFilters: {}, certificates: { ca: { enabled: false, pem: '' }, clients: [] }, project: { mode: 'local', path: '', remoteUrl: '', remoteName: 'origin', authorName: '', authorEmail: '', autoSave: true, gitCredentialId: '' }, plugins: [], pluginData: {}, activePluginTheme: '', collaboration: { mode: 'off', path: '', actor: '', revision: 0, autoSync: false, stagedResourceKeys: [], repository: { version: 1, activeBranches: {}, branches: [], commits: [] } }, governance: { currentMemberId: 'local-owner', members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true, source: 'manual', externalId: '', teamIds: [], lastAuthenticatedAt: '' }], teams: [], resourceGrants: [], organization: { id: 'organization-local', name: 'Local organization', createdAt: '2026-07-21T00:00:00.000Z', ownerId: 'local-owner', domains: [], invitations: [] }, sso: { enabled: false, protocol: 'oidc', oidc: { issuer: '', clientId: '', scopes: 'openid profile email', callbackPort: 49152 }, saml: { idpEntityId: '', signInUrl: '', certificatePem: '', signatureMode: 'assertion', callbackPort: 49153 } }, scim: { enabled: false, bindHost: '127.0.0.1', port: 49154, publicBaseUrl: '', tokenId: '', issuedAt: '', expiresAt: '', refreshMode: 'manual', logs: [] }, policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], storageRules: { enableCloudSync: true, enableLocalVault: true, enableGitSync: true, isOverridden: false }, requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 }, audit: [] }, mcpClients: [], ai: { enabled: false, provider: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', model: '', apiKey: '', temperature: 0.6, topP: 0.9, topK: 40, seed: true, repeatPenalty: 1.1, mockGeneration: false, commitSuggestions: false }, konnect: { enabled: false, baseUrl: 'https://us.api.konghq.com', token: '', controlPlaneId: '', controlPlanes: [] }, preferences: structuredClone(defaultPreferences),
   }));
+  const setWorkspace = useCallback<Dispatch<SetStateAction<Workspace>>>((updater) => {
+    setWorkspaceState((current) => {
+      const proposed = typeof updater === 'function' ? updater(current) : updater;
+      return enforceWorkspaceMutationAuthority(current, proposed);
+    });
+  }, []);
   const [hydrated, setHydrated] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('');
   const [workspaceEntries, setWorkspaceEntries] = useState<WorkspaceCatalogEntry[]>([]);
@@ -1670,7 +1682,7 @@ export default function App() {
     let cancelled = false;
     void workspaceCatalogApi().then(({ loadWorkspaceCatalog }) => loadWorkspaceCatalog()).then((snapshot) => {
       if (!cancelled) {
-        setWorkspace(snapshot.workspace);
+        setWorkspaceState(snapshot.workspace);
         setActiveWorkspaceId(snapshot.activeWorkspaceId);
         setWorkspaceEntries(snapshot.entries);
         setWorkspaceRecovery(snapshot.recovery);
@@ -1698,6 +1710,25 @@ export default function App() {
     if (!hydrated || !isTauri()) return;
     void invoke('oauth2_configure_session', { clearOnRestart: workspace.preferences.clearOAuth2SessionOnRestart }).catch(() => undefined);
   }, [hydrated, workspace.preferences.clearOAuth2SessionOnRestart]);
+
+  useEffect(() => {
+    if (!hydrated || !isTauri()) return;
+    let cancelled = false;
+    let unlisten: () => void = () => {};
+    void listenForGovernanceUpdates((event) => {
+      if (event.workspaceId !== activeWorkspaceIdRef.current) return;
+      setWorkspaceState((current) => ({ ...current, governance: event.governance }));
+    }).then((stop) => {
+      if (cancelled) stop();
+      else unlisten = stop;
+    }).catch(() => undefined);
+    return () => { cancelled = true; unlisten(); };
+  }, [hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !activeWorkspaceId || !isTauri()) return;
+    void syncIdentityControlPlane(activeWorkspaceId, workspace.governance).catch(() => undefined);
+  }, [activeWorkspaceId, hydrated, workspace.governance]);
 
   useEffect(() => {
     if (!hydrated || !activeWorkspaceId || !isTauri()) return;
@@ -1805,14 +1836,16 @@ export default function App() {
     return () => window.clearTimeout(timeout);
   }, [hydrated, workspace]);
 
-  const active = useMemo(() => findRequest(workspace), [workspace]);
+  const governedWorkspace = useMemo(() => workspaceForCurrentMember(workspace), [workspace]);
+  const active = useMemo(() => findRequest(governedWorkspace), [governedWorkspace]);
+  const activeRequestReadOnly = active ? resourceAccess(workspace.governance, 'collection', active.collectionId) !== 'editor' : false;
   const activePinnedRequestIds = requestPinState.workspaceId === activeWorkspaceId ? requestPinState.ids : [];
-  const requestsById = useMemo(() => new Map(workspace.collections.flatMap((collection) => collection.requests.map((request) => [request.id, request] as const))), [workspace.collections]);
-  const foldersById = useMemo(() => new Map(workspace.collections.flatMap((collection) => (collection.folders ?? []).map((folder) => [folder.id, { folder, collection }] as const))), [workspace.collections]);
+  const requestsById = useMemo(() => new Map(governedWorkspace.collections.flatMap((collection) => collection.requests.map((request) => [request.id, request] as const))), [governedWorkspace.collections]);
+  const foldersById = useMemo(() => new Map(governedWorkspace.collections.flatMap((collection) => (collection.folders ?? []).map((folder) => [folder.id, { folder, collection }] as const))), [governedWorkspace.collections]);
   const runnerTargetsById = useMemo(() => new Map([
     [runnerDocumentId(activeWorkspaceId), undefined] as const,
-    ...workspace.collections.flatMap((collection) => (collection.folders ?? []).map((folder) => [runnerDocumentId(activeWorkspaceId, folder.id), { collectionId: collection.id, folderId: folder.id }] as const)),
-  ]), [activeWorkspaceId, workspace.collections]);
+    ...governedWorkspace.collections.flatMap((collection) => (collection.folders ?? []).map((folder) => [runnerDocumentId(activeWorkspaceId, folder.id), { collectionId: collection.id, folderId: folder.id }] as const)),
+  ]), [activeWorkspaceId, governedWorkspace.collections]);
   const mockTargetsById = useMemo(() => {
     const targets = new Map<string, { server: MockServer; route?: MockServer['routes'][number] }>();
     workspace.mockServers.forEach((server) => {
@@ -1821,7 +1854,7 @@ export default function App() {
     });
     return targets;
   }, [workspace.mockServers]);
-  const validDocumentReferences = useMemo(() => workspaceDocumentReferences(workspace, activeWorkspaceId), [activeWorkspaceId, workspace]);
+  const validDocumentReferences = useMemo(() => workspaceDocumentReferences(governedWorkspace, activeWorkspaceId), [activeWorkspaceId, governedWorkspace]);
   const activeRequestDocumentState = requestDocumentState.workspaceId === activeWorkspaceId
     ? requestDocumentState.state
     : reconcileRequestTabState(emptyRequestTabState(), validDocumentReferences, { id: workspace.activeRequestId, type: 'request' });
@@ -1839,7 +1872,7 @@ export default function App() {
       return tab.requestId === environmentDocumentId(activeWorkspaceId) ? [{ id: tab.requestId, type: 'environment', name: 'Environments', temporary: tab.temporary }] : [];
     }
     if (tab.type === 'document') {
-      const design = workspace.apiDesigns.find((candidate) => candidate.id === tab.requestId);
+      const design = governedWorkspace.apiDesigns.find((candidate) => candidate.id === tab.requestId);
       return design ? [{ id: design.id, type: 'document', name: design.name, temporary: tab.temporary }] : [];
     }
     if (tab.type === 'mockServer' || tab.type === 'mockRoute') {
@@ -1848,7 +1881,7 @@ export default function App() {
       return [{ id: tab.requestId, type: tab.type, name: target.route?.name ?? target.server.name, temporary: tab.temporary, ...(target.route ? { method: target.route.method } : {}) }];
     }
     if (tab.type === 'collection') {
-      const collection = workspace.collections.find((candidate) => candidate.id === tab.requestId);
+      const collection = governedWorkspace.collections.find((candidate) => candidate.id === tab.requestId);
       return collection ? [{ id: collection.id, type: 'collection', name: collection.name, temporary: tab.temporary }] : [];
     }
     if (tab.type === 'testSuite') {
@@ -1863,9 +1896,9 @@ export default function App() {
   const activeRunnerTarget = activeDocumentTab?.type === 'runner' ? runnerTargetsById.get(activeDocumentTab.requestId) : undefined;
   const isRunnerDocument = activeDocumentTab?.type === 'runner' && runnerTargetsById.has(activeDocumentTab.requestId);
   const isEnvironmentDocument = activeDocumentTab?.type === 'environment' && activeDocumentTab.requestId === environmentDocumentId(activeWorkspaceId);
-  const activeDesignDocument = activeDocumentTab?.type === 'document' ? workspace.apiDesigns.find((design) => design.id === activeDocumentTab.requestId) : undefined;
+  const activeDesignDocument = activeDocumentTab?.type === 'document' ? governedWorkspace.apiDesigns.find((design) => design.id === activeDocumentTab.requestId) : undefined;
   const activeMockDocument = activeDocumentTab?.type === 'mockServer' || activeDocumentTab?.type === 'mockRoute' ? mockTargetsById.get(activeDocumentTab.requestId) : undefined;
-  const activeCollectionDocument = activeDocumentTab?.type === 'collection' ? workspace.collections.find((collection) => collection.id === activeDocumentTab.requestId) : undefined;
+  const activeCollectionDocument = activeDocumentTab?.type === 'collection' ? governedWorkspace.collections.find((collection) => collection.id === activeDocumentTab.requestId) : undefined;
   const activeTestSuiteDocument = activeDocumentTab?.type === 'testSuite' ? workspace.testSuites.find((suite) => suite.id === activeDocumentTab.requestId) : undefined;
   const isRequestDocument = activeDocumentTab?.type === 'request';
   const isRequestDashboard = openDocumentTabs.length === 0;
@@ -3110,7 +3143,7 @@ export default function App() {
     const nextWorkspace = preservePreferences
       ? { ...snapshot.workspace, preferences: structuredClone(workspace.preferences) }
       : snapshot.workspace;
-    setWorkspace(nextWorkspace);
+    setWorkspaceState(nextWorkspace);
     setActiveWorkspaceId(snapshot.activeWorkspaceId);
     setWorkspaceEntries(snapshot.entries);
     setWorkspaceRecovery(snapshot.recovery);
@@ -3790,7 +3823,7 @@ export default function App() {
           pinnedRequestIds={activePinnedRequestIds}
           pluginActionBusyKey={contextualPluginActionBusyKey}
           pluginActions={contextualPluginActions}
-          workspace={workspace}
+          workspace={governedWorkspace}
         /> : null}
 
         {workbenchSection === 'requests' ? (isRequestDashboard ? <ProjectDashboard
@@ -3807,7 +3840,7 @@ export default function App() {
           onRunPluginAction={(action, target) => void runContextualPluginAction(action, target)}
           pluginActionBusyKey={contextualPluginActionBusyKey}
           pluginActions={contextualPluginActions}
-          workspace={workspace}
+          workspace={governedWorkspace}
         /> : isEnvironmentDocument ? <EnvironmentDocumentPanel
           activeId={workspace.activeEnvironmentId}
           documentTabStrip={renderDocumentTabStrip()}
@@ -3844,6 +3877,7 @@ export default function App() {
             graphqlSchemaLoading={graphqlSchemaLoading}
             grpcSchemaLoading={grpcSchemaLoading}
             isSending={isSending}
+            readOnly={activeRequestReadOnly}
             onChange={updateActiveRequest}
             onCancelScheduled={cancelScheduledSends}
             onGenerateCode={() => setShowCodeGeneration(true)}

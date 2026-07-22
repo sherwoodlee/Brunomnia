@@ -140,7 +140,7 @@ const collection = (id: string, name: string, requests: ApiRequest[]): Collectio
 
 export const seedWorkspace: Workspace = {
   format: 'brunomnia',
-  version: 50,
+  version: 51,
   name: 'Local Workspace',
   activeRequestId: orders.id,
   activeEnvironmentId: 'development',
@@ -307,8 +307,13 @@ paths:
   collaboration: { mode: 'off', path: '', actor: 'Local owner', revision: 0, autoSync: false, stagedResourceKeys: [], repository: { version: 1, activeBranches: {}, branches: [], commits: [] } },
   governance: {
     currentMemberId: 'local-owner',
-    members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true }],
-    policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 },
+    members: [{ id: 'local-owner', name: 'Local owner', email: '', role: 'owner', active: true, source: 'manual', externalId: '', teamIds: [], lastAuthenticatedAt: '' }],
+    teams: [],
+    resourceGrants: [],
+    organization: { id: 'organization-local', name: 'Local organization', createdAt: '2026-07-21T00:00:00.000Z', ownerId: 'local-owner', domains: [], invitations: [] },
+    sso: { enabled: false, protocol: 'oidc', oidc: { issuer: '', clientId: '', scopes: 'openid profile email', callbackPort: 49152 }, saml: { idpEntityId: '', signInUrl: '', certificatePem: '', signatureMode: 'assertion', callbackPort: 49153 } },
+    scim: { enabled: false, bindHost: '127.0.0.1', port: 49154, publicBaseUrl: '', tokenId: '', issuedAt: '', expiresAt: '', refreshMode: 'manual', logs: [] },
+    policy: { allowedStorage: ['local', 'folder', 'git', 'encrypted-file'], storageRules: { enableCloudSync: true, enableLocalVault: true, enableGitSync: true, isOverridden: false }, requireEncryptedSync: true, requireVaultForSecrets: true, externalVaultAllowlist: [], auditRetention: 500 },
     audit: [],
   },
   mcpClients: [],

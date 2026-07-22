@@ -440,7 +440,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 50;
+  version: 51;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -710,10 +710,119 @@ export type GovernanceMember = {
   email: string;
   role: GovernanceRole;
   active: boolean;
+  source: 'manual' | 'scim';
+  externalId: string;
+  teamIds: string[];
+  lastAuthenticatedAt: string;
+};
+
+export type OrganizationPermission =
+  | 'own:organization'
+  | 'read:organization'
+  | 'delete:organization'
+  | 'update:organization'
+  | 'read:membership'
+  | 'delete:membership'
+  | 'update:membership'
+  | 'read:invitation'
+  | 'create:invitation'
+  | 'delete:invitation'
+  | 'create:enterprise_connection'
+  | 'read:enterprise_connection'
+  | 'delete:enterprise_connection'
+  | 'update:enterprise_connection'
+  | 'leave:organization';
+
+export type GovernanceTeam = {
+  id: string;
+  name: string;
+  externalId: string;
+  source: 'manual' | 'scim';
+  memberIds: string[];
+};
+
+export type GovernanceResourceGrant = {
+  id: string;
+  resourceType: 'collection' | 'api-design';
+  resourceId: string;
+  subjectType: 'member' | 'team';
+  subjectId: string;
+  access: 'viewer' | 'editor';
+};
+
+export type OrganizationInvitation = {
+  id: string;
+  email: string;
+  role: GovernanceRole;
+  status: 'pending' | 'accepted' | 'revoked' | 'expired';
+  createdAt: string;
+  expiresAt: string;
+  lastSentAt: string;
+};
+
+export type VerifiedDomain = {
+  id: string;
+  domain: string;
+  challenge: string;
+  verifiedAt: string;
+};
+
+export type OrganizationConfig = {
+  id: string;
+  name: string;
+  createdAt: string;
+  ownerId: string;
+  domains: VerifiedDomain[];
+  invitations: OrganizationInvitation[];
+};
+
+export type SsoConfig = {
+  enabled: boolean;
+  protocol: 'oidc' | 'saml';
+  oidc: {
+    issuer: string;
+    clientId: string;
+    scopes: string;
+    callbackPort: number;
+  };
+  saml: {
+    idpEntityId: string;
+    signInUrl: string;
+    certificatePem: string;
+    signatureMode: 'assertion' | 'response' | 'both';
+    callbackPort: number;
+  };
+};
+
+export type ScimRequestLog = {
+  id: string;
+  timestamp: string;
+  method: string;
+  path: string;
+  status: number;
+  detail: string;
+};
+
+export type ScimConfig = {
+  enabled: boolean;
+  bindHost: '127.0.0.1' | '0.0.0.0' | '::1' | '::';
+  port: number;
+  publicBaseUrl: string;
+  tokenId: string;
+  issuedAt: string;
+  expiresAt: string;
+  refreshMode: 'manual' | 'oauth2';
+  logs: ScimRequestLog[];
 };
 
 export type GovernancePolicy = {
   allowedStorage: Array<'local' | 'folder' | 'git' | 'encrypted-file'>;
+  storageRules: {
+    enableCloudSync: boolean;
+    enableLocalVault: boolean;
+    enableGitSync: boolean;
+    isOverridden: boolean;
+  };
   requireEncryptedSync: boolean;
   requireVaultForSecrets: boolean;
   externalVaultAllowlist: string[];
@@ -731,6 +840,11 @@ export type AuditEvent = {
 export type GovernanceConfig = {
   currentMemberId: string;
   members: GovernanceMember[];
+  teams: GovernanceTeam[];
+  resourceGrants: GovernanceResourceGrant[];
+  organization: OrganizationConfig;
+  sso: SsoConfig;
+  scim: ScimConfig;
   policy: GovernancePolicy;
   audit: AuditEvent[];
 };

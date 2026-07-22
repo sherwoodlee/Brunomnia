@@ -91,7 +91,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
   };
   if (result.replacement) {
     const replacement = withoutEnvironmentSecrets(result.replacement);
-    return { ...replacement, version: 50, imports: [record, ...replacement.imports].slice(0, 100) };
+    return { ...replacement, version: 51, imports: [record, ...replacement.imports].slice(0, 100) };
   }
 
   const collections = result.collections.map((collection) => rekeyCollection(collection, batch));
@@ -122,7 +122,7 @@ export const applyArtifactImport = (workspace: Workspace, result: ArtifactImport
   const firstRequest = collections.flatMap((collection) => collection.requests)[0];
   return {
     ...workspace,
-    version: 50,
+    version: 51,
     activeRequestId: firstRequest?.id ?? workspace.activeRequestId,
     activeEnvironmentId: environments[0]?.id ?? workspace.activeEnvironmentId,
     collections: [...workspace.collections, ...collections],

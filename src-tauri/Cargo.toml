@@ -6,7 +6,7 @@ authors = ["Brunomnia contributors"]
 license = "Apache-2.0"
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.85"
 
 [lib]
 name = "brunomnia_lib"
@@ -38,6 +38,7 @@ prost-reflect = { version = "0.16", features = ["serde", "text-format"] }
 prost-types = "0.14"
 protox = "0.9"
 ntlmclient = "0.2.0"
+openidconnect = "4.0.1"
 p12-keystore = { version = "=0.1.5", default-features = true }
 pem-rfc7468 = { version = "0.7", features = ["alloc"] }
 pkcs5 = { version = "0.7", features = ["3des", "alloc", "pbes2", "sha1-insecure"] }
@@ -50,6 +51,7 @@ semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+saml-rs = "0.3.0"
 tauri = { version = "2", features = ["macos-proxy"] }
 tempfile = "3"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
