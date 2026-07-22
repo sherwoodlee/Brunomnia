@@ -28,7 +28,7 @@ describe('local project catalog', () => {
 
   it('creates initial and named local projects with no typed files', async () => {
     const initial = await loadWorkspaceCatalog();
-    expect(initial.workspace).toMatchObject({ name: 'Local Workspace', version: 51, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
+    expect(initial.workspace).toMatchObject({ name: 'Local Workspace', version: 52, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
     expect(await listCatalogProjectWorkspaces(initial.activeWorkspaceId)).toEqual([]);
     expect(JSON.parse(localStorage.getItem(`brunomnia.project.${initial.activeWorkspaceId}.v1`)!)).toMatchObject({ format: 'brunomnia-project-store', version: 1, records: [] });
 
@@ -293,7 +293,7 @@ describe('local project catalog', () => {
       ];
       workspace.collections[0].environment = [{ id: 'collection-secret', name: 'token', value: 'must-drop', valueType: 'secret', enabled: true }];
       const migrated = migrateWorkspace(workspace);
-      expect(migrated.version).toBe(51);
+      expect(migrated.version).toBe(52);
       expect(migrated.environments[0].variables).toEqual([]);
       expect(migrated.environments[1]).toMatchObject({ environmentEditorMode: 'table', variables: [{ id: 'private-secret', name: 'token', value: '', valueType: 'secret', enabled: true }] });
       expect(migrated.collections[0].environment).toEqual([]);
@@ -302,7 +302,7 @@ describe('local project catalog', () => {
 
   it('preserves explicit v42 empty projects while repairing legacy empty documents', () => {
     const empty = createBlankWorkspace('Empty', cloneSeedWorkspace().preferences);
-    expect(migrateWorkspace(empty)).toMatchObject({ version: 51, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
+    expect(migrateWorkspace(empty)).toMatchObject({ version: 52, activeRequestId: '', activeEnvironmentId: '', collections: [], environments: [], fileState: {} });
 
     const legacy = { ...empty, version: 41 };
     const migratedLegacy = migrateWorkspace(legacy);
@@ -418,7 +418,7 @@ describe('local project catalog', () => {
     delete legacy.imports;
 
     const migrated = migrateWorkspace(legacy);
-    expect(migrated.version).toBe(51);
+    expect(migrated.version).toBe(52);
     expect(migrated.collections[0].requests[0]).toMatchObject({ id: first.id, protocol: 'http', bodyMode: 'none' });
     expect(migrated.collections[0].requests[0].encodeUrl).toBe(true);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(true);
@@ -471,7 +471,7 @@ describe('local project catalog', () => {
     ];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(51);
+    expect(migrated.version).toBe(52);
     expect(migrated.collections[0].requests[0].renderBodyTemplates).toBe(false);
     expect(migrated.collections[0].requests[0].multipartBody).toEqual([
       expect.objectContaining({ id: 'multiline', multiline: true, contentType: '', fileName: '' }),
@@ -495,7 +495,7 @@ describe('local project catalog', () => {
     }, { id: 'orphan', suiteId: 'missing', tests: [] }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(51);
+    expect(migrated.version).toBe(52);
     expect(migrated.testSuites).toHaveLength(1);
     expect(migrated.testSuites[0].collectionId).toBe(migrated.collections[0].id);
     expect(migrated.testSuites[0].tests.map((test) => [test.id, test.requestId])).toEqual([['test-two', null], ['test-one', requestId]]);
@@ -549,7 +549,7 @@ describe('local project catalog', () => {
     };
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(51);
+    expect(migrated.version).toBe(52);
     expect(migrated.collections[0].requests[0].grpc).toMatchObject({
       protoText: 'syntax = "proto3"; service Legacy {}',
       protoEntryPath: 'schema.proto',
@@ -574,7 +574,7 @@ describe('local project catalog', () => {
 
     const migrated = migrateWorkspace(workspace);
     const grpc = migrated.collections[0].requests[0].grpc;
-    expect(migrated.version).toBe(51);
+    expect(migrated.version).toBe(52);
     expect(grpc.descriptorSource).toBe('buf');
     expect(grpc.reflectionApiUrl).toHaveLength(8_192);
     expect(grpc.reflectionApiKey).toHaveLength(65_536);
@@ -592,7 +592,7 @@ describe('local project catalog', () => {
     };
     workspace.cookies = [{ id: 'legacy-cookie', name: 'sid', value: 'legacy', domain: 'api.example.test', path: '/', secure: true, httpOnly: true, sameSite: 'lax', hostOnly: true, createdAt: '2026-07-20T00:00:00.000Z' }];
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(51);
+    expect(migrated.version).toBe(52);
     expect(migrated.certificates).toEqual({ ca: { enabled: false, pem: '' }, clients: [] });
     expect(Object.values(migrated.fileState)).not.toHaveLength(0);
     expect(Object.values(migrated.fileState)).toEqual(expect.arrayContaining([{
@@ -707,7 +707,7 @@ describe('local project catalog', () => {
     environments[0].environmentEditorMode = 'raw';
     (environments[0].variables as Array<Record<string, unknown>>).push({ id: 'global-config', name: 'globalConfig', value: '{"enabled":true}', valueType: 'json', enabled: true });
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(51);
+    expect(migrated.version).toBe(52);
     expect(migrated.collections[0]).toMatchObject({ environmentEditorMode: 'raw', environment: [expect.objectContaining({ name: 'config', valueType: 'json' })] });
     expect(migrated.collections[0].subEnvironments).toEqual([{ id: 'staging', name: 'Staging', environmentEditorMode: 'raw', variables: [{ id: 'staging-variable-0', name: 'host', value: 'staging.example', enabled: true, description: '' }] }]);
     expect(migrated.collections[0].activeSubEnvironmentId).toBe('');
@@ -800,7 +800,7 @@ describe('local project catalog', () => {
     }];
 
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(51);
+    expect(migrated.version).toBe(52);
     expect(migrated.mcpClients[0].env).toEqual([{ id: 'stdio-env', name: 'MODE', value: 'review', enabled: false, description: '' }]);
     expect(migrated.mcpClients[0].resourceTemplates[0]).toMatchObject({
       uri: 'files://{/path}{?query,limit}',
@@ -836,7 +836,7 @@ describe('local project catalog', () => {
     expect(imported.ai).toMatchObject({ enabled: false, apiKey: '', mockGeneration: false, commitSuggestions: false });
     expect(imported.konnect).toMatchObject({ enabled: false, token: '' });
     expect(imported.konnect.managedControlPlaneId).toBeUndefined();
-    expect(imported.preferences).toMatchObject({ theme: 'system', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, validateCertificates: true, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', allowScriptRequests: false, allowScriptFileAccess: false, dataFolders: [], enableVaultInScripts: false });
+    expect(imported.preferences).toMatchObject({ theme: 'system', updateAutomatically: true, updateChannel: 'stable', preferredHttpVersion: 'default', maxRedirects: 10, followRedirects: true, maxTimelineDataSizeKB: 10, maxHistoryResponses: 20, filterResponsesByEnv: false, requestTimeoutMs: 30_000, validateCertificates: true, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', allowScriptRequests: false, allowScriptFileAccess: false, dataFolders: [], enableVaultInScripts: false });
     expect(imported.preferences).toMatchObject({ useBulkHeaderEditor: false, useBulkParametersEditor: false });
     expect(imported.preferences).toMatchObject({ forceVerticalLayout: false, editorIndentWithTabs: true, editorIndentSize: 2, editorLineWrapping: true, fontVariantLigatures: false });
     expect(imported.preferences).toMatchObject({ fontSize: 11, interfaceFontSize: 13, fontInterface: '', fontMonospace: '', showPasswords: false, allowHtmlPreviewRemoteResources: false, allowHtmlPreviewScripts: false, disableResponsePreviewLinks: false });
@@ -875,7 +875,7 @@ describe('local project catalog', () => {
     const workspace = cloneSeedWorkspace() as unknown as Record<string, unknown>;
     workspace.preferences = { theme: 'unknown', density: 'compact', fontSize: 99, interfaceFontSize: 2, fontInterface: 'Fancy\nUI', fontMonospace: 42, showPasswords: 'yes', allowHtmlPreviewRemoteResources: 'yes', allowHtmlPreviewScripts: 'yes', disableResponsePreviewLinks: 'yes', preferredHttpVersion: 'http3', maxRedirects: -99.8, followRedirects: 'sometimes', maxTimelineDataSizeKB: -400.2, maxHistoryResponses: -400.2, filterResponsesByEnv: 'yes', requestTimeoutMs: 1, validateCertificates: false, validateAuthCertificates: 'no', proxyEnabled: 'yes', httpProxy: 42, httpsProxy: false, noProxy: null, forceVerticalLayout: 'yes', editorIndentWithTabs: 0, editorIndentSize: 999, editorLineWrapping: null, fontVariantLigatures: 1, scriptTimeoutMs: 999_999, allowScriptRequests: 'yes', allowScriptFileAccess: 'yes', dataFolders: [' /tmp/fixtures ', '/tmp/fixtures', 42, '', 'x'.repeat(5_000)], enableVaultInScripts: 1, shortcuts: { palette: ' mod + shift + p ', send: 42 } };
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.preferences).toMatchObject({ theme: 'system', density: 'compact', fontSize: 24, interfaceFontSize: 8, fontInterface: 'Fancy UI', fontMonospace: '', showPasswords: false, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: false, preferredHttpVersion: 'default', maxRedirects: -1, followRedirects: true, maxTimelineDataSizeKB: 0, maxHistoryResponses: -1, filterResponsesByEnv: false, requestTimeoutMs: 1, validateCertificates: false, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', pluginRegistryUrl: 'https://registry.npmjs.org/', scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
+    expect(migrated.preferences).toMatchObject({ theme: 'system', updateAutomatically: true, updateChannel: 'stable', density: 'compact', fontSize: 24, interfaceFontSize: 8, fontInterface: 'Fancy UI', fontMonospace: '', showPasswords: false, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: false, preferredHttpVersion: 'default', maxRedirects: -1, followRedirects: true, maxTimelineDataSizeKB: 0, maxHistoryResponses: -1, filterResponsesByEnv: false, requestTimeoutMs: 1, validateCertificates: false, validateAuthCertificates: true, proxyEnabled: false, httpProxy: '', httpsProxy: '', noProxy: '', pluginRegistryUrl: 'https://registry.npmjs.org/', scriptTimeoutMs: 60_000, allowScriptRequests: false, allowScriptFileAccess: false, enableVaultInScripts: false });
     expect(migrated.preferences).toMatchObject({ useBulkHeaderEditor: false, useBulkParametersEditor: false });
     expect(migrated.preferences).toMatchObject({ forceVerticalLayout: false, editorIndentWithTabs: true, editorIndentSize: 16, editorLineWrapping: true, fontVariantLigatures: false });
     expect(migrated.preferences.dataFolders).toEqual(['/tmp/fixtures', 'x'.repeat(4_096)]);
@@ -904,13 +904,15 @@ describe('local project catalog', () => {
     workspace.preferences.shortcuts['new-request'] = ['Mod+N'];
     delete workspace.preferences.shortcuts['create-menu'];
     const migrated = migrateWorkspace(workspace);
-    expect(migrated.version).toBe(51);
+    expect(migrated.version).toBe(52);
     expect(migrated.preferences.shortcuts['create-menu']).toEqual(['Mod+N']);
     expect(migrated.preferences.shortcuts['new-request']).toEqual(['Mod+Alt+N']);
   });
 
   it('preserves supported device-local preferences', () => {
     const workspace = cloneSeedWorkspace();
+    workspace.preferences.updateAutomatically = false;
+    workspace.preferences.updateChannel = 'beta';
     workspace.preferences.preferredHttpVersion = 'http2-prior-knowledge';
     workspace.preferences.maxRedirects = -1;
     workspace.preferences.followRedirects = false;
@@ -941,7 +943,7 @@ describe('local project catalog', () => {
     workspace.preferences.allowHtmlPreviewScripts = true;
     workspace.preferences.disableResponsePreviewLinks = true;
     workspace.preferences.dataFolders = ['/Users/example/fixtures', '/Volumes/shared/data'];
-    expect(migrateWorkspace(workspace).preferences).toMatchObject({ preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 77, maxHistoryResponses: -1, filterResponsesByEnv: true, validateCertificates: false, validateAuthCertificates: false, clearOAuth2SessionOnRestart: true, proxyEnabled: true, httpProxy: 'http://http-proxy.test:8080', httpsProxy: 'http://https-proxy.test:8443', noProxy: 'localhost,.internal', pluginRegistryUrl: 'https://registry.example.test/npm/', useBulkHeaderEditor: true, useBulkParametersEditor: true, forceVerticalLayout: true, editorIndentWithTabs: false, editorIndentSize: 8, editorLineWrapping: false, fontVariantLigatures: true, fontSize: 18, interfaceFontSize: 17, fontInterface: 'Avenir Next, sans-serif', fontMonospace: 'JetBrains Mono, monospace', showPasswords: true, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: true, dataFolders: ['/Users/example/fixtures', '/Volumes/shared/data'] });
+    expect(migrateWorkspace(workspace).preferences).toMatchObject({ updateAutomatically: false, updateChannel: 'beta', preferredHttpVersion: 'http2-prior-knowledge', maxRedirects: -1, followRedirects: false, maxTimelineDataSizeKB: 77, maxHistoryResponses: -1, filterResponsesByEnv: true, validateCertificates: false, validateAuthCertificates: false, clearOAuth2SessionOnRestart: true, proxyEnabled: true, httpProxy: 'http://http-proxy.test:8080', httpsProxy: 'http://https-proxy.test:8443', noProxy: 'localhost,.internal', pluginRegistryUrl: 'https://registry.example.test/npm/', useBulkHeaderEditor: true, useBulkParametersEditor: true, forceVerticalLayout: true, editorIndentWithTabs: false, editorIndentSize: 8, editorLineWrapping: false, fontVariantLigatures: true, fontSize: 18, interfaceFontSize: 17, fontInterface: 'Avenir Next, sans-serif', fontMonospace: 'JetBrains Mono, monospace', showPasswords: true, allowHtmlPreviewRemoteResources: true, allowHtmlPreviewScripts: true, disableResponsePreviewLinks: true, dataFolders: ['/Users/example/fixtures', '/Volumes/shared/data'] });
   });
 
   it('migrates legacy redirect booleans and preserves supported three-state overrides', () => {
