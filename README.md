@@ -2,7 +2,7 @@
 
 Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and TypeScript. It is an original clean-room foundation for moving a desktop API client away from Electron while keeping product capabilities available without an account, subscription, telemetry requirement, or premium feature gate.
 
-> This is the two-hundred-seventy-ninth runnable migration milestone, not full Insomnia ecosystem parity yet. See the [parity ledger](docs/PARITY.md) and [migration map](docs/MIGRATION.md) for the honest coverage list.
+> Milestone 280 completes the pinned Insomnia behavior ledger within the documented clean-room and platform bounds. See the [parity ledger](docs/PARITY.md), [migration map](docs/MIGRATION.md), and [final verification record](docs/QA_MILESTONE_280.md).
 
 ## What works now
 
@@ -48,11 +48,11 @@ Brunomnia is a local-first API workbench built with Tauri 2, Rust, React, and Ty
 - Project-scoped MCP clients over Streamable HTTP/JSON-RPC and native STDIO, with first-class Insomnia v4/v5 interchange, cached tools/prompts/resources, guided prompt and bounded recursive/conditional JSON-Schema tool forms, guided RFC 6570 resource templates, per-primitive drafts, reusable device-memory HTTP sessions and persistent direct-child STDIO sessions with bounded login-shell `PATH` discovery, reviewed isolated process environments, explicit disconnect/recovery, cancellable discovery/invocation, roots, persistent device-local response/event/notification/console history with filters and environment-aware retention, and authorization-code/PKCE OAuth with discovery, bounded metadata redirects, dynamic registration, refresh, scope escalation, and device-local credentials
 - Optional direct local `.gguf` inference through a crash-isolated llama.cpp worker plus OpenAI, Anthropic, Gemini, and custom/local OpenAI-compatible providers; pinned-compatible GGUF sampling controls, vault-only hosted credential execution, AI mock generation from manual, reviewed specification-URL, or explicitly selected active-request/latest-response context, and reviewable ordered Git commit groups with optional push
 - Pull-only Konnect reconciliation across the pinned five regions with one credential-free local project per control plane, one root Environment per project, one Collection per Gateway Service, exact page/offset pagination, five-service route concurrency, safe stale-region cleanup, progress/count evidence, managed route/path/protocol folders, HTTP/HTTPS, WebSocket, and gRPC combinations, bounded expression-router conversion, local-work preservation, proxy defaults, and explicit unextractable/SNI/L4 skips
-- Workspace v51 migrations with organization identity, member/team provenance, verified domains, invitations, RBAC grants, SSO/SCIM configuration and logs, explicit empty-project preservation, per-file cookie/CA/client-certificate ownership, private global/collection-environment Secret metadata normalization, bounded object-scoped collaboration repositories, complete shortcut-registry migration with the create-menu/create-request split, managed Konnect project metadata, device-local global Git credential selection, generated-design collection inheritance, OAuth browser-mode/session settings, bounded GGUF settings, MCP process-environment/history and collection-owned standalone test-suite/result normalization, device-local bulk/editor/layout/typography/password/variable-visibility/HTML-script and script-data-folder preferences, legacy-safe timeout/certificate/proxy overrides, complete bounded GraphQL schema-cache refresh, bounded resource hierarchy, request-row/Socket.IO/session-history/request-snapshot/handshake-metadata normalization, collection sub-environment repair, private global/collection publication filtering, split-YAML serialization, import-time Secret/collaboration-authority stripping, and device-local integration/script permissions
+- Workspace v52 migrations with signed-update preferences, organization identity, member/team provenance, verified domains, invitations, RBAC grants, SSO/SCIM configuration and logs, explicit empty-project preservation, per-file cookie/CA/client-certificate ownership, private global/collection-environment Secret metadata normalization, bounded object-scoped collaboration repositories, complete shortcut-registry migration with the create-menu/create-request split, managed Konnect project metadata, device-local global Git credential selection, generated-design collection inheritance, OAuth browser-mode/session settings, bounded GGUF settings, MCP process-environment/history and collection-owned standalone test-suite/result normalization, device-local bulk/editor/layout/typography/password/variable-visibility/HTML-script and script-data-folder preferences, legacy-safe timeout/certificate/proxy overrides, complete bounded GraphQL schema-cache refresh, bounded resource hierarchy, request-row/Socket.IO/session-history/request-snapshot/handshake-metadata normalization, collection sub-environment repair, private global/collection publication filtering, split-YAML serialization, import-time Secret/collaboration-authority stripping, and device-local integration/script permissions
 - Atomic per-project persistence in the OS application-data directory with recoverable prior revisions and restorable soft-deleted workspace/backup/vault snapshots in device-local trash
 - System/dark/light appearance, comfortable/compact density, horizontal/responsive or forced-vertical request layout, separate interface/editor font families and 8–24 px sizes, configurable editor wrapping/indentation/ligatures, masked authentication and integration credentials with device-wide or per-field reveal, request defaults, and all 33 pinned keyboard actions with bounded editable multi-bindings and contextual request/sidebar/response/workspace focus and command targets
-- Unsigned CI-built macOS ARM64 DMG, Windows x64 NSIS/MSI, and Linux x64 AppImage/DEB/RPM installers with stable JSON/SHA-256 manifests, direct GitHub build-provenance attestations, 30-day main-branch artifacts, and tagged GitHub releases
-- Responsive desktop UI with no login, upgrade, or cloud dependency
+- Unsigned CI-built macOS ARM64 DMG, Windows x64 NSIS/MSI, and Linux x64 AppImage/DEB/RPM installers with stable JSON/SHA-256 manifests, direct GitHub build-provenance attestations, and 30-day main-branch artifacts; credential-required tags add universal notarized macOS, Authenticode-signed Windows, signed updater archives, and separate rolling stable/beta manifests
+- Responsive desktop UI with no login, upgrade, or cloud dependency, including skip navigation, semantic landmarks and tabs, polite live status, keyboard tab navigation, visible focus, reduced-motion behavior, increased-contrast styling, and forced-colors support
 
 ## Run it
 
@@ -74,20 +74,21 @@ The browser development build uses deterministic protocol demos for the `*.acme.
 See [local and self-hosted mock servers](docs/MOCK_SERVERS.md) for deployment, request-aware response-template syntax, and bounds.
 See [local projects and recovery](docs/LOCAL_PROJECTS.md) for lifecycle, storage, backup, migration, and vault-isolation behavior.
 See [self-hosted identity governance](docs/IDENTITY_GOVERNANCE.md) for verified domains, OIDC/SAML callbacks, SCIM reverse-proxy deployment, token lifecycle, RBAC, and trust boundaries.
+See [desktop updates and accessibility](docs/DESKTOP_UPDATES_AND_ACCESSIBILITY.md) for update channels, release trust, administrator controls, keyboard semantics, and platform accessibility preferences.
 
 ## Desktop bundles
 
-The pinned [desktop bundle workflow](.github/workflows/desktop-release.yml) builds the following account-free targets on every relevant `main` push and every `v*` tag:
+The pinned [desktop bundle workflow](.github/workflows/desktop-release.yml) builds the following account-free targets:
 
 | Platform | Tauri targets | Published installers |
 | --- | --- | --- |
-| macOS ARM64 | `app,dmg` | `.dmg` containing `Brunomnia.app` |
+| macOS ARM64 on `main`; universal on tags | `app,dmg` | `.dmg` containing `Brunomnia.app`; signed `.app.tar.gz` updater archive on tags |
 | Windows x64 | `nsis,msi` | `.exe`, `.msi` |
-| Linux x64 | `appimage,deb,rpm` | `.AppImage`, `.deb`, `.rpm` |
+| Linux x64 | `appimage,deb,rpm` | `.AppImage`, `.deb`, `.rpm`; signed `.AppImage.tar.gz` updater archive on tags |
 
-Each platform artifact includes a versioned JSON manifest and flat `SHA256SUMS-<platform>.txt`. GitHub build provenance is attached directly to every installer digest. Main-branch artifacts are retained for 30 days; a `v*` tag also publishes the installers and checksum evidence to that tag's GitHub release.
+Each platform artifact includes a versioned JSON manifest and flat `SHA256SUMS-<platform>.txt`. GitHub build provenance is attached directly to every installer digest. Main-branch artifacts are retained for 30 days and deliberately use `--no-sign`, so normal operating-system trust warnings remain.
 
-These bundles deliberately use `--no-sign`: macOS Developer ID signing/notarization, Windows code signing, and an updater are not claimed. Expect operating-system trust warnings. The macOS bundle requires macOS 10.15 or newer because the pinned local llama.cpp runtime uses C++ filesystem APIs unavailable on 10.13.
+A SemVer `v*` tag instead requires the Tauri updater key, Apple Developer ID/notarization credentials, and DigiCert Software Trust Manager credentials. It fails closed when they are missing, verifies platform trust after building, publishes the signed installers and updater archives to the versioned release, and replaces the appropriate rolling stable/beta manifest. No trusted Apple or Windows artifact is claimed until that credential-backed workflow succeeds. The macOS bundle requires macOS 10.15 or newer because the pinned local llama.cpp runtime uses C++ filesystem APIs unavailable on 10.13.
 
 Build the equivalent unsigned macOS bundle locally:
 

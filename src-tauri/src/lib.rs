@@ -1,4 +1,5 @@
 mod client_identity;
+mod desktop_update;
 mod external_credential_store;
 mod external_url;
 mod external_vault;
@@ -1224,9 +1225,15 @@ pub fn run() {
         .manage(oauth2_callback::OAuthCallbackState::default())
         .manage(identity_control_plane::IdentityControlPlaneState::default())
         .manage(external_vault::ExternalSecretCache::default())
+        .manage(desktop_update::DesktopUpdateState::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             load_workspace,
             save_workspace,
+            desktop_update::desktop_update_support,
+            desktop_update::desktop_update_check,
+            desktop_update::desktop_update_download,
+            desktop_update::desktop_update_install_and_restart,
             workspace_catalog_load,
             workspace_catalog_open,
             workspace_catalog_read,

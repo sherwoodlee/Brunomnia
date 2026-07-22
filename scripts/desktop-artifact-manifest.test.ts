@@ -61,15 +61,16 @@ describe('desktop artifact manifest', () => {
   });
 
   it('pins actions and preserves unsigned cross-platform release provenance', async () => {
-    const workflow = parse(await readFile('.github/workflows/desktop-release.yml', 'utf8')) as { jobs: { build: { env: Record<string, unknown>; strategy: { matrix: { include: Array<{ platform: string; runner: string; bundles: string; attestationPaths: string }> } }; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, string | number> }> }; release: { steps: Array<{ name?: string; run?: string; uses?: string }> } } };
-    const tauriConfig = JSON.parse(await readFile('src-tauri/tauri.conf.json', 'utf8')) as { bundle: { icon: string[] } };
+    const workflow = parse(await readFile('.github/workflows/desktop-release.yml', 'utf8')) as any;
+    const tauriConfig = JSON.parse(await readFile('src-tauri/tauri.conf.json', 'utf8')) as { bundle: { createUpdaterArtifacts: boolean; icon: string[] }; plugins: { updater: { pubkey: string } } };
     const icon = await readFile('src-tauri/icons/icon.png');
     const windowsIcon = await readFile('src-tauri/icons/icon.ico');
     expect(workflow.jobs.build.strategy.matrix.include.map(item => item.platform)).toEqual(['macos-arm64', 'windows-x64', 'linux-x64']);
     expect(workflow.jobs.build.strategy.matrix.include.map(item => item.runner)).toEqual(['macos-15', 'windows-2022', 'ubuntu-22.04']);
     expect(workflow.jobs.build.strategy.matrix.include.map(item => item.bundles)).toEqual(['app,dmg', 'nsis,msi', 'appimage,deb,rpm']);
     expect(workflow.jobs.build.strategy.matrix.include.map(item => item.attestationPaths.trim().split('\n').length)).toEqual([1, 2, 3]);
-    const actions = [...workflow.jobs.build.steps, ...workflow.jobs.release.steps].flatMap(step => step.uses ? [step.uses] : []);
+    const trusted = workflow.jobs['trusted-release-build'];
+    const actions = [...workflow.jobs.build.steps, ...trusted.steps, ...workflow.jobs.release.steps].flatMap((step: { uses?: string }) => step.uses ? [step.uses] : []);
     expect(actions.length).toBeGreaterThan(0);
     expect(actions.every(action => /@[0-9a-f]{40}$/.test(action))).toBe(true);
     expect(workflow.jobs.build.env.CI).toBe(true);
@@ -81,13 +82,24 @@ describe('desktop artifact manifest', () => {
     expect(upload?.['retention-days']).toBe(30);
     expect(upload?.path).toContain('bundle/dmg/*.dmg');
     expect(upload?.path).not.toContain('**/*.dmg');
+    expect(trusted.strategy.matrix.include.map((item: { platform: string }) => item.platform)).toEqual(['macos-universal', 'windows-x64', 'linux-x64']);
+    expect(trusted.strategy.matrix.include[0].buildArgs).toContain('universal-apple-darwin');
+    expect(trusted.steps.find((step: { name?: string }) => step.name === 'Build signed desktop installers and updater archives')?.run).not.toContain('--no-sign');
+    expect(trusted.steps.find((step: { name?: string }) => step.name === 'Setup DigiCert Software Trust Manager')?.uses).toBe('digicert/code-signing-software-trust-action@fae23a455ba4bde62b64fd7cb2f81ade788f5a95');
+    expect(trusted.steps.find((step: { name?: string }) => step.name === 'Verify Apple signatures and notarization')?.run).toContain('stapler validate');
+    expect(trusted.steps.find((step: { name?: string }) => step.name === 'Verify Windows Authenticode signatures')?.run).toContain('Get-AuthenticodeSignature');
     const release = workflow.jobs.release.steps.find(step => step.name === 'Publish tagged desktop installers')?.run;
-    expect(release).toContain('test "${#files[@]}"');
-    expect(release).not.toContain('${{#');
-    expect(release).not.toContain('${{files');
-    expect(release).toContain('gh release create');
+    const trustedRelease = workflow.jobs.release.steps.find((step: { name?: string }) => step.name === 'Publish tagged and rolling-channel releases')?.run;
+    expect(trustedRelease).toContain('test "${#files[@]}"');
+    expect(trustedRelease).not.toContain('${{#');
+    expect(trustedRelease).not.toContain('${{files');
+    expect(trustedRelease).toContain('gh release create');
+    expect(trustedRelease).toContain('gh release upload');
+    expect(release).toBeUndefined();
     expect(tauriConfig.bundle.icon).toContain('icons/icon.png');
     expect(tauriConfig.bundle.icon).toContain('icons/icon.ico');
+    expect(tauriConfig.bundle.createUpdaterArtifacts).toBe(true);
+    expect(tauriConfig.plugins.updater.pubkey).toMatch(/^[A-Za-z0-9+/=\n]+$/);
     expect([icon.readUInt32BE(16), icon.readUInt32BE(20)]).toEqual([512, 512]);
     expect([...windowsIcon.subarray(0, 4)]).toEqual([0, 0, 1, 0]);
     expect(windowsIcon.readUInt16LE(4)).toBe(6);

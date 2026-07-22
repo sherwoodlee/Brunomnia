@@ -4,10 +4,11 @@ import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const platforms = new Set(['linux-x64', 'macos-arm64', 'windows-x64']);
+const platforms = new Set(['linux-x64', 'macos-arm64', 'macos-universal', 'windows-x64']);
 const artifactLayouts = {
   'linux-x64': new Map([['appimage', '.AppImage'], ['deb', '.deb'], ['rpm', '.rpm']]),
   'macos-arm64': new Map([['dmg', '.dmg']]),
+  'macos-universal': new Map([['dmg', '.dmg']]),
   'windows-x64': new Map([['msi', '.msi'], ['nsis', '.exe']]),
 };
 const scriptPath = fileURLToPath(import.meta.url);
@@ -84,11 +85,14 @@ export const writeDesktopArtifactManifest = async ({ root, platform, revision, a
 };
 
 const main = async () => {
-  const root = argumentValue(process.argv.slice(2), '--root');
-  const platform = argumentValue(process.argv.slice(2), '--platform');
-  const revision = argumentValue(process.argv.slice(2), '--revision');
+  const argumentsList = process.argv.slice(2);
+  const root = argumentValue(argumentsList, '--root');
+  const platform = argumentValue(argumentsList, '--platform');
+  const revision = argumentValue(argumentsList, '--revision');
   const packageJson = JSON.parse(await readFile(resolve(repositoryRoot, 'package.json'), 'utf8'));
-  const result = await writeDesktopArtifactManifest({ root, platform, revision, appVersion: packageJson.version });
+  const appVersionIndex = argumentsList.indexOf('--app-version');
+  const appVersion = appVersionIndex >= 0 ? argumentValue(argumentsList, '--app-version') : packageJson.version;
+  const result = await writeDesktopArtifactManifest({ root, platform, revision, appVersion });
   process.stdout.write(result.manifest.artifacts.length + ' installers recorded in ' + result.manifestPath + '\n');
 };
 

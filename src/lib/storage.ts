@@ -540,6 +540,8 @@ const normalizePreferences = (value: unknown, workspaceVersion: number): AppPref
   }
   return {
     theme: source?.theme === 'dark' || source?.theme === 'light' ? source.theme : 'system',
+    updateAutomatically: source?.updateAutomatically !== false,
+    updateChannel: source?.updateChannel === 'beta' ? 'beta' : 'stable',
     density: source?.density === 'compact' ? 'compact' : 'comfortable',
     fontSize: Math.min(24, Math.max(8, Number(source?.fontSize) || defaultPreferences.fontSize)),
     interfaceFontSize: Math.min(24, Math.max(8, Number(source?.interfaceFontSize) || defaultPreferences.interfaceFontSize)),
@@ -1132,7 +1134,7 @@ export const migrateWorkspace = (value: unknown): Workspace => {
   }));
   return {
     ...workspace,
-    version: 51,
+    version: 52,
     name: workspace.name || 'Imported Workspace',
     activeRequestId: requestIds.has(workspace.activeRequestId) ? workspace.activeRequestId : collections[0]?.requests[0]?.id ?? '',
     activeEnvironmentId: environmentIds.has(workspace.activeEnvironmentId) ? workspace.activeEnvironmentId : environments[0]?.id ?? '',

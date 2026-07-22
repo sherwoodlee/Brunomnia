@@ -27,6 +27,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/icon.png",
@@ -39,5 +40,10 @@
     },
     "shortDescription": "Local-first API workbench",
     "longDescription": "A free, local-first workbench for building, sending, and testing API requests."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJEMDBCNTI3MzNDNjYzRTYKUldUbVk4WXpKN1VBdlk5RjRJTWlrTkpYOE81VnlFMDNnSk5GdUhsR1pPQ1BIcFBQTytaZWVGYUEK"
+    }
   }
 }

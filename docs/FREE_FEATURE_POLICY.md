@@ -12,5 +12,6 @@ Brunomnia's product capabilities are source-available under Apache-2.0 and must 
 6. Telemetry is absent by default. Any future diagnostics must be explicit, optional, documented, and removable.
 7. Pull requests that add feature gating must be rejected unless the gate protects an unsafe or unsupported platform condition rather than a commercial entitlement.
 8. SSO, SCIM, organizations, resource RBAC, and governance audit are community features. Operators may supply their own IdP, reverse proxy, and synchronization infrastructure without a Brunomnia license or entitlement service.
+9. Desktop updates, release channels, accessibility behavior, and platform packaging/signing configuration are community features. Real Apple, Microsoft-compatible, registry, or hosting credentials may be required by those external platforms, but Brunomnia adds no license gate.
 
-This policy describes the project architecture and contribution standard; it does not claim that every parity item has already been implemented. Coverage is tracked in [PARITY.md](PARITY.md) and staged in [MIGRATION.md](MIGRATION.md).
+Milestone 280 completes every row in the pinned behavior ledger. Future upstream capabilities or regressions must still be added to [PARITY.md](PARITY.md) and staged in [MIGRATION.md](MIGRATION.md) before a later release repeats that claim.

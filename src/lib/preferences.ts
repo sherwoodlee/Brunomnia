@@ -78,6 +78,8 @@ export const cloneShortcuts = (shortcuts: AppPreferences['shortcuts']): AppPrefe
 
 export const defaultPreferences: AppPreferences = {
   theme: 'system',
+  updateAutomatically: true,
+  updateChannel: 'stable',
   density: 'comfortable',
   fontSize: 11,
   interfaceFontSize: 13,

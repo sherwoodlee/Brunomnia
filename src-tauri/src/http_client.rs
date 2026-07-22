@@ -136,7 +136,7 @@ impl HttpRequestError {
     fn canceled(started: Instant) -> Self {
         Self {
             kind: "canceled".into(),
-            elapsed_ms: started.elapsed().as_millis(),
+            elapsed_ms: started.elapsed().as_millis().max(1),
             ..Self::request("Request canceled.")
         }
     }

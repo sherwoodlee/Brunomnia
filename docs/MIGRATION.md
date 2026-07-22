@@ -2844,6 +2844,19 @@ Compatibility bounds remain explicit: recipient removal rotates future revisions
 
 Compatibility bounds remain explicit: fixed loopback SSO callback ports must be registered with the IdP, public SCIM use requires a user-controlled HTTPS reverse proxy, and direct workspace-file editors remain inside the local policy trust boundary. Current Insomnia documentation defines SCIM request logs but not a separate general signed audit export. `SSO, RBAC, SCIM, audit, and organization controls` is now `Complete`; `Preferences, shortcuts, themes, accessibility, and packaging` is the only incomplete parity row, so Brunomnia is not yet declared feature-complete.
 
+## Milestone 280 — signed updates, accessibility, and final parity (complete)
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Pinned final-row audit | Complete | Startup/three-hour/manual stable/beta updates, development/administrator/portable guards, Linux package notice, universal macOS, trusted platform signing, semantic navigation/tabs/status, reduced motion, increased contrast, and forced colors reconcile the remaining documented contract |
+| Signed native updater | Complete | Workspace v52 preferences drive separate rolling manifests; Tauri verifies the embedded-key signature, rechecks the exact version, stages progress, applies macOS/Windows updates on explicit restart, and leaves Linux package replacement explicit |
+| Trusted release path | Complete | SemVer tags require updater, Apple Developer ID/notarization, and DigiCert credentials; build universal macOS plus Windows/Linux packages; verify platform trust; attest artifacts; and publish signed archives to separate stable/beta rolling releases. Missing credentials fail closed; `main` remains truthfully unsigned |
+| Accessibility completion | Complete | Skip navigation, one labeled main landmark, tab/tabpanel relationships, Arrow/Home/End activation, polite live status, visible focus, reduced-motion suppression, stronger contrast, forced-color adaptation, static regressions, and rendered keyboard/console QA close the named audit |
+| Free capability boundary | Complete | Updates, signing configuration, accessibility, all 33 shortcuts, themes, packaging, organizations, SSO/SCIM/RBAC, collaboration, vaults, plugins, protocols, and CLI remain free of account/plan/seat/entitlement checks |
+| Verification | Complete | 756 frontend tests, 200 native tests, 24 mock-server tests, TypeScript, production/CLI build, packaged and container smokes, strict Rust formatting/check/Clippy, npm audit, Actionlint, an unsigned release app bundle, and browser semantics/keyboard QA are recorded in [Milestone 280 verification](QA_MILESTONE_280.md) |
+
+Compatibility bounds remain explicit: trusted tags cannot exist without real user-supplied Apple and DigiCert identities, unsigned local/main artifacts retain operating-system warnings, Linux package replacement is not silently taken from the package manager, browser development cannot install native updates, and no unperformed physical screen-reader session is claimed. Every source-backed parity row is now `Complete`, so Brunomnia is feature-complete against the pinned behavior references within the ledger's documented clean-room and platform bounds.
+
 ## Architectural boundaries
 
 - Protocol implementations live in Rust crates and expose serializable commands/events.

@@ -440,7 +440,7 @@ export type HistoryEntry = {
 
 export type Workspace = {
   format: 'brunomnia';
-  version: 51;
+  version: 52;
   name: string;
   activeRequestId: string;
   activeEnvironmentId: string;
@@ -511,6 +511,8 @@ export type PreferredHttpVersion = 'default' | 'http1.0' | 'http1.1' | 'http2' |
 
 export type AppPreferences = {
   theme: 'system' | 'dark' | 'light';
+  updateAutomatically: boolean;
+  updateChannel: 'stable' | 'beta';
   density: 'comfortable' | 'compact';
   fontSize: number;
   interfaceFontSize: number;
