@@ -44,7 +44,11 @@ At `http://127.0.0.1:4173/` in the Codex in-app browser's 1280×720 desktop view
 
 ## Remote gate
 
-Pending the implementation commit's push to remote `main`. The CLI container and three-platform desktop workflows must rebuild the committed source successfully before this milestone is treated as published.
+Implementation commit `94bb8ef1d159afce029b8471cbaaa0bc36003c60` completed both jobs in [CLI container workflow 29887158868](https://github.com/sherwoodlee/Brunomnia/actions/runs/29887158868) and all three platform jobs in [Desktop bundles workflow 29887158894](https://github.com/sherwoodlee/Brunomnia/actions/runs/29887158894).
+
+The CLI verify job rebuilt the committed bundle without a diff, built the verification image, matched the package version, and passed the pinned-image, non-root, no-network, read-only, local-reference lint, standalone-suite, config, and plugin-tag smoke. Publication emitted AMD64/ARM64 SBOM and provenance attestations, then keylessly signed `ghcr.io/sherwoodlee/brunomnia-cli@sha256:b54ade3ec9c0cf5ab8349195869009ba8277cf2a9ceaf0bd10d3aba4d0795c71`; the Cosign transparency-log entry is Rekor index `2215766918`.
+
+The desktop workflow rebuilt, checksummed, and attested the unsigned macOS ARM64 DMG, Windows x64 NSIS/MSI, and Linux x64 AppImage/DEB/RPM artifacts successfully. Its tag-only release job correctly remained skipped for this `main` push. The successful macOS CI bundle also confirms that the local AppleEvent timeout was specific to the headless Codex Finder session rather than the committed Tauri packaging configuration.
 
 ## Acceptance boundary
 
